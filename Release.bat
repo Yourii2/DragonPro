@@ -102,4 +102,4 @@ echo Next:
 echo - Create a GitHub Release with tag: v%VERSION%
 echo - Upload this zip as the Release asset
 echo.
-pause
+if "%~1"=="" pause
