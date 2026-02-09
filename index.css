@@ -1,0 +1,188 @@
+@tailwind base; 
+@tailwind components; 
+@tailwind utilities;
+
+/* Smooth transitions for theme switching */
+* {
+  transition: background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1), 
+              border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1), 
+              color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Exclude specific elements from transition if needed */
+.no-transition,
+.no-transition * {
+  transition: none !important;
+}
+
+/* Custom scrollbar for dark mode */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-slate-100 dark:bg-slate-800;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-300 dark:bg-slate-600 rounded-full hover:bg-slate-400 dark:hover:bg-slate-500;
+}
+
+/* Smooth fade-in animation */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-in {
+  animation: fadeIn 0.4s ease-out;
+}
+
+/* Pulse animation for important elements */
+@keyframes pulse-soft {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.animate-pulse-soft {
+  animation: pulse-soft 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* App color tokens (used by .card, .bg-app, .accent, etc.) */
+:root {
+  --app-bg: #f8fafc; /* very light */
+  --card-bg: #ffffff; /* cards */
+  --muted: #64748b; /* muted text */
+  --accent: #2563eb; /* primary blue */
+  --text: #0f172a; /* primary text */
+  --border: rgba(15,23,42,0.06);
+}
+
+.dark {
+  --app-bg: #071028; /* deep navy */
+  --card-bg: #071827; /* card deep */
+  --muted: #94a3b8;
+  --accent: #60a5fa; /* lighter blue */
+  --text: #e6eef8;
+  --border: rgba(255,255,255,0.06);
+}
+
+/* Utility helpers that use the tokens */
+.bg-app { background-color: var(--app-bg) !important; }
+.card { background-color: var(--card-bg) !important; color: var(--text) !important; border-color: var(--border) !important; }
+.text-muted { color: var(--muted) !important; }
+.accent { color: var(--accent) !important; }
+.bg-accent { background-color: var(--accent) !important; color: white !important; }
+.border-card { border-color: var(--border) !important; }
+
+/* Prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+
+/* Print helpers */
+.print-only { display: none; }
+@media print {
+  .no-print { display: none !important; }
+  .print-only { display: block !important; }
+}
+
+/* Apply the tokenized text and background colors globally so components inherit correct colors */
+html, body, #root {
+  background-color: var(--app-bg);
+  color: var(--text);
+}
+
+/* Make card and app containers inherit text color */
+.card, .bg-app {
+  color: var(--text);
+}
+
+/* Table theming: ensure tables follow theme tokens regardless of inline Tailwind bg classes */
+table {
+  color: var(--text) !important;
+  border-color: var(--border) !important;
+}
+table thead, table tfoot {
+  background-color: var(--card-bg) !important;
+  color: var(--text) !important;
+}
+table th, table td {
+  background-color: transparent !important;
+  color: var(--text) !important;
+  border-color: var(--border) !important;
+}
+table tbody tr:hover {
+  background-color: rgba(0,0,0,0.03);
+}
+
+/* Strong table overrides: ensure nested bg-* classes don't force light backgrounds inside tables */
+.overflow-x-auto table,
+.card table,
+table.table-theme,
+table {
+  background-color: var(--card-bg) !important;
+  color: var(--text) !important;
+}
+
+/* Remove explicit Tailwind bg-* and gradient backgrounds inside tables so the table root color shows through */
+.overflow-x-auto table [class*="bg-"]:not(button):not(a):not(input):not(select):not(textarea) ,
+.overflow-x-auto table [class*="from-"]:not(button):not(a):not(input):not(select):not(textarea) ,
+.overflow-x-auto table [class*="to-"]:not(button):not(a):not(input):not(select):not(textarea) ,
+.card table [class*="bg-"]:not(button):not(a):not(input):not(select):not(textarea) ,
+.card table [class*="from-"]:not(button):not(a):not(input):not(select):not(textarea) ,
+.card table [class*="to-"]:not(button):not(a):not(input):not(select):not(textarea) {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+
+/* Table cells should inherit text color and border tokens */
+.overflow-x-auto table th,
+.overflow-x-auto table td,
+.card table th,
+.card table td,
+table th,
+table td {
+  background-color: transparent !important;
+  color: var(--text) !important;
+  border-color: var(--border) !important;
+}
+
+/* Row hover using a subtle overlay that works in both themes */
+.overflow-x-auto table tbody tr:hover,
+.card table tbody tr:hover,
+table tbody tr:hover {
+  background-color: rgba(255,255,255,0.03);
+}
+
+/* Fix header strips that use semi-transparent slate backgrounds so they follow theme tokens
+   Targets Tailwind classes like "bg-slate-50/50" and "dark:bg-slate-900/30" when used inside cards/tables */
+.card [class*="bg-slate-50"],
+.overflow-x-auto [class*="bg-slate-50"],
+.card [class*="bg-slate-100"],
+.overflow-x-auto [class*="bg-slate-100"],
+.card [class*="dark:bg-slate-900"],
+.overflow-x-auto [class*="dark:bg-slate-900"] {
+  background-color: var(--card-bg) !important;
+  background-image: none !important;
+  color: var(--text) !important;
+}
+
+/* Specific rule for header rows with border-bottom and bg-slate-* used as section headers */
+.card .border-b[class*="bg-slate"],
+.overflow-x-auto .border-b[class*="bg-slate"] {
+  background-color: var(--card-bg) !important;
+  color: var(--text) !important;
+}

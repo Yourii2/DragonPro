@@ -1,0 +1,11 @@
+<IfModule mod_headers.c>
+    # CORS handled in PHP application to allow credentials and dynamic origin
+    # Header always set Access-Control-Allow-Origin "*"
+    # Header always set Access-Control-Allow-Methods "GET, POST, OPTIONS"
+    # Header always set Access-Control-Allow-Headers "Content-Type, Authorization"
+</IfModule>
+
+# Ensure PHP files are executed instead of served as text
+<FilesMatch "\.php$">
+    SetHandler application/x-httpd-php
+</FilesMatch>
