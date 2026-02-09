@@ -19,7 +19,9 @@ import {
   Image as ImageIcon,
   Camera,
   Coins,
-  FileText
+  FileText,
+  LifeBuoy,
+  Copy
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
@@ -72,6 +74,39 @@ const SettingsModule: React.FC = () => {
       : 'text-rose-400';
 
   const parseBool = (value: any) => value === true || value === 'true' || value === '1';
+
+  const RUSTDESK_DOWNLOAD_URL = 'https://rustdesk.com/download';
+
+  const copyToClipboard = async (text: string, label: string) => {
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      Swal.fire('تم', `تم نسخ ${label}.`, 'success');
+    } catch (e) {
+      console.error(e);
+      Swal.fire('خطأ', 'تعذر النسخ. انسخ الرابط يدوياً.', 'error');
+    }
+  };
+
+  const openRustDesk = () => {
+    try {
+      window.location.href = 'rustdesk://';
+    } catch (e) {
+      console.error(e);
+    }
+    // Always show a friendly hint (browser can't reliably detect if protocol opened).
+    Swal.fire('ملاحظة', 'إذا لم يتم فتح RustDesk تلقائياً، تأكد من تثبيته ثم جرّب مرة أخرى أو قم بتحميله.', 'info');
+  };
 
   const formatActivationStatus = (type: string, accountStatus: string, isExpired: boolean) => {
     if (isExpired) return 'منتهي';
@@ -828,6 +863,61 @@ const SettingsModule: React.FC = () => {
               {!updateInfo && (
                 <div>اضغط “فحص التحديثات” لعرض آخر إصدار.</div>
               )}
+            </div>
+          </div>
+
+          {/* Support Section (RustDesk) */}
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
+            <h3 className="font-bold flex items-center gap-2 mb-6 text-slate-800 dark:text-slate-100"><LifeBuoy className="text-slate-500" size={18}/> الدعم الفني (RustDesk)</h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <button
+                onClick={openRustDesk}
+                className="w-full flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-900 rounded-2xl hover:bg-slate-100 dark:hover:bg-slate-700/40 transition-all"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="bg-slate-200 dark:bg-slate-700 p-2.5 rounded-xl text-slate-700 dark:text-slate-200">
+                    <LifeBuoy size={20} />
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-bold text-slate-800 dark:text-slate-200">فتح RustDesk</p>
+                    <p className="text-[10px] text-slate-500">لفتح جلسة دعم فني على جهازك</p>
+                  </div>
+                </div>
+              </button>
+
+              <button
+                onClick={() => window.open(RUSTDESK_DOWNLOAD_URL, '_blank', 'noopener,noreferrer')}
+                className="w-full flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-900 rounded-2xl hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-all"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="bg-indigo-100 dark:bg-indigo-900/40 p-2.5 rounded-xl text-indigo-700 dark:text-indigo-300">
+                    <Download size={20} />
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-bold text-slate-800 dark:text-slate-200">تحميل RustDesk</p>
+                    <p className="text-[10px] text-slate-500">إذا لم يكن مثبتاً على الجهاز</p>
+                  </div>
+                </div>
+              </button>
+            </div>
+
+            <div className="mt-4 text-xs text-muted space-y-1">
+              <div>1) افتح RustDesk على الجهاز.</div>
+              <div>2) أرسل لنا الـ ID وكلمة المرور الظاهرة داخل RustDesk.</div>
+              <div>3) سيتم الاتصال بعد موافقتك.</div>
+
+              <div className="pt-2 flex items-center gap-2">
+                <span className="font-mono text-[11px] break-all">{RUSTDESK_DOWNLOAD_URL}</span>
+                <button
+                  onClick={() => copyToClipboard(RUSTDESK_DOWNLOAD_URL, 'رابط التحميل')}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-100"
+                  type="button"
+                >
+                  <Copy size={14} />
+                  نسخ
+                </button>
+              </div>
             </div>
           </div>
 
