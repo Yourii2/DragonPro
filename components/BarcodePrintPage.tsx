@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { printBarcodeLabels, type BarcodeLabelItem, type BarcodeLabelsPrintOptions } from '../services/printUtils';
+import CustomSelect from './CustomSelect';
 
 type SourceType = 'fabrics' | 'accessories' | 'factory_products' | 'products' | 'cutting_stage' | 'manufacturing_work';
 
@@ -257,26 +258,22 @@ const BarcodePrintPage: React.FC = () => {
 					<h2 className="font-black mb-3">إعدادات الطباعة</h2>
 
 					<label className="block text-sm font-bold mb-1">نوع الطباعة</label>
-					<select
-						className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
-						value={printMode}
-						onChange={e => setPrintMode(e.target.value as any)}
-					>
-						<option value="a4">A4</option>
-						<option value="thermal">حراري 80mm</option>
-					</select>
+									<CustomSelect
+										value={printMode}
+										onChange={v => setPrintMode(v as any)}
+										options={[{ value: 'a4', label: 'A4' }, { value: 'thermal', label: 'حراري 80mm' }]}
+										className="w-full"
+									/>
 
 					{printMode === 'thermal' && (
 						<div className="mt-3">
 							<label className="block text-sm font-bold mb-1">الخامة</label>
-							<select
-								className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+							<CustomSelect
 								value={thermalType}
-								onChange={e => setThermalType(e.target.value as any)}
-							>
-								<option value="paper">ورق</option>
-								<option value="sticker">ملصق</option>
-							</select>
+								onChange={v => setThermalType(v as any)}
+								options={[{ value: 'paper', label: 'ورق' }, { value: 'sticker', label: 'ملصق' }]}
+								className="w-full"
+							/>
 
 							{thermalType === 'sticker' && (
 								<div className="mt-3 grid grid-cols-2 gap-2">
@@ -312,18 +309,19 @@ const BarcodePrintPage: React.FC = () => {
 					<div className="flex flex-col md:flex-row md:items-end gap-3 mb-3">
 						<div className="flex-1">
 							<label className="block text-sm font-bold mb-1">مصدر الأكواد</label>
-							<select
-								className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+							<CustomSelect
 								value={sourceType}
-								onChange={e => setSourceType(e.target.value as any)}
-							>
-								<option value="fabrics">قماش</option>
-								<option value="accessories">إكسسوار</option>
-								<option value="factory_products">منتج مصنع</option>
-								<option value="products">منتج مخزن</option>
-								<option value="manufacturing_work">مرحلة تصنيع</option>
-								<option value="cutting_stage">مرحلة قص</option>
-							</select>
+								onChange={v => setSourceType(v as any)}
+								options={[
+									{ value: 'fabrics', label: 'قماش' },
+									{ value: 'accessories', label: 'إكسسوار' },
+									{ value: 'factory_products', label: 'منتج مصنع' },
+									{ value: 'products', label: 'منتج مخزن' },
+									{ value: 'manufacturing_work', label: 'مرحلة تصنيع' },
+									{ value: 'cutting_stage', label: 'مرحلة قص' }
+								]}
+								className="w-full"
+							/>
 						</div>
 						<div className="flex-1">
 							<label className="block text-sm font-bold mb-1">بحث</label>

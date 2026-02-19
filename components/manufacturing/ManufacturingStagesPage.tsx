@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeftRight, CheckCircle2, Plus, Save, X, Printer } from 'lucide-react';
 import JsBarcode from 'jsbarcode';
 import Swal from 'sweetalert2';
+import CustomSelect from '../CustomSelect';
 import { API_BASE_PATH } from '../../services/apiConfig';
 import { printBarcode, printBarcodeLabels } from '../../services/printUtils';
 
@@ -727,23 +728,17 @@ const ManufacturingStagesPage = () => {
 							<div className="grid grid-cols-1 md:grid-cols-6 gap-4">
 								<div className="space-y-1 md:col-span-3">
 									<label className="text-xs font-bold text-slate-500 mr-2">أمر القص</label>
-									<select
-										value={assignForm.cutting_order_id}
-										onChange={e => {
-											const id = Number(e.target.value);
+									<CustomSelect
+										value={String(assignForm.cutting_order_id || 0)}
+										onChange={v => {
+											const id = Number(v || 0);
 											setAssignForm(f => ({ ...f, cutting_order_id: id }));
 											loadAssignMeta(id);
 										}}
-										className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
+										options={[{ value: '0', label: 'اختر أمر القص' }, ...cuttingOrders.map(o => ({ value: String(o.id), label: `${o.code} - ${o.product_name} - ${o.fabric_name}` }))]}
+										className="w-full text-sm"
 										required
-									>
-										<option value={0}>اختر أمر القص</option>
-										{cuttingOrders.map(o => (
-											<option key={o.id} value={o.id}>
-												{o.code} - {o.product_name} - {o.fabric_name}
-											</option>
-										))}
-									</select>
+									/>
 								</div>
 								<div className="space-y-1 md:col-span-1">
 									<label className="text-xs font-bold text-slate-500 mr-2">الكمية المتاحة</label>
@@ -767,53 +762,35 @@ const ManufacturingStagesPage = () => {
 
 								<div className="space-y-1 md:col-span-2">
 									<label className="text-xs font-bold text-slate-500 mr-2">العامل</label>
-									<select
-										value={assignForm.worker_id}
-										onChange={e => setAssignForm(f => ({ ...f, worker_id: Number(e.target.value) }))}
-										className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
+									<CustomSelect
+										value={String(assignForm.worker_id || 0)}
+										onChange={v => setAssignForm(f => ({ ...f, worker_id: Number(v || 0) }))}
+										options={[{ value: '0', label: 'اختر العامل' }, ...workers.map(w => ({ value: String(w.id), label: w.name }))]}
+										className="w-full text-sm"
 										required
-									>
-										<option value={0}>اختر العامل</option>
-										{workers.map(w => (
-											<option key={w.id} value={w.id}>
-												{w.name}
-											</option>
-										))}
-									</select>
+									/>
 								</div>
 								<div className="space-y-1 md:col-span-2">
 									<label className="text-xs font-bold text-slate-500 mr-2">مرحلة التصنيع</label>
-									<select
-										value={assignForm.stage_id}
-										onChange={e => setAssignForm(f => ({ ...f, stage_id: Number(e.target.value) }))}
-										className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
+									<CustomSelect
+										value={String(assignForm.stage_id || 0)}
+										onChange={v => setAssignForm(f => ({ ...f, stage_id: Number(v || 0) }))}
+										options={[{ value: '0', label: assignForm.cutting_order_id ? 'اختر المرحلة' : 'اختر أمر القص أولاً' }, ...assignStages.map(s => ({ value: String(s.id), label: s.name }))]}
+										className="w-full text-sm"
 										required
 										disabled={!assignForm.cutting_order_id}
-									>
-										<option value={0}>{assignForm.cutting_order_id ? 'اختر المرحلة' : 'اختر أمر القص أولاً'}</option>
-										{assignStages.map(s => (
-											<option key={s.id} value={s.id}>
-												{s.name}
-											</option>
-										))}
-									</select>
+									/>
 								</div>
 								<div className="space-y-1 md:col-span-2">
 									<label className="text-xs font-bold text-slate-500 mr-2">المقاس</label>
-									<select
-										value={assignForm.size_id}
-										onChange={e => setAssignForm(f => ({ ...f, size_id: Number(e.target.value) }))}
-										className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
+									<CustomSelect
+										value={String(assignForm.size_id || 0)}
+										onChange={v => setAssignForm(f => ({ ...f, size_id: Number(v || 0) }))}
+										options={[{ value: '0', label: assignForm.cutting_order_id ? 'اختر المقاس' : 'اختر أمر القص أولاً' }, ...assignSizes.map(s => ({ value: String(s.id), label: `${s.name}${s.code ? ` (${s.code})` : ''}` }))]}
+										className="w-full text-sm"
 										required
 										disabled={!assignForm.cutting_order_id}
-									>
-										<option value={0}>{assignForm.cutting_order_id ? 'اختر المقاس' : 'اختر أمر القص أولاً'}</option>
-										{assignSizes.map(s => (
-											<option key={s.id} value={s.id}>
-												{s.name}{s.code ? ` (${s.code})` : ''}
-											</option>
-										))}
-									</select>
+									/>
 								</div>
 
 								<div className="md:col-span-6 flex items-center justify-between gap-4 mt-2">
@@ -900,35 +877,23 @@ const ManufacturingStagesPage = () => {
 
 								<div className="space-y-1 md:col-span-3">
 									<label className="text-xs font-bold text-slate-500 mr-2">العامل (للمرحلة الجديدة)</label>
-									<select
-										value={transferForm.to_worker_id}
-										onChange={e => setTransferForm(f => ({ ...f, to_worker_id: Number(e.target.value) }))}
-										className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
+									<CustomSelect
+										value={String(transferForm.to_worker_id || 0)}
+										onChange={v => setTransferForm(f => ({ ...f, to_worker_id: Number(v || 0) }))}
+										options={[{ value: '0', label: 'اختر العامل' }, ...workers.map(w => ({ value: String(w.id), label: w.name }))]}
+										className="w-full text-sm"
 										required
-									>
-										<option value={0}>اختر العامل</option>
-										{workers.map(w => (
-											<option key={w.id} value={w.id}>
-												{w.name}
-											</option>
-										))}
-									</select>
+									/>
 								</div>
 								<div className="space-y-1 md:col-span-3">
 									<label className="text-xs font-bold text-slate-500 mr-2">المرحلة الجديدة</label>
-									<select
-										value={transferForm.to_stage_id}
-										onChange={e => setTransferForm(f => ({ ...f, to_stage_id: Number(e.target.value) }))}
-										className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
+									<CustomSelect
+										value={String(transferForm.to_stage_id || 0)}
+										onChange={v => setTransferForm(f => ({ ...f, to_stage_id: Number(v || 0) }))}
+										options={[{ value: '0', label: 'اختر المرحلة' }, ...transferStages.map(s => ({ value: String(s.id), label: s.name }))]}
+										className="w-full text-sm"
 										required
-									>
-										<option value={0}>اختر المرحلة</option>
-										{transferStages.map(s => (
-											<option key={s.id} value={s.id}>
-												{s.name}
-											</option>
-										))}
-									</select>
+									/>
 								</div>
 
 								<div className="md:col-span-6 flex items-center justify-between gap-4 mt-2">
@@ -1014,19 +979,13 @@ const ManufacturingStagesPage = () => {
 								</div>
 								<div className="space-y-1 md:col-span-4">
 									<label className="text-xs font-bold text-slate-500 mr-2">إضافة للمخزن</label>
-									<select
-										value={finishForm.warehouse_id}
-										onChange={e => setFinishForm(f => ({ ...f, warehouse_id: Number(e.target.value) }))}
-										className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
+									<CustomSelect
+										value={String(finishForm.warehouse_id || 0)}
+										onChange={v => setFinishForm(f => ({ ...f, warehouse_id: Number(v || 0) }))}
+										options={[{ value: '0', label: 'اختر المخزن' }, ...warehouses.map(w => ({ value: String(w.id), label: w.name }))]}
+										className="w-full text-sm"
 										required
-									>
-										<option value={0}>اختر المخزن</option>
-										{warehouses.map(w => (
-											<option key={w.id} value={w.id}>
-												{w.name}
-											</option>
-										))}
-									</select>
+									/>
 								</div>
 							</div>
 

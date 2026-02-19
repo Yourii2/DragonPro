@@ -53,6 +53,10 @@ rem - components/ for PHP APIs
 
 xcopy /e /i /y "components" "%STAGE%\components" >nul
 
+if exist "migrations" (
+  xcopy /e /i /y "migrations" "%STAGE%\migrations" >nul
+)
+
 if exist "dist\assets" (
   xcopy /e /i /y "dist\assets" "%STAGE%\assets" >nul
 ) else (
@@ -83,12 +87,8 @@ if not exist "%OUTDIR%" mkdir "%OUTDIR%" >nul
 set "ZIP=%OUTDIR%\DragonPro_v%VERSION%.zip"
 if exist "%ZIP%" del /f /q "%ZIP%" >nul
 
-where tar >nul 2>&1
-if "%ERRORLEVEL%"=="0" (
-  tar -a -c -f "%ZIP%" -C "%STAGE%" .
-) else (
-  powershell -NoProfile -Command "Compress-Archive -Path '%STAGE%\*' -DestinationPath '%ZIP%' -Force"
-)
+rem Always create a standard ZIP (compatible with PHP ZipArchive)
+powershell -NoProfile -Command "Compress-Archive -Path '%STAGE%\*' -DestinationPath '%ZIP%' -Force"
 
 if not exist "%ZIP%" (
   echo Failed to create zip.

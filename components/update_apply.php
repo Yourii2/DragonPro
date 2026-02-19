@@ -129,6 +129,17 @@ function download_file($url, $destPath) {
     }
 }
 
+function log_msg($root, $msg) {
+    try {
+        $logDir = $root . '/logs';
+        if (!is_dir($logDir)) mkdir($logDir, 0775, true);
+        $path = $logDir . '/update_apply.log';
+        file_put_contents($path, date('c') . ' ' . $msg . "\n", FILE_APPEND);
+    } catch (Exception $e) {
+        // ignore logging failures
+    }
+}
+
 try {
     if (!class_exists('ZipArchive')) {
         throw new Exception('PHP extension ZipArchive is not enabled on this server. Enable php_zip then retry.');
@@ -185,6 +196,8 @@ try {
     $backupDir = $root . '/backups/updates';
     ensure_dir($backupDir);
 
+    log_msg($root, "Starting update process for asset: $assetUrl");
+
     $zipPath = $backupDir . '/update_' . $timestamp . '.zip';
     $extractDir = $backupDir . '/extract_' . $timestamp;
     ensure_dir($extractDir);
@@ -201,6 +214,8 @@ try {
     }
     $zip->close();
 
+    log_msg($root, "Extracted zip to: $extractDir");
+
     // Detect release root
     $entries = array_values(array_filter(scandir($extractDir), function($x){ return $x !== '.' && $x !== '..'; }));
     $srcRoot = $extractDir;
@@ -214,7 +229,79 @@ try {
         throw new Exception('Zip does not look like a valid Dragon release');
     }
 
+    // Backup current files (zip already saved to backups/updates)
+    log_msg($root, "Copying files from release root to application root: $srcRoot -> $root");
     copy_tree($srcRoot, $root, $exclude);
+    log_msg($root, "Files copied successfully");
+    // After copying files, try to update version.json from manifest if available
+    $manifest = null;
+    if (file_exists($srcRoot . '/manifest.json')) {
+        $manifest = read_json_file($srcRoot . '/manifest.json');
+    } elseif (file_exists($root . '/manifest.json')) {
+        $manifest = read_json_file($root . '/manifest.json');
+    }
+    if (is_array($manifest) && !empty($manifest['version'])) {
+        $verObj = ['version' => (string)$manifest['version'], 'buildDate' => (string)($manifest['date'] ?? date('Y-m-d'))];
+        file_put_contents($root . '/version.json', json_encode($verObj, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+    }
+
+    // If manifest exists in source, copy to root for reference
+    if (file_exists($srcRoot . '/manifest.json')) {
+        @copy($srcRoot . '/manifest.json', $root . '/manifest.json');
+    }
+
+    // If a migrations runner exists, attempt to execute it automatically and capture output
+    $migrationRunner = $root . '/migrations/run_updates.php';
+    if (file_exists($migrationRunner)) {
+        ensure_dir($root . '/logs');
+        $logPath = $root . '/logs/update_migrations.log';
+        $output = null;
+        // Prefer spawning the PHP CLI if available
+        $phpCmd = defined('PHP_BINARY') ? PHP_BINARY : 'php';
+        // Try proc_open for robust execution and streaming output
+        $cmd = escapeshellcmd($phpCmd) . ' ' . escapeshellarg($migrationRunner);
+        if (function_exists('proc_open')) {
+            $descriptors = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+            $proc = @proc_open($cmd, $descriptors, $pipes, null, null);
+            if (is_resource($proc)) {
+                $out = stream_get_contents($pipes[1]);
+                fclose($pipes[1]);
+                $err = stream_get_contents($pipes[2]);
+                fclose($pipes[2]);
+                $rc = proc_close($proc);
+                $output = trim($out . "\n" . $err);
+            } else {
+                // fallback to shell_exec
+                if (function_exists('shell_exec')) $output = shell_exec($cmd . ' 2>&1');
+            }
+        } elseif (function_exists('shell_exec')) {
+            $output = shell_exec($cmd . ' 2>&1');
+        } elseif (function_exists('exec')) {
+            exec($cmd . ' 2>&1', $lines, $rc);
+            $output = implode("\n", $lines);
+        } else {
+            ob_start();
+            include $migrationRunner;
+            $output = ob_get_clean();
+        }
+        if ($output === null) $output = "(no output)";
+        file_put_contents($logPath, "=== " . date('c') . " ===\n" . $output . "\n\n", FILE_APPEND);
+        log_msg($root, "Migrations runner executed; output written to: $logPath");
+    }
+
+    // Run optional post-update hook if present in the package
+    $postHook = $srcRoot . '/post_update.php';
+    if (file_exists($postHook)) {
+        log_msg($root, "Executing post-update hook: $postHook");
+        try {
+            ob_start();
+            include $postHook;
+            $hookOut = ob_get_clean();
+            log_msg($root, "Post-update hook output: " . substr($hookOut, 0, 4000));
+        } catch (Exception $he) {
+            log_msg($root, "Post-update hook error: " . $he->getMessage());
+        }
+    }
 
     @unlink($lockPath);
 

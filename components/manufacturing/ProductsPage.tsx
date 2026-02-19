@@ -4,6 +4,7 @@ import { Plus, Edit, Trash2, X, Save, Eye, History, Printer, Layers, QrCode } fr
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../../services/apiConfig';
 import { openPrintWindow } from '../../services/printUtils';
+import CustomSelect from '../CustomSelect';
 
 type Warehouse = { id: number; name: string };
 type SizeRow = { id: number; name: string; code?: string | null };
@@ -704,13 +705,16 @@ const ProductsPage = () => {
 
 	const formatMovementType = (t: string) => {
 		const v = (t || '').trim();
-		if (v === 'purchase') return { label: 'شراء/استلام', cls: 'bg-emerald-100 text-emerald-700' };
+		if (v === 'purchase') return { label: 'شراء', cls: 'bg-emerald-100 text-emerald-700' };
+		if (v === 'sale' || v === 'order') return { label: 'مبيعات / طلبية', cls: 'bg-rose-100 text-rose-700' };
+		if (v === 'return_in') return { label: 'مرتجع من عميل', cls: 'bg-blue-100 text-blue-700' };
+		if (v === 'return_out') return { label: 'مرتجع لمورد', cls: 'bg-blue-100 text-blue-700' };
 		if (v === 'initial_balance') return { label: 'رصيد افتتاحي', cls: 'bg-blue-100 text-blue-700' };
 		if (v === 'adjustment') return { label: 'تسوية', cls: 'bg-amber-100 text-amber-700' };
 		if (v === 'manufacturing') return { label: 'تصنيع', cls: 'bg-emerald-100 text-emerald-700' };
 		if (v === 'manufacturing_finish') return { label: 'انتهاء تصنيع', cls: 'bg-emerald-100 text-emerald-700' };
 		if (v === 'manufacturing_consume') return { label: 'استهلاك للتصنيع', cls: 'bg-amber-100 text-amber-700' };
-		if (v === 'transfer') return { label: 'تحويل', cls: 'bg-indigo-100 text-indigo-700' };
+		if (v === 'transfer') return { label: 'نقل الى مخزن', cls: 'bg-indigo-100 text-indigo-700' };
 		if (v === 'return') return { label: 'مرتجع', cls: 'bg-blue-100 text-blue-700' };
 		if (v === 'send_to_sales') return { label: 'إرسال للمبيعات', cls: 'bg-rose-100 text-rose-700' };
 		if (v === 'receive_from_factory') return { label: 'استلام من المصنع', cls: 'bg-emerald-100 text-emerald-700' };
@@ -734,7 +738,20 @@ const ProductsPage = () => {
 	const formatDetailsFromObject = (obj: any) => {
 		if (!obj || typeof obj !== 'object') return '-';
 		if (obj.notes) return String(obj.notes);
-		if (obj.name) return String(obj.name);
+		if (obj.name && !obj.itemType) return String(obj.name);
+		// Handle product/item payloads
+		if (obj.itemType || obj.productId || obj.qty || obj.quantity) {
+			const parts: string[] = [];
+			if (obj.name) parts.push(`المنتج: ${obj.name}`);
+			if (obj.color) parts.push(`اللون: ${obj.color}`);
+			if (obj.size) parts.push(`المقاس: ${obj.size}`);
+			if (obj.qty || obj.quantity) parts.push(`الكمية: ${Number(obj.qty||obj.quantity||0)}`);
+			if (obj.costPrice || obj.cost_price) parts.push(`سعر التكلفة: ${Number(obj.costPrice||obj.cost_price||0)}`);
+			if (obj.sellingPrice || obj.selling_price) parts.push(`سعر البيع: ${Number(obj.sellingPrice||obj.selling_price||0)}`);
+			if (obj.barcode) parts.push(`الباركود: ${obj.barcode}`);
+			if (obj.productId) parts.push(`معرّف المنتج: ${obj.productId}`);
+			return parts.length ? parts.join(' | ') : '-';
+		}
 
 		const parts: string[] = [];
 		const pushNum = (label: string, value: any) => {
@@ -779,17 +796,12 @@ const ProductsPage = () => {
 			<div className="flex items-center justify-between mb-6">
 				<h2 className="text-xl font-black">إدارة المنتجات</h2>
 				<div className="flex items-center gap-2">
-					<select
-						value={warehouseFilterId || 0}
-						onChange={e => setWarehouseFilterId(Number(e.target.value) || 0)}
-						className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-2 px-3 text-xs font-bold"
-						title="فلتر المخزن"
-					>
-						<option value={0}>كل المخازن</option>
-						{warehouses.map(w => (
-							<option key={w.id} value={w.id}>{w.name}</option>
-						))}
-					</select>
+					<CustomSelect
+						value={String(warehouseFilterId || 0)}
+						onChange={v => setWarehouseFilterId(Number(v) || 0)}
+						options={[{ value: '0', label: 'كل المخازن' }, ...warehouses.map(w => ({ value: String(w.id), label: w.name }))]}
+						className="text-xs"
+						/>
 					<button onClick={() => openModal()} className="flex items-center gap-2 bg-accent text-white px-4 py-2 rounded-xl text-xs font-black hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20">
 						<Plus size={16} /> إضافة منتج
 					</button>
@@ -887,32 +899,24 @@ const ProductsPage = () => {
 							<div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
 								<div className="space-y-1">
 									<label className="text-xs font-bold text-slate-500 mr-2">المقاس</label>
-									<select
+									<CustomSelect
 										value={barcodesSizeId ? String(barcodesSizeId) : ''}
-										onChange={e => setBarcodesSizeId(Number(e.target.value) || 0)}
-										className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
-									>
-										<option value="">اختر المقاس</option>
-										{((barcodesAllowedSizeIds && barcodesAllowedSizeIds.length > 0)
+										onChange={v => setBarcodesSizeId(Number(v) || 0)}
+										options={[{ value: '', label: 'اختر المقاس' }, ...(((barcodesAllowedSizeIds && barcodesAllowedSizeIds.length > 0)
 											? sizes.filter(s => barcodesAllowedSizeIds.includes(Number(s.id)))
 											: sizes
-										).map(s => (
-											<option key={s.id} value={String(s.id)}>{s.name}{s.code ? ` (${s.code})` : ''}</option>
-										))}
-									</select>
+										).map(s => ({ value: String(s.id), label: `${s.name}${s.code ? ` (${s.code})` : ''}` })))]}
+										className="w-full"
+									/>
 								</div>
 								<div className="space-y-1">
 									<label className="text-xs font-bold text-slate-500 mr-2">اللون</label>
-									<select
+									<CustomSelect
 										value={barcodesColorId ? String(barcodesColorId) : ''}
-										onChange={e => setBarcodesColorId(Number(e.target.value) || 0)}
-										className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
-									>
-										<option value="">اختر اللون</option>
-										{colors.map(c => (
-											<option key={c.id} value={String(c.id)}>{c.name}{c.code ? ` (${c.code})` : ''}</option>
-										))}
-									</select>
+										onChange={v => setBarcodesColorId(Number(v) || 0)}
+										options={[{ value: '', label: 'اختر اللون' }, ...colors.map(c => ({ value: String(c.id), label: `${c.name}${c.code ? ` (${c.code})` : ''}` }))]}
+										className="w-full"
+									/>
 								</div>
 								<div className="rounded-3xl border border-card card p-4" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
 									<div className="text-xs text-slate-500 dark:text-slate-400 font-bold">باركود التتبع (لإرسال للمبيعات)</div>
@@ -1052,19 +1056,21 @@ const ProductsPage = () => {
 								</div>
 								<div className="space-y-1 md:col-span-2">
 									<label className="text-xs font-bold text-slate-500 mr-2">نوع المنتج</label>
-									<select name="type" value={form.type} onChange={handleChange} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white">
-										<option value="individual">فردي</option>
-										<option value="composite">مجمع</option>
-									</select>
+									<CustomSelect
+										value={String(form.type)}
+										onChange={v => setForm({ ...form, type: v as any })}
+										options={[{ value: 'individual', label: 'فردي' }, { value: 'composite', label: 'مجمع' }]}
+										className="w-full"
+									/>
 								</div>
 								<div className="space-y-1 md:col-span-2">
 									<label className="text-xs font-bold text-slate-500 mr-2">المخزن (للكمية الحالية)</label>
-									<select name="warehouse_id" value={form.warehouse_id === '' ? '' : String(form.warehouse_id)} onChange={handleChange} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white" required>
-										<option value="">اختر المخزن</option>
-										{warehouses.map(w => (
-											<option key={w.id} value={String(w.id)}>{w.name}</option>
-										))}
-									</select>
+									<CustomSelect
+										value={form.warehouse_id === '' ? '' : String(form.warehouse_id)}
+										onChange={v => setForm({ ...form, warehouse_id: v === '' ? '' : Number(v) })}
+										options={[{ value: '', label: 'اختر المخزن' }, ...warehouses.map(w => ({ value: String(w.id), label: w.name }))]}
+										className="w-full"
+									/>
 								</div>
 								<div className="space-y-1">
 									<label className="text-xs font-bold text-slate-500 mr-2">سعر البيع</label>
@@ -1149,22 +1155,18 @@ const ProductsPage = () => {
 																		{(stageAccessories[st.id] || []).map((r, idx) => (
 																			<div key={idx} className="grid grid-cols-1 md:grid-cols-12 gap-2 bg-white/70 dark:bg-slate-900/40 rounded-2xl p-3">
 																				<div className="md:col-span-7">
-																					<select
+																					<CustomSelect
 																						value={r.accessory_id === '' ? '' : String(r.accessory_id)}
-																						onChange={(ev) => {
-																							const v = ev.target.value === '' ? '' : Number(ev.target.value);
+																						onChange={(v) => {
+																							const val = v === '' ? '' : Number(v);
 																							setStageAccessories(prev => ({
 																							...prev,
-																							[st.id]: (prev[st.id] || []).map((x, i) => i === idx ? { ...x, accessory_id: v } : x)
+																							[st.id]: (prev[st.id] || []).map((x, i) => i === idx ? { ...x, accessory_id: val } : x)
 																						}));
 																						}}
-																						className="w-full bg-transparent border-none rounded-2xl py-2 px-3 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
-																					>
-																						<option value="">اختر اكسسوار</option>
-																						{accessories.map(a => (
-																							<option key={a.id} value={String(a.id)}>{a.name}</option>
-																						))}
-																					</select>
+																						options={[{ value: '', label: 'اختر اكسسوار' }, ...accessories.map(a => ({ value: String(a.id), label: a.name }))]}
+																						className="w-full"
+																					/>
 																				</div>
 																				<div className="md:col-span-3">
 																					<input
@@ -1230,19 +1232,15 @@ const ProductsPage = () => {
 											<div className="space-y-2">
 												{components.map((c, idx) => (
 													<div key={idx} className="grid grid-cols-1 md:grid-cols-3 gap-2">
-														<select
+														<CustomSelect
 															value={c.product_id === '' ? '' : String(c.product_id)}
-															onChange={(ev) => {
-																const v = ev.target.value === '' ? '' : Number(ev.target.value);
-																setComponents(prev => prev.map((x, i) => i === idx ? { ...x, product_id: v } : x));
+															onChange={(v) => {
+																const val = v === '' ? '' : Number(v);
+																setComponents(prev => prev.map((x, i) => i === idx ? { ...x, product_id: val } : x));
 															}}
-															className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
-														>
-															<option value="">اختر منتج</option>
-															{individualProducts.map(p => (
-																<option key={p.id} value={String(p.id)}>{p.name}</option>
-															))}
-														</select>
+															options={[{ value: '', label: 'اختر منتج' }, ...individualProducts.map(p => ({ value: String(p.id), label: p.name }))]}
+															className="w-full"
+														/>
 														<input
 															type="number"
 															min="1"
@@ -1305,45 +1303,33 @@ const ProductsPage = () => {
 							<div className="grid grid-cols-1 md:grid-cols-3 gap-4">
 								<div className="space-y-1">
 									<label className="text-xs font-bold text-slate-500 mr-2">المخزن</label>
-									<select
+									<CustomSelect
 										value={assembleWarehouseId ? String(assembleWarehouseId) : ''}
-										onChange={e => setAssembleWarehouseId(Number(e.target.value) || 0)}
-										className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
-									>
-										<option value="">اختر المخزن</option>
-										{warehouses.map(w => (
-											<option key={w.id} value={String(w.id)}>{w.name}</option>
-										))}
-									</select>
+										onChange={v => setAssembleWarehouseId(Number(v) || 0)}
+										options={[{ value: '', label: 'اختر المخزن' }, ...warehouses.map(w => ({ value: String(w.id), label: w.name }))]}
+										className="w-full"
+									/>
 								</div>
 
 								<div className="space-y-1">
 									<label className="text-xs font-bold text-slate-500 mr-2">المقاس (إجباري)</label>
-									<select
+									<CustomSelect
 										value={assembleSizeId ? String(assembleSizeId) : ''}
-										onChange={e => setAssembleSizeId(Number(e.target.value) || 0)}
-										className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
+										onChange={v => setAssembleSizeId(Number(v) || 0)}
+										options={[{ value: '', label: 'اختر المقاس' }, ...(((assembleInfo?.allowed_sizes && assembleInfo.allowed_sizes.length > 0) ? assembleInfo.allowed_sizes : sizes) as any[]).map((s: any) => ({ value: String(s.id), label: String(s.name || s.code || s.id) }))]}
+										className="w-full"
 										title="التجميع لابد أن يكون بنفس المقاس"
-									>
-										<option value="">اختر المقاس</option>
-										{(((assembleInfo?.allowed_sizes && assembleInfo.allowed_sizes.length > 0) ? assembleInfo.allowed_sizes : sizes) as any[])?.map((s: any) => (
-											<option key={String(s.id)} value={String(s.id)}>{String(s.name || s.code || s.id)}</option>
-										))}
-									</select>
+									/>
 								</div>
 
 								<div className="space-y-1">
 									<label className="text-xs font-bold text-slate-500 mr-2">المنتج المجمع</label>
-									<select
+									<CustomSelect
 										value={assembleCompositeId ? String(assembleCompositeId) : ''}
-										onChange={e => setAssembleCompositeId(Number(e.target.value) || 0)}
-										className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
-									>
-										<option value="">اختر المنتج المجمع</option>
-										{(allProducts || []).filter(p => p.type === 'composite').map(p => (
-											<option key={p.id} value={String(p.id)}>{p.name} {p.code ? `(${p.code})` : ''}</option>
-										))}
-									</select>
+										onChange={v => setAssembleCompositeId(Number(v) || 0)}
+										options={[{ value: '', label: 'اختر المنتج المجمع' }, ...((allProducts || []).filter(p => p.type === 'composite').map(p => ({ value: String(p.id), label: `${p.name}${p.code ? ` (${p.code})` : ''}` })))]}
+										className="w-full"
+									/>
 								</div>
 							</div>
 

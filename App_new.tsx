@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
 import Login from './components/Login';
@@ -14,9 +14,10 @@ import WorkersModule from './components/WorkersModule';
 import RepresentativesModule from './components/RepresentativesModule';
 import SettingsModule from './components/SettingsModule';
 import ReportsModule from './components/ReportsModule';
-import SalesDaily from './components/SalesDaily';
+import SalesDaily from './components/SalesDaily.tsx';
 import SalesUpdateStatus from './components/SalesUpdateStatus';
 import SalesReport from './components/SalesReport';
+import SalesDailyClose from './components/SalesDailyClose';
 import AttendanceModule from './components/AttendanceModule';
 import Profile from './components/Profile';
 import { ThemeProvider } from './components/ThemeContext';
@@ -36,6 +37,8 @@ import ReceiveFromFactoryPage from './components/manufacturing/ReceiveFromFactor
 import BarcodePrintPage from './components/BarcodePrintPage';
 import SalesOffices from './components/SalesOffices';
 import BrandedWelcome from './components/BrandedWelcome';
+import PointOfSale from './components/PointOfSale';
+import ShippingCompaniesModule from './components/ShippingCompaniesModule.tsx';
 
 const migrateStorageKeys = () => {
   if (typeof window === 'undefined') return;
@@ -86,7 +89,7 @@ const migrateStorageKeys = () => {
   }
 };
 
-const App: React.FC = () => {
+const App_new: React.FC = () => {
   const [appStatus, setAppStatus] = useState<'loading' | 'not_installed' | 'error' | 'ready'>('loading');
   const [errorMessage, setErrorMessage] = useState('');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -103,63 +106,65 @@ const App: React.FC = () => {
     return 'غير معروف';
   };
 
+  // Verify installation / activation with the backend. Placed in component scope so hooks are used correctly.
+  const verifyInstallation = useCallback(async () => {
+    // First test the connection
+    const isConnected = await testConnection();
+    if (!isConnected) {
+      setErrorMessage('Cannot connect to the server. Please ensure XAMPP is running.');
+      setAppStatus('error');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_PATH}/verify.php`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force: true })
+      });
+      const result = await response.json();
+
+      if (result.status === 'not_installed') {
+        setAppStatus('not_installed');
+      } else if (result.status === 'activation_blocked' || result.status === 'activation_expired') {
+        setErrorMessage(result.message || 'ترخيص غير صالح.');
+        setAppStatus('error');
+      } else if (result.status === 'invalid_device' || result.status === 'tampered') {
+        setErrorMessage(result.message || 'تعذر التحقق من الترخيص.');
+        setAppStatus('error');
+      } else if (result.status === 'ok') {
+        // Store settings from backend
+        localStorage.setItem('Dragon_company_name', result.settings.company_name || '');
+        localStorage.setItem('Dragon_company_logo', result.settings.company_logo || '');
+
+        if (result.activation) {
+          localStorage.setItem('Dragon_activation', JSON.stringify({
+            status: formatActivationStatus(result.activation.type, result.activation.account_status, result.activation.is_expired),
+            expiry: result.activation.expiry || 'غير محدد',
+            account_status: result.activation.account_status || 'Active',
+            is_expired: result.activation.is_expired || 'false',
+            last_check: result.activation.last_check || ''
+          }));
+        }
+
+        setIsLoggedIn(result.is_logged_in);
+        if (result.is_logged_in) {
+          localStorage.setItem('Dragon_user', JSON.stringify(result.user));
+        }
+        setAppStatus('ready');
+      } else {
+        setErrorMessage(result.message || 'An unknown verification error occurred.');
+        setAppStatus('error');
+      }
+    } catch (error) {
+      console.error('Verification error:', error);
+      setErrorMessage('Cannot connect to the server. Please ensure XAMPP is running.');
+      setAppStatus('error');
+    }
+  }, []);
+
   useEffect(() => {
     migrateStorageKeys();
-    const verifyInstallation = async () => {
-      // First test the connection
-      const isConnected = await testConnection();
-      if (!isConnected) {
-        setErrorMessage('Cannot connect to the server. Please ensure XAMPP is running.');
-        setAppStatus('error');
-        return;
-      }
-
-      try {
-        const response = await fetch(`${API_BASE_PATH}/verify.php`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-        });
-        const result = await response.json();
-
-        if (result.status === 'not_installed') {
-          setAppStatus('not_installed');
-        } else if (result.status === 'activation_blocked' || result.status === 'activation_expired') {
-          setErrorMessage(result.message || 'ترخيص غير صالح.');
-          setAppStatus('error');
-        } else if (result.status === 'invalid_device' || result.status === 'tampered') {
-          setErrorMessage(result.message || 'تعذر التحقق من الترخيص.');
-          setAppStatus('error');
-        } else if (result.status === 'ok') {
-          // Store settings from backend
-          localStorage.setItem('Dragon_company_name', result.settings.company_name || '');
-          localStorage.setItem('Dragon_company_logo', result.settings.company_logo || '');
-
-          if (result.activation) {
-            localStorage.setItem('Dragon_activation', JSON.stringify({
-              status: formatActivationStatus(result.activation.type, result.activation.account_status, result.activation.is_expired),
-              expiry: result.activation.expiry || 'غير محدد',
-              account_status: result.activation.account_status || 'Active',
-              is_expired: result.activation.is_expired || 'false',
-              last_check: result.activation.last_check || ''
-            }));
-          }
-
-          setIsLoggedIn(result.is_logged_in);
-          if(result.is_logged_in) {
-            localStorage.setItem('Dragon_user', JSON.stringify(result.user));
-          }
-          setAppStatus('ready');
-        } else {
-          setErrorMessage(result.message || 'An unknown verification error occurred.');
-          setAppStatus('error');
-        }
-      } catch (error) {
-        console.error('Verification error:', error);
-        setErrorMessage('Cannot connect to the server. Please ensure XAMPP is running.');
-        setAppStatus('error');
-      }
-    };
-
     verifyInstallation();
 
     // Clear any existing hash from the URL to keep the address clean
@@ -169,7 +174,7 @@ const App: React.FC = () => {
         window.history.replaceState(null, '', cleanUrl);
       }
     } catch (e) { /* ignore */ }
-  }, []);
+  }, [verifyInstallation]);
 
   useEffect(() => {
     const fetchPages = async () => {
@@ -227,6 +232,27 @@ const App: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    const deliveryMethod = (localStorage.getItem('Dragon_delivery_method') || 'reps').toString();
+    const hiddenForDirect = ['orders', 'sales', 'reps', 'shipping-companies'];
+    const hiddenForShipping = ['pos', 'reps'];
+    const hiddenForReps = ['pos', 'shipping-companies'];
+
+    if (deliveryMethod === 'direct' && hiddenForDirect.includes(activeSlug)) {
+      setActiveView('pos', '');
+      return;
+    }
+    if (deliveryMethod === 'shipping' && hiddenForShipping.includes(activeSlug)) {
+      setActiveView('orders', 'new-order');
+      return;
+    }
+    if (deliveryMethod === 'reps' && hiddenForReps.includes(activeSlug)) {
+      setActiveView('orders', 'new-order');
+      return;
+    }
+  }, [activeSlug, isLoggedIn]);
+
   if (appStatus === 'loading') {
     return <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex items-center justify-center"><div className="w-16 h-16 border-8 border-blue-500 border-t-transparent rounded-full animate-spin"></div></div>;
   }
@@ -249,8 +275,8 @@ const App: React.FC = () => {
               <li>• تأكد من أن المنفذ 80 متاح</li>
             </ul>
           </div>
-          <button 
-            onClick={() => window.location.reload()}
+          <button
+            onClick={() => { setAppStatus('loading'); verifyInstallation(); }}
             className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-xl transition-colors"
           >
             إعادة المحاولة
@@ -278,13 +304,18 @@ const App: React.FC = () => {
         return <InventoryModule initialView={activeSubSlug} />;
       case 'orders':
         return <OrdersModule initialView={activeSubSlug} />;
+      case 'pos':
+        return <PointOfSale />;
       case 'reps':
         return <RepresentativesModule initialView={activeSubSlug} />;
+      case 'shipping-companies':
+        return <ShippingCompaniesModule />;
       case 'sales':
         switch (activeSubSlug) {
           case 'sales-daily': return <SalesDaily />;
           case 'sales-update-status': return <SalesUpdateStatus />;
-          case 'sales-report': return <SalesReport />;
+          case 'close-daily': return <SalesDailyClose />;
+          case 'sales-report': return <SalesReport />;          
           default: return <SalesDaily />;
         }
       case 'sales-offices':
@@ -352,5 +383,4 @@ const App: React.FC = () => {
   );
 };
 
-export default App;
-
+export default App_new;

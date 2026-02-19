@@ -5,6 +5,7 @@ import { Edit, Plus, Trash2, X, Save, Eye, History, Printer } from 'lucide-react
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../../services/apiConfig';
 import { openPrintWindow } from '../../services/printUtils';
+import CustomSelect from '../CustomSelect';
 
 type AccessoryRow = {
 	id: number;
@@ -438,12 +439,14 @@ const AccessoriesPage = () => {
 								</div>
 								<div className="space-y-1 md:col-span-2">
 									<label className="text-xs font-bold text-slate-500 mr-2">المخزن</label>
-									<select name="warehouse_id" value={form.warehouse_id === '' ? '' : String(form.warehouse_id)} onChange={handleChange} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white" required>
-										<option value="">اختر المخزن</option>
-										{warehouses.map(w => (
-											<option key={w.id} value={String(w.id)}>{w.name}</option>
-										))}
-									</select>
+									<CustomSelect
+										value={form.warehouse_id === '' ? '' : String(form.warehouse_id)}
+										onChange={v => handleChange({ target: { name: 'warehouse_id', value: v } } as any)}
+										options={warehouses.map(w => ({ value: String(w.id), label: w.name }))}
+										placeholder="اختر المخزن"
+										disabled={false}
+										className=""
+									/>
 									{warehouses.length === 0 && (
 										<p className="text-[11px] text-rose-600 mt-1">لا توجد مخازن. أضف مخزنًا أولاً من المخازن.</p>
 									)}

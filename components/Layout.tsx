@@ -56,6 +56,7 @@ const Layout: React.FC<LayoutProps> = ({
   const companyLogo = assetUrl('Dragon.png');
   const salesDisplayMethod = (localStorage.getItem('Dragon_sales_display_method') || 'company').toString();
   const productSource = (localStorage.getItem('Dragon_product_source') || 'both').toString();
+  const deliveryMethod = (localStorage.getItem('Dragon_delivery_method') || 'reps').toString();
 
   useEffect(() => {
     const handler = (e: any) => {
@@ -73,10 +74,10 @@ const Layout: React.FC<LayoutProps> = ({
       try {
         const user = JSON.parse(localStorage.getItem('Dragon_user') || 'null');
         const [pagesRes, mRes, pRes] = await Promise.all([
-          fetch(`${API_BASE_PATH}/api.php?module=permissions&action=getUserPages&user_id=${user ? user.id : 0}`).then(r => r.json()).catch(() => ({ success: false, data: [] })),
-          fetch(`${API_BASE_PATH}/api.php?module=permissions&action=getMyModules`).then(r => r.json()).catch(() => ({ success: false, data: [] })),
+          fetch(`${API_BASE_PATH}/api.php?module=permissions&action=getUserPages&user_id=${user ? user.id : 0}`, { credentials: 'include' }).then(r => r.json()).catch(() => ({ success: false, data: [] })),
+          fetch(`${API_BASE_PATH}/api.php?module=permissions&action=getMyModules`, { credentials: 'include' }).then(r => r.json()).catch(() => ({ success: false, data: [] })),
           // also fetch per-action perms to build module list from action entries
-          fetch(`${API_BASE_PATH}/api.php?module=permissions&action=getUserPermissions&user_id=${user ? user.id : 0}`).then(r => r.json()).catch(() => ({ success: false, data: [] }))
+          fetch(`${API_BASE_PATH}/api.php?module=permissions&action=getUserPermissions&user_id=${user ? user.id : 0}`, { credentials: 'include' }).then(r => r.json()).catch(() => ({ success: false, data: [] }))
         ]);
 
         const pages = (pagesRes && pagesRes.success && Array.isArray(pagesRes.data)) ? pagesRes.data : [];
@@ -280,7 +281,7 @@ const Layout: React.FC<LayoutProps> = ({
       {/* Sidebar */}
       <aside className="fixed inset-y-0 right-0 z-50 w-64 transition-transform duration-300 transform card backdrop-blur-xl border-l border-card shadow-xl no-print" style={{ transform: isSidebarOpen ? 'translateX(0)' : 'translateX(100%)' }}>
         <div className="flex flex-col h-full">
-          <div className="flex items-center justify-between px-6 py-5 border-b border-gradient-to-r from-transparent via-slate-200/50 dark:via-slate-700/50 to-transparent bg-gradient-to-b from-blue-500/5 dark:from-blue-400/10 to-transparent">
+          <div className="flex items-center justify-between px-6 py-5 border-b border-gradient-to-r via-slate-200/50 dark:via-slate-700/50 bg-gradient-to-b from-blue-500/5 dark:from-blue-400/10 to-transparent">
             <div className="flex items-center gap-3">
               {companyLogo ? (
                 <img src={companyLogo} alt="logo" className="w-11 h-11 rounded-xl object-cover border-2 border-blue-500/20 dark:border-blue-400/30 shadow-lg" onError={(e:any)=>{e.target.src=assetUrl('Dragon.png')}} />
@@ -297,6 +298,25 @@ const Layout: React.FC<LayoutProps> = ({
               .filter(item => {
                 // hide sales-offices menu when sales display is set to company
                 if (item.id === 'sales-offices' && salesDisplayMethod === 'company') return false;
+
+                // Delivery method toggles
+                // reps: current behavior
+                if (deliveryMethod === 'direct') {
+                  // hide orders/sales/reps and show POS
+                  const hideForDirect = ['orders', 'sales', 'reps', 'shipping-companies'];
+                  if (hideForDirect.includes(item.id)) return false;
+                }
+                if (deliveryMethod === 'shipping') {
+                  // hide reps and POS and show shipping-companies
+                  const hideForShipping = ['reps', 'pos'];
+                  if (hideForShipping.includes(item.id)) return false;
+                }
+                if (deliveryMethod === 'reps') {
+                  // default: hide pos and shipping companies
+                  const hideForReps = ['pos', 'shipping-companies'];
+                  if (hideForReps.includes(item.id)) return false;
+                }
+
                 // when productSource is 'suppliers', hide factory-related menus
                 if (productSource === 'suppliers') {
                   const hideWhenSuppliers = ['factory-stock', 'factory-management', 'manufacturing-management', 'dispatch', 'factory-receiving', 'workers'];
@@ -363,6 +383,8 @@ const Layout: React.FC<LayoutProps> = ({
               <Search className="w-4 h-4" />
               <input type="text" placeholder="بحث سريع..." className="bg-transparent border-none focus:ring-0 text-sm mr-2 w-full text-right placeholder:text-slate-400 dark:placeholder:text-slate-500" />
             </div>
+          </div>
+          <div className="flex items-center gap-4">
           </div>
           
           <div className="flex items-center gap-2">

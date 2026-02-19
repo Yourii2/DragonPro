@@ -3,6 +3,7 @@ import { Search, Plus, Truck, FileText, Phone, MapPin, X, Save, Edit, Eye, Print
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { assetUrl } from '../services/assetUrl';
+import CustomSelect from './CustomSelect';
 
 const toAbsoluteUrl = (input: string) => {
     if (typeof window === 'undefined') return input;
@@ -50,9 +51,9 @@ const SRMModule: React.FC = () => {
     const [receivePaidAmount, setReceivePaidAmount] = useState('');
     const [receiveTreasuryId, setReceiveTreasuryId] = useState('');
     const [receiveNotes, setReceiveNotes] = useState('');
-    const [receiveItems, setReceiveItems] = useState<any[]>([
-            { productId: '', name: '', qty: 1, costPrice: '', sellingPrice: '' }
-    ]);
+        const [receiveItems, setReceiveItems] = useState<any[]>([
+            { productId: '', name: '', color: '', size: '', barcode: '', qty: 1, costPrice: '', sellingPrice: '' }
+        ]);
 
   const [formData, setFormData] = useState({ name: '', phone: '', address: '' });
     const [userDefaults, setUserDefaults] = useState<any>(null);
@@ -837,10 +838,11 @@ const SRMModule: React.FC = () => {
                             </div>
                             <div className="space-y-1">
                                 <label className="text-xs font-bold text-slate-500 mr-2">الخزينة</label>
-                                <select value={paymentTreasuryId} onChange={e => setPaymentTreasuryId(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm">
-                                    <option value="">اختر الخزينة</option>
-                                    {treasuries.map(t => (<option key={t.id} value={t.id}>{t.name}</option>))}
-                                </select>
+                                <CustomSelect
+                                    value={paymentTreasuryId}
+                                    onChange={v => setPaymentTreasuryId(v)}
+                                    options={[{ value: '', label: 'اختر الخزينة' }, ...treasuries.map(t => ({ value: String(t.id), label: t.name }))]}
+                                />
                             </div>
                             <div className="space-y-1">
                                 <label className="text-xs font-bold text-slate-500 mr-2">ملاحظات</label>
@@ -864,19 +866,20 @@ const SRMModule: React.FC = () => {
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <div className="space-y-1">
                                     <label className="text-xs font-bold text-slate-500 mr-2">المورد</label>
-                                    <select value={receiveSupplierId} onChange={e => setReceiveSupplierId(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm">
-                                        <option value="">اختر المورد</option>
-                                        {suppliers.map(s => (<option key={s.id} value={s.id}>{s.name}</option>))}
-                                    </select>
+                                    <CustomSelect
+                                        value={receiveSupplierId}
+                                        onChange={v => setReceiveSupplierId(v)}
+                                        options={[{ value: '', label: 'اختر المورد' }, ...suppliers.map(s => ({ value: String(s.id), label: s.name }))]}
+                                    />
                                 </div>
                                 <div className="space-y-1">
                                     <label className="text-xs font-bold text-slate-500 mr-2">المخزن</label>
-                                    <select value={receiveWarehouseId} onChange={e => setReceiveWarehouseId(e.target.value)} disabled={userDefaults && userDefaults.default_warehouse_id && !userDefaults.can_change_warehouse} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm">
-                                        <option value="">اختر المخزن</option>
-                                        {(userDefaults && userDefaults.default_warehouse_id && !userDefaults.can_change_warehouse ? warehouses.filter(w => Number(w.id) === Number(userDefaults.default_warehouse_id)) : warehouses).map(w => (
-                                            <option key={w.id} value={w.id}>{w.name}</option>
-                                        ))}
-                                    </select>
+                                    <CustomSelect
+                                        value={receiveWarehouseId}
+                                        onChange={v => setReceiveWarehouseId(v)}
+                                        disabled={userDefaults && userDefaults.default_warehouse_id && !userDefaults.can_change_warehouse}
+                                        options={[{ value: '', label: 'اختر المخزن' }, ...(userDefaults && userDefaults.default_warehouse_id && !userDefaults.can_change_warehouse ? warehouses.filter(w => Number(w.id) === Number(userDefaults.default_warehouse_id)) : warehouses).map(w => ({ value: String(w.id), label: w.name }))]}
+                                    />
                                 </div>
                                 <div className="space-y-1">
                                     <label className="text-xs font-bold text-slate-500 mr-2">مدفوع</label>
@@ -884,12 +887,12 @@ const SRMModule: React.FC = () => {
                                 </div>
                                 <div className="space-y-1">
                                     <label className="text-xs font-bold text-slate-500 mr-2">الخزينة</label>
-                                    <select value={receiveTreasuryId} onChange={e => setReceiveTreasuryId(e.target.value)} disabled={userDefaults && userDefaults.default_treasury_id && !userDefaults.can_change_treasury} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm">
-                                        <option value="">اختر الخزينة</option>
-                                        {(userDefaults && userDefaults.default_treasury_id && !userDefaults.can_change_treasury ? treasuries.filter(t => Number(t.id) === Number(userDefaults.default_treasury_id)) : treasuries).map(t => (
-                                            <option key={t.id} value={t.id}>{t.name}</option>
-                                        ))}
-                                    </select>
+                                    <CustomSelect
+                                        value={receiveTreasuryId}
+                                        onChange={v => setReceiveTreasuryId(v)}
+                                        disabled={userDefaults && userDefaults.default_treasury_id && !userDefaults.can_change_treasury}
+                                        options={[{ value: '', label: 'اختر الخزينة' }, ...(userDefaults && userDefaults.default_treasury_id && !userDefaults.can_change_treasury ? treasuries.filter(t => Number(t.id) === Number(userDefaults.default_treasury_id)) : treasuries).map(t => ({ value: String(t.id), label: t.name }))]}
+                                    />
                                 </div>
                                 <div className="space-y-1 md:col-span-2">
                                     <label className="text-xs font-bold text-slate-500 mr-2">ملاحظات</label>
@@ -903,6 +906,9 @@ const SRMModule: React.FC = () => {
                                         <tr>
                                             <th className="p-3">الصنف</th>
                                             <th className="p-3">الاسم</th>
+                                            <th className="p-3">اللون</th>
+                                            <th className="p-3">المقاس</th>
+                                            <th className="p-3">الباركود</th>
                                             <th className="p-3">الكمية</th>
                                             <th className="p-3">سعر التكلفة</th>
                                             <th className="p-3">سعر البيع</th>
@@ -913,17 +919,35 @@ const SRMModule: React.FC = () => {
                                         {receiveItems.map((item, idx) => (
                                             <tr key={idx} className="border-t">
                                                 <td className="p-3">
-                                                    <select value={item.productId} onChange={e => {
-                                                            const pid = e.target.value;
+                                                    <CustomSelect
+                                                        value={item.productId || ''}
+                                                        onChange={v => {
+                                                            const pid = v;
                                                             const product = products.find((p: any) => String(p.id) === String(pid));
-                                                            updateReceiveItem(idx, { productId: pid, name: product?.name || '' });
-                                                    }} className="w-full bg-white border border-slate-200 rounded-lg px-2 py-2 text-xs">
-                                                        <option value="">اختر</option>
-                                                        {products.map(p => (<option key={p.id} value={p.id}>{p.name}</option>))}
-                                                    </select>
+                                                            updateReceiveItem(idx, {
+                                                                productId: pid,
+                                                                name: product?.name || '',
+                                                                color: product?.color || '',
+                                                                size: product?.size || '',
+                                                                barcode: product?.barcode || '',
+                                                                costPrice: product?.cost || product?.cost_price || product?.costPrice || '',
+                                                                sellingPrice: product?.price || product?.sale_price || product?.sellingPrice || ''
+                                                            });
+                                                        }}
+                                                        options={[{ value: '', label: 'اختر' }, ...products.map(p => ({ value: String(p.id), label: `${p.name} (${p.color || '-'}-${p.size || '-'}) ${p.barcode || ''}` }))]}
+                                                    />
                                                 </td>
                                                 <td className="p-3">
                                                     <input type="text" value={item.name} onChange={e => updateReceiveItem(idx, { name: e.target.value })} className="w-full bg-white border border-slate-200 rounded-lg px-2 py-2 text-xs" placeholder="اسم الصنف" />
+                                                </td>
+                                                <td className="p-3">
+                                                    <input type="text" readOnly value={item.color || ''} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 text-xs text-slate-600" />
+                                                </td>
+                                                <td className="p-3">
+                                                    <input type="text" readOnly value={item.size || ''} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 text-xs text-slate-600" />
+                                                </td>
+                                                <td className="p-3">
+                                                    <input type="text" readOnly value={item.barcode || ''} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 text-xs text-slate-600" />
                                                 </td>
                                                 <td className="p-3">
                                                     <input type="number" min="1" value={item.qty} onChange={e => updateReceiveItem(idx, { qty: e.target.value })} className="w-full bg-white border border-slate-200 rounded-lg px-2 py-2 text-xs" />

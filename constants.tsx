@@ -44,6 +44,12 @@ export const MENU_ITEMS = [
     ]
   },
   {
+    id: 'pos',
+    label: 'نقطه البيع',
+    icon: <ShoppingCart className="w-5 h-5" />,
+    slug: 'pos'
+  },
+  {
     id: 'dispatch',
     label: 'ارسال المنتجات',
     icon: <Truck className="w-5 h-5" />,
@@ -70,6 +76,12 @@ export const MENU_ITEMS = [
     ]
   },
   {
+    id: 'shipping-companies',
+    label: 'شركات الشحن',
+    icon: <Truck className="w-5 h-5" />,
+    slug: 'shipping-companies'
+  },
+  {
     id: 'orders',
     label: 'الطلبيات',
     icon: <ShoppingCart className="w-5 h-5" />,
@@ -86,9 +98,10 @@ export const MENU_ITEMS = [
     icon: <Briefcase className="w-5 h-5" />,
     slug: 'sales',
     subItems: [
-      { label: 'يوميه البيع', slug: 'sales-daily' },
-      { label: 'تحديث حاله الطلبيه', slug: 'sales-update-status' },
-      { label: 'تقرير البيع', slug: 'sales-report' }
+      { label: 'بدء اليومية', slug: 'sales-daily' },
+      { label: 'تسجيل المرتجعات', slug: 'sales-update-status' },
+      { label: 'اغلاق اليومية', slug: 'close-daily' },
+      { label: 'تقرير اليومية', slug: 'sales-report' }
     ]
   },
   {
@@ -120,7 +133,8 @@ export const MENU_ITEMS = [
       { label: 'قائمه المناديب', slug: 'list' },
       { label: 'عهده المندوب', slug: 'custody' },
       { label: 'معاملات المندوب', slug: 'transactions' },
-      { label: 'دوره عمل المندوب', slug: 'rep-cycle' }
+      { label: 'ماليات المندوب', slug: 'rep-cycle' },
+      { label: 'أداء المناديب', slug: 'rep-performance' }
     ]
   },
   {

@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Save } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../../services/apiConfig';
+import CustomSelect from '../CustomSelect';
 
 type DispatchOrderRow = {
 	id: number;
@@ -207,18 +208,12 @@ const ReceiveFromFactoryPage = () => {
 							إظهار المستلمة بالفعل
 						</label>
 					</div>
-					<select
-						value={selectedOrderId || ''}
-						onChange={e => setSelectedOrderId(Number(e.target.value) || 0)}
-						className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
-					>
-						<option value="">{showCompleted ? 'اختر إرسالًا' : 'اختر إرسالًا معلقًا'}</option>
-						{pendingOrders.map(o => (
-							<option key={o.id} value={o.id}>
-								{o.code || `#${o.id}`} — {o.from_warehouse_name || o.from_warehouse_id} → {o.to_warehouse_name || o.to_warehouse_id}
-							</option>
-						))}
-					</select>
+					<CustomSelect
+						value={selectedOrderId ? String(selectedOrderId) : ''}
+						onChange={v => setSelectedOrderId(Number(v) || 0)}
+						options={[{ value: '', label: showCompleted ? 'اختر إرسالًا' : 'اختر إرسالًا معلقًا' }, ...pendingOrders.map(o => ({ value: String(o.id), label: `${o.code || `#${o.id}`} — ${o.from_warehouse_name || o.from_warehouse_id} → ${o.to_warehouse_name || o.to_warehouse_id}` }))]}
+						className="w-full"
+					/>
 					<div className="mt-3 text-xs text-muted">عدد الإرسالات: {pendingOrders.length}</div>
 				</div>
 

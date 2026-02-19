@@ -2,6 +2,9 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Package, ArrowDownLeft, ArrowUpRight, History, Box, QrCode, Plus, Edit, Trash2, Eye, MapPin, X, Save, ArrowLeftRight, CheckCircle2, MinusCircle, PlusCircle, FilePlus2, Search, FileText, RefreshCw, AlertTriangle } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
+import { formatMovementDetails, translateMovementType } from '../services/labelHelpers';
+import { assetUrl } from '../services/assetUrl';
+import CustomSelect from './CustomSelect';
 
 interface InventoryModuleProps {
   initialView?: string;
@@ -17,6 +20,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
   const [selectedWarehouseFilter, setSelectedWarehouseFilter] = useState<string>('كل المستودعات');
   const currencySymbol = 'ج.م';
   const productSource = (localStorage.getItem('Dragon_product_source') || 'both').toString();
+  const salePriceSource = (localStorage.getItem('Dragon_default_sale_price_source') || 'product').toString();
   const defaultReceivingItemType = productSource === 'suppliers' ? 'product_new' : 'fabric_new';
   
   // --- Real Data State (Initialized Empty) ---
@@ -228,21 +232,30 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
     try {
       if (!selectedWarehouseFilter || selectedWarehouseFilter === 'كل المستودعات') {
         const storeResp = await fetch(`${API_BASE_PATH}/api.php?module=stock&action=getAllSummary`).then(r => r.json()).catch(() => ({ success: false }));
+        // Build a map of returned stock by product_id (API may omit zero-qty items)
+        const apiRows: any[] = (storeResp && storeResp.success ? (storeResp.data || []) : []);
+        const apiMap = new Map<number, any>();
+        apiRows.forEach((r: any) => apiMap.set(Number(r.product_id), r));
 
-        const storeMapped = (storeResp && storeResp.success ? (storeResp.data || []) : []).map((r: any) => ({
-          id: r.product_id,
-          name: r.name,
-          barcode: r.barcode,
-          color: r.color,
-          size: r.size,
-          cost: Number(r.cost || 0),
-          price: Number(r.price || 0),
-          stock: Number(r.quantity || 0),
-          reorderLevel: Number(r.reorderLevel || 0),
-          itemType: 'store',
-        }));
+        // Merge with full products list so products with zero quantity are shown
+        const merged = (products && products.length ? products : apiRows).map((p: any) => {
+          const id = Number(p.id ?? p.product_id);
+          const fromApi = apiMap.get(id) || {};
+          return {
+            id: id,
+            name: p.name || fromApi.name || '',
+            barcode: p.barcode || fromApi.barcode || '-',
+            color: p.color || fromApi.color || '',
+            size: p.size || fromApi.size || '',
+            cost: Number(p.cost ?? fromApi.cost ?? 0),
+            price: Number(p.price ?? fromApi.price ?? 0),
+            stock: Number(fromApi.quantity ?? 0),
+            reorderLevel: Number(p.reorderLevel ?? p.reorder_level ?? fromApi.reorderLevel ?? 0),
+            itemType: 'store',
+          };
+        });
 
-        setStockRows(storeMapped);
+        setStockRows(merged);
         return;
       }
 
@@ -254,21 +267,30 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
       }
 
       const storeResp = await fetch(`${API_BASE_PATH}/api.php?module=stock&action=getByWarehouse&warehouse_id=${wid}`).then(r => r.json()).catch(() => ({ success: false }));
+      // Build map from API rows
+      const apiRows: any[] = (storeResp && storeResp.success ? (storeResp.data || []) : []);
+      const apiMap = new Map<number, any>();
+      apiRows.forEach((r: any) => apiMap.set(Number(r.product_id), r));
 
-      const storeMapped = (storeResp && storeResp.success ? (storeResp.data || []) : []).map((r: any) => ({
-        id: r.product_id,
-        name: r.name,
-        barcode: r.barcode,
-        color: r.color,
-        size: r.size,
-        cost: Number(r.cost || 0),
-        price: Number(r.price || 0),
-        stock: Number(r.quantity || 0),
-        reorderLevel: Number(r.reorderLevel || 0),
-        itemType: 'store',
-      }));
+      // Merge with full products list so products with zero quantity in this warehouse are shown
+      const merged = (products && products.length ? products : apiRows).map((p: any) => {
+        const id = Number(p.id ?? p.product_id);
+        const fromApi = apiMap.get(id) || {};
+        return {
+          id: id,
+          name: p.name || fromApi.name || '',
+          barcode: p.barcode || fromApi.barcode || '-',
+          color: p.color || fromApi.color || '',
+          size: p.size || fromApi.size || '',
+          cost: Number(p.cost ?? fromApi.cost ?? 0),
+          price: Number(p.price ?? fromApi.price ?? 0),
+          stock: Number(fromApi.quantity ?? 0),
+          reorderLevel: Number(p.reorderLevel ?? p.reorder_level ?? fromApi.reorderLevel ?? 0),
+          itemType: 'store',
+        };
+      });
 
-      setStockRows(storeMapped);
+      setStockRows(merged);
     } catch (e) {
       console.error('Failed to fetch stock rows:', e);
       setStockRows([]);
@@ -882,17 +904,37 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                   const price = Number(it.sellingPrice ?? it.selling_price ?? it.price ?? it.sale_price ?? costPrice);
                   return { ...it, qty, costPrice, price };
                 });
+                const whName = (warehouses.find(w => String(w.id) === String(receivingData.warehouseId)) || { name: String(receivingData.warehouseId || '') }).name;
+                // compute item totals
+                const totalItemsCount = items.reduce((s:any,it:any) => s + Number(it.qty || 0), 0);
+                const totalFabricsCount = items.reduce((s:any,it:any) => {
+                  const isFabric = (String(it.category || '').toLowerCase().includes('fabric') || String(it.type || '').toLowerCase().includes('fabric') || String(it.itemType || '').toLowerCase().includes('fabric') || Boolean(it.isFabric));
+                  return s + (isFabric ? Number(it.qty || 0) : 0);
+                }, 0);
+                const totalProductsCount = totalItemsCount - totalFabricsCount;
+                const supplierPrev = Number(currentSupplier?.balance ?? 0);
+                const paidAmountVal = Number(receivingData.paidAmount || 0);
+                const txAmountVal = Number(tx.amount || 0);
+                const treasuryName = (treasuries.find(t => String(t.id) === String(receivingData.treasuryId)) || { name: '' }).name;
                 setReceivedInvoice({
                   id: tx.id,
                   number: tx.reference_id || `INV-${tx.id}`,
                   date: tx.transaction_date || tx.date,
                   items: items,
-                  total: Number(tx.amount || 0),
+                  total: txAmountVal,
                   supplierName: currentSupplier?.name || '',
                   supplierPhone: currentSupplier?.phone || '',
                   supplierAddress: currentSupplier?.address || '',
                   type: tx.type || 'purchase',
-                  userName: tx.created_by || '-'
+                  userName: tx.created_by_name || tx.created_by || (typeof window !== 'undefined' && (() => { try { const u = JSON.parse(localStorage.getItem('Dragon_user')||'null'); return u && (u.name || u.username) ? (u.name || u.username) : '-'; } catch(e){ return '-'; } })()) || '-',
+                  warehouseName: whName,
+                  supplierPreviousBalance: supplierPrev,
+                  paidAmount: paidAmountVal,
+                  treasuryName: treasuryName,
+                  newSupplierBalance: supplierPrev + txAmountVal - paidAmountVal,
+                  totalItemsReceived: totalItemsCount,
+                  totalFabricsReceived: totalFabricsCount,
+                  totalProductsReceived: totalProductsCount
                 });
                 setIsReceivedInvoiceModalOpen(true);
               }
@@ -933,16 +975,40 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
     const items = receivedInvoice.items || [];
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
+    const companyLogo = (localStorage.getItem('Dragon_company_logo') || assetUrl('Dragon.png'));
+    const companyName = (localStorage.getItem('Dragon_company_name') || 'اسم الشركة التجارية');
+    const companyPhone = (localStorage.getItem('Dragon_company_phone') || '');
+    const companyAddress = (localStorage.getItem('Dragon_company_address') || '');
+
     let html = `<!doctype html><html><head><meta charset="utf-8"><title>فاتورة شراء</title>
-    <style>@media print{@page{size:A4;margin:18mm}} body{font-family:Arial,Helvetica,sans-serif;color:#111}</style>
-    </head><body>
-    <div style="text-align:center;margin-bottom:8px">
-      <h2 style="margin:0">اسم الشركة التجارية</h2>
-      <div style="font-size:12px">العنوان - الهاتف</div>
+    <style>@media print{@page{size:A4;margin:18mm}} body{font-family:Arial,Helvetica,sans-serif;color:#111;direction:rtl;text-align:right} table{width:100%;border-collapse:collapse} th,td{padding:6px;border:1px solid #eee} th{background:#f3f4f6;text-align:right} td{text-align:right} .num{text-align:right}</style>
+    </head><body dir="rtl">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <div style="text-align:left;flex:0 0 120px">
+        <img src="${companyLogo}" onerror="this.src='${assetUrl('Dragon.png')}'" style="max-width:120px;max-height:80px;object-fit:contain" />
+      </div>
+      <div style="flex:1;text-align:center">
+        <h2 style="margin:0">${companyName}</h2>
+        <div style="font-size:12px">${companyAddress}</div>
+      </div>
+      <div style="text-align:right;flex:0 0 160px;font-size:12px">
+        ${companyPhone ? `<div>هاتف: ${companyPhone}</div>` : ''}
+      </div>
     </div>
-    <h3>فاتورة شراء رقم ${receivedInvoice.number || receivedInvoice.id}</h3>
-    <div>التاريخ: ${receivedInvoice.date}</div>
-    <div>المورد: ${receivedInvoice.supplierName || ''}</div>`;
+    <div style="text-align:center;margin:10px 0">
+      <h3 style="margin:0">فاتورة شراء</h3>
+      <div style="font-weight:700;margin-top:4px">${receivedInvoice.number || receivedInvoice.id}</div>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:6px">
+      <div style="text-align:left">
+        <div>الموظف: ${receivedInvoice.userName || '-'}</div>
+        <div>المستودع: ${receivedInvoice.warehouseName || ''}</div>
+      </div>
+      <div style="text-align:right">
+        <div>التاريخ: ${receivedInvoice.date}</div>
+        <div>المورد: ${receivedInvoice.supplierName || ''}</div>
+      </div>
+    </div>`;
     if (printItems) {
       html += `<table style="width:100%;border-collapse:collapse;margin-top:10px" border="1">
       <thead><tr style="background:#f3f4f6"><th>م</th><th>الصنف</th><th>اللون</th><th>المقاس</th><th>الكمية</th><th>سعر الوحدة</th><th>الإجمالي</th></tr></thead>
@@ -952,6 +1018,33 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
     } else {
       html += `<div style="margin-top:20px;font-size:18px;font-weight:800;text-align:right">الإجمالي: ${Number(receivedInvoice.total||receivedInvoice.amount||0).toLocaleString()} ${currencySymbol}</div>`;
     }
+
+    // Summary block (supplier balances / payment / counts)
+    html += `<div style="margin-top:18px;border-top:1px solid #e5e7eb;padding-top:12px;">
+      <div style="display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap">
+        <div style="flex:1;min-width:220px;text-align:right">
+          <div style="font-size:11px;color:#6b7280">حساب المورد قبل المعاملة</div>
+          <div style="font-weight:700;font-size:16px">${Number(receivedInvoice.supplierPreviousBalance || 0).toLocaleString()} ${currencySymbol}</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:8px">مبلغ المعاملة</div>
+          <div style="font-weight:700;font-size:16px">${Number(receivedInvoice.total || receivedInvoice.amount || 0).toLocaleString()} ${currencySymbol}</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:8px">تم دفع</div>
+          <div style="font-weight:600">${Number(receivedInvoice.paidAmount || 0).toLocaleString()} ${currencySymbol}</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:8px">من خزينة</div>
+          <div style="font-weight:600">${receivedInvoice.treasuryName || '-'}</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:8px">الحساب الجديد</div>
+          <div style="font-weight:700;font-size:16px">${Number(receivedInvoice.newSupplierBalance || 0).toLocaleString()} ${currencySymbol}</div>
+        </div>
+        <div style="flex:1;min-width:220px;text-align:right">
+          <div style="font-size:11px;color:#6b7280">إجمالي المنتجات المستلمة (قطع)</div>
+          <div style="font-weight:700;font-size:16px">${Number(receivedInvoice.totalProductsReceived || receivedInvoice.totalItemsReceived || 0).toLocaleString()}</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:8px">إجمالي المقطع المستلم</div>
+          <div style="font-weight:700;font-size:16px">${Number(receivedInvoice.totalFabricsReceived || 0).toLocaleString()}</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:8px">ملاحظات</div>
+          <div style="font-size:13px;color:#374151">${receivedInvoice.notes || '-'}</div>
+        </div>
+      </div>
+    </div>`;
+
     html += `<div style="margin-top:30px;display:flex;justify-content:space-between;font-size:12px"><div>توقيع المستلم: __________</div><div>توقيع المورد: __________</div></div>
     </body></html>`;
     printWindow.document.write(html);
@@ -1065,6 +1158,8 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                   const price = Number(it.sellingPrice ?? it.selling_price ?? it.price ?? it.sale_price ?? costPrice);
                   return { ...it, qty, costPrice, price };
                 });
+                const totalItemsCount = items.reduce((s:any,it:any) => s + Number(it.qty || 0), 0);
+                const supplierPrev = Number(currentSupplierForReturn?.balance ?? 0);
                 setReceivedInvoice({
                   id: tx.id,
                   number: tx.reference_id || `INV-${tx.id}`,
@@ -1075,7 +1170,14 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                   supplierPhone: currentSupplierForReturn?.phone || '',
                   supplierAddress: currentSupplierForReturn?.address || '',
                   type: tx.type || 'return_out',
-                  userName: tx.created_by || '-'
+                  userName: tx.created_by_name || tx.created_by || (typeof window !== 'undefined' && (() => { try { const u = JSON.parse(localStorage.getItem('Dragon_user')||'null'); return u && (u.name || u.username) ? (u.name || u.username) : '-'; } catch(e){ return '-'; } })()) || '-',
+                  supplierPreviousBalance: supplierPrev,
+                  paidAmount: 0,
+                  treasuryName: '',
+                  newSupplierBalance: supplierPrev + Number(tx.amount || 0),
+                  totalItemsReceived: totalItemsCount,
+                  totalFabricsReceived: 0,
+                  totalProductsReceived: totalItemsCount
                 });
                 setIsReceivedInvoiceModalOpen(true);
               }
@@ -1143,6 +1245,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                 const finalItems = (itemsInput && itemsInput.length) ? itemsInput : itemsFromTx;
                 const fromName = (warehouses.find(w => String(w.id) === transferData.from) || { name: transferData.from }).name;
                 const toName = (warehouses.find(w => String(w.id) === transferData.to) || { name: transferData.to }).name;
+                const totalItemsCount = finalItems.reduce((s:any,it:any) => s + Number(it.qty || 0), 0);
                 setReceivedInvoice({
                   id: tx.id,
                   number: tx.reference_id || `INV-${tx.id}`,
@@ -1153,7 +1256,14 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                   supplierPhone: '',
                   supplierAddress: '',
                   type: 'transfer',
-                  userName: tx.created_by || '-'
+                  userName: tx.created_by_name || tx.created_by || (typeof window !== 'undefined' && (() => { try { const u = JSON.parse(localStorage.getItem('Dragon_user')||'null'); return u && (u.name || u.username) ? (u.name || u.username) : '-'; } catch(e){ return '-'; } })()) || '-',
+                  supplierPreviousBalance: 0,
+                  paidAmount: 0,
+                  treasuryName: '',
+                  newSupplierBalance: 0,
+                  totalItemsReceived: totalItemsCount,
+                  totalFabricsReceived: 0,
+                  totalProductsReceived: totalItemsCount
                 });
                 setIsReceivedInvoiceModalOpen(true);
               }
@@ -1460,7 +1570,38 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                   })()}
                 </tbody>
               </table>
-              <div className="mt-4 font-bold">الإجمالي: {(receivedInvoice.total || receivedInvoice.amount || 0).toLocaleString()}</div>
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2 text-right">
+                  <div className="text-xs text-slate-500">حساب المورد قبل المعاملة</div>
+                  <div className="font-bold text-lg">{Number(receivedInvoice.supplierPreviousBalance || 0).toLocaleString()} {currencySymbol}</div>
+
+                  <div className="text-xs text-slate-500">مبلغ المعاملة</div>
+                  <div className="font-bold text-lg">{Number(receivedInvoice.total || receivedInvoice.amount || 0).toLocaleString()} {currencySymbol}</div>
+
+                  <div className="text-xs text-slate-500">الإجمالي</div>
+                  <div className="font-bold text-lg">{Number(receivedInvoice.total || receivedInvoice.amount || 0).toLocaleString()} {currencySymbol}</div>
+
+                  <div className="text-xs text-slate-500">تم دفع</div>
+                  <div className="font-semibold">{Number(receivedInvoice.paidAmount || 0).toLocaleString()} {currencySymbol}</div>
+
+                  <div className="text-xs text-slate-500">من خزينة</div>
+                  <div className="font-semibold">{receivedInvoice.treasuryName || '-'}</div>
+
+                  <div className="text-xs text-slate-500">الحساب الجديد</div>
+                  <div className="font-bold text-lg">{Number(receivedInvoice.newSupplierBalance || 0).toLocaleString()} {currencySymbol}</div>
+                </div>
+
+                <div className="space-y-2 text-right">
+                  <div className="text-xs text-slate-500">إجمالي المنتجات المستلمة (قطع)</div>
+                  <div className="font-bold text-lg">{Number(receivedInvoice.totalProductsReceived || receivedInvoice.totalItemsReceived || 0).toLocaleString()}</div>
+
+                  <div className="text-xs text-slate-500">إجمالي المقطع المستلم</div>
+                  <div className="font-bold text-lg">{Number(receivedInvoice.totalFabricsReceived || 0).toLocaleString()}</div>
+
+                  <div className="text-xs text-slate-500">ملاحظات</div>
+                  <div className="text-sm text-slate-600">{receivedInvoice.notes || '-'}</div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1490,15 +1631,12 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                    <span className="font-black text-sm text-slate-800 dark:text-slate-100">سجل الأصناف</span>
                </div>
                <div className="flex items-center gap-2 w-full md:w-auto">
-                   <select 
+                   <CustomSelect
                     value={selectedWarehouseFilter}
-                    onChange={(e) => setSelectedWarehouseFilter(e.target.value)}
-                    className="text-xs rounded-xl px-3 py-2 outline-none card"
-                    style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)', borderColor: 'var(--border)' }}
-                   >
-                     <option value="كل المستودعات">كل المستودعات</option>
-                     {warehouses.map(w => <option key={w.id} value={w.name}>{w.name}</option>)}
-                   </select>
+                    onChange={(v) => setSelectedWarehouseFilter(v)}
+                    options={[{ value: 'كل المستودعات', label: 'كل المستودعات' }, ...warehouses.map(w => ({ value: String(w.name), label: w.name }))]}
+                    className="text-xs"
+                   />
                    <button 
                     onClick={() => handleOpenProductModal()}
                     className="flex items-center gap-2 bg-accent text-white px-4 py-2 rounded-xl text-xs font-black hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20"
@@ -1517,13 +1655,15 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                       <th className="px-6 py-4 font-bold">المقاس</th>
                       <th className="px-6 py-4 font-bold">الكمية</th>
                       <th className="px-6 py-4 font-bold">الشراء</th>
-                      <th className="px-6 py-4 font-bold">البيع</th>
+                      {salePriceSource === 'product' && (
+                        <th className="px-6 py-4 font-bold">البيع</th>
+                      )}
                       <th className="px-6 py-4 font-bold text-center">تحكم</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y dark:divide-slate-700 text-slate-700 dark:text-slate-300">
                     {stockRows.length === 0 ? (
-                        <tr><td colSpan={8} className="text-center py-10 text-muted">لا توجد منتجات مسجلة.</td></tr>
+                      <tr><td colSpan={salePriceSource === 'product' ? 8 : 7} className="text-center py-10 text-muted">لا توجد منتجات مسجلة.</td></tr>
                     ) : stockRows.map(p => (
                       <tr key={p.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
                         <td className="px-6 py-4 font-bold text-slate-800 dark:text-white">
@@ -1540,9 +1680,11 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                             </span>
                         </td>
                         <td className="px-6 py-4 text-xs">{p.cost} {currencySymbol}</td>
-                        <td className="px-6 py-4 text-xs font-bold">
-                          {p.price} {currencySymbol}
-                        </td>
+                        {salePriceSource === 'product' && (
+                          <td className="px-6 py-4 text-xs font-bold">
+                            {p.price} {currencySymbol}
+                          </td>
+                        )}
                         <td className="px-6 py-4">
                           <div className="flex items-center justify-center gap-1">
                             <button onClick={() => openStockBarcodes(p)} className="p-2 bg-slate-50 text-slate-700 rounded-lg hover:bg-slate-100 transition-colors" title="عرض باركودات الكمية"><QrCode size={14} /></button>
@@ -1602,10 +1744,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                 <div className="space-y-3">
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-muted">المستودع</label>
-                    <select value={auditWarehouseId} onChange={e => setAuditWarehouseId(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm">
-                      <option value="">اختر المستودع</option>
-                      {warehouses.map(w => (<option key={w.id} value={w.id}>{w.name}</option>))}
-                    </select>
+                    <CustomSelect value={auditWarehouseId} onChange={v => setAuditWarehouseId(v)} options={[{ value: '', label: 'اختر المستودع' }, ...warehouses.map(w=>({ value: String(w.id), label: w.name }))]} />
                   </div>
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-muted">ملاحظات</label>
@@ -1621,17 +1760,8 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                   <button onClick={fetchAudits} className="text-xs text-blue-600">تحديث</button>
                 </div>
                 <div className="grid grid-cols-2 gap-2 mb-3">
-                  <select value={auditStatusFilter} onChange={e => setAuditStatusFilter(e.target.value)} className="bg-slate-50 dark:bg-slate-900 border-none rounded-lg px-2 py-2 text-xs">
-                    <option value="all">كل الحالات</option>
-                    <option value="draft">مسودة</option>
-                    <option value="pending">قيد المراجعة</option>
-                    <option value="approved">معتمد</option>
-                    <option value="rejected">مرفوض</option>
-                  </select>
-                  <select value={auditWarehouseFilter} onChange={e => setAuditWarehouseFilter(e.target.value)} className="bg-slate-50 dark:bg-slate-900 border-none rounded-lg px-2 py-2 text-xs">
-                    <option value="">كل المستودعات</option>
-                    {warehouses.map(w => (<option key={w.id} value={w.id}>{w.name}</option>))}
-                  </select>
+                  <CustomSelect value={auditStatusFilter} onChange={v => setAuditStatusFilter(v)} options={[{ value: 'all', label: 'كل الحالات' }, { value: 'draft', label: 'مسودة' }, { value: 'pending', label: 'قيد المراجعة' }, { value: 'approved', label: 'معتمد' }, { value: 'rejected', label: 'مرفوض' }]} />
+                  <CustomSelect value={auditWarehouseFilter} onChange={v => setAuditWarehouseFilter(v)} options={[{ value: '', label: 'كل المستودعات' }, ...warehouses.map(w=>({ value: String(w.id), label: w.name }))]} />
                 </div>
                 {auditLoading ? (
                   <div className="text-xs text-muted">جاري التحميل...</div>
@@ -1702,15 +1832,17 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                           <tr key={idx}>
                             <td className="px-3 py-2">
                               {selectedAudit.status === 'draft' ? (
-                                <select value={item.product_id || ''} onChange={e => {
-                                  const pid = e.target.value;
-                                  const product = products.find(p => String(p.id) === String(pid));
-                                  updateAuditItem(idx, { product_id: pid, product_name: product?.name || '' });
-                                }} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-lg px-2 py-1 text-xs">
-                                  <option value="">اختر الصنف</option>
-                                  {products.map(p => (<option key={p.id} value={p.id}>{p.name}</option>))}
-                                </select>
-                              ) : (
+                                  <CustomSelect
+                                    value={item.product_id || ''}
+                                    onChange={v => {
+                                      const pid = v;
+                                      const product = products.find(p => String(p.id) === String(pid));
+                                      updateAuditItem(idx, { product_id: pid, product_name: product?.name || '' });
+                                    }}
+                                    options={[{ value: '', label: 'اختر الصنف' }, ...products.map((p:any) => ({ value: String(p.id), label: p.name }))]}
+                                    className="w-full"
+                                  />
+                                ) : (
                                 <span className="text-xs font-bold">{item.product_name || item.name || '-'}</span>
                               )}
                             </td>
@@ -1795,10 +1927,12 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                     <label className="text-xs font-bold text-slate-500">سعر الشراء (التكلفة)</label>
                     <input type="number" required disabled={!!editingProduct} value={productFormData.cost} onChange={e => setProductFormData({...productFormData, cost: parseFloat(e.target.value)})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm focus:ring-2 ring-blue-500/20 disabled:opacity-50 dark:text-white"/>
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-500">سعر البيع</label>
-                    <input type="number" required value={productFormData.price} onChange={e => setProductFormData({...productFormData, price: parseFloat(e.target.value)})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm focus:ring-2 ring-blue-500/20 dark:text-white"/>
-                  </div>
+                  {salePriceSource === 'product' && (
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-500">سعر البيع</label>
+                      <input type="number" required value={productFormData.price} onChange={e => setProductFormData({...productFormData, price: parseFloat(e.target.value)})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm focus:ring-2 ring-blue-500/20 dark:text-white"/>
+                    </div>
+                  )}
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-slate-500">الكمية الافتتاحية</label>
                     <input type="number" required disabled={!!editingProduct} value={productFormData.quantity} onChange={e => setProductFormData({...productFormData, quantity: parseInt(e.target.value)})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm focus:ring-2 ring-blue-500/20 disabled:opacity-50 dark:text-white"/>
@@ -1813,14 +1947,13 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
               {!editingProduct && productFormData.quantity > 0 && (
                   <div className="space-y-1 bg-slate-50 dark:bg-slate-900 p-3 rounded-xl border dark:border-slate-700 animate-in fade-in">
                       <label className="text-xs font-bold text-blue-600">تخزين الكمية الافتتاحية في:</label>
-                      <select 
+                      <CustomSelect
                         required
-                        value={productFormData.warehouseId}
-                        onChange={e => setProductFormData({...productFormData, warehouseId: e.target.value})}
-                        className="w-full bg-white dark:bg-slate-800 border-none rounded-xl py-2 px-3 text-sm focus:ring-2 ring-blue-500/20 dark:text-white"
-                      >
-                          {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-                      </select>
+                        value={productFormData.warehouseId ? String(productFormData.warehouseId) : ''}
+                        onChange={v => setProductFormData({...productFormData, warehouseId: v})}
+                        options={[{ value: '', label: 'اختر المستودع' }, ...warehouses.map(w => ({ value: String(w.id), label: w.name }))]}
+                        className="w-full"
+                      />
                   </div>
               )}
 
@@ -1864,13 +1997,15 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                             <tr key={m.id}>
                                 <td className="px-4 py-3 font-mono text-xs text-slate-500 dark:text-slate-400">{m.date}</td>
                                 <td className="px-4 py-3">
-                                    <span className={`px-2 py-1 rounded text-[10px] font-bold ${
-                                        m.type === 'purchase' || m.type === 'return_in' || m.type === 'initial_balance' ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'
-                                    }`}>
-                                        {m.type === 'purchase' ? 'استلام' : m.type === 'sale' ? 'بيع' : m.type === 'return_in' ? 'مرتجع عميل' : m.type === 'initial_balance' ? 'رصيد افتتاحي' : 'صرف/مرتجع'}
-                                    </span>
+                                  {(() => {
+                                        const label = translateMovementType(String(m.type || ''), m.details);
+                                    const inflows = ['purchase', 'return_in', 'initial_balance', 'manufacturing', 'receive_from_factory'];
+                                    const isIn = inflows.includes(String(m.type || ''));
+                                    const cls = isIn ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600';
+                                    return <span className={`px-2 py-1 rounded text-[10px] font-bold ${cls}`}>{label}</span>;
+                                  })()}
                                 </td>
-                                <td className="px-4 py-3 text-xs">{m.details}</td>
+                                <td className="px-4 py-3 text-xs">{formatMovementDetails(m.details)}</td>
                                 <td className="px-4 py-3 text-center font-bold dir-ltr">
                                     {m.qty > 0 ? `+${m.qty}` : m.qty}
                                 </td>
@@ -1997,17 +2132,21 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-slate-500 mr-2">من مستودع</label>
-                    <select required value={transferData.from} onChange={e => setTransferData({ ...transferData, from: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm text-slate-800 dark:text-slate-200 focus:ring-2 ring-indigo-500/20">
-                      <option value="">اختر مصدر النقل...</option>
-                      {warehouses.map(w => <option key={w.id} value={String(w.id)}>{w.name}</option>)}
-                    </select>
+                    <CustomSelect
+                      value={transferData.from}
+                      onChange={v => setTransferData({ ...transferData, from: v })}
+                      options={[{ value: '', label: 'اختر مصدر النقل...' }, ...warehouses.map(w => ({ value: String(w.id), label: w.name }))]}
+                      className="w-full"
+                    />
                   </div>
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-slate-500 mr-2">إلى مستودع</label>
-                    <select required value={transferData.to} onChange={e => setTransferData({ ...transferData, to: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm text-slate-800 dark:text-slate-200 focus:ring-2 ring-indigo-500/20">
-                      <option value="">اختر الوجهة...</option>
-                      {warehouses.filter(w => String(w.id) !== transferData.from).map(w => <option key={w.id} value={String(w.id)}>{w.name}</option>)}
-                    </select>
+                    <CustomSelect
+                      value={transferData.to}
+                      onChange={v => setTransferData({ ...transferData, to: v })}
+                      options={[{ value: '', label: 'اختر الوجهة...' }, ...warehouses.filter(w => String(w.id) !== transferData.from).map(w => ({ value: String(w.id), label: w.name }))]}
+                      className="w-full"
+                    />
                   </div>
                 </div>
                 <div className="space-y-4">
@@ -2015,33 +2154,31 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                   {transferData.items.map((item, index) => (
                     <div key={index} className="grid grid-cols-12 gap-2 items-center">
                       <div className="col-span-4">
-                        <select required value={item.transferType || ''} onChange={e => handleTransferItemChange(index, 'transferType', e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm mb-1">
-                          <option value="">اختر النوع...</option>
-                          {productSource !== 'suppliers' && <option value="fabric">قماش</option>}
-                          {productSource !== 'suppliers' && <option value="accessory">اكسسوار</option>}
-                          <option value="product">منتج</option>
-                        </select>
+                        <CustomSelect
+                          value={item.transferType || ''}
+                          onChange={v => handleTransferItemChange(index, 'transferType', v)}
+                          options={[
+                            { value: '', label: 'اختر النوع...' },
+                            ...(productSource !== 'suppliers' ? [{ value: 'fabric', label: 'قماش' }, { value: 'accessory', label: 'اكسسوار' }] : []),
+                            { value: 'product', label: 'منتج' }
+                          ]}
+                          className="w-full"
+                        />
                       </div>
                       <div className="col-span-4">
-                        <select required value={item.productId} onChange={e => handleTransferItemChange(index, 'productId', e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm">
-                          <option value="">اختر الصنف...</option>
-                          {(() => {
+                        <CustomSelect
+                          required
+                          value={item.productId || ''}
+                          onChange={v => handleTransferItemChange(index, 'productId', v)}
+                          options={(() => {
                             const t = String(item.transferType || '').trim();
                             if (t === 'fabric') {
                               const rows = getWarehouseFabrics(String(transferData.from || ''));
-                              return rows.map((r: any) => (
-                                <option key={r.id ?? r.fabric_id} value={r.id ?? r.fabric_id}>
-                                  {r.name} ({r.color || '-'}-{r.size || '-'}) — {Number(r.quantity || 0)}
-                                </option>
-                              ));
+                              return [{ value: '', label: 'اختر الصنف...' }, ...rows.map((r: any) => ({ value: String(r.id ?? r.fabric_id), label: `${r.name} (${r.color || '-'}-${r.size || '-'}) — ${Number(r.quantity || 0)}` }))];
                             }
                             if (t === 'accessory') {
                               const rows = getWarehouseAccessories(String(transferData.from || ''));
-                              return rows.map((r: any) => (
-                                <option key={r.id ?? r.accessory_id} value={r.id ?? r.accessory_id}>
-                                  {r.name} ({r.color || '-'}-{r.size || '-'}) — {Number(r.quantity || 0)}
-                                </option>
-                              ));
+                              return [{ value: '', label: 'اختر الصنف...' }, ...rows.map((r: any) => ({ value: String(r.id ?? r.accessory_id), label: `${r.name} (${r.color || '-'}-${r.size || '-'}) — ${Number(r.quantity || 0)}` }))];
                             }
                             if (t === 'product') {
                               const rows = getWarehouseStock(String(transferData.from || ''));
@@ -2049,15 +2186,12 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                                 const cat = String(r.category || '').trim();
                                 return !cat || cat === 'product';
                               });
-                              return filtered.map((r: any) => (
-                                <option key={r.product_id} value={r.product_id}>
-                                  {r.name} ({r.color || '-'}-{r.size || '-'}) — {Number(r.quantity || 0)}
-                                </option>
-                              ));
+                              return [{ value: '', label: 'اختر الصنف...' }, ...filtered.map((r: any) => ({ value: String(r.product_id), label: `${r.name} (${r.color || '-'}-${r.size || '-'}) — ${Number(r.quantity || 0)}` }))];
                             }
-                            return null;
+                            return [{ value: '', label: 'اختر الصنف...' }];
                           })()}
-                        </select>
+                          className="w-full"
+                        />
                       </div>
                       <div className="col-span-3">
                         <input type="number" placeholder="الكمية" min="1" required value={item.qty} onChange={e => handleTransferItemChange(index, 'qty', (String(item.transferType || '').trim() === 'fabric') ? parseFloat(e.target.value) : parseInt(e.target.value))} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm" />
@@ -2088,27 +2222,23 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-500 dark:text-slate-400 mr-2">المورد</label>
-                <select required value={receivingData.supplierId} onChange={e => setReceivingData({...receivingData, supplierId: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm text-slate-700 dark:text-slate-300 focus:ring-2 ring-blue-500/20">
-                  <option value="">اختر المورد...</option>
-                  {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
+                <CustomSelect value={receivingData.supplierId} onChange={v => setReceivingData({...receivingData, supplierId: v})} options={[{ value: '', label: 'اختر المورد...' }, ...suppliers.map(s=>({ value: String(s.id), label: s.name }))]} className="w-full" />
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-500 dark:text-slate-400 mr-2">المستودع الهدف</label>
-                <select required value={receivingData.warehouseId} onChange={e => setReceivingData({...receivingData, warehouseId: e.target.value})} disabled={userDefaults && userDefaults.default_warehouse_id && !userDefaults.can_change_warehouse} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm text-slate-700 dark:text-slate-300 focus:ring-2 ring-blue-500/20">
-                  <option value="">اختر المستودع...</option>
-                  {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-                </select>
+                <CustomSelect value={receivingData.warehouseId} onChange={v => setReceivingData({...receivingData, warehouseId: v})} options={[{ value: '', label: 'اختر المستودع...' }, ...warehouses.map(w=>({ value: String(w.id), label: w.name }))]} className="w-full" />
               </div>
             </div>
 
-            <div className="overflow-x-auto -mx-4">
+            {/* <div className="overflow-x-auto overflow-y-visible -mx-4 pb-32 min-h-[300px]">
               <table className="w-full text-right text-sm min-w-[1000px]">
                 <thead className="text-slate-500 dark:text-slate-400">
                   <tr>
                     <th className="px-2 py-3 font-bold w-40">نوع الصنف</th>
                     <th className="px-2 py-3 font-bold">اسم الصنف/باركود</th>
                     <th className="px-2 py-3 font-bold">اللون</th>
+                    <th className="px-2 py-3 font-bold">المقاس</th>
+                    <th className="px-2 py-3 font-bold">الباركود</th>
                     <th className="px-2 py-3 font-bold">سعر التكلفة</th>
                     <th className="px-2 py-3 font-bold">الكمية</th>
                     <th className="px-2 py-3 font-bold">الإجمالي</th>
@@ -2119,14 +2249,23 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                   {receivingData.items.map((item) => (
                     <tr key={item.id} className="border-b dark:border-slate-700">
                       <td className="px-2 py-2">
-                        <select value={item.itemType || 'fabric_new'} onChange={e => handleReceivingItemChange(item.id, 'itemType', e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-lg py-2 px-2 text-xs">
-                          {productSource !== 'suppliers' && <option value="fabric_new">قماش جديد</option>}
-                          {productSource !== 'suppliers' && <option value="fabric_existing">قماش حالى</option>}
-                          {productSource !== 'suppliers' && <option value="accessory_new">اكسسوار جديد</option>}
-                          {productSource !== 'suppliers' && <option value="accessory_existing">اكسسوار حالى</option>}
-                          {productSource !== 'factory' && <option value="product_new">منتج جديد</option>}
-                          {productSource !== 'factory' && <option value="product_existing">منتج حالى</option>}
-                        </select>
+                        <CustomSelect
+                          value={item.itemType || 'fabric_new'}
+                          onChange={v => handleReceivingItemChange(item.id, 'itemType', v)}
+                          options={[
+                            ...(productSource !== 'suppliers' ? [
+                              { value: 'fabric_new', label: 'قماش جديد' },
+                              { value: 'fabric_existing', label: 'قماش حالى' },
+                              { value: 'accessory_new', label: 'اكسسوار جديد' },
+                              { value: 'accessory_existing', label: 'اكسسوار حالى' }
+                            ] : []),
+                            ...(productSource !== 'factory' ? [
+                              { value: 'product_new', label: 'منتج جديد' },
+                              { value: 'product_existing', label: 'منتج حالى' }
+                            ] : [])
+                          ]}
+                          className="w-full"
+                        />
                       </td>
                       <td className="px-2 py-2">
                         {item.itemType && item.itemType.endsWith('_new') ? (
@@ -2135,33 +2274,35 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                             <input type="text" placeholder="باركود تلقائي" value={item.barcode} readOnly className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-lg py-2 px-2 text-xs font-mono" />
                           </>
                         ) : (
-                          <select required value={item.productId} onChange={e => handleSelectExistingProduct(item.id, e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-lg py-2 px-2 text-xs">
-                            <option value="">اختر صنف موجود...</option>
-                            {(() => {
-                              if (item.itemType === 'fabric_existing') {
-                                return fabrics.map((f:any) => <option key={f.id} value={f.id}>{f.name} - {f.code || f.barcode || ''}</option>);
-                              } else if (item.itemType === 'accessory_existing') {
-                                return accessories.map((a:any) => <option key={a.id} value={a.id}>{a.name} - {a.code || a.barcode || ''}</option>);
-                              } else if (item.itemType === 'product_existing') {
-                                return products.filter(p => {
-                                  const cat = String(p.category || '').trim();
-                                  return !cat || cat === 'product';
-                                }).map(p => <option key={p.id} value={p.id}>{p.name} - {p.barcode}</option>);
-                              } else {
-                                return products.map(p => <option key={p.id} value={p.id}>{p.name} - {p.barcode}</option>);
-                              }
-                            })()}
-                          </select>
+                        <CustomSelect
+                          required
+                          value={item.productId ? String(item.productId) : ''}
+                          onChange={v => handleSelectExistingProduct(item.id, v)}
+                          options={(() => {
+                            if (item.itemType === 'fabric_existing') {
+                              return [{ value: '', label: 'اختر صنف موجود...' }, ...fabrics.map((f:any) => ({ value: String(f.id), label: `${f.name} (${f.color || '-'}-${f.size || '-'}) ${f.code || f.barcode || ''}` }))];
+                            } else if (item.itemType === 'accessory_existing') {
+                              return [{ value: '', label: 'اختر صنف موجود...' }, ...accessories.map((a:any) => ({ value: String(a.id), label: `${a.name} (${a.color || '-'}-${a.size || '-'}) ${a.code || a.barcode || ''}` }))];
+                            } else if (item.itemType === 'product_existing') {
+                              return [{ value: '', label: 'اختر صنف موجود...' }, ...products.filter(p => { const cat = String(p.category || '').trim(); return !cat || cat === 'product'; }).map(p => ({ value: String(p.id), label: `${p.name} (${p.color || '-'}-${p.size || '-'}) ${p.barcode || ''}` }))];
+                            }
+                            return [{ value: '', label: 'اختر صنف موجود...' }, ...products.map(p => ({ value: String(p.id), label: `${p.name} (${p.color || '-'}-${p.size || '-'}) ${p.barcode || ''}` }))];
+                          })()}
+                          className="w-full"
+                        />
                         )}
                       </td>
                       <td className="px-2 py-2">
-                        {item.itemType === 'product_new' ? (
-                          <>
-                            <input type="text" placeholder="اللون" value={item.color} onChange={e => handleReceivingItemChange(item.id, 'color', e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-lg py-2 px-2 text-xs mb-1" />
-                            <input type="text" placeholder="المقاس" value={item.size} onChange={e => handleReceivingItemChange(item.id, 'size', e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-lg py-2 px-2 text-xs" />
-                          </>
+                        <input type="text" placeholder="اللون" value={item.color} onChange={e => handleReceivingItemChange(item.id, 'color', e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-lg py-2 px-2 text-xs" />
+                      </td>
+                      <td className="px-2 py-2">
+                        <input type="text" placeholder="المقاس" value={item.size} onChange={e => handleReceivingItemChange(item.id, 'size', e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-lg py-2 px-2 text-xs" />
+                      </td>
+                      <td className="px-2 py-2">
+                        {item.itemType && item.itemType.endsWith('_new') ? (
+                          <input type="text" placeholder="باركود تلقائي" value={item.barcode} readOnly className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-lg py-2 px-2 text-xs font-mono" />
                         ) : (
-                          <input type="text" placeholder="-" value={item.color} onChange={e => handleReceivingItemChange(item.id, 'color', e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-lg py-2 px-2 text-xs" />
+                          <input type="text" placeholder="-" value={item.barcode || ''} readOnly className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-lg py-2 px-2 text-xs font-mono" />
                         )}
                       </td>
                       <td className="px-2 py-2">
@@ -2181,7 +2322,105 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                   ))}
                 </tbody>
               </table>
+            </div> */}
+           {/* بداية تصميم الاستلام الجديد بنظام الكروت */}
+            <div className="space-y-4 mb-6">
+              <label className="text-xs font-bold text-slate-500 dark:text-slate-400 mr-2">أصناف فاتورة الاستلام</label>
+              {receivingData.items.map((item) => (
+                <div key={item.id} className="p-5 bg-slate-50 dark:bg-slate-900/40 rounded-2xl border border-slate-200 dark:border-slate-700 relative group transition-all hover:shadow-md">
+                  
+                  {/* زر الحذف */}
+                  <button type="button" onClick={() => removeReceivingItem(item.id)} className="absolute top-5 left-4 text-rose-500 hover:text-rose-700 bg-white dark:bg-slate-800 p-2 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 z-10 transition-transform active:scale-95" title="حذف البند">
+                    <Trash2 size={16} />
+                  </button>
+
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-4 pr-8 md:pr-0">
+                    
+                    {/* --- الصف الأول: نوع الصنف واسم الصنف (مساحة كبرى للاسم) --- */}
+                    <div className="col-span-1 md:col-span-4 lg:col-span-3">
+                      <span className="text-[11px] font-bold text-slate-500 block mb-1">نوع الصنف</span>
+                      <CustomSelect
+                        value={item.itemType || 'fabric_new'}
+                        onChange={v => handleReceivingItemChange(item.id, 'itemType', v)}
+                        options={[
+                          ...(productSource !== 'suppliers' ? [
+                            { value: 'fabric_new', label: 'قماش جديد' },
+                            { value: 'fabric_existing', label: 'قماش حالى' },
+                            { value: 'accessory_new', label: 'اكسسوار جديد' },
+                            { value: 'accessory_existing', label: 'اكسسوار حالى' }
+                          ] : []),
+                          ...(productSource !== 'factory' ? [
+                            { value: 'product_new', label: 'منتج جديد' },
+                            { value: 'product_existing', label: 'منتج حالى' }
+                          ] : [])
+                        ]}
+                        className="w-full"
+                      />
+                    </div>
+                    <div className="col-span-1 md:col-span-8 lg:col-span-9">
+                      <span className="text-[11px] font-bold text-slate-500 block mb-1">اسم الصنف / الصنف المسجل</span>
+                      {item.itemType && item.itemType.endsWith('_new') ? (
+                        <input type="text" placeholder="اكتب اسم الصنف الجديد" value={item.name} onChange={e => handleReceivingItemChange(item.id, 'name', e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-2.5 px-3 text-sm font-bold text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all" />
+                      ) : (
+                        <CustomSelect
+                          required
+                          value={item.productId ? String(item.productId) : ''}
+                          onChange={v => handleSelectExistingProduct(item.id, v)}
+                          options={(() => {
+                            if (item.itemType === 'fabric_existing') return [{ value: '', label: 'اختر صنف موجود...' }, ...fabrics.map((f:any) => ({ value: String(f.id), label: `${f.name} (${f.color || '-'}-${f.size || '-'}) ${f.code || f.barcode || ''}` }))];
+                            if (item.itemType === 'accessory_existing') return [{ value: '', label: 'اختر صنف موجود...' }, ...accessories.map((a:any) => ({ value: String(a.id), label: `${a.name} (${a.color || '-'}-${a.size || '-'}) ${a.code || a.barcode || ''}` }))];
+                            if (item.itemType === 'product_existing') return [{ value: '', label: 'اختر صنف موجود...' }, ...products.filter(p => { const cat = String(p.category || '').trim(); return !cat || cat === 'product'; }).map(p => ({ value: String(p.id), label: `${p.name} (${p.color || '-'}-${p.size || '-'}) ${p.barcode || ''}` }))];
+                            return [{ value: '', label: 'اختر صنف موجود...' }, ...products.map(p => ({ value: String(p.id), label: `${p.name} (${p.color || '-'}-${p.size || '-'}) ${p.barcode || ''}` }))];
+                          })()}
+                          className="w-full text-sm font-bold"
+                        />
+                      )}
+                    </div>
+
+                    {/* --- الصف الثاني: اللون، المقاس، الباركود --- */}
+                    <div className="col-span-1 md:col-span-3">
+                      <span className="text-[11px] font-bold text-slate-500 block mb-1">اللون</span>
+                      <input type="text" placeholder="اللون" value={item.color} onChange={e => handleReceivingItemChange(item.id, 'color', e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-2 px-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-blue-500/20" />
+                    </div>
+                    <div className="col-span-1 md:col-span-3">
+                      <span className="text-[11px] font-bold text-slate-500 block mb-1">المقاس</span>
+                      <input type="text" placeholder="المقاس" value={item.size} onChange={e => handleReceivingItemChange(item.id, 'size', e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-2 px-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-blue-500/20" />
+                    </div>
+                    <div className="col-span-1 md:col-span-6">
+                      <span className="text-[11px] font-bold text-slate-500 block mb-1">الباركود</span>
+                      <input type="text" placeholder="باركود" value={item.barcode || ''} readOnly className="w-full bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl py-2 px-3 text-sm font-mono text-slate-500 cursor-not-allowed" />
+                    </div>
+
+                    {/* --- الصف الثالث: الأسعار، الكمية، الإجمالي --- */}
+                    <div className="col-span-1 md:col-span-5">
+                      <span className="text-[11px] font-bold text-slate-500 block mb-1">الأسعار</span>
+                      <div className="flex gap-2">
+                        <div className="relative w-full">
+                           <input type="number" placeholder="التكلفة" value={item.costPrice} onChange={e => handleReceivingItemChange(item.id, 'costPrice', parseFloat(e.target.value))} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-2 pl-2 pr-3 text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500/20" />
+                        </div>
+                        {item.itemType === 'product_new' && (
+                          <div className="relative w-full">
+                             <input type="number" placeholder="سعر البيع" value={item.sellingPrice} onChange={e => handleReceivingItemChange(item.id, 'sellingPrice', parseFloat(e.target.value))} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-2 pl-2 pr-3 text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500/20" />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="col-span-1 md:col-span-3">
+                      <span className="text-[11px] font-bold text-slate-500 block mb-1">الكمية</span>
+                      <input type="number" placeholder="0" min="1" value={item.qty} onChange={e => handleReceivingItemChange(item.id, 'qty', parseInt(e.target.value))} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-2 px-3 text-base font-black text-center text-blue-600 outline-none focus:ring-2 focus:ring-blue-500/20" />
+                    </div>
+                    <div className="col-span-1 md:col-span-4 flex items-center justify-end bg-blue-50 dark:bg-blue-900/20 rounded-xl px-4 py-2 border border-blue-100 dark:border-blue-900/30">
+                      <div className="text-left w-full">
+                        <span className="text-[11px] font-bold text-blue-400 block mb-0.5">الإجمالي</span>
+                        <span className="font-black text-blue-700 dark:text-blue-400 text-lg">{(item.costPrice * item.qty).toLocaleString()} {currencySymbol}</span>
+                      </div>
+                    </div>
+
+                  </div>
+                </div>
+              ))}
             </div>
+            {/* نهاية تصميم الاستلام الجديد */}
             <button type="button" onClick={addReceivingItem} className="mt-4 text-sm font-bold text-blue-600 flex items-center gap-2"><PlusCircle size={16} /> إضافة بند جديد للفاتورة</button>
 
             <div className="mt-8 pt-6 border-t dark:border-slate-700 grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -2203,10 +2442,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                   </div>
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-slate-500 dark:text-slate-400 mr-2">من خزينة</label>
-                    <select required={receivingData.paidAmount > 0} value={receivingData.treasuryId} onChange={e => setReceivingData({...receivingData, treasuryId: e.target.value})} disabled={userDefaults && userDefaults.default_treasury_id && !userDefaults.can_change_treasury} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm">
-                      <option value="">اختر خزينة...</option>
-                      {treasuries.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                    </select>
+                    <CustomSelect value={receivingData.treasuryId} onChange={v => setReceivingData({...receivingData, treasuryId: v})} options={[{ value: '', label: 'اختر خزينة...' }, ...treasuries.map(t=>({ value: String(t.id), label: t.name }))]} className="w-full" />
                   </div>
                 </div>
                 <button type="submit" className="w-full bg-blue-600 text-white py-3 rounded-2xl font-black shadow-xl shadow-blue-500/30 hover:bg-blue-700 active:scale-95 transition-all">تأكيد الاستلام وترحيل المخزون</button>
@@ -2224,21 +2460,15 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-500 dark:text-slate-400 mr-2">مرتجع إلى مورد</label>
-                <select required value={returnsData.supplierId} onChange={e => setReturnsData({...returnsData, supplierId: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm text-slate-700 dark:text-slate-300 focus:ring-2 ring-rose-500/20">
-                  <option value="">اختر المورد...</option>
-                  {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
+                <CustomSelect value={returnsData.supplierId} onChange={v => setReturnsData({...returnsData, supplierId: v})} options={[{ value: '', label: 'اختر المورد...' }, ...suppliers.map(s=>({ value: String(s.id), label: s.name }))]} className="w-full" />
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-500 dark:text-slate-400 mr-2">من مستودع</label>
-                <select required value={returnsData.warehouseId} onChange={e => setReturnsData({...returnsData, warehouseId: e.target.value})} disabled={userDefaults && userDefaults.default_warehouse_id && !userDefaults.can_change_warehouse} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm text-slate-700 dark:text-slate-300 focus:ring-2 ring-rose-500/20">
-                  <option value="">اختر المستودع...</option>
-                  {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-                </select>
+                <CustomSelect value={returnsData.warehouseId} onChange={v => setReturnsData({...returnsData, warehouseId: v})} options={[{ value: '', label: 'اختر المستودع...' }, ...warehouses.map(w=>({ value: String(w.id), label: w.name }))]} className="w-full" />
               </div>
             </div>
 
-            <div className="overflow-x-auto -mx-4">
+            {/* <div className="overflow-x-auto overflow-y-visible -mx-4 pb-32 min-h-[300px]">
               <table className="w-full text-right text-sm min-w-[700px]">
                 <thead className="text-slate-500 dark:text-slate-400">
                   <tr>
@@ -2254,31 +2484,30 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                     <tr key={item.id} className="border-b dark:border-slate-700">
                       <td className="px-2 py-2">
                         <div className="flex flex-col gap-1">
-                          <select required value={item.returnType || ''} onChange={e => handleReturnItemChange(item.id, 'returnType', e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-lg py-2 px-2 text-xs mb-1">
-                            <option value="">اختر النوع...</option>
-                            {productSource !== 'suppliers' && <option value="fabric">قماش</option>}
-                            {productSource !== 'suppliers' && <option value="accessory">اكسسوار</option>}
-                            <option value="product">منتج</option>
-                          </select>
-                          <select required value={item.productId} onChange={e => handleSelectProductForReturn(item.id, e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-lg py-2 px-2 text-xs">
-                            <option value="">اختر اسم {item.returnType === 'fabric' ? 'القماش' : item.returnType === 'accessory' ? 'الاكسسوار' : 'المنتج'}...</option>
-                            {(() => {
+                          <CustomSelect
+                            required
+                            value={item.returnType || ''}
+                            onChange={v => handleReturnItemChange(item.id, 'returnType', v)}
+                            options={[
+                              { value: '', label: 'اختر النوع...' },
+                              ...(productSource !== 'suppliers' ? [{ value: 'fabric', label: 'قماش' }, { value: 'accessory', label: 'اكسسوار' }] : []),
+                              { value: 'product', label: 'منتج' }
+                            ]}
+                            className="w-full mb-1"
+                          />
+                          <CustomSelect
+                            required
+                            value={item.productId || ''}
+                            onChange={v => handleSelectProductForReturn(item.id, v)}
+                            options={(() => {
                               const t = String(item.returnType || '').trim();
                               if (t === 'fabric') {
                                 const rows = getWarehouseFabrics(String(returnsData.warehouseId || ''));
-                                return rows.map((r: any) => (
-                                  <option key={r.id ?? r.fabric_id} value={r.id ?? r.fabric_id}>
-                                    {r.name} ({r.color || '-'}-{r.size || '-'}) — {Number(r.quantity || 0)}
-                                  </option>
-                                ));
+                                return [{ value: '', label: `اختر اسم القماش...` }, ...rows.map((r: any) => ({ value: String(r.id ?? r.fabric_id), label: `${r.name} (${r.color || '-'}-${r.size || '-'}) ${r.barcode || r.code || ''} — ${Number(r.quantity || 0)}` }))];
                               }
                               if (t === 'accessory') {
                                 const rows = getWarehouseAccessories(String(returnsData.warehouseId || ''));
-                                return rows.map((r: any) => (
-                                  <option key={r.id ?? r.accessory_id} value={r.id ?? r.accessory_id}>
-                                    {r.name} ({r.color || '-'}-{r.size || '-'}) — {Number(r.quantity || 0)}
-                                  </option>
-                                ));
+                                return [{ value: '', label: `اختر اسم الاكسسوار...` }, ...rows.map((r: any) => ({ value: String(r.id ?? r.accessory_id), label: `${r.name} (${r.color || '-'}-${r.size || '-'}) ${r.barcode || r.code || ''} — ${Number(r.quantity || 0)}` }))];
                               }
                               if (t === 'product') {
                                 const rows = getWarehouseStock(String(returnsData.warehouseId || ''));
@@ -2286,15 +2515,12 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                                   const cat = String(r.category || '').trim();
                                   return !cat || cat === 'product';
                                 });
-                                return filtered.map((r: any) => (
-                                  <option key={r.product_id} value={r.product_id}>
-                                    {r.name} ({r.color || '-'}-{r.size || '-'}) — {Number(r.quantity || 0)}
-                                  </option>
-                                ));
+                                return [{ value: '', label: `اختر اسم المنتج...` }, ...filtered.map((r: any) => ({ value: String(r.product_id), label: `${r.name} (${r.color || '-'}-${r.size || '-'}) ${r.barcode || r.code || ''} — ${Number(r.quantity || 0)}` }))];
                               }
-                              return null;
+                              return [{ value: '', label: `اختر الصنف...` }];
                             })()}
-                          </select>
+                            className="w-full"
+                          />
                         </div>
                       </td>
                       <td className="px-2 py-2"><input type="number" placeholder="0" min="1" value={item.qty} onChange={e => handleReturnItemChange(item.id, 'qty', (String(item.returnType || '').trim() === 'fabric') ? parseFloat(e.target.value) : parseInt(e.target.value))} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-lg py-2 px-2 text-xs" /></td>
@@ -2305,7 +2531,76 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                   ))}
                 </tbody>
               </table>
+            </div> */}
+           {/* بداية تصميم المرتجع الجديد بنظام الكروت */}
+            <div className="space-y-4 mb-6">
+              <label className="text-xs font-bold text-slate-500 dark:text-slate-400 mr-2">الأصناف المرتجعة</label>
+              {returnsData.items.map((item) => (
+                <div key={item.id} className="p-5 bg-slate-50 dark:bg-slate-900/40 rounded-2xl border border-slate-200 dark:border-slate-700 flex flex-col md:flex-row gap-4 items-start md:items-center relative transition-all hover:shadow-md">
+                  
+                  {/* زر الحذف */}
+                  <button type="button" onClick={() => removeReturnItem(item.id)} className="absolute top-5 left-4 md:static md:order-last text-rose-500 hover:text-rose-700 bg-white dark:bg-slate-800 p-2 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 z-10 transition-transform active:scale-95" title="حذف البند">
+                    <Trash2 size={16} />
+                  </button>
+                  
+                  <div className="flex-1 grid grid-cols-1 md:grid-cols-12 gap-4 w-full pr-8 md:pr-0">
+                    
+                    {/* --- الصف الأول: النوع والصنف --- */}
+                    <div className="col-span-1 md:col-span-4 lg:col-span-3">
+                      <span className="text-[11px] font-bold text-slate-500 block mb-1">نوع المرتجع</span>
+                      <CustomSelect
+                        required
+                        value={item.returnType || ''}
+                        onChange={v => handleReturnItemChange(item.id, 'returnType', v)}
+                        options={[
+                          { value: '', label: 'اختر النوع...' },
+                          ...(productSource !== 'suppliers' ? [{ value: 'fabric', label: 'قماش' }, { value: 'accessory', label: 'اكسسوار' }] : []),
+                          { value: 'product', label: 'منتج' }
+                        ]}
+                        className="w-full"
+                      />
+                    </div>
+                    <div className="col-span-1 md:col-span-8 lg:col-span-9">
+                      <span className="text-[11px] font-bold text-slate-500 block mb-1">اسم الصنف المتوفر بالمخزن</span>
+                      <CustomSelect
+                        required
+                        value={item.productId || ''}
+                        onChange={v => handleSelectProductForReturn(item.id, v)}
+                        options={(() => {
+                          const t = String(item.returnType || '').trim();
+                          if (t === 'fabric') return [{ value: '', label: `اختر اسم القماش...` }, ...getWarehouseFabrics(String(returnsData.warehouseId || '')).map((r: any) => ({ value: String(r.id ?? r.fabric_id), label: `${r.name} (${r.color || '-'}-${r.size || '-'}) — متوفر: ${Number(r.quantity || 0)}` }))];
+                          if (t === 'accessory') return [{ value: '', label: `اختر اسم الاكسسوار...` }, ...getWarehouseAccessories(String(returnsData.warehouseId || '')).map((r: any) => ({ value: String(r.id ?? r.accessory_id), label: `${r.name} (${r.color || '-'}-${r.size || '-'}) — متوفر: ${Number(r.quantity || 0)}` }))];
+                          if (t === 'product') {
+                            const rows = getWarehouseStock(String(returnsData.warehouseId || ''));
+                            return [{ value: '', label: `اختر اسم المنتج...` }, ...rows.filter((r: any) => !r.category || r.category === 'product').map((r: any) => ({ value: String(r.product_id), label: `${r.name} (${r.color || '-'}-${r.size || '-'}) — متوفر: ${Number(r.quantity || 0)}` }))];
+                          }
+                          return [{ value: '', label: `اختر الصنف...` }];
+                        })()}
+                        className="w-full text-sm font-bold"
+                      />
+                    </div>
+
+                    {/* --- الصف الثاني: الكمية والإجماليات --- */}
+                    <div className="col-span-1 md:col-span-4 lg:col-span-3">
+                      <span className="text-[11px] font-bold text-slate-500 block mb-1">الكمية المرتجعة</span>
+                      <input type="number" placeholder="الكمية" min="1" value={item.qty} onChange={e => handleReturnItemChange(item.id, 'qty', (String(item.returnType || '').trim() === 'fabric') ? parseFloat(e.target.value) : parseInt(e.target.value))} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-2 px-3 text-base font-black text-center text-rose-600 outline-none focus:ring-2 focus:ring-rose-500/20" />
+                    </div>
+                    <div className="col-span-1 md:col-span-8 lg:col-span-9 flex justify-between items-center px-5 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm">
+                       <div className="text-center">
+                          <span className="text-[11px] font-bold text-slate-500 block">تكلفة الوحدة</span>
+                          <span className="font-bold text-slate-800 dark:text-slate-200 text-base">{item.costPrice.toLocaleString()} <span className="text-xs font-normal text-slate-400">{currencySymbol}</span></span>
+                       </div>
+                       <div className="text-center text-rose-600">
+                          <span className="text-[11px] font-bold text-rose-400 block">إجمالي المرتجع</span>
+                          <span className="font-black text-xl">{(item.costPrice * item.qty).toLocaleString()} <span className="text-sm">{currencySymbol}</span></span>
+                       </div>
+                    </div>
+
+                  </div>
+                </div>
+              ))}
             </div>
+            {/* نهاية تصميم المرتجع الجديد */}
             <button type="button" onClick={addReturnItem} className="mt-4 text-sm font-bold text-rose-600 flex items-center gap-2"><PlusCircle size={16} /> إضافة بند مرتجع آخر</button>
 
             <div className="mt-8 pt-6 border-t dark:border-slate-700 grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -2327,10 +2622,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                   </div>
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-slate-500 dark:text-slate-400 mr-2">إلى خزينة</label>
-                    <select required={returnsData.receivedAmount > 0} value={returnsData.treasuryId} onChange={e => setReturnsData({...returnsData, treasuryId: e.target.value})} disabled={userDefaults && userDefaults.default_treasury_id && !userDefaults.can_change_treasury} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm">
-                      <option value="">اختر خزينة...</option>
-                      {treasuries.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                    </select>
+                      <CustomSelect value={returnsData.treasuryId} onChange={v => setReturnsData({...returnsData, treasuryId: v})} options={[{ value: '', label: 'اختر خزينة...' }, ...treasuries.map(t=>({ value: String(t.id), label: t.name }))]} className="w-full" />
                   </div>
                 </div>
                 <button type="submit" className="w-full bg-rose-600 text-white py-3 rounded-2xl font-black shadow-xl shadow-rose-500/30 hover:bg-rose-700 active:scale-95 transition-all">تأكيد المرتجع وتحديث الأرصدة</button>

@@ -7,7 +7,7 @@ const UserHome: React.FC = () => {
   useEffect(() => {
     const fetchModules = async () => {
       try {
-        const res = await fetch(`${API_BASE_PATH}/api.php?module=permissions&action=getMyModules`);
+        const res = await fetch(`${API_BASE_PATH}/api.php?module=permissions&action=getMyModules`, { credentials: 'include' });
         const js = await res.json();
         if (js.success && Array.isArray(js.data)) setModules(js.data);
       } catch (e) { console.error('Failed to fetch my modules', e); }

@@ -1,267 +1,351 @@
-import React, { useEffect, useState } from 'react';
-import { API_BASE_PATH } from '../services/apiConfig';
+import React, { useEffect, useMemo, useState } from 'react';
 import Swal from 'sweetalert2';
+import CustomSelect from './CustomSelect';
+import { API_BASE_PATH } from '../services/apiConfig';
+import { translateTxnLabel } from '../services/labelHelpers';
 
-const formatDateInput = (d: Date) => d.toISOString().slice(0,10);
-const startOfToday = () => { const d = new Date(); d.setHours(0,0,0,0); return d; };
-const endOfToday = () => { const d = new Date(); d.setHours(23,59,59,999); return d; };
+const formatDateInput = (d: Date) => d.toISOString().slice(0, 10);
+
+const toNum = (v: any) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const parseDetails = (s: any) => {
+  if (!s) return {};
+  if (typeof s === 'object') return s;
+  try {
+    return JSON.parse(s);
+  } catch {
+    return {};
+  }
+};
+
+const money = (n: number) => Math.abs(toNum(n)).toLocaleString();
 
 const SalesReport: React.FC = () => {
-  const [startDate, setStartDate] = useState<string>(formatDateInput(startOfToday()));
-  const [endDate, setEndDate] = useState<string>(formatDateInput(endOfToday()));
+  const currencySymbol = 'ج.م';
+
+  const [dailyDate, setDailyDate] = useState<string>(formatDateInput(new Date()));
+  const [treasuries, setTreasuries] = useState<any[]>([]);
+  const [selectedTreasuryId, setSelectedTreasuryId] = useState<string>('');
   const [loading, setLoading] = useState(false);
-  const [reps, setReps] = useState<any[]>([]);
-  const [orders, setOrders] = useState<any[]>([]);
-  const [reportRows, setReportRows] = useState<any[]>([]);
 
-  useEffect(() => { loadInitial(); }, []);
+  const [startingBalance, setStartingBalance] = useState<number>(0);
+  const [treasuryHistory, setTreasuryHistory] = useState<any[]>([]);
+  const [records, setRecords] = useState<any[]>([]);
 
-  const loadInitial = async () => {
+  const loadTreasuries = async () => {
     try {
-      const r = await fetch(`${API_BASE_PATH}/api.php?module=users&action=getAll`);
-      const jr = await r.json();
-      const repList = (jr.success ? (jr.data||[]) : []).filter((u:any)=> u.role === 'representative');
-      setReps(repList);
-      const or = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll`);
-      const jor = await or.json();
-      setOrders(jor.success ? (jor.data||[]) : []);
+      const r = await fetch(`${API_BASE_PATH}/api.php?module=treasuries&action=getAll`);
+      const j = await r.json();
+      const list = j && j.success ? j.data || [] : [];
+      setTreasuries(list);
+      if (!selectedTreasuryId && list.length > 0) setSelectedTreasuryId(String(list[0].id));
     } catch (e) {
-      console.error('Failed to load initial data', e);
-      Swal.fire('خطأ', 'فشل تحميل البيانات الأساسية.', 'error');
+      console.error('Failed to load treasuries', e);
+      setTreasuries([]);
     }
   };
 
-  const preset = (p: 'today'|'week'|'month') => {
-    const now = new Date();
-    if (p === 'today') {
-      setStartDate(formatDateInput(startOfToday()));
-      setEndDate(formatDateInput(endOfToday()));
-    } else if (p === 'week') {
-      const s = new Date(); s.setDate(now.getDate() - 7); s.setHours(0,0,0,0);
-      setStartDate(formatDateInput(s));
-      setEndDate(formatDateInput(endOfToday()));
-    } else if (p === 'month') {
-      const s = new Date(); s.setMonth(now.getMonth() - 1); s.setHours(0,0,0,0);
-      setStartDate(formatDateInput(s));
-      setEndDate(formatDateInput(endOfToday()));
+  const loadReport = async () => {
+    if (!selectedTreasuryId) {
+      setStartingBalance(0);
+      setTreasuryHistory([]);
+      setRecords([]);
+      return;
     }
-  };
-
-  const parseDetails = (d:any) => {
-    if (!d) return {};
-    try { return typeof d === 'string' ? JSON.parse(d) : d; } catch(e){ return {}; }
-  };
-
-  const generateReport = async () => {
     setLoading(true);
     try {
-      const s = new Date(startDate + 'T00:00:00');
-      const e = new Date(endDate + 'T23:59:59');
+      const date = dailyDate || formatDateInput(new Date());
+      const url =
+        `${API_BASE_PATH}/api.php?module=reports&action=finance` +
+        `&treasury_id=${encodeURIComponent(selectedTreasuryId)}` +
+        `&start_date=${encodeURIComponent(date)}` +
+        `&end_date=${encodeURIComponent(date)}`;
 
-      const ordersMap = new Map<number, any>();
-      orders.forEach((o:any)=> ordersMap.set(o.id, o));
-
-      const rows = await Promise.all(reps.map(async (rep:any) => {
-        // fetch transactions for this rep
-        let txs:any[] = [];
-        try {
-          const tr = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=getByRelated&related_to_type=rep&related_to_id=${rep.id}`);
-          const jtr = await tr.json();
-          txs = jtr.success ? (jtr.data||[]) : [];
-        } catch (e) { txs = []; }
-
-        const prevBalance = txs.filter(tx=> new Date(tx.transaction_date) < s).reduce((sum,tx)=> sum + Number(tx.amount||0), 0);
-        const currentBalance = txs.filter(tx=> new Date(tx.transaction_date) <= e).reduce((sum,tx)=> sum + Number(tx.amount||0), 0);
-
-        // orders before start (assigned earlier)
-        const ordersBefore = orders.filter((o:any)=> Number(o.rep_id) === Number(rep.id) && new Date(o.created_at) < s);
-        const ordersBeforeCount = ordersBefore.length;
-        const piecesBefore = ordersBefore.reduce((sum:any,o:any)=> sum + ((o.products||[]).reduce((ss:number,p:any)=> ss + Number(p.quantity||p.qty||0),0)), 0);
-
-        // transactions in period
-        const txInPeriod = txs.filter(tx=> {
-          const d = new Date(tx.transaction_date);
-          return d >= s && d <= e;
-        });
-
-        // orders received in daily: transactions with details.orders
-        let ordersReceivedCount = 0; let piecesReceivedCount = 0;
-        txInPeriod.forEach(tx => {
-          const det = parseDetails(tx.details);
-          if (det && Array.isArray(det.orders) && det.orders.length>0) {
-            ordersReceivedCount += det.orders.length;
-            det.orders.forEach((oid:number) => {
-              const ord = ordersMap.get(Number(oid));
-              if (ord) piecesReceivedCount += (ord.products||[]).reduce((ss:number,p:any)=> ss + Number(p.quantity||p.qty||0), 0);
-            });
-          }
-        });
-
-        // delivered / returned in period via tx details 'action'
-        const deliveredOrderIds = new Set<number>();
-        const returnedOrderIds = new Set<number>();
-        txInPeriod.forEach(tx=>{
-          const det = parseDetails(tx.details);
-          if (det && det.action && det.order_id) {
-            const aid = Number(det.order_id);
-            if (det.action === 'delivered' || det.action === 'partial_delivered') deliveredOrderIds.add(aid);
-            if (det.action === 'returned' || det.action === 'partial_returned') returnedOrderIds.add(aid);
-          }
-        });
-        const deliveredOrdersCount = deliveredOrderIds.size;
-        const returnedOrdersCount = returnedOrderIds.size;
-        const deliveredPieces = Array.from(deliveredOrderIds).reduce((s:any, oid:any)=> { const ord = ordersMap.get(Number(oid)); return s + (ord? (ord.products||[]).reduce((ss:number,p:any)=> ss + Number(p.quantity||p.qty||0),0) : 0); }, 0);
-        const returnedPieces = Array.from(returnedOrderIds).reduce((s:any, oid:any)=> { const ord = ordersMap.get(Number(oid)); return s + (ord? (ord.products||[]).reduce((ss:number,p:any)=> ss + Number(p.quantity||p.qty||0),0) : 0); }, 0);
-
-        // payments in period: transactions that include details.direction or type contains payment
-        const paymentsInPeriod = txInPeriod.reduce((s:any, tx:any)=> {
-          const det = parseDetails(tx.details);
-          const type = (tx.type||'').toLowerCase();
-          if ((det && det.direction) || type.includes('payment')) {
-            return s + Number(tx.amount||0);
-          }
-          return s;
-        }, 0);
-
-        return {
-          repId: rep.id,
-          repName: rep.name,
-          prevBalance,
-          ordersBeforeCount,
-          piecesBefore,
-          ordersReceivedCount,
-          piecesReceivedCount,
-          deliveredOrdersCount,
-          deliveredPieces,
-          returnedOrdersCount,
-          returnedPieces,
-          currentBalance,
-          paymentsInPeriod
-        };
-      }));
-
-      setReportRows(rows);
+      const r = await fetch(url);
+      const j = await r.json();
+      if (j && j.success) {
+        const data = j.data || {};
+        setStartingBalance(toNum(data.starting_balance ?? 0));
+        setTreasuryHistory(Array.isArray(data.treasuryBalanceHistory) ? data.treasuryBalanceHistory : []);
+        setRecords(Array.isArray(data.revenueAndExpenseRecords) ? data.revenueAndExpenseRecords : []);
+      } else {
+        setStartingBalance(0);
+        setTreasuryHistory([]);
+        setRecords([]);
+        Swal.fire('تنبيه', j?.message || 'لا توجد بيانات للفترة المحددة.', 'info');
+      }
     } catch (e) {
-      console.error('Failed to generate report', e);
-      Swal.fire('خطأ', 'فشل إنشاء التقرير.', 'error');
-    } finally { setLoading(false); }
+      console.error('Failed to load treasury report', e);
+      setStartingBalance(0);
+      setTreasuryHistory([]);
+      setRecords([]);
+      Swal.fire('خطأ', 'فشل تحميل تقرير الخزينة. راجع الكونسول.', 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  function exportCSV() {
-    if (!reportRows || reportRows.length === 0) { Swal.fire('تنبيه', 'لا توجد بيانات للتصدير', 'info'); return; }
-    const headers = [
-      'اسم المندوب', 'المبلغ_بداية', 'طلبيات_قبل', 'قطع_قبل', 'طلبيات_مستلمة', 'قطع_مستلمة', 'طلبيات_مسلمة', 'قطع_مسلمة', 'طلبيات_مرتجعة', 'قطع_مرتجعة', 'المبلغ_الحالي', 'تم_دفع', 'المتبقي'
-    ];
-    const rows = reportRows.map(r => [
-      `"${r.repName || ''}"`, Math.abs(Number(r.prevBalance || 0)).toString(), (r.ordersBeforeCount||0).toString(), (r.piecesBefore||0).toString(), (r.ordersReceivedCount||0).toString(), (r.piecesReceivedCount||0).toString(), (r.deliveredOrdersCount||0).toString(), (r.deliveredPieces||0).toString(), (r.returnedOrdersCount||0).toString(), (r.returnedPieces||0).toString(), Math.abs(Number(r.currentBalance||0)).toString(), Number(r.paymentsInPeriod||0).toString(), `${Number(r.currentBalance||0).toString()} ${r.currentBalance>0? 'له' : (r.currentBalance<0? 'عليه':'')}`
-    ]);
-    const csv = [headers.join(','), ...rows.map(r=> r.join(','))].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `sales_report_${startDate}_${endDate}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  }
+  useEffect(() => {
+    loadTreasuries();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  function printA4Report() {
-    if (!reportRows || reportRows.length === 0) { Swal.fire('تنبيه', 'لا توجد بيانات للطباعة', 'info'); return; }
-    const dateStr = `${startDate} - ${endDate}`;
-    const htmlRows = reportRows.map(r => `
-      <tr>
-        <td>${r.repName}</td>
-        <td style="text-align:right">${Math.abs(Number(r.prevBalance)).toLocaleString()}</td>
-        <td style="text-align:center">${r.ordersBeforeCount}</td>
-        <td style="text-align:center">${r.piecesBefore}</td>
-        <td style="text-align:center">${r.ordersReceivedCount}</td>
-        <td style="text-align:center">${r.piecesReceivedCount}</td>
-        <td style="text-align:center">${r.deliveredOrdersCount}</td>
-        <td style="text-align:center">${r.deliveredPieces}</td>
-        <td style="text-align:center">${r.returnedOrdersCount}</td>
-        <td style="text-align:center">${r.returnedPieces}</td>
-        <td style="text-align:right">${Math.abs(Number(r.currentBalance)).toLocaleString()}</td>
-        <td style="text-align:right">${Number(r.paymentsInPeriod).toLocaleString()}</td>
-        <td style="text-align:right">${Number(r.currentBalance).toLocaleString()} ${r.currentBalance>0? 'له' : (r.currentBalance<0? 'عليه':'')}</td>
-      </tr>
-    `).join('');
+  useEffect(() => {
+    loadReport();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTreasuryId, dailyDate]);
 
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>تقرير مبيعات</title><style>@page{size:A4;margin:20mm;} body{font-family: Arial, "Noto Naskh Arabic", sans-serif; direction:rtl; padding:10px;} table{width:100%; border-collapse:collapse;} th,td{border:1px solid #333; padding:6px; font-size:12px; text-align:right;} th{background:#f3f4f6;} h1{text-align:center;}</style></head><body><h1>تقرير مبيعات</h1><div>الفترة: ${dateStr}</div><table><thead><tr><th>اسم المندوب</th><th>المبلغ في البداية</th><th>طلبيات قبل</th><th>قطع قبل</th><th>طلبيات مستلمة</th><th>قطع مستلمة</th><th>طلبيات مسلمة</th><th>قطع مسلمة</th><th>طلبيات مرتجعة</th><th>قطع مرتجعة</th><th>المبلغ الحالي</th><th>تم دفع</th><th>المتبقي</th></tr></thead><tbody>${htmlRows}</tbody></table></body></html>`;
-    const w = window.open('', '_blank', 'width=900,height=700');
-    if (!w) return;
-    w.document.write(html);
-    w.document.close();
-    setTimeout(()=> w.print(), 500);
-  }
+  const { cashIn, cashOut } = useMemo(() => {
+    const ins: any[] = [];
+    const outs: any[] = [];
+    (records || []).forEach((rec: any) => {
+      const amt = toNum(rec.amount);
+      if (amt >= 0) ins.push(rec);
+      else outs.push(rec);
+    });
+    return { cashIn: ins, cashOut: outs };
+  }, [records]);
+
+  const totals = useMemo(() => {
+    const totalIn = (records || []).reduce((s: number, r: any) => (toNum(r.amount) > 0 ? s + toNum(r.amount) : s), 0);
+    const totalOut = (records || []).reduce((s: number, r: any) => (toNum(r.amount) < 0 ? s + Math.abs(toNum(r.amount)) : s), 0);
+    const net = (records || []).reduce((s: number, r: any) => s + toNum(r.amount), 0);
+
+    const closingFromHistory =
+      Array.isArray(treasuryHistory) && treasuryHistory.length > 0
+        ? toNum(treasuryHistory[treasuryHistory.length - 1].balance)
+        : null;
+
+    const closing = closingFromHistory !== null ? closingFromHistory : toNum(startingBalance) + net;
+    return { opening: toNum(startingBalance), totalIn, totalOut, closing };
+  }, [records, startingBalance, treasuryHistory]);
+
+  const getTypeLabel = (rec: any) => translateTxnLabel(rec.type, rec.desc, rec.txn_type);
+  const getEntityNameForIn = (rec: any) => {
+    const d = parseDetails(rec.raw_details || rec.details);
+    return (
+      d.related_to_name ||
+      d.rep_name ||
+      d.repName ||
+      d.customer_name ||
+      d.customerName ||
+      d.supplier_name ||
+      d.supplierName ||
+      rec.related_name ||
+      rec.entity ||
+      '—'
+    );
+  };
+  const getReasonForOut = (rec: any) => {
+    const d = parseDetails(rec.raw_details || rec.details);
+    return d.notes || d.note || d.reason || rec.desc || '—';
+  };
+
+  const selectedTreasuryName = useMemo(
+    () => treasuries.find(t => String(t.id) === String(selectedTreasuryId))?.name || '',
+    [treasuries, selectedTreasuryId]
+  );
 
   return (
-    <div className="p-6">
-      <h2 className="font-black text-lg mb-4">تقرير المبيعات/الفترة للمندوبين</h2>
-      <div className="flex gap-3 items-center mb-4">
-        <div>
-          <label className="text-xs">من</label>
-          <input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)} className="border p-2 rounded" />
-        </div>
-        <div>
-          <label className="text-xs">إلى</label>
-          <input type="date" value={endDate} onChange={e=>setEndDate(e.target.value)} className="border p-2 rounded" />
-        </div>
-        <div className="flex gap-2">
-          <button onClick={()=>preset('today')} className="px-3 py-2 bg-slate-100 rounded">اليوم</button>
-          <button onClick={()=>preset('week')} className="px-3 py-2 bg-slate-100 rounded">الأسبوع</button>
-          <button onClick={()=>preset('month')} className="px-3 py-2 bg-slate-100 rounded">الشهر</button>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={generateReport} className="px-4 py-2 bg-blue-600 text-white rounded">تحديث التقرير</button>
-          <button onClick={()=> exportCSV()} className="px-4 py-2 bg-sky-600 text-white rounded">تصدير CSV</button>
-          <button onClick={()=> printA4Report()} className="px-4 py-2 bg-emerald-600 text-white rounded">طباعة A4</button>
+    <div className="p-6 space-y-5">
+      <div className="rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 shadow-sm">
+        <div className="flex flex-col lg:flex-row lg:items-end gap-3 justify-between">
+          <div>
+            <h2 className="text-lg font-black text-slate-900 dark:text-white">تقرير الخزينة (استلامات / مدفوعات)</h2>
+            <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+              تقرير خاص بالخزينة فقط — {selectedTreasuryName ? `(${selectedTreasuryName})` : ''}
+            </div>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+            <div>
+                <div className="text-xs text-slate-500 mb-1">الخزينة</div>
+                <CustomSelect
+                  value={selectedTreasuryId}
+                  onChange={v => setSelectedTreasuryId(v)}
+                  options={
+                    treasuries.length === 0
+                      ? [{ value: '', label: 'لا توجد خزائن' }]
+                      : [{ value: '', label: 'اختر خزينة' }, ...treasuries.map(t => ({ value: String(t.id), label: t.name }))]
+                  }
+                  className="w-full sm:w-56 text-sm"
+                />
+            </div>
+            <div>
+              <div className="text-xs text-slate-500 mb-1">تاريخ اليومية</div>
+              <input
+                type="date"
+                className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl px-3 py-2 text-sm"
+                value={dailyDate}
+                onChange={e => setDailyDate(e.target.value)}
+              />
+            </div>
+            <button
+              onClick={loadReport}
+              className="px-4 py-2 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-black"
+              disabled={loading}
+            >
+              {loading ? 'جارٍ التحميل...' : 'تحديث'}
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="overflow-auto border rounded">
-        <table className="w-full text-sm text-right">
-          <thead className="bg-slate-50">
-            <tr>
-              <th className="px-3 py-2">اسم المندوب</th>
-              <th className="px-3 py-2">المبلغ في بداية الفترة</th>
-              <th className="px-3 py-2">عدد الطلبيات قبل الفترة</th>
-              <th className="px-3 py-2">عدد القطع قبل الفترة</th>
-              <th className="px-3 py-2">عدد الطلبيات المستلمة في اليومية</th>
-              <th className="px-3 py-2">عدد القطع المستلمة في اليومية</th>
-              <th className="px-3 py-2">عدد الطلبيات المسلمة</th>
-              <th className="px-3 py-2">عدد القطع المسلمة</th>
-              <th className="px-3 py-2">عدد الطلبيات المرتجعة</th>
-              <th className="px-3 py-2">عدد القطع المرتجعة</th>
-              <th className="px-3 py-2">المبلغ الحالي</th>
-              <th className="px-3 py-2">تم دفع</th>
-              <th className="px-3 py-2">المتبقي (له/عليه)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {reportRows.map(r => (
-              <tr key={r.repId} className="border-t">
-                <td className="px-3 py-2 font-bold">{r.repName}</td>
-                <td className="px-3 py-2">{Math.abs(Number(r.prevBalance)).toLocaleString()}</td>
-                <td className="px-3 py-2">{r.ordersBeforeCount}</td>
-                <td className="px-3 py-2">{r.piecesBefore}</td>
-                <td className="px-3 py-2">{r.ordersReceivedCount}</td>
-                <td className="px-3 py-2">{r.piecesReceivedCount}</td>
-                <td className="px-3 py-2">{r.deliveredOrdersCount}</td>
-                <td className="px-3 py-2">{r.deliveredPieces}</td>
-                <td className="px-3 py-2">{r.returnedOrdersCount}</td>
-                <td className="px-3 py-2">{r.returnedPieces}</td>
-                <td className="px-3 py-2">{Math.abs(Number(r.currentBalance)).toLocaleString()}</td>
-                <td className="px-3 py-2">{Number(r.paymentsInPeriod).toLocaleString()}</td>
-                <td className="px-3 py-2">{Number(r.currentBalance).toLocaleString()} <span className="mx-2 font-bold" style={{color: (r.currentBalance>0? 'green': (r.currentBalance<0? 'red':'#666'))}}>{r.currentBalance>0? 'له' : (r.currentBalance<0? 'عليه' : '')}</span></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 shadow-sm">
+          <div className="text-xs text-slate-500 dark:text-slate-400">رصيد بداية اليوم</div>
+          <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">
+            {totals.opening.toLocaleString()} <span className="text-sm font-bold text-slate-500">{currencySymbol}</span>
+          </div>
+        </div>
+        <div className="rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 shadow-sm">
+          <div className="text-xs text-slate-500 dark:text-slate-400">مبالغ تم استلامها</div>
+          <div className="mt-2 text-2xl font-black text-emerald-600">
+            {totals.totalIn.toLocaleString()} <span className="text-sm font-bold text-slate-500">{currencySymbol}</span>
+          </div>
+        </div>
+        <div className="rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 shadow-sm">
+          <div className="text-xs text-slate-500 dark:text-slate-400">مبالغ تم دفعها</div>
+          <div className="mt-2 text-2xl font-black text-rose-600">
+            {totals.totalOut.toLocaleString()} <span className="text-sm font-bold text-slate-500">{currencySymbol}</span>
+          </div>
+        </div>
+        <div className="rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 shadow-sm">
+          <div className="text-xs text-slate-500 dark:text-slate-400">رصيد نهاية اليوم</div>
+          <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">
+            {totals.closing.toLocaleString()} <span className="text-sm font-bold text-slate-500">{currencySymbol}</span>
+          </div>
+          <div className="mt-1 text-[11px] text-slate-400">
+            {treasuryHistory.length > 0 ? 'حسب تاريخ رصيد الخزينة' : 'محسوب: بداية + صافي الحركات'}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="lg:order-1 rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+          <div className="p-5 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-black text-slate-900 dark:text-white">مدفوعات / مصروفات</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">كل الحركات الخارجة</div>
+              </div>
+              <div className="text-xs font-black text-rose-600">
+                {cashOut.length} حركة — الإجمالي: {totals.totalOut.toLocaleString()} {currencySymbol}
+              </div>
+            </div>
+          </div>
+          <div className="overflow-auto max-h-[520px]">
+            <table className="w-full text-right text-sm">
+              <thead className="sticky top-0 z-10 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
+                <tr className="text-xs text-slate-500 dark:text-slate-400">
+                  <th className="px-5 py-3 font-black">السبب / الملاحظات</th>
+                  <th className="px-5 py-3 font-black">نوع الحركة</th>
+                  <th className="px-5 py-3 font-black text-left">المبلغ</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {loading ? (
+                  <tr>
+                    <td colSpan={3} className="px-5 py-10 text-center text-slate-400">جارٍ التحميل...</td>
+                  </tr>
+                ) : cashOut.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="px-5 py-10 text-center text-slate-400">لا توجد مدفوعات</td>
+                  </tr>
+                ) : (
+                  cashOut.map((rec: any, idx: number) => {
+                    const amt = toNum(rec.amount);
+                    const typeLabel = getTypeLabel(rec);
+                    const reason = getReasonForOut(rec);
+                    return (
+                      <tr key={`${rec.id || idx}`}>
+                        <td className="px-5 py-3">
+                          <div className="font-bold text-slate-900 dark:text-white line-clamp-1">{reason || '—'}</div>
+                          <div className="text-[11px] text-slate-400 mt-1">{String(rec.date || rec.transaction_date || '')}</div>
+                        </td>
+                        <td className="px-5 py-3">
+                          <span className="inline-flex items-center px-3 py-1 rounded-full text-[11px] font-black bg-rose-50 text-rose-700 dark:bg-rose-900/20 dark:text-rose-300">
+                            {typeLabel || '—'}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3 text-left font-black text-rose-600">
+                          {money(amt)} {currencySymbol}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="lg:order-2 rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+          <div className="p-5 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-black text-slate-900 dark:text-white">استلامات</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">كل الحركات الداخلة</div>
+              </div>
+              <div className="text-xs font-black text-emerald-600">
+                {cashIn.length} حركة — الإجمالي: {totals.totalIn.toLocaleString()} {currencySymbol}
+              </div>
+            </div>
+          </div>
+          <div className="overflow-auto max-h-[520px]">
+            <table className="w-full text-right text-sm">
+              <thead className="sticky top-0 z-10 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
+                <tr className="text-xs text-slate-500 dark:text-slate-400">
+                  <th className="px-5 py-3 font-black">الجهة / الاسم</th>
+                  <th className="px-5 py-3 font-black">نوع الحركة</th>
+                  <th className="px-5 py-3 font-black text-left">المبلغ</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {loading ? (
+                  <tr>
+                    <td colSpan={3} className="px-5 py-10 text-center text-slate-400">جارٍ التحميل...</td>
+                  </tr>
+                ) : cashIn.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="px-5 py-10 text-center text-slate-400">لا توجد استلامات</td>
+                  </tr>
+                ) : (
+                  cashIn.map((rec: any, idx: number) => {
+                    const amt = toNum(rec.amount);
+                    const typeLabel = getTypeLabel(rec);
+                    const entity = getEntityNameForIn(rec);
+                    return (
+                      <tr key={`${rec.id || idx}`}>
+                        <td className="px-5 py-3">
+                          <div className="font-bold text-slate-900 dark:text-white line-clamp-1">{entity || '—'}</div>
+                          <div className="text-[11px] text-slate-400 mt-1">{String(rec.date || rec.transaction_date || '')}</div>
+                        </td>
+                        <td className="px-5 py-3">
+                          <span className="inline-flex items-center px-3 py-1 rounded-full text-[11px] font-black bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300">
+                            {typeLabel || '—'}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3 text-left font-black text-emerald-600">
+                          {money(amt)} {currencySymbol}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div className="text-[11px] text-slate-500 dark:text-slate-400">
+        ملاحظة: تم تقسيم الحركات بناءً على إشارة <span className="font-bold">amount</span> (موجب = استلام / سالب = دفع).
       </div>
     </div>
-  );
+  )
 };
 
 export default SalesReport;

@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
+import CustomSelect from './CustomSelect';
 import { Briefcase, CreditCard, UserCheck, Calendar, Search, Plus, X, Save, Edit, Trash2, Eye, User, FileText } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
@@ -654,15 +655,13 @@ const HRMModule: React.FC<HRMModuleProps> = ({ initialView }) => {
               <form onSubmit={handleAddTransaction} className="p-8 space-y-4 text-right">
                 <div>
                   <label className="text-xs font-bold text-muted mr-2">الموظف</label>
-                  <select
+                  <CustomSelect
                     required
                     value={newTransactionData.employee_id}
-                    onChange={e => handleEmployeeChange(e.target.value)}
-                    className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm"
-                  >
-                    <option value="">اختر موظف</option>
-                    {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
-                  </select>
+                    onChange={v => handleEmployeeChange(v)}
+                    options={[{ value: '', label: 'اختر موظف' }, ...employees.map((emp:any) => ({ value: String(emp.id), label: emp.name }))]}
+                    className="w-full"
+                  />
                 </div>
 
                 {financialSummary && (
@@ -700,24 +699,23 @@ const HRMModule: React.FC<HRMModuleProps> = ({ initialView }) => {
                 </div>
                 <div>
                   <label className="text-xs font-bold text-muted mr-2">النوع</label>
-                  <select value={newTransactionData.type} onChange={e => setNewTransactionData({ ...newTransactionData, type: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm">
-                    <option value="advance">سلفة</option>
-                    <option value="bonus">حافز</option>
-                    <option value="penalty">خصم</option>
-                  </select>
+                  <CustomSelect
+                    value={newTransactionData.type}
+                    onChange={v => setNewTransactionData({ ...newTransactionData, type: v })}
+                    options={[{ value: 'advance', label: 'سلفة' }, { value: 'bonus', label: 'حافز' }, { value: 'penalty', label: 'خصم' }]}
+                    className="w-full"
+                  />
                 </div>
                 {(newTransactionData.type === 'advance' || newTransactionData.type === 'bonus') && (
                   <div>
                     <label className="text-xs font-bold text-muted mr-2">الخزينة</label>
-                    <select
+                    <CustomSelect
                       required
                       value={newTransactionData.treasury_id}
-                      onChange={e => setNewTransactionData({ ...newTransactionData, treasury_id: e.target.value })}
-                      className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm"
-                    >
-                      <option value="">اختر خزينة</option>
-                      {treasuries.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                    </select>
+                      onChange={v => setNewTransactionData({ ...newTransactionData, treasury_id: v })}
+                      options={[{ value: '', label: 'اختر خزينة' }, ...treasuries.map((t:any) => ({ value: String(t.id), label: t.name }))]}
+                      className="w-full"
+                    />
                   </div>
                 )}
                 <div>
@@ -848,16 +846,12 @@ const HRMModule: React.FC<HRMModuleProps> = ({ initialView }) => {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-muted mr-2">جهاز البصمة</label>
-                  <select
+                  <CustomSelect
                     value={formData.fingerprintDeviceId}
-                    onChange={e => setFormData({ ...formData, fingerprintDeviceId: e.target.value })}
-                    className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
-                  >
-                    <option value="">اختر الجهاز</option>
-                    {devices.map((d: any) => (
-                      <option key={d.id} value={d.id}>{d.name}</option>
-                    ))}
-                  </select>
+                    onChange={v => setFormData({ ...formData, fingerprintDeviceId: v })}
+                    options={[{ value: '', label: 'اختر الجهاز' }, ...devices.map((d:any) => ({ value: String(d.id), label: d.name }))]}
+                    className="w-full"
+                  />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-muted mr-2">رقم الموظف على الجهاز</label>

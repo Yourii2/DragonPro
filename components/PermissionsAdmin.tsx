@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { MENU_ITEMS } from '../constants';
+import CustomSelect from './CustomSelect';
 
 const PermissionsAdmin: React.FC = () => {
   const [users, setUsers] = useState<any[]>([]);
@@ -400,10 +401,11 @@ const ModuleForm: React.FC<{ modules:any[], onCreate: (name:string,parent_id:num
   return (
     <div>
       <input className="w-full p-2 border rounded mb-2" placeholder="اسم القسم" value={name} onChange={e=>setName(e.target.value)} />
-      <select className="w-full p-2 border rounded mb-2" value={parent} onChange={e=>setParent(e.target.value)}>
-        <option value="">بدون والد</option>
-        {modules.filter(m=>!m.parent_id).map(m=> <option key={m.id} value={m.id}>{m.name}</option>)}
-      </select>
+      <CustomSelect
+        value={parent}
+        onChange={v=>setParent(v)}
+        options={[{ value: '', label: 'بدون والد' }, ...modules.filter(m=>!m.parent_id).map(m=>({ value: String(m.id), label: m.name }))]}
+      />
       <button className="px-3 py-1 bg-blue-600 text-white rounded" onClick={()=>{ if(name.trim()) { onCreate(name.trim(), parent?Number(parent):null); setName(''); setParent(''); } }}>إنشاء</button>
     </div>
   );
@@ -512,10 +514,11 @@ const TreasuryAccess: React.FC<{ selectedUser: number }> = ({ selectedUser }) =>
       </div>
       {scope === 'specific' && (
         <div className="mb-3">
-          <select className="w-full p-2 border rounded bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-right" value={selectedTreasuryId || ''} onChange={(e) => setSelectedTreasuryId(e.target.value?Number(e.target.value):null)}>
-            <option value="">-- اختر خزينة --</option>
-            {treasuries.map(t=> <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
+          <CustomSelect
+            value={selectedTreasuryId || ''}
+            onChange={v => setSelectedTreasuryId(v?Number(v):null)}
+            options={[{ value: '', label: '-- اختر خزينة --' }, ...treasuries.map(t=>({ value: String(t.id), label: t.name }))]}
+          />
         </div>
       )}
       <div className="flex justify-end">
@@ -595,10 +598,11 @@ const WarehouseAccess: React.FC<{ selectedUser: number }> = ({ selectedUser }) =
       </div>
       {scope === 'specific' && (
         <div className="mb-3">
-          <select className="w-full p-2 border rounded bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-right" value={selectedWarehouseId || ''} onChange={(e) => setSelectedWarehouseId(e.target.value?Number(e.target.value):null)}>
-            <option value="">-- اختر مستودع --</option>
-            {warehouses.map(w=> <option key={w.id} value={w.id}>{w.name}</option>)}
-          </select>
+          <CustomSelect
+            value={selectedWarehouseId || ''}
+            onChange={v => setSelectedWarehouseId(v?Number(v):null)}
+            options={[{ value: '', label: '-- اختر مستودع --' }, ...warehouses.map(w=>({ value: String(w.id), label: w.name }))]}
+          />
         </div>
       )}
       <div className="flex justify-end">
@@ -684,10 +688,11 @@ const SalesOfficeAccess: React.FC<{ selectedUser: number }> = ({ selectedUser })
       </div>
       {scope === 'specific' && (
         <div className="mb-3">
-          <select className="w-full p-2 border rounded bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-right" value={selectedOfficeId || ''} onChange={(e) => setSelectedOfficeId(e.target.value?Number(e.target.value):null)}>
-            <option value="">-- اختر مكتب --</option>
-            {offices.map(o=> <option key={o.id} value={o.id}>{o.name}</option>)}
-          </select>
+          <CustomSelect
+            value={selectedOfficeId || ''}
+            onChange={v => setSelectedOfficeId(v?Number(v):null)}
+            options={[{ value: '', label: '-- اختر مكتب --' }, ...offices.map(o=>({ value: String(o.id), label: o.name }))]}
+          />
         </div>
       )}
       <div className="flex justify-end">

@@ -62,6 +62,10 @@ try {
         // New settings: sales display method and product source
         'sales_display_method' => $input['sales_display_method'] ?? 'company', // values: 'company' or 'sales_offices'
         'product_source' => $input['product_source'] ?? 'both', // values: 'factory' | 'suppliers' | 'both'
+        // New setting: delivery method
+        'delivery_method' => $input['delivery_method'] ?? 'reps', // values: 'reps' | 'direct' | 'shipping'
+        // New setting: default sale price source ('product' | 'order')
+        'sale_price_source' => $input['sale_price_source'] ?? 'product',
         'currency' => $input['currency'] ?? 'EGP',
         'auto_backup' => $input['auto_backup'] ?? 'false',
         'backup_frequency' => $input['backup_frequency'] ?? 'daily',

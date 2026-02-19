@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
+import CustomSelect from './CustomSelect';
 
 const SettingsModule: React.FC = () => {
   const [isSaved, setIsSaved] = useState(false);
@@ -47,6 +48,8 @@ const SettingsModule: React.FC = () => {
     // New settings
     salesDisplayMethod: localStorage.getItem('Dragon_sales_display_method') || 'company', // 'company' | 'sales_offices'
     productSource: localStorage.getItem('Dragon_product_source') || 'both', // 'factory' | 'suppliers' | 'both'
+    salePriceSource: localStorage.getItem('Dragon_default_sale_price_source') || 'product', // 'product' | 'order'
+    deliveryMethod: (localStorage.getItem('Dragon_delivery_method') || 'reps').toString(), // 'reps' | 'direct' | 'shipping'
     currency: localStorage.getItem('Dragon_currency') || 'EGP',
     autoBackup: localStorage.getItem('Dragon_auto_backup') === 'true',
     backupFrequency: localStorage.getItem('Dragon_backup_freq') || 'daily',
@@ -128,7 +131,7 @@ const SettingsModule: React.FC = () => {
         
         if (result.success && result.data) {
           const settings = result.data;
-          setConfig({
+            setConfig({
             name: settings.company_name || '',
             phone: settings.company_phone || '',
             address: settings.company_address || '',
@@ -139,6 +142,8 @@ const SettingsModule: React.FC = () => {
             // load new settings
             salesDisplayMethod: settings.sales_display_method || 'company',
             productSource: settings.product_source || 'both',
+            salePriceSource: settings.sale_price_source || 'product',
+            deliveryMethod: settings.delivery_method || 'reps',
             autoBackup: settings.auto_backup === 'true',
             backupFrequency: settings.backup_frequency || 'daily',
             backupEmail: settings.backup_email || '',
@@ -197,7 +202,10 @@ const SettingsModule: React.FC = () => {
         report_auto: config.reportAuto.toString(),
         // new settings
         sales_display_method: config.salesDisplayMethod,
-        product_source: config.productSource
+        product_source: config.productSource,
+        delivery_method: config.deliveryMethod
+        ,
+        sale_price_source: config.salePriceSource
       })
     });
 
@@ -215,12 +223,15 @@ const SettingsModule: React.FC = () => {
         localStorage.setItem('Dragon_company_phone', config.phone);
         localStorage.setItem('Dragon_company_address', config.address);
         localStorage.setItem('Dragon_company_terms', config.terms);
+        // save new setting locally
+        localStorage.setItem('Dragon_default_sale_price_source', config.salePriceSource || 'product');
         localStorage.setItem('Dragon_tax_rate', config.taxRate);
         localStorage.setItem('Dragon_sales_calc_order', config.salesCalcOrder);
         localStorage.setItem('Dragon_currency', config.currency);
         // persist new settings locally
         localStorage.setItem('Dragon_sales_display_method', config.salesDisplayMethod);
         localStorage.setItem('Dragon_product_source', config.productSource);
+        localStorage.setItem('Dragon_delivery_method', config.deliveryMethod);
         localStorage.setItem('Dragon_auto_backup', config.autoBackup.toString());
         localStorage.setItem('Dragon_backup_freq', config.backupFrequency);
         localStorage.setItem('Dragon_backup_email', config.backupEmail);
@@ -475,12 +486,36 @@ const SettingsModule: React.FC = () => {
     }
   };
 
-  const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLogoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
+    if (!file) return;
+
+    // Upload the file to server to get a persistent URL/path instead of embedding a large data URL
+    try {
+      const form = new FormData();
+      form.append('logo', file);
+      Swal.fire({ title: 'جارٍ رفع الشعار...', didOpen: () => Swal.showLoading(), allowOutsideClick: false });
+      const res = await fetch(`${API_BASE_PATH}/upload_logo.php`, { method: 'POST', body: form });
+      const j = await res.json();
+      Swal.close();
+      if (j && j.success && j.url) {
+        setLogoPreview(j.url);
+      } else {
+        // fallback: show preview as data URL if upload failed
+        const reader = new FileReader();
+        reader.onloadend = () => setLogoPreview(reader.result as string);
+        reader.readAsDataURL(file);
+        Swal.fire('فشل الرفع', j.message || 'تعذّر رفع الشعار، سيتم عرض معاينة محلية فقط.', 'warning');
+      }
+    } catch (err) {
+      // fallback to data URL preview on any error
       const reader = new FileReader();
       reader.onloadend = () => setLogoPreview(reader.result as string);
       reader.readAsDataURL(file);
+      Swal.close();
+      Swal.fire('خطأ', 'تعذر الاتصال بالخادم لرفع الشعار. سيتم استخدام معاينة محلية فقط.', 'error');
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
@@ -699,14 +734,27 @@ const SettingsModule: React.FC = () => {
             <h3 className="font-bold flex items-center gap-2 mb-4 text-slate-800 dark:text-slate-100">طريقة البيع</h3>
             <div className="space-y-2">
               <label className="text-xs font-bold text-slate-500 dark:text-slate-400">اختر طريقة عرض بيانات البيع</label>
-              <select
+              <CustomSelect
                 value={config.salesDisplayMethod}
-                onChange={(e) => setConfig({ ...config, salesDisplayMethod: e.target.value })}
-                className="w-full py-3 px-4 bg-slate-50 dark:bg-slate-900 border-none rounded-2xl text-sm text-slate-900 dark:text-white"
-              >
-                <option value="company">عن طريق اسم الشركة</option>
-                <option value="sales_offices">عن طريق مكاتب المبيعات</option>
-              </select>
+                onChange={(v) => setConfig({ ...config, salesDisplayMethod: v })}
+                options={[{ value: 'company', label: 'عن طريق اسم الشركة' }, { value: 'sales_offices', label: 'عن طريق مكاتب المبيعات' }]}
+              />
+            </div>
+          </div>
+
+          {/* طريقة التوصيل */}
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
+            <h3 className="font-bold flex items-center gap-2 mb-4 text-slate-800 dark:text-slate-100">طريقة التوصيل إلى العميل</h3>
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-500 dark:text-slate-400">اختر طريقة البيع/التسليم</label>
+              <CustomSelect
+                value={config.deliveryMethod}
+                onChange={(v) => setConfig({ ...config, deliveryMethod: v })}
+                options={[{ value: 'reps', label: 'البيع عن طريق المناديب' }, { value: 'direct', label: 'البيع المباشر للعملاء' }, { value: 'shipping', label: 'البيع عن طريق شركات الشحن' }]}
+              />
+              <p className="text-[11px] text-muted">
+                هذا الاختيار يحدد الأقسام الظاهرة في القائمة الجانبية وطريقة التعامل مع الطلبيات.
+              </p>
             </div>
           </div>
 
@@ -715,15 +763,20 @@ const SettingsModule: React.FC = () => {
             <h3 className="font-bold flex items-center gap-2 mb-4 text-slate-800 dark:text-slate-100">طريقة الحصول على المنتجات</h3>
             <div className="space-y-2">
               <label className="text-xs font-bold text-slate-500 dark:text-slate-400">اختر مصدر المنتجات</label>
-              <select
+              <CustomSelect
                 value={config.productSource}
-                onChange={(e) => setConfig({ ...config, productSource: e.target.value })}
-                className="w-full py-3 px-4 bg-slate-50 dark:bg-slate-900 border-none rounded-2xl text-sm text-slate-900 dark:text-white"
-              >
-                <option value="factory">عن طريق المصنع</option>
-                <option value="suppliers">عن طريق الموردين</option>
-                <option value="both">الاثنين معاً</option>
-              </select>
+                onChange={(v) => setConfig({ ...config, productSource: v })}
+                options={[{ value: 'factory', label: 'عن طريق المصنع' }, { value: 'suppliers', label: 'عن طريق الموردين' }, { value: 'both', label: 'الاثنين معاً' }]}
+              />
+            </div>
+          </div>
+          {/* سعر البيع الأساسي */}
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
+            <h3 className="font-bold flex items-center gap-2 mb-4 text-slate-800 dark:text-slate-100">تحديد سعر البيع الأساسي</h3>
+            <div className="space-y-2 text-sm">
+              <label className="flex items-center gap-2"><input type="radio" name="salePriceSource" value="product" checked={config.salePriceSource === 'product'} onChange={() => setConfig({...config, salePriceSource: 'product'})} /> سعر البيع المسجل فى إدارة المنتجات</label>
+              <label className="flex items-center gap-2"><input type="radio" name="salePriceSource" value="order" checked={config.salePriceSource === 'order'} onChange={() => setConfig({...config, salePriceSource: 'order'})} /> سعر البيع الموجود فى الطلبيه (يجب كتابة السعر في السكربت/الادخال)</label>
+              <p className="text-[11px] text-slate-500 mt-2">ملاحظة: إذا اخترت "سعر المنتج" فسيتم دائماً استخدام السعر المسجل في بطاقة المنتج، أما إذا اخترت "سعر الطلب" فسيُطلب وجود سعر لكل بند في الاستيراد أو الإدخال اليدوي، ولن يسمح بحفظ أي طلبية تحتوي على بند بدون سعر.</p>
             </div>
           </div>
           {/* Backup Section */}
@@ -803,11 +856,12 @@ const SettingsModule: React.FC = () => {
                 </div>
                 <div className={`space-y-1 ${!config.autoBackup ? 'opacity-40' : ''}`}>
                   <label className="text-[10px] font-bold text-slate-500 mr-2">توقيت النسخ</label>
-                  <select disabled={!config.autoBackup} value={config.backupFrequency} onChange={(e) => setConfig({...config, backupFrequency: e.target.value})} className="w-full py-3 px-4 bg-slate-50 dark:bg-slate-900 border-none rounded-2xl text-sm text-slate-900 dark:text-white">
-                    <option value="hourly">كل ساعة عمل</option>
-                    <option value="daily">يومياً (منتصف الليل)</option>
-                    <option value="weekly">أسبوعياً (كل جمعة)</option>
-                  </select>
+                  <CustomSelect
+                    value={config.backupFrequency}
+                    onChange={(v) => setConfig({...config, backupFrequency: v})}
+                    disabled={!config.autoBackup}
+                    options={[{ value: 'hourly', label: 'كل ساعة عمل' }, { value: 'daily', label: 'يومياً (منتصف الليل)' }, { value: 'weekly', label: 'أسبوعياً (كل جمعة)' }]}
+                  />
                 </div>
               </div>
             </div>
@@ -1040,16 +1094,11 @@ const SettingsModule: React.FC = () => {
             <div className="space-y-4">
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-500 dark:text-slate-400">العملة الافتراضية</label>
-                <select
+                <CustomSelect
                   value={config.currency}
-                  onChange={(e) => setConfig({...config, currency: e.target.value})}
-                  className="w-full py-3 px-4 bg-slate-50 dark:bg-slate-900 border-none rounded-2xl text-sm text-slate-900 dark:text-white"
-                >
-                  <option value="EGP">الجنيه المصري (EGP)</option>
-                  <option value="SAR">الريال السعودي (SAR)</option>
-                  <option value="USD">الدولار الأمريكي (USD)</option>
-                  <option value="AED">الدرهم الإماراتي (AED)</option>
-                </select>
+                  onChange={(v) => setConfig({...config, currency: v})}
+                  options={[{ value: 'EGP', label: 'الجنيه المصري (EGP)' }, { value: 'SAR', label: 'الريال السعودي (SAR)' }, { value: 'USD', label: 'الدولار الأمريكي (USD)' }, { value: 'AED', label: 'الدرهم الإماراتي (AED)' }]}
+                />
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-500 dark:text-slate-400">معدل الضريبة (%)</label>
@@ -1062,14 +1111,11 @@ const SettingsModule: React.FC = () => {
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-500 dark:text-slate-400">ترتيب احتساب الخصم/الضريبة</label>
-                <select
+                <CustomSelect
                   value={config.salesCalcOrder}
-                  onChange={(e) => setConfig({...config, salesCalcOrder: e.target.value})}
-                  className="w-full py-3 px-4 bg-slate-50 dark:bg-slate-900 border-none rounded-2xl text-sm text-slate-900 dark:text-white"
-                >
-                  <option value="discount_then_tax">خصم ثم ضريبة</option>
-                  <option value="tax_then_discount">ضريبة ثم خصم</option>
-                </select>
+                  onChange={(v) => setConfig({...config, salesCalcOrder: v})}
+                  options={[{ value: 'discount_then_tax', label: 'خصم ثم ضريبة' }, { value: 'tax_then_discount', label: 'ضريبة ثم خصم' }]}
+                />
               </div>
             </div>
           </div>

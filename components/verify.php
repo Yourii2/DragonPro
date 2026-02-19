@@ -45,7 +45,13 @@ $activation_updated = false;
 
 $last_check_raw = $license_data['activation_last_check'] ?? '';
 $last_check_ts = $last_check_raw ? strtotime($last_check_raw) : false;
-$should_refresh = ($last_check_ts === false) || ((time() - $last_check_ts) > 86400);
+$input_raw = @file_get_contents('php://input');
+$input_json = $input_raw ? json_decode($input_raw, true) : [];
+$force_flag = false;
+if (is_array($input_json) && !empty($input_json['force'])) $force_flag = true;
+if (isset($_GET['force']) && ($_GET['force'] === '1' || $_GET['force'] === 'true')) $force_flag = true;
+
+$should_refresh = $force_flag || ($last_check_ts !== false && ((time() - $last_check_ts) > 86400));
 
 $activationResult = ['success' => false, 'message' => 'Activation check skipped'];
 if ($should_refresh) {

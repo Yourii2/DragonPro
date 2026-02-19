@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { API_BASE_PATH } from '../services/apiConfig';
+import { translateTxnLabel } from '../services/labelHelpers';
 import Swal from 'sweetalert2';
 
 const formatDate = (d: Date) => d.toISOString().slice(0,10);
@@ -161,7 +162,7 @@ const TotalsReport: React.FC = () => {
   function exportCSV() {
     if (!records || records.length === 0) { Swal.fire('تنبيه', 'لا توجد بيانات للتصدير', 'info'); return; }
     const headers = ['التاريخ','النوع','الوصف','المبلغ','الخزينة'];
-    const rows = records.map((r:any) => [r.date||'', r.type||'', r.desc||'', Number(r.amount||0).toString(), r.treasury||'']);
+    const rows = records.map((r:any) => [r.date||'', translateTxnLabel(r.type, r.desc, r.txn_type), r.desc||'', Number(r.amount||0).toString(), r.treasury||'']);
     const csv = [headers.join(','), ...rows.map(rr => rr.map(c => `"${String(c).replace(/"/g,'""')}"`).join(','))].join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `totals_${startDate}_to_${endDate}.csv`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);

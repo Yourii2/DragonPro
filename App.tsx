@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
 import Login from './components/Login';
@@ -8,14 +8,16 @@ import CRMModule from './components/CRMModule';
 import SRMModule from './components/SRMModule';
 import InventoryModule from './components/InventoryModule';
 import OrdersModule from './components/SalesModule';
+import PrintWaybill from './components/PrintWaybill';
 import AdminModule from './components/AdminModule';
 import FinanceModule from './components/FinanceModule';
 import HRMModule from './components/HRMModule';
 import RepresentativesModule from './components/RepresentativesModule';
 import SettingsModule from './components/SettingsModule';
-import SalesDaily from './components/SalesDaily';
+import SalesDaily from './components/SalesDaily.tsx';
 import SalesUpdateStatus from './components/SalesUpdateStatus';
 import SalesReport from './components/SalesReport';
+import SalesDailyClose from './components/SalesDailyClose';
 import AttendanceModule from './components/AttendanceModule';
 import SalesOffices from './components/SalesOffices';
 import { API_BASE_PATH, testConnection } from './services/apiConfig';
@@ -87,6 +89,61 @@ const App: React.FC = () => {
     return 'غير معروف';
   };
 
+  const verifyInstallation = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE_PATH}/verify.php`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force: true })
+      });
+      const result = await response.json();
+
+      if (result.status === 'not_installed') {
+        setAppStatus('not_installed');
+      } else if (result.status === 'activation_blocked' || result.status === 'activation_expired') {
+        setErrorMessage(result.message || 'ترخيص غير صالح.');
+        setAppStatus('error');
+      } else if (result.status === 'invalid_device' || result.status === 'tampered') {
+        setErrorMessage(result.message || 'تعذر التحقق من الترخيص.');
+        setAppStatus('error');
+      } else if (result.status === 'ok') {
+        // Store settings from backend
+        localStorage.setItem('Dragon_company_name', result.settings.company_name || '');
+        localStorage.setItem('Dragon_company_phone', result.settings.company_phone || '');
+        localStorage.setItem('Dragon_company_address', result.settings.company_address || '');
+        localStorage.setItem('Dragon_company_terms', result.settings.company_terms || '');
+        localStorage.setItem('Dragon_company_logo', result.settings.company_logo || '');
+        localStorage.setItem('Dragon_tax_rate', result.settings.tax_rate || '14');
+        localStorage.setItem('Dragon_currency', result.settings.currency || 'EGP');
+        localStorage.setItem('Dragon_auto_backup', result.settings.auto_backup || 'false');
+        localStorage.setItem('Dragon_backup_freq', result.settings.backup_frequency || 'daily');
+
+        if (result.activation) {
+          localStorage.setItem('Dragon_activation', JSON.stringify({
+            status: formatActivationStatus(result.activation.type, result.activation.account_status, result.activation.is_expired),
+            expiry: result.activation.expiry || 'غير محدد',
+            account_status: result.activation.account_status || 'Active',
+            is_expired: result.activation.is_expired || 'false',
+            last_check: result.activation.last_check || ''
+          }));
+        }
+        
+        setIsLoggedIn(result.is_logged_in);
+        if(result.is_logged_in) {
+          localStorage.setItem('Dragon_user', JSON.stringify(result.user));
+        }
+        setAppStatus('ready');
+      } else {
+        setErrorMessage(result.message || 'An unknown verification error occurred.');
+        setAppStatus('error');
+      }
+    } catch (error) {
+      console.error('Verification error:', error);
+      setErrorMessage('Cannot connect to the server. Please ensure XAMPP is running.');
+      setAppStatus('error');
+    }
+  }, []);
+
   useEffect(() => {
     migrateStorageKeys();
     if (!(window as any).__DragonFetchWrapped) {
@@ -107,11 +164,12 @@ const App: React.FC = () => {
       }) as any;
     }
 
-    const verifyInstallation = async () => {
+    const verifyInstallation = useCallback(async () => {
       try {
         const response = await fetch(`${API_BASE_PATH}/verify.php`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ force: true })
         });
         const result = await response.json();
 
@@ -159,7 +217,7 @@ const App: React.FC = () => {
         setErrorMessage('Cannot connect to the server. Please ensure XAMPP is running.');
         setAppStatus('error');
       }
-    };
+    }, []);
 
     verifyInstallation();
 
@@ -168,8 +226,11 @@ const App: React.FC = () => {
       try {
         const hash = window.location.hash || '';
         if (!hash) return;
-        const cleaned = hash.replace(/^#/, '');
-        const parts = cleaned.split('/');
+        // remove leading '#' and optional leading '/'
+        const cleaned = hash.replace(/^#\/?/, '');
+        // strip query string if present
+        const pathOnly = cleaned.split('?')[0] || '';
+        const parts = pathOnly.split('/');
         const slug = parts[0] || 'dashboard';
         const sub = parts[1] || '';
         setActiveSlug(slug);
@@ -222,7 +283,7 @@ const App: React.FC = () => {
             </ul>
           </div>
           <button 
-            onClick={() => window.location.reload()}
+            onClick={() => verifyInstallation()}
             className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-xl transition-colors"
           >
             إعادة المحاولة
@@ -231,6 +292,13 @@ const App: React.FC = () => {
         </div>
       </div>
     );
+  }
+  // If the app was opened directly on /print_waybill (path or hash), render the print view (standalone)
+  if (typeof window !== 'undefined') {
+    const loc = window.location;
+    const isPath = loc.pathname && loc.pathname.indexOf('/print_waybill') !== -1;
+    const isHash = (loc.hash || '').indexOf('/print_waybill') !== -1 || (loc.hash || '').indexOf('#/print_waybill') !== -1;
+    if (isPath || isHash) return <PrintWaybill />;
   }
 
   if (!isLoggedIn) {
@@ -250,6 +318,8 @@ const App: React.FC = () => {
         return <InventoryModule initialView={activeSubSlug} />;
       case 'orders':
         return <OrdersModule initialView={activeSubSlug} />;
+      case 'print_waybill':
+        return <PrintWaybill />;
       case 'reps':
         return <RepresentativesModule initialView={activeSubSlug} />;
       case 'sales':
@@ -257,6 +327,7 @@ const App: React.FC = () => {
           case 'sales-daily': return <SalesDaily />;
           case 'sales-update-status': return <SalesUpdateStatus />;
           case 'sales-report': return <SalesReport />;
+          case 'close-daily': return <SalesDailyClose />;
           default: return <SalesDaily />;
         }
       case 'hrm':

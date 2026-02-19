@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Wallet, TrendingUp, TrendingDown, ArrowLeftRight, Landmark, Plus, Search, X, Save, Edit, Trash2, Eye, Coins, ArrowDown, ArrowUp, Truck, Printer } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
+import CustomSelect from './CustomSelect';
 
 interface FinanceModuleProps {
   initialView?: string;
@@ -22,6 +23,12 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
   const [transferData, setTransferData] = useState({ amount: '', from_treasury_id: '', to_treasury_id: '', notes: '' });
 
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [detailStartDate, setDetailStartDate] = useState<string>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d.toISOString().slice(0,10);
+  });
+  const [detailEndDate, setDetailEndDate] = useState<string>(() => new Date().toISOString().slice(0,10));
   const [editingTreasury, setEditingTreasury] = useState<any>(null);
   const [selectedTreasury, setSelectedTreasury] = useState<any>(null);
   const currencySymbol = 'ج.م';
@@ -427,26 +434,34 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
     });
   };
 
+  const loadTreasuryTransactions = async (treasuryId: number, startDate?: string, endDate?: string) => {
+    setIsTransactionsLoading(true);
+    setTreasuryTransactions([]);
+    try {
+      let url = `${API_BASE_PATH}/api.php?module=transactions&action=getByTreasuryId&id=${treasuryId}`;
+      if (startDate) url += `&start_date=${encodeURIComponent(startDate)}`;
+      if (endDate) url += `&end_date=${encodeURIComponent(endDate)}`;
+      const response = await fetch(url);
+      const result = await response.json();
+      if (result.success) {
+        setTreasuryTransactions(result.data || []);
+      } else {
+        console.error('Failed to fetch treasury transactions:', result.message);
+        Swal.fire('خطأ', 'فشل في جلب سجل الخزينة.', 'error');
+      }
+    } catch (error) {
+      console.error('Error fetching treasury transactions:', error);
+      Swal.fire('خطأ', 'فشل الاتصال بالخادم.', 'error');
+    } finally {
+      setIsTransactionsLoading(false);
+    }
+  };
+
   const handleViewDetails = async (treasury: any) => {
     setSelectedTreasury(treasury);
     setIsDetailModalOpen(true);
-    setIsTransactionsLoading(true);
-    setTreasuryTransactions([]); // Clear previous data
-    try {
-        const response = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=getByTreasuryId&id=${treasury.id}`);
-        const result = await response.json();
-        if (result.success) {
-            setTreasuryTransactions(result.data || []);
-        } else {
-            console.error("Failed to fetch treasury transactions:", result.message);
-            Swal.fire('خطأ', 'فشل في جلب سجل الخزينة.', 'error');
-        }
-    } catch (error) {
-        console.error("Error fetching treasury transactions:", error);
-        Swal.fire('خطأ', 'فشل الاتصال بالخادم.', 'error');
-    } finally {
-        setIsTransactionsLoading(false);
-    }
+    // Use currently selected detailStartDate/detailEndDate
+    await loadTreasuryTransactions(treasury.id, detailStartDate, detailEndDate);
   };
 
   const getTransactionTypeLabel = (type: string, detailsJson: string | null) => {
@@ -913,6 +928,15 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
               </div>
             </div>
             <div className="p-8 text-right space-y-4">
+               <div className="flex items-center gap-3 justify-between">
+                 <div className="flex items-center gap-2">
+                   <label className="text-xs font-bold text-slate-500">من</label>
+                   <input type="date" value={detailStartDate} onChange={e=>setDetailStartDate(e.target.value)} className="bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm" />
+                   <label className="text-xs font-bold text-slate-500">إلى</label>
+                   <input type="date" value={detailEndDate} onChange={e=>setDetailEndDate(e.target.value)} className="bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm" />
+                   <button onClick={() => selectedTreasury && loadTreasuryTransactions(selectedTreasury.id, detailStartDate, detailEndDate)} className="px-3 py-2 bg-blue-600 text-white rounded-xl text-sm font-black">تحديث</button>
+                 </div>
+               </div>
                <div className="bg-blue-50 dark:bg-blue-900/20 p-6 rounded-2xl flex justify-between items-center">
                    <span className="font-bold text-slate-600 dark:text-slate-400">الرصيد الدفتري الحالي</span>
                   <span className="text-2xl font-black text-blue-600">{selectedTreasury.balance.toLocaleString()} {currencySymbol}</span>
@@ -971,15 +995,12 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-500 mr-2">نوع الحساب</label>
-                <select 
+                <CustomSelect
                   value={formData.type}
-                  onChange={e => setFormData({...formData, type: e.target.value})}
-                  className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
-                >
-                  <option value="نقدي">نقدي (كاش)</option>
-                  <option value="بنكي">حساب بنكي</option>
-                  <option value="محفظة">محفظة إلكترونية</option>
-                </select>
+                  onChange={v => setFormData({...formData, type: v})}
+                  options={[{ value: 'نقدي', label: 'نقدي (كاش)' }, { value: 'بنكي', label: 'حساب بنكي' }, { value: 'محفظة', label: 'محفظة إلكترونية' }]}
+                  className="w-full"
+                />
               </div>
               <button 
                 type="submit"
@@ -1010,7 +1031,16 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
               {modalType === 'deposit' && (
                 <>
                   <div><label className="text-xs font-bold text-slate-500">المبلغ</label><input type="number" required value={depositData.amount} onChange={e => setDepositData({...depositData, amount: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1" /></div>
-                  <div><label className="text-xs font-bold text-slate-500">إلى خزينة</label><select required value={depositData.treasury_id} onChange={e => setDepositData({...depositData, treasury_id: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1"><option value="">اختر خزينة</option>{treasuries.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-500">إلى خزينة</label>
+                    <CustomSelect
+                      required
+                      value={depositData.treasury_id}
+                      onChange={v => setDepositData({...depositData, treasury_id: v})}
+                      options={[{ value: '', label: 'اختر خزينة' }, ...treasuries.map((t:any) => ({ value: String(t.id), label: t.name }))]}
+                      className="w-full"
+                    />
+                  </div>
                   <div><label className="text-xs font-bold text-slate-500">السبب/البيان</label><input type="text" required value={depositData.notes} onChange={e => setDepositData({...depositData, notes: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1" /></div>
                 </>
               )}
@@ -1018,7 +1048,16 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
               {modalType === 'expense' && (
                 <>
                   <div><label className="text-xs font-bold text-slate-500">المبلغ</label><input type="number" required value={expenseData.amount} onChange={e => setExpenseData({...expenseData, amount: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1" /></div>
-                  <div><label className="text-xs font-bold text-slate-500">من خزينة</label><select required value={expenseData.treasury_id} onChange={e => setExpenseData({...expenseData, treasury_id: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1"><option value="">اختر خزينة</option>{treasuries.map(t => <option key={t.id} value={t.id}>{t.name} (متاح: {t.balance.toLocaleString()})</option>)}</select></div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-500">من خزينة</label>
+                    <CustomSelect
+                      required
+                      value={expenseData.treasury_id}
+                      onChange={v => setExpenseData({...expenseData, treasury_id: v})}
+                      options={[{ value: '', label: 'اختر خزينة' }, ...treasuries.map((t:any) => ({ value: String(t.id), label: `${t.name} (متاح: ${t.balance.toLocaleString()})` }))]}
+                      className="w-full"
+                    />
+                  </div>
                   <div><label className="text-xs font-bold text-slate-500">السبب/البيان</label><input type="text" required value={expenseData.notes} onChange={e => setExpenseData({...expenseData, notes: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1" /></div>
                 </>
               )}
@@ -1026,8 +1065,26 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
               {modalType === 'payment' && (
                 <>
                   <div><label className="text-xs font-bold text-slate-500">المبلغ المدفوع</label><input type="number" required value={paymentData.amount} onChange={e => setPaymentData({...paymentData, amount: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1" /></div>
-                  <div><label className="text-xs font-bold text-slate-500">من خزينة</label><select required value={paymentData.treasury_id} onChange={e => setPaymentData({...paymentData, treasury_id: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1"><option value="">اختر خزينة</option>{treasuries.map(t => <option key={t.id} value={t.id}>{t.name} (متاح: {t.balance.toLocaleString()})</option>)}</select></div>
-                  <div><label className="text-xs font-bold text-slate-500">إلى المورد</label><select required value={paymentData.supplier_id} onChange={e => setPaymentData({...paymentData, supplier_id: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1"><option value="">اختر مورد</option>{suppliers.map(s => <option key={s.id} value={s.id}>{s.name} (رصيده: {s.balance?.toLocaleString() || 0})</option>)}</select></div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-500">من خزينة</label>
+                    <CustomSelect
+                      required
+                      value={paymentData.treasury_id}
+                      onChange={v => setPaymentData({...paymentData, treasury_id: v})}
+                      options={[{ value: '', label: 'اختر خزينة' }, ...treasuries.map((t:any) => ({ value: String(t.id), label: `${t.name} (متاح: ${t.balance.toLocaleString()})` }))]}
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-500">إلى المورد</label>
+                    <CustomSelect
+                      required
+                      value={paymentData.supplier_id}
+                      onChange={v => setPaymentData({...paymentData, supplier_id: v})}
+                      options={[{ value: '', label: 'اختر مورد' }, ...suppliers.map((s:any) => ({ value: String(s.id), label: `${s.name} (رصيده: ${s.balance?.toLocaleString() || 0})` }))]}
+                      className="w-full"
+                    />
+                  </div>
                   <div><label className="text-xs font-bold text-slate-500">ملاحظات</label><input type="text" value={paymentData.notes} onChange={e => setPaymentData({...paymentData, notes: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1" /></div>
                 </>
               )}
@@ -1036,8 +1093,26 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
                 <>
                   <div><label className="text-xs font-bold text-slate-500">المبلغ المحول</label><input type="number" required value={transferData.amount} onChange={e => setTransferData({...transferData, amount: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1" /></div>
                   <div className="grid grid-cols-2 gap-4">
-                    <div><label className="text-xs font-bold text-slate-500">من خزينة</label><select required value={transferData.from_treasury_id} onChange={e => setTransferData({...transferData, from_treasury_id: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1"><option value="">اختر المصدر</option>{treasuries.map(t => <option key={t.id} value={t.id}>{t.name} (متاح: {t.balance.toLocaleString()})</option>)}</select></div>
-                    <div><label className="text-xs font-bold text-slate-500">إلى خزينة</label><select required value={transferData.to_treasury_id} onChange={e => setTransferData({...transferData, to_treasury_id: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1"><option value="">اختر الوجهة</option>{treasuries.filter(t => t.id != transferData.from_treasury_id).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-500">من خزينة</label>
+                      <CustomSelect
+                        required
+                        value={transferData.from_treasury_id}
+                        onChange={v => setTransferData({...transferData, from_treasury_id: v})}
+                        options={[{ value: '', label: 'اختر المصدر' }, ...treasuries.map((t:any) => ({ value: String(t.id), label: `${t.name} (متاح: ${t.balance.toLocaleString()})` }))]}
+                        className="w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-500">إلى خزينة</label>
+                      <CustomSelect
+                        required
+                        value={transferData.to_treasury_id}
+                        onChange={v => setTransferData({...transferData, to_treasury_id: v})}
+                        options={[{ value: '', label: 'اختر الوجهة' }, ...treasuries.filter((t:any) => String(t.id) !== transferData.from_treasury_id).map((t:any) => ({ value: String(t.id), label: t.name }))]}
+                        className="w-full"
+                      />
+                    </div>
                   </div>
                   <div><label className="text-xs font-bold text-slate-500">السبب/البيان</label><input type="text" required value={transferData.notes} onChange={e => setTransferData({...transferData, notes: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1" /></div>
                 </>
@@ -1071,17 +1146,12 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-500">النوع</label>
-                  <select
+                  <CustomSelect
                     value={accountForm.type}
-                    onChange={e => setAccountForm({ ...accountForm, type: e.target.value })}
-                    className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1"
-                  >
-                    <option value="asset">أصل</option>
-                    <option value="liability">التزام</option>
-                    <option value="equity">حقوق ملكية</option>
-                    <option value="income">إيراد</option>
-                    <option value="expense">مصروف</option>
-                  </select>
+                    onChange={v => setAccountForm({ ...accountForm, type: v })}
+                    options={[{ value: 'asset', label: 'أصل' }, { value: 'liability', label: 'التزام' }, { value: 'equity', label: 'حقوق ملكية' }, { value: 'income', label: 'إيراد' }, { value: 'expense', label: 'مصروف' }]}
+                    className="w-full"
+                  />
                 </div>
               </div>
               <div>
@@ -1096,16 +1166,12 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-500">الحساب الأب (اختياري)</label>
-                <select
+                <CustomSelect
                   value={accountForm.parent_id}
-                  onChange={e => setAccountForm({ ...accountForm, parent_id: e.target.value })}
-                  className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1"
-                >
-                  <option value="">بدون</option>
-                  {accounts.filter(a => !editingAccount || a.id !== editingAccount.id).map(a => (
-                    <option key={a.id} value={a.id}>{a.code} - {a.name}</option>
-                  ))}
-                </select>
+                  onChange={v => setAccountForm({ ...accountForm, parent_id: v })}
+                  options={[{ value: '', label: 'بدون' }, ...accounts.filter((a:any) => !editingAccount || a.id !== editingAccount.id).map((a:any) => ({ value: String(a.id), label: `${a.code} - ${a.name}` }))]}
+                  className="w-full"
+                />
               </div>
               <button type="submit" className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black shadow-xl shadow-blue-500/30 hover:bg-blue-700 transition-all flex items-center justify-center gap-2">
                 <Save size={18} /> حفظ الحساب
@@ -1168,16 +1234,12 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
                     {journalLines.map((line, idx) => (
                       <tr key={idx}>
                         <td className="px-4 py-3">
-                          <select
+                          <CustomSelect
                             value={line.account_id}
-                            onChange={e => updateJournalLine(idx, 'account_id', e.target.value)}
-                            className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm"
-                          >
-                            <option value="">اختر الحساب</option>
-                            {accounts.map(a => (
-                              <option key={a.id} value={a.id}>{a.code} - {a.name}</option>
-                            ))}
-                          </select>
+                            onChange={v => updateJournalLine(idx, 'account_id', v)}
+                            options={[{ value: '', label: 'اختر الحساب' }, ...accounts.map((a:any) => ({ value: String(a.id), label: `${a.code} - ${a.name}` }))]}
+                            className="w-full"
+                          />
                         </td>
                         <td className="px-4 py-3">
                           <input

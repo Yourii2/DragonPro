@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { API_BASE_PATH } from '../services/apiConfig';
 import Swal from 'sweetalert2';
+import { translateTxnLabel } from '../services/labelHelpers';
 
 const formatDate = (d: Date) => d.toISOString().slice(0,10);
 
@@ -103,36 +104,7 @@ const DailyReport: React.FC = () => {
     return { startBalance, endBalance, totalRevenue, totalExpense, totalPayments, totalDeposits };
   }, [treasuryHistory, records]);
 
-  const translateLabel = (typeVal: any, descVal: any, txnVal?: any) => {
-    const t = (typeVal || txnVal || descVal || '').toString().toLowerCase();
-    const map: Record<string,string> = {
-      'expense': 'مصروف',
-      'revenue': 'إيراد',
-      'payment_in': 'إيداع',
-      'payment_out': 'دفعة',
-      'sale': 'مبيعات',
-      'deposit': 'إيداع',
-      'supplier_payment': 'دفعة مورد',
-      'transfer_in': 'تحويل وارد',
-      'transfer_out': 'تحويل صادر',
-      'rep_payment_in': 'دفعة واردة من مندوب',
-      'rep_payment_out': 'دفعة للمندوب',
-      'rep_settlement': 'تسوية مندوب',
-      'payment': 'دفع/قبض',
-      'paymentin': 'إيداع',
-      'paymentout': 'دفعة'
-    };
-    // try exact match
-    if (map[t]) return map[t];
-    // check substrings
-    for (const k of Object.keys(map)) {
-      if (t.includes(k)) return map[k];
-    }
-    // fallback: if desc is Arabic already, return it; else return original
-    const descStr = (descVal || '').toString();
-    if (/[\u0600-\u06FF]/.test(descStr)) return descStr;
-    return descStr || (typeVal || txnVal || '').toString();
-  };
+  const translateLabel = (typeVal: any, descVal: any, txnVal?: any) => translateTxnLabel(typeVal, descVal, txnVal);
 
   // compute order-based metrics for the day
   const orderMetrics = React.useMemo(() => {
@@ -207,7 +179,7 @@ const DailyReport: React.FC = () => {
   }
 
   function printReport() {
-    const txnRows = records.map(r=>`<tr><td>${r.date||''}</td><td>${translateLabel(r.type, r.desc, r.txn_type)}</td><td>${((r.desc&& /[\u0600-\u06FF]/.test(r.desc)) ? r.desc : translateLabel(r.desc, r.desc, r.txn_type))}</td><td style="text-align:left">${Number(r.amount||0).toLocaleString()}</td><td>${r.treasury||''}</td></tr>`).join('');
+  const txnRows = records.map(r=>`<tr><td>${r.date||''}</td><td>${translateLabel(r.type, r.desc, r.txn_type)}</td><td>${((r.desc&& /[\u0600-\u06FF]/.test(r.desc)) ? r.desc : translateLabel(r.desc, r.desc, r.txn_type))}</td><td style="text-align:left">${Number(r.amount||0).toLocaleString()}</td><td>${r.treasury||''}</td></tr>`).join('');
     const metricsHtml = `<div style="margin-top:8px;">عدد الطلبيات المسلمة: ${orderMetrics.deliveredOrders} — عدد الطلبيات المرتجعة: ${orderMetrics.returnedOrders} — إجمالي القطع المسلمة: ${orderMetrics.deliveredPieces.toLocaleString()} — إجمالي القطع المرتجعة: ${orderMetrics.returnedPieces.toLocaleString()} — إجمالي المبيعات: ${Number(orderMetrics.salesAmount||0).toLocaleString()} — إجمالي المرتجعات: ${Number(orderMetrics.returnsAmount||0).toLocaleString()} — إجمالي المصروفات: ${Number(orderMetrics.expenses||0).toLocaleString()} — إجمالي دفعات للموردين: ${Number(orderMetrics.supplierPayments||0).toLocaleString()} — إجمالي الإيداعات: ${Number(orderMetrics.deposits||0).toLocaleString()}</div>`;
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>تقرير اليومية ${date}</title><style>body{font-family: Arial, "Noto Naskh Arabic", sans-serif; direction:rtl; padding:20px;} table{width:100%; border-collapse:collapse; font-size:12px;} th,td{border:1px solid #333; padding:6px; text-align:right;} th{background:#f3f4f6;} .summary{display:block; margin-bottom:12px;}</style></head><body><h1 style="text-align:center">تقرير اليومية</h1><div>التاريخ: ${date}</div><div class="summary"><div>رصيد البداية: ${totals.startBalance.toLocaleString()}</div><div>رصيد النهاية: ${totals.endBalance.toLocaleString()}</div><div>إجمالي الإيرادات: ${totals.totalRevenue.toLocaleString()}</div><div>إجمالي المصروفات: ${totals.totalExpense.toLocaleString()}</div>${metricsHtml}</div><table><thead><tr><th>التاريخ</th><th>النوع</th><th>الوصف</th><th>المبلغ</th><th>الخزينة</th></tr></thead><tbody>${txnRows}</tbody></table></body></html>`;
     const w = window.open('', '_blank', 'width=900,height=700'); if (!w) return; w.document.write(html); w.document.close(); setTimeout(()=>w.print(), 500);
@@ -223,13 +195,27 @@ const DailyReport: React.FC = () => {
         <button onClick={printReport} className="px-3 py-2 bg-emerald-600 text-white rounded">طباعة</button>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
-        <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>رصيد البداية<br/><div className="font-black">{totals.startBalance.toLocaleString()}</div></div>
-        <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>إجمالي الإيرادات<br/><div className="font-black">{totals.totalRevenue.toLocaleString()}</div></div>
-        <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>إجمالي المصروفات<br/><div className="font-black">{totals.totalExpense.toLocaleString()}</div></div>
-        <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>إجمالي الإيداعات<br/><div className="font-black">{totals.totalDeposits.toLocaleString()}</div></div>
-        <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>إجمالي الدفعات<br/><div className="font-black">{totals.totalPayments.toLocaleString()}</div></div>
-        <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>رصيد النهاية<br/><div className="font-black">{totals.endBalance.toLocaleString()}</div></div>
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+        <div className="p-4 rounded shadow card border border-card text-right" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+          <div className="text-sm text-muted">تاريخ اليومية</div>
+          <div className="font-black">{date}</div>
+        </div>
+        <div className="p-4 rounded shadow card border border-card text-right" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+          <div className="text-sm text-muted">رصيد الخزينة في بداية اليومية</div>
+          <div className="font-black">{totals.startBalance.toLocaleString()} { /* currency symbol displayed elsewhere */ }</div>
+        </div>
+        <div className="p-4 rounded shadow card border border-card text-right" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+          <div className="text-sm text-muted">إجمالي المبالغ المستلمة</div>
+          <div className="font-black">{totals.totalDeposits.toLocaleString()}</div>
+        </div>
+        <div className="p-4 rounded shadow card border border-card text-right" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+          <div className="text-sm text-muted">إجمالي المبالغ المُسلمة</div>
+          <div className="font-black">{totals.totalPayments.toLocaleString()}</div>
+        </div>
+        <div className="p-4 rounded shadow card border border-card text-right" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+          <div className="text-sm text-muted">رصيد الخزينة الحالي / عند نهاية التقفيل</div>
+          <div className="font-black">{totals.endBalance.toLocaleString()}</div>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 mt-2">

@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import PermissionsAdmin from './PermissionsAdmin';
 import { Lock, Search, Globe, Users as UsersIcon, Shield, ChevronRight, Plus, X, Save, Edit, Trash2, Eye, UserPlus } from 'lucide-react';
 import Swal from 'sweetalert2';
+import CustomSelect from './CustomSelect';
 import { API_BASE_PATH } from '../services/apiConfig';
 
 interface AdminModuleProps {
@@ -33,12 +34,18 @@ const AdminModule: React.FC<AdminModuleProps> = ({ initialView }) => {
     if (initialView) setActiveTab(initialView);
 
     // Fetch users from API
+    const isRepresentative = (u: any) => {
+      const r = (u?.role || '').toString().toLowerCase();
+      return r === 'representative' || r.includes('مندوب');
+    };
+
     const fetchUsers = async () => {
       try {
         const response = await fetch(`${API_BASE_PATH}/api.php?module=users&action=getAll`);
         const result = await response.json();
         if (result.success) {
-          setUsers(result.data || []);
+          const list = Array.isArray(result.data) ? result.data.filter((u:any) => !isRepresentative(u)) : [];
+          setUsers(list);
           const defaults:any = {};
           pages.forEach(p => defaults[p.slug] = false);
           setPermissionsMap(defaults);
@@ -97,14 +104,7 @@ const AdminModule: React.FC<AdminModuleProps> = ({ initialView }) => {
       
       if (result.success) {
         // Refresh users list
-        const fetchUsers = async () => {
-          const response = await fetch(`${API_BASE_PATH}/api.php?module=users&action=getAll`);
-          const result = await response.json();
-          if (result.success) {
-            setUsers(result.data);
-          }
-        };
-        fetchUsers();
+        await fetchUsers();
         setIsModalOpen(false);
       } else {
         Swal.fire({
@@ -150,14 +150,7 @@ const AdminModule: React.FC<AdminModuleProps> = ({ initialView }) => {
           
           if (deleteResult.success) {
             // Refresh users list
-            const fetchUsers = async () => {
-              const response = await fetch(`${API_BASE_PATH}/api.php?module=users&action=getAll`);
-              const result = await response.json();
-              if (result.success) {
-                setUsers(result.data);
-              }
-            };
-            fetchUsers();
+            await fetchUsers();
             Swal.fire(
               'تم الحذف!',
               `تم حذف المستخدم "${user.name}" بنجاح.`,
@@ -324,15 +317,16 @@ const AdminModule: React.FC<AdminModuleProps> = ({ initialView }) => {
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-500 mr-2">الدور الوظيفي</label>
-                <select 
+                <CustomSelect
                   value={formData.role}
-                  onChange={e => setFormData({...formData, role: e.target.value})}
-                  className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
-                >
-                  <option value="representative">مندوب مبيعات</option>
-                  <option value="accountant">محاسب</option>
-                  <option value="admin">مدير نظام</option>
-                </select>
+                  onChange={v => setFormData({...formData, role: v})}
+                  options={[
+                    { value: 'representative', label: 'مندوب مبيعات' },
+                    { value: 'accountant', label: 'محاسب' },
+                    { value: 'admin', label: 'مدير نظام' }
+                  ]}
+                  className="w-full"
+                />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">

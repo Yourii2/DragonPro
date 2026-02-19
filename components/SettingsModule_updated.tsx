@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
+import CustomSelect from './CustomSelect';
 
 const SettingsModule: React.FC = () => {
   const [isSaved, setIsSaved] = useState(false);
@@ -303,11 +304,12 @@ const SettingsModule: React.FC = () => {
                 </div>
                 <div className={`space-y-1 ${!config.autoBackup ? 'opacity-40' : ''}`}>
                   <label className="text-[10px] font-bold text-slate-500 mr-2">توقيت النسخ</label>
-                  <select disabled={!config.autoBackup} value={config.backupFrequency} onChange={(e) => setConfig({...config, backupFrequency: e.target.value})} className="w-full py-3 px-4 bg-slate-50 dark:bg-slate-900 border-none rounded-2xl text-sm text-slate-900 dark:text-white">
-                    <option value="hourly">كل ساعة عمل</option>
-                    <option value="daily">يومياً (منتصف الليل)</option>
-                    <option value="weekly">أسبوعياً (كل جمعة)</option>
-                  </select>
+                  <CustomSelect
+                    value={config.backupFrequency}
+                    onChange={(v) => setConfig({...config, backupFrequency: v})}
+                    disabled={!config.autoBackup}
+                    options={[{ value: 'hourly', label: 'كل ساعة عمل' }, { value: 'daily', label: 'يومياً (منتصف الليل)' }, { value: 'weekly', label: 'أسبوعياً (كل جمعة)' }]}
+                  />
                 </div>
               </div>
             </div>
@@ -336,16 +338,17 @@ const SettingsModule: React.FC = () => {
             <div className="space-y-4">
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-500 dark:text-slate-400">العملة الافتراضية</label>
-                <select
+                <CustomSelect
                   value={config.currency}
-                  onChange={(e) => setConfig({...config, currency: e.target.value})}
-                  className="w-full py-3 px-4 bg-slate-50 dark:bg-slate-900 border-none rounded-2xl text-sm text-slate-900 dark:text-white"
-                >
-                  <option value="EGP">الجنيه المصري (EGP)</option>
-                  <option value="SAR">الريال السعودي (SAR)</option>
-                  <option value="USD">الدولار الأمريكي (USD)</option>
-                  <option value="AED">الدرهم الإماراتي (AED)</option>
-                </select>
+                  onChange={(v) => setConfig({...config, currency: v})}
+                  options={[
+                    { value: 'EGP', label: 'الجنيه المصري (EGP)' },
+                    { value: 'SAR', label: 'الريال السعودي (SAR)' },
+                    { value: 'USD', label: 'الدولار الأمريكي (USD)' },
+                    { value: 'AED', label: 'الدرهم الإماراتي (AED)' }
+                  ]}
+                  className="w-full"
+                />
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-500 dark:text-slate-400">معدل الضريبة (%)</label>

@@ -4,6 +4,7 @@ import { Plus, Edit, Trash2, X, Save, Eye, History, Printer } from 'lucide-react
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../../services/apiConfig';
 import { openPrintWindow } from '../../services/printUtils';
+import CustomSelect from '../CustomSelect';
 
 const FabricsPage = () => {
 	const [fabrics, setFabrics] = useState([]);
@@ -229,29 +230,55 @@ const FabricsPage = () => {
 	};
 
 	const safeDetails = (notes: any) => {
-		if (!notes) return '-';
-		if (typeof notes !== 'string') return String(notes);
-		const s = notes.trim();
-		if (!s) return '-';
-		try {
-			const obj = JSON.parse(s);
-			if (obj && typeof obj === 'object') {
-				const o: any = obj;
-				if (o.cutting_order_code) {
-					const parts: string[] = [`أمر قص: ${o.cutting_order_code}`];
-					if (o.cut_quantity != null) parts.push(`كمية قص: ${o.cut_quantity}`);
-					if (o.consumption_per_piece != null) parts.push(`استهلاك/قطعة: ${o.consumption_per_piece}`);
-					if (o.total_consumption != null) parts.push(`إجمالي الاستهلاك: ${o.total_consumption}`);
-					if (o.factory_product_id != null) parts.push(`رقم المنتج: ${o.factory_product_id}`);
-					return parts.join(' | ');
-				}
-				if (o.name) return o.name;
-			}
-			return '-';
-		} catch {
-			return s;
-		}
-	};
+	    if (!notes) return '-';
+	    if (typeof notes !== 'string') return formatDetailsFromObject(notes);
+	    const s = notes.trim();
+	    if (!s) return '-';
+	    try {
+	      const obj = JSON.parse(s);
+	      if (obj && typeof obj === 'object') return formatDetailsFromObject(obj);
+	      return String(obj);
+	    } catch {
+	      return s;
+	    }
+	  };
+
+	  const formatDetailsFromObject = (obj: any) => {
+	    if (!obj || typeof obj !== 'object') return '-';
+	    if (obj.notes) return String(obj.notes);
+	    if (obj.name && !obj.itemType) return String(obj.name);
+	    if (obj.itemType || obj.productId || obj.qty || obj.quantity) {
+	      const parts: string[] = [];
+	      if (obj.name) parts.push(`المنتج: ${obj.name}`);
+	      if (obj.color) parts.push(`اللون: ${obj.color}`);
+	      if (obj.size) parts.push(`المقاس: ${obj.size}`);
+	      if (obj.qty || obj.quantity) parts.push(`الكمية: ${Number(obj.qty||obj.quantity||0)}`);
+	      if (obj.costPrice || obj.cost_price) parts.push(`سعر التكلفة: ${Number(obj.costPrice||obj.cost_price||0)}`);
+	      if (obj.sellingPrice || obj.selling_price) parts.push(`سعر البيع: ${Number(obj.sellingPrice||obj.selling_price||0)}`);
+	      if (obj.barcode) parts.push(`الباركود: ${obj.barcode}`);
+	      if (obj.productId) parts.push(`معرّف المنتج: ${obj.productId}`);
+	      return parts.length ? parts.join(' | ') : '-';
+	    }
+
+	    const parts: string[] = [];
+	    const pushNum = (label: string, value: any) => {
+	      if (value === null || value === undefined || value === '') return;
+	      const n = Number(value);
+	      parts.push(Number.isFinite(n) ? `${label}: ${n}` : `${label}: ${String(value)}`);
+	    };
+	    const pushText = (label: string, value: any) => {
+	      if (value === null || value === undefined || value === '') return;
+	      parts.push(`${label}: ${String(value)}`);
+	    };
+
+	    pushNum('أمر قص', obj.cutting_order_id);
+	    pushNum('مرحلة', obj.stage_id);
+	    pushNum('الكمية', obj.qty ?? obj.quantity);
+	    pushNum('تكلفة الوحدة', obj.unit_cost);
+	    pushText('السبب', obj.reason);
+
+	    return parts.length ? parts.join(' | ') : '-';
+	  };
 
 	return (
 		<div className="p-8">
@@ -268,7 +295,7 @@ const FabricsPage = () => {
 						<tr>
 							<th className="px-6 py-4 font-bold">الاسم</th>
 							<th className="px-6 py-4 font-bold">الكود</th>
-								<th className="px-6 py-4 font-bold">المخزن</th>
+							<th className="px-6 py-4 font-bold">المخزن</th>
 							<th className="px-6 py-4 font-bold">اللون</th>
 							<th className="px-6 py-4 font-bold">الكمية الحالية</th>
 							<th className="px-6 py-4 font-bold">سعر التكلفة</th>
@@ -395,12 +422,14 @@ const FabricsPage = () => {
 								</div>
 								<div className="space-y-1 md:col-span-2">
 									<label className="text-xs font-bold text-slate-500 mr-2">المخزن</label>
-									<select name="warehouse_id" value={form.warehouse_id === '' ? '' : String(form.warehouse_id)} onChange={handleChange} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white" required>
-										<option value="">اختر المخزن</option>
-										{warehouses.map(w => (
-											<option key={w.id} value={String(w.id)}>{w.name}</option>
-										))}
-									</select>
+									<CustomSelect
+										value={form.warehouse_id === '' ? '' : String(form.warehouse_id)}
+										onChange={v => handleChange({ target: { name: 'warehouse_id', value: v } } as any)}
+										options={warehouses.map(w => ({ value: String(w.id), label: w.name }))}
+										placeholder="اختر المخزن"
+										disabled={false}
+										className=""
+									/>
 									{warehouses.length === 0 && (
 										<p className="text-[11px] text-rose-600 mt-1">لا توجد مخازن. أضف مخزنًا أولاً من إعدادات/المخازن.</p>
 									)}

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { CalendarDays, Fingerprint, Plus, RefreshCw, Save, Upload } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
+import CustomSelect from './CustomSelect';
 
 const dayOptions = [
   { value: 0, label: 'الأحد' },
@@ -421,33 +422,39 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
               </div>
               <div className="space-y-1">
                 <label className="text-[11px] text-muted">النوع</label>
-                <select
-                  className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2"
+                <CustomSelect
                   value={deviceForm.vendor}
-                  onChange={e => {
-                    const nextVendor = e.target.value;
+                  onChange={v => {
+                    const nextVendor = v;
                     setDeviceForm(prev => ({
                       ...prev,
                       vendor: nextVendor,
                       driver: prev.driver ? prev.driver : inferDefaultDriver(nextVendor)
                     }));
                   }}
-                >
-                <option value="hikvision">Hikvision</option>
-                <option value="zkteco">ZKTeco</option>
-                <option value="adms">ADMS</option>
-                <option value="other">أخرى</option>
-              </select>
+                  options={[
+                    { value: 'hikvision', label: 'Hikvision' },
+                    { value: 'zkteco', label: 'ZKTeco' },
+                    { value: 'adms', label: 'ADMS' },
+                    { value: 'other', label: 'أخرى' }
+                  ]}
+                  className="w-full"
+                />
               </div>
 
               <div className="space-y-1">
                 <label className="text-[11px] text-muted">Driver</label>
-                <select className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2" value={deviceForm.driver} onChange={e => setDeviceForm({ ...deviceForm, driver: e.target.value })}>
-                  <option value="adms_push">{driverLabels.adms_push}</option>
-                  <option value="hikvision_isapi">{driverLabels.hikvision_isapi}</option>
-                  <option value="http_json_pull">{driverLabels.http_json_pull}</option>
-                  <option value="manual">{driverLabels.manual}</option>
-                </select>
+                <CustomSelect
+                  value={deviceForm.driver}
+                  onChange={v => setDeviceForm({ ...deviceForm, driver: v })}
+                  options={[
+                    { value: 'adms_push', label: driverLabels.adms_push },
+                    { value: 'hikvision_isapi', label: driverLabels.hikvision_isapi },
+                    { value: 'http_json_pull', label: driverLabels.http_json_pull },
+                    { value: 'manual', label: driverLabels.manual }
+                  ]}
+                  className="w-full"
+                />
               </div>
 
               <div className="space-y-1 col-span-2">
@@ -503,10 +510,12 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
           <div className="p-6 rounded-3xl border border-card shadow-sm card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
             <h3 className="font-black mb-4">سحب السجلات (Pull Sync)</h3>
             <div className="grid grid-cols-1 gap-3 text-xs">
-              <select className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2" value={pullForm.device_id} onChange={e => setPullForm({ ...pullForm, device_id: e.target.value })}>
-                <option value="">اختر الجهاز</option>
-                {devices.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-              </select>
+              <CustomSelect
+                value={String(pullForm.device_id || '')}
+                onChange={v => setPullForm({ ...pullForm, device_id: v })}
+                options={[{ value: '', label: 'اختر الجهاز' }, ...devices.map((d:any)=>({ value: String(d.id), label: d.name }))]}
+                className="w-full"
+              />
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-[11px] text-muted">من</label>
@@ -533,14 +542,18 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
           <div className="p-6 rounded-3xl border border-card shadow-sm card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
             <h3 className="font-black mb-4">ربط الموظفين بالأجهزة</h3>
             <div className="grid grid-cols-1 gap-3 text-xs">
-              <select className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2" value={deviceUserForm.device_id} onChange={e => setDeviceUserForm({ ...deviceUserForm, device_id: e.target.value })}>
-                <option value="">اختر الجهاز</option>
-                {devices.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-              </select>
-              <select className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2" value={deviceUserForm.employee_id} onChange={e => setDeviceUserForm({ ...deviceUserForm, employee_id: e.target.value })}>
-                <option value="">اختر الموظف</option>
-                {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
-              </select>
+              <CustomSelect
+                value={String(deviceUserForm.device_id || '')}
+                onChange={v => setDeviceUserForm({ ...deviceUserForm, device_id: v })}
+                options={[{ value: '', label: 'اختر الجهاز' }, ...devices.map((d:any)=>({ value: String(d.id), label: d.name }))]}
+                className="w-full"
+              />
+              <CustomSelect
+                value={String(deviceUserForm.employee_id || '')}
+                onChange={v => setDeviceUserForm({ ...deviceUserForm, employee_id: v })}
+                options={[{ value: '', label: 'اختر الموظف' }, ...employees.map((emp:any)=>({ value: String(emp.id), label: emp.name }))]}
+                className="w-full"
+              />
               <div className="space-y-1">
                 <label className="text-[11px] text-muted">رقم المستخدم على الجهاز</label>
                 <input className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2" placeholder="رقم المستخدم على الجهاز" value={deviceUserForm.device_user_id} onChange={e => setDeviceUserForm({ ...deviceUserForm, device_user_id: e.target.value })} />
@@ -569,14 +582,18 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
           <div className="p-6 rounded-3xl border border-card shadow-sm card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
             <h3 className="font-black mb-4">ربط العمال بالأجهزة</h3>
             <div className="grid grid-cols-1 gap-3 text-xs">
-              <select className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2" value={deviceWorkerForm.device_id} onChange={e => setDeviceWorkerForm({ ...deviceWorkerForm, device_id: e.target.value })}>
-                <option value="">اختر الجهاز</option>
-                {devices.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-              </select>
-              <select className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2" value={deviceWorkerForm.worker_id} onChange={e => setDeviceWorkerForm({ ...deviceWorkerForm, worker_id: e.target.value })}>
-                <option value="">اختر العامل</option>
-                {workers.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-              </select>
+              <CustomSelect
+                value={String(deviceWorkerForm.device_id || '')}
+                onChange={v => setDeviceWorkerForm({ ...deviceWorkerForm, device_id: v })}
+                options={[{ value: '', label: 'اختر الجهاز' }, ...devices.map((d:any)=>({ value: String(d.id), label: d.name }))]}
+                className="w-full"
+              />
+              <CustomSelect
+                value={String(deviceWorkerForm.worker_id || '')}
+                onChange={v => setDeviceWorkerForm({ ...deviceWorkerForm, worker_id: v })}
+                options={[{ value: '', label: 'اختر العامل' }, ...workers.map((w:any)=>({ value: String(w.id), label: w.name }))]}
+                className="w-full"
+              />
               <div className="space-y-1">
                 <label className="text-[11px] text-muted">رقم المستخدم على الجهاز</label>
                 <input className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2" placeholder="رقم المستخدم على الجهاز" value={deviceWorkerForm.device_user_id} onChange={e => setDeviceWorkerForm({ ...deviceWorkerForm, device_user_id: e.target.value })} />
@@ -773,23 +790,30 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
             <div className="grid grid-cols-2 gap-3 text-xs">
               <div className="space-y-1">
                 <label className="text-[11px] text-muted">الموظف</label>
-                <select className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2" value={scheduleForm.employee_id} onChange={e => setScheduleForm({ ...scheduleForm, employee_id: e.target.value })}>
-                  <option value="">اختر الموظف</option>
-                  {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
-                </select>
+                <CustomSelect
+                  value={scheduleForm.employee_id ? String(scheduleForm.employee_id) : ''}
+                  onChange={v => setScheduleForm({ ...scheduleForm, employee_id: v })}
+                  options={[{ value: '', label: 'اختر الموظف' }, ...employees.map(emp => ({ value: String(emp.id), label: emp.name }))]}
+                  className="w-full"
+                />
               </div>
               <div className="space-y-1">
                 <label className="text-[11px] text-muted">الوردية</label>
-                <select className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2" value={scheduleForm.shift_id} onChange={e => setScheduleForm({ ...scheduleForm, shift_id: e.target.value })}>
-                  <option value="">اختر الوردية</option>
-                  {shifts.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
+                <CustomSelect
+                  value={scheduleForm.shift_id ? String(scheduleForm.shift_id) : ''}
+                  onChange={v => setScheduleForm({ ...scheduleForm, shift_id: v })}
+                  options={[{ value: '', label: 'اختر الوردية' }, ...shifts.map((s:any) => ({ value: String(s.id), label: s.name }))]}
+                  className="w-full"
+                />
               </div>
               <div className="space-y-1">
                 <label className="text-[11px] text-muted">اليوم</label>
-                <select className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2" value={scheduleForm.day_of_week} onChange={e => setScheduleForm({ ...scheduleForm, day_of_week: e.target.value })}>
-                  {dayOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-                </select>
+                <CustomSelect
+                  value={scheduleForm.day_of_week ? String(scheduleForm.day_of_week) : ''}
+                  onChange={v => setScheduleForm({ ...scheduleForm, day_of_week: v })}
+                  options={dayOptions.map(opt => ({ value: String(opt.value), label: opt.label }))}
+                  className="w-full"
+                />
               </div>
               <div className="space-y-1">
                 <label className="text-[11px] text-muted">تاريخ البداية</label>
@@ -909,10 +933,12 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="p-6 rounded-3xl border border-card shadow-sm card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
             <h3 className="font-black mb-4">استيراد سجلات CSV</h3>
-            <select className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2 text-xs w-full" value={importDeviceId} onChange={e => setImportDeviceId(e.target.value)}>
-              <option value="">اختر الجهاز</option>
-              {devices.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-            </select>
+            <CustomSelect
+              value={importDeviceId ? String(importDeviceId) : ''}
+              onChange={v => setImportDeviceId(v)}
+              options={[{ value: '', label: 'اختر الجهاز' }, ...devices.map(d => ({ value: String(d.id), label: d.name }))]}
+              className="w-full"
+            />
             <input
               type="file"
               accept=".csv"

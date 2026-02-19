@@ -130,6 +130,212 @@ if (!function_exists('column_exists')) {
     }
 }
 
+if (!function_exists('get_setting_value')) {
+    function get_setting_value($pdo, $key, $default = null) {
+        $key = trim((string)$key);
+        if ($key === '') return $default;
+
+        static $cache = null;
+        static $cacheLoaded = false;
+
+        try {
+            if (!($pdo instanceof PDO)) return $default;
+            if (!table_exists($pdo, 'settings')) return $default;
+
+            // Lazy-load settings into a small in-request cache to avoid repeated queries.
+            if (!$cacheLoaded) {
+                $cacheLoaded = true;
+                $cache = [];
+                try {
+                    $stmt = execute_query($pdo, 'SELECT config_key, config_value FROM settings');
+                    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                    foreach ($rows as $r) {
+                        if (!isset($r['config_key'])) continue;
+                        $k = (string)$r['config_key'];
+                        $cache[$k] = $r['config_value'] ?? null;
+                    }
+                } catch (Exception $e) {
+                    // If the table exists but query fails for any reason, fallback to per-key query.
+                    $cache = null;
+                }
+            }
+
+            if (is_array($cache)) {
+                return array_key_exists($key, $cache) ? $cache[$key] : $default;
+            }
+
+            $val = execute_query(
+                $pdo,
+                'SELECT config_value FROM settings WHERE config_key = ? LIMIT 1',
+                [$key]
+            )->fetchColumn();
+
+            return ($val === false || $val === null) ? $default : $val;
+        } catch (Exception $e) {
+            return $default;
+        }
+    }
+}
+
+if (!function_exists('normalize_tax_discount_type')) {
+    function normalize_tax_discount_type($value) {
+        if ($value === null) return null;
+        $v = strtolower(trim((string)$value));
+        if ($v === '') return null;
+        if ($v === 'percent' || $v === 'percentage') return 'percent';
+        if ($v === 'amount' || $v === 'fixed' || $v === 'value') return 'amount';
+        return null;
+    }
+}
+
+if (!function_exists('calculate_order_totals')) {
+    function calculate_order_totals($subtotal, $shipping, $discountType, $discountValue, $taxType, $taxValue, $calcOrder) {
+        $safeSubtotal = max(0, floatval($subtotal ?? 0));
+        $safeShipping = max(0, floatval($shipping ?? 0));
+        $safeDiscountValue = max(0, floatval($discountValue ?? 0));
+        $safeTaxValue = max(0, floatval($taxValue ?? 0));
+        $calcOrder = ($calcOrder === 'tax_then_discount') ? 'tax_then_discount' : 'discount_then_tax';
+
+        $discountAmount = 0.0;
+        $taxAmount = 0.0;
+
+        if ($calcOrder === 'tax_then_discount') {
+            if ($taxType === 'percent') $taxAmount = $safeSubtotal * ($safeTaxValue / 100.0);
+            else if ($taxType === 'amount') $taxAmount = $safeTaxValue;
+
+            $baseForDiscount = max(0.0, $safeSubtotal + $taxAmount);
+            if ($discountType === 'percent') $discountAmount = $baseForDiscount * ($safeDiscountValue / 100.0);
+            else if ($discountType === 'amount') $discountAmount = $safeDiscountValue;
+            if ($discountAmount > $baseForDiscount) $discountAmount = $baseForDiscount;
+        } else {
+            if ($discountType === 'percent') $discountAmount = $safeSubtotal * ($safeDiscountValue / 100.0);
+            else if ($discountType === 'amount') $discountAmount = $safeDiscountValue;
+            if ($discountAmount > $safeSubtotal) $discountAmount = $safeSubtotal;
+
+            $baseForTax = max(0.0, $safeSubtotal - $discountAmount);
+            if ($taxType === 'percent') $taxAmount = $baseForTax * ($safeTaxValue / 100.0);
+            else if ($taxType === 'amount') $taxAmount = $safeTaxValue;
+        }
+
+        $total = max(0.0, $safeSubtotal - $discountAmount + $taxAmount + $safeShipping);
+        return [
+            'subtotal' => $safeSubtotal,
+            'discount_amount' => $discountAmount,
+            'tax_amount' => $taxAmount,
+            'total' => $total,
+        ];
+    }
+}
+
+if (!function_exists('finance_get_account_id_by_code')) {
+    function finance_get_account_id_by_code($pdo, $code) {
+        try {
+            if (!($pdo instanceof PDO)) return null;
+            if (!table_exists($pdo, 'accounts')) return null;
+            $code = trim((string)$code);
+            if ($code === '') return null;
+            $id = execute_query($pdo, "SELECT id FROM accounts WHERE code = ? LIMIT 1", [$code])->fetchColumn();
+            return $id ? intval($id) : null;
+        } catch (Exception $e) {
+            return null;
+        }
+    }
+}
+
+if (!function_exists('finance_get_account_id_by_type')) {
+    function finance_get_account_id_by_type($pdo, $type) {
+        try {
+            if (!($pdo instanceof PDO)) return null;
+            if (!table_exists($pdo, 'accounts')) return null;
+            $type = trim((string)$type);
+            if ($type === '') return null;
+            $hasActive = column_exists($pdo, 'accounts', 'is_active');
+            $sql = $hasActive ? "SELECT id FROM accounts WHERE type = ? AND is_active = 1 ORDER BY id ASC LIMIT 1" : "SELECT id FROM accounts WHERE type = ? ORDER BY id ASC LIMIT 1";
+            $id = execute_query($pdo, $sql, [$type])->fetchColumn();
+            return $id ? intval($id) : null;
+        } catch (Exception $e) {
+            return null;
+        }
+    }
+}
+
+if (!function_exists('finance_create_journal_entry')) {
+    function finance_create_journal_entry($pdo, $entryDate, $memo, $sourceType, $sourceId, $posted, $lines) {
+        try {
+            if (!($pdo instanceof PDO)) return null;
+            if (!table_exists($pdo, 'journal_entries') || !table_exists($pdo, 'journal_lines') || !table_exists($pdo, 'accounts')) return null;
+            if (!is_array($lines) || count($lines) < 2) return null;
+
+            $totalDebit = 0.0;
+            $totalCredit = 0.0;
+            $normLines = [];
+            foreach ($lines as $ln) {
+                if (!is_array($ln)) continue;
+                $accountId = intval($ln['account_id'] ?? 0);
+                $debit = floatval($ln['debit'] ?? 0);
+                $credit = floatval($ln['credit'] ?? 0);
+                $lineMemo = $ln['memo'] ?? ($ln['line_memo'] ?? null);
+                if ($accountId <= 0) continue;
+                if ($debit < 0) $debit = 0;
+                if ($credit < 0) $credit = 0;
+                $totalDebit += $debit;
+                $totalCredit += $credit;
+                $normLines[] = ['account_id' => $accountId, 'debit' => $debit, 'credit' => $credit, 'line_memo' => $lineMemo];
+            }
+            if (count($normLines) < 2) return null;
+            if (abs($totalDebit - $totalCredit) > 0.01) return null; // not balanced
+
+            $entryDate = $entryDate ? (string)$entryDate : date('Y-m-d');
+            $postedVal = $posted ? 1 : 0;
+            $createdBy = $_SESSION['user_id'] ?? null;
+
+            $txStarted = false;
+            try {
+                if (!$pdo->inTransaction()) {
+                    $txStarted = $pdo->beginTransaction();
+                }
+            } catch (Exception $e) {
+                $txStarted = false;
+            }
+
+            $cols = ['entry_date', 'memo', 'source_type', 'source_id', 'posted', 'created_by'];
+            $vals = [$entryDate, $memo, $sourceType, $sourceId ? intval($sourceId) : null, $postedVal, $createdBy ? intval($createdBy) : null];
+
+            // Older installs safety: only insert columns that exist.
+            $finalCols = [];
+            $finalVals = [];
+            foreach ($cols as $idx => $c) {
+                if (column_exists($pdo, 'journal_entries', $c)) {
+                    $finalCols[] = $c;
+                    $finalVals[] = $vals[$idx];
+                }
+            }
+            if (count($finalCols) === 0) return null;
+
+            $ph = implode(',', array_fill(0, count($finalCols), '?'));
+            execute_query($pdo, "INSERT INTO journal_entries (" . implode(',', $finalCols) . ") VALUES ($ph)", $finalVals);
+            $entryId = intval($pdo->lastInsertId());
+            if ($entryId <= 0) return null;
+
+            foreach ($normLines as $ln) {
+                execute_query(
+                    $pdo,
+                    "INSERT INTO journal_lines (entry_id, account_id, debit, credit, line_memo) VALUES (?, ?, ?, ?, ?)",
+                    [$entryId, $ln['account_id'], $ln['debit'], $ln['credit'], $ln['line_memo']]
+                );
+            }
+
+            if ($txStarted && $pdo->inTransaction()) $pdo->commit();
+            return $entryId;
+        } catch (Exception $e) {
+            try {
+                if ($pdo instanceof PDO && $pdo->inTransaction()) $pdo->rollBack();
+            } catch (Exception $ignore) {}
+            return null;
+        }
+    }
+}
+
 // Pick a safe enum/set value for older DB schemas.
 // - Prefer $value if it exists in the DB enum and in $allowedValues.
 // - Otherwise pick the first intersection between DB enum options and $allowedValues.
@@ -867,6 +1073,22 @@ if (!function_exists('check_permission_or_die')) {
             echo json_encode(['success' => false, 'message' => 'Not authenticated.']);
             exit;
         }
+
+        // Hard bypass for the built-in super admin.
+        // This prevents accidental lockouts if permissions tables drift.
+        if (intval($user_id) === 1) {
+            return true;
+        }
+        try {
+            $u = $_SESSION['user'] ?? null;
+            $role = is_array($u) ? ($u['role'] ?? '') : '';
+            if (is_string($role) && strtolower($role) === 'admin') {
+                return true;
+            }
+        } catch (Exception $e) {
+            // ignore
+        }
+
         if (!user_has_permission($pdo, $user_id, $module_name, $action_code)) {
             http_response_code(403);
             echo json_encode(['success' => false, 'message' => 'Insufficient permissions.']);
@@ -1351,6 +1573,60 @@ if ($module === '') {
 }
 
 switch ($module) {
+    // -----------------------
+    // Selected product / temporary selection persisted server-side
+    // -----------------------
+    case 'selected_product':
+        $action = $_GET['action'] ?? 'get';
+        try {
+            if (!table_exists($pdo, 'selected_products')) {
+                execute_query($pdo, "CREATE TABLE IF NOT EXISTS selected_products (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT NOT NULL,
+                    product_id INT NULL,
+                    name VARCHAR(255) NULL,
+                    color VARCHAR(100) NULL,
+                    size VARCHAR(100) NULL,
+                    qty INT DEFAULT 1,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+            }
+        } catch (Exception $e) {
+            // ignore creation errors for older DBs
+        }
+
+        $userId = isset($_SESSION['user_id']) ? intval($_SESSION['user_id']) : 0;
+
+        if ($action === 'set') {
+            // Expect JSON body with { productId, name, color, size, qty }
+            $prodId = isset($input['productId']) ? (is_numeric($input['productId']) ? intval($input['productId']) : null) : null;
+            $name = isset($input['name']) ? trim((string)$input['name']) : null;
+            $color = isset($input['color']) ? trim((string)$input['color']) : null;
+            $size = isset($input['size']) ? trim((string)$input['size']) : null;
+            $qty = isset($input['qty']) ? intval($input['qty']) : 1;
+            try {
+                $exists = execute_query($pdo, 'SELECT id FROM selected_products WHERE user_id = ? LIMIT 1', [$userId])->fetchColumn();
+                if ($exists) {
+                    execute_query($pdo, 'UPDATE selected_products SET product_id = ?, name = ?, color = ?, size = ?, qty = ? WHERE id = ?', [$prodId, $name, $color, $size, $qty, intval($exists)]);
+                } else {
+                    execute_query($pdo, 'INSERT INTO selected_products (user_id, product_id, name, color, size, qty) VALUES (?, ?, ?, ?, ?, ?)', [$userId, $prodId, $name, $color, $size, $qty]);
+                }
+                echo json_encode(['success' => true]);
+            } catch (Exception $e) {
+                echo json_encode(['success' => false, 'message' => 'Failed to persist selection']);
+            }
+            exit;
+        }
+
+        // Default: get latest selection for this user
+        try {
+            $row = execute_query($pdo, 'SELECT product_id, name, color, size, qty FROM selected_products WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1', [$userId])->fetch(PDO::FETCH_ASSOC);
+            if ($row === false || $row === null) $row = new stdClass();
+            echo json_encode(['success' => true, 'data' => $row]);
+        } catch (Exception $e) {
+            echo json_encode(['success' => false, 'message' => 'Failed to read selection']);
+        }
+        exit;
     // -----------------------
     // Manufacturing master data
     // -----------------------
@@ -4239,6 +4515,47 @@ switch ($module) {
         handle_crud($pdo, 'customers', $input, ['name', 'phone1', 'phone2', 'governorate', 'address', 'landmark'], "*, (total_credit - total_debit) as balance");
         break;
     case 'treasuries':
+        // Ensure fixed treasury for representatives insurance exists.
+        // This keeps older installs working even if the SQL migration wasn't applied yet.
+        try {
+            if (table_exists($pdo, 'treasuries') && column_exists($pdo, 'treasuries', 'name')) {
+                $exists = execute_query($pdo, "SELECT id FROM treasuries WHERE name = ? LIMIT 1", ['تأمين المناديب'])->fetchColumn();
+                if (!$exists) {
+                    $hasIsFixed = column_exists($pdo, 'treasuries', 'is_fixed');
+                    $hasCreatedAt = column_exists($pdo, 'treasuries', 'created_at');
+
+                    if ($hasIsFixed && $hasCreatedAt) {
+                        execute_query($pdo, "INSERT INTO treasuries (name, is_fixed, created_at) VALUES (?, 1, NOW())", ['تأمين المناديب']);
+                    } elseif ($hasIsFixed && !$hasCreatedAt) {
+                        execute_query($pdo, "INSERT INTO treasuries (name, is_fixed) VALUES (?, 1)", ['تأمين المناديب']);
+                    } elseif (!$hasIsFixed && $hasCreatedAt) {
+                        execute_query($pdo, "INSERT INTO treasuries (name, created_at) VALUES (?, NOW())", ['تأمين المناديب']);
+                    } else {
+                        execute_query($pdo, "INSERT INTO treasuries (name) VALUES (?)", ['تأمين المناديب']);
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            // Don't block treasuries API if auto-create fails.
+        }
+
+        // If delivery method is not reps, hide the reps insurance treasury.
+        // This matches the UX rule: when reps section is hidden, its treasury should also be hidden.
+        try {
+            $action = $_GET['action'] ?? 'getAll';
+            if ($action === 'getAll' && table_exists($pdo, 'settings')) {
+                $delivery = execute_query($pdo, "SELECT config_value FROM settings WHERE config_key = 'delivery_method' LIMIT 1")->fetchColumn();
+                $delivery = is_string($delivery) ? strtolower(trim($delivery)) : '';
+                if ($delivery !== '' && $delivery !== 'reps') {
+                    $stmt = execute_query($pdo, "SELECT id, name, COALESCE(current_balance, 0) as balance FROM treasuries WHERE name <> ?", ['تأمين المناديب']);
+                    echo json_encode(['success' => true, 'data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
+                    break;
+                }
+            }
+        } catch (Exception $e) {
+            // On any error, fall back to normal behavior.
+        }
+
         // معالجة الخزينة بشكل صحيح
         handle_crud($pdo, 'treasuries', $input, ['name'], "id, name, COALESCE(current_balance, 0) as balance");
         break;    
@@ -4377,6 +4694,25 @@ switch ($module) {
             // ignore creation errors; handle_crud will surface problems
         }
         handle_crud($pdo, 'sales_offices', $input, ['name', 'phones']);
+        break;
+    case 'shipping_companies':
+        $action = $_GET['action'] ?? 'getAll';
+        $perm_code = map_action_to_perm($action);
+        if ($perm_code) {
+            check_permission_or_die($pdo, 'shipping_companies', $perm_code);
+        }
+        // Ensure table exists for shipping companies
+        try {
+            execute_query($pdo, "CREATE TABLE IF NOT EXISTS shipping_companies (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                phones TEXT NULL,
+                created_at DATETIME DEFAULT NOW()
+            )");
+        } catch (Exception $e) {
+            // ignore creation errors; handle_crud will surface problems
+        }
+        handle_crud($pdo, 'shipping_companies', $input, ['name', 'phones']);
         break;
     case 'stock':
         // Provide a server-side handler for stock availability checks used by the frontend.
@@ -6276,6 +6612,22 @@ switch ($module) {
             echo json_encode(['success' => true, 'data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
             break; 
         }
+
+        // Runtime migration: ensure insurance columns exist on users table.
+        // Frontend stores representatives in users (role='representative').
+        try {
+            if (table_exists($pdo, 'users')) {
+                if (!column_exists($pdo, 'users', 'insurance_paid')) {
+                    execute_query($pdo, "ALTER TABLE users ADD COLUMN insurance_paid TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'هل دفع تأمين'");
+                }
+                if (!column_exists($pdo, 'users', 'insurance_amount')) {
+                    execute_query($pdo, "ALTER TABLE users ADD COLUMN insurance_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT 'مبلغ التأمين المدفوع'");
+                }
+            }
+        } catch (Exception $e) {
+            // If DB user lacks ALTER privileges, ignore and keep API working.
+        }
+
         // If DB has a 'permissions' column, include it in CRUD operations
         $user_fields = ['name', 'username', 'role', 'phone', 'status', 'password'];
         $select_fields = '*';
@@ -6283,6 +6635,15 @@ switch ($module) {
             $user_fields[] = 'permissions';
             $select_fields = '*, permissions';
         }
+
+        // Insurance fields (used for representatives)
+        if (column_exists($pdo, 'users', 'insurance_paid')) {
+            $user_fields[] = 'insurance_paid';
+        }
+        if (column_exists($pdo, 'users', 'insurance_amount')) {
+            $user_fields[] = 'insurance_amount';
+        }
+
         handle_crud($pdo, 'users', $input, $user_fields, $select_fields);
         break;
     case 'profile':
@@ -6440,13 +6801,40 @@ switch ($module) {
 
     case 'permissions':
         $action = $_GET['action'] ?? 'getModules';
+        // Ensure responses for permissions endpoints are never cached by the browser
+        // (prevents 304 Not Modified responses returning empty bodies during dev)
+        header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+        header('Pragma: no-cache');
+        header('Expires: Thu, 01 Jan 1970 00:00:00 GMT');
+        header('Content-Type: application/json; charset=utf-8');
         $perm_code = map_action_to_perm($action);
+
+        // Permissions endpoints are used by the UI for non-admin users too.
+        // Only restrict management actions; always allow a logged-in user to read
+        // their own permissions/pages/modules to avoid accidental lockouts.
+        $uid = intval($_SESSION['user_id'] ?? 0);
         if (!can_manage_permissions($pdo)) {
-            // Allow a user to read their own permissions to avoid lockout
-            $uid = $_SESSION['user_id'] ?? 0;
-            $requested_uid = intval($_GET['user_id'] ?? ($input['user_id'] ?? 0));
-            $self_read = in_array($action, ['getUserPermissions','getUserPages'], true) && $uid && $requested_uid && $uid === $requested_uid;
-            if (!$self_read) {
+            if (!$uid) {
+                http_response_code(403);
+                echo json_encode(['success' => false, 'message' => 'Authentication required.']);
+                break;
+            }
+
+            $selfReadableActions = ['getUserPermissions', 'getUserPages'];
+            $alwaysReadableActions = ['getMyModules', 'getUserDefaults'];
+
+            if (in_array($action, $alwaysReadableActions, true)) {
+                // OK
+            } else if (in_array($action, $selfReadableActions, true)) {
+                // If user_id not provided, assume current user.
+                $requested_uid = intval($_GET['user_id'] ?? ($input['user_id'] ?? 0));
+                if ($requested_uid <= 0) $requested_uid = $uid;
+                if ($requested_uid !== $uid) {
+                    http_response_code(403);
+                    echo json_encode(['success' => false, 'message' => 'Insufficient permissions.']);
+                    break;
+                }
+            } else {
                 http_response_code(403);
                 echo json_encode(['success' => false, 'message' => 'Insufficient permissions.']);
                 break;
@@ -6531,20 +6919,38 @@ switch ($module) {
 
             // User-specific permissions
             if ($action === 'getUserPermissions') {
-                $user_id = intval($_GET['user_id'] ?? $input['user_id'] ?? 0);
+                $user_id = intval($_GET['user_id'] ?? $input['user_id'] ?? ($_SESSION['user_id'] ?? 0));
+                if ($user_id <= 0) {
+                    $user_id = intval($_SESSION['user_id'] ?? 0);
+                }
                 if (!$user_id) { http_response_code(400); echo json_encode(['success'=>false,'message'=>'user_id required']); break; }
                 $sql = "SELECT up.user_id, up.module_id, up.action_id, up.allowed, m.name as module_name, a.name as action_name, a.code as action_code
                         FROM user_permissions up
                         LEFT JOIN permission_modules m ON m.id = up.module_id
                         LEFT JOIN permission_actions a ON a.id = up.action_id
                         WHERE up.user_id = ?";
+                // Measure query time for troubleshooting slow responses
+                $t0 = microtime(true);
                 $stmt = execute_query($pdo, $sql, [$user_id]);
+                $t1 = microtime(true);
+                $dur = $t1 - $t0;
+                if ($dur > 0.2) {
+                    try {
+                        $dbg = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'nexus_perf.log';
+                        $entry = "[" . date('c') . "] getUserPermissions user_id={$user_id} duration=" . round($dur,4) . "s SQL=" . str_replace("\n"," ", $sql) . "\n";
+                        @file_put_contents($dbg, $entry, FILE_APPEND | LOCK_EX);
+                        @error_log("nexus: slow getUserPermissions ({$dur}s) for user {$user_id}");
+                    } catch (Exception $e) {}
+                }
                 echo json_encode(['success'=>true,'data'=>$stmt->fetchAll(PDO::FETCH_ASSOC)]); break;
             }
 
             // Get per-user page access (top-level pages/menu)
             if ($action === 'getUserPages') {
                 $user_id = intval($_GET['user_id'] ?? ($_SESSION['user_id'] ?? 0));
+                if ($user_id <= 0) {
+                    $user_id = intval($_SESSION['user_id'] ?? 0);
+                }
                 if (!$user_id) { http_response_code(400); echo json_encode(['success'=>false,'message'=>'user_id required']); break; }
                 $stmt = execute_query($pdo, "SELECT page_slug, can_access FROM user_page_permissions WHERE user_id = ?", [$user_id]);
                 echo json_encode(['success'=>true,'data'=>$stmt->fetchAll(PDO::FETCH_ASSOC)]); break;
@@ -6669,11 +7075,21 @@ switch ($module) {
             check_permission_or_die($pdo, 'products', $perm_code);
         }
         if ($action === 'getAll') {
+            // Ensure `is_archived` column exists so we can hide archived products by default
+            try {
+                if (!column_exists($pdo, 'products', 'is_archived')) {
+                    execute_query($pdo, "ALTER TABLE products ADD COLUMN is_archived TINYINT(1) NOT NULL DEFAULT 0");
+                }
+            } catch (Exception $e) {
+                // ignore migration failure - listing will still work
+            }
+
             $hasCategory = column_exists($pdo, 'products', 'category');
             $categorySelect = $hasCategory ? ', p.category' : ", NULL as category";
             $stmt = $pdo->query(
                 "SELECT p.id, p.name, p.barcode, p.cost_price as cost, p.sale_price as price, p.sale_price as sale_price, COALESCE(SUM(s.quantity), 0) as stock, p.color, p.size, p.reorder_level as reorderLevel{$categorySelect}
                 FROM products p LEFT JOIN stock s ON p.id = s.product_id
+                WHERE COALESCE(p.is_archived, 0) = 0
                 GROUP BY p.id ORDER BY p.name ASC"
             );
             echo json_encode(['success' => true, 'data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
@@ -6744,8 +7160,29 @@ switch ($module) {
                 echo json_encode(['success' => false, 'message' => 'ID is required for deletion.']);
                 return;
             }
-            execute_query($pdo, "DELETE FROM products WHERE id = ?", [$id]);
-            echo json_encode(['success' => true, 'message' => 'Deleted successfully.']);
+
+            // Convert delete -> archive (soft-delete) by setting is_archived = 1
+            try {
+                if (!column_exists($pdo, 'products', 'is_archived')) {
+                    execute_query($pdo, "ALTER TABLE products ADD COLUMN is_archived TINYINT(1) NOT NULL DEFAULT 0");
+                }
+            } catch (Exception $e) {
+                // ignore migration failure - proceed to update if possible
+            }
+
+            try {
+                $stmt = execute_query($pdo, "UPDATE products SET is_archived = 1 WHERE id = ? LIMIT 1", [$id]);
+                $affected = is_object($stmt) && method_exists($stmt, 'rowCount') ? $stmt->rowCount() : 0;
+                if ($affected === 0) {
+                    http_response_code(404);
+                    echo json_encode(['success' => false, 'message' => 'لم يتم العثور على المنتج أو لم يتم أرشفته.']);
+                } else {
+                    echo json_encode(['success' => true, 'message' => 'تم إخفاء المنتج (مؤرشف).', 'archived' => intval($affected)]);
+                }
+            } catch (PDOException $ex) {
+                http_response_code(500);
+                echo json_encode(['success' => false, 'message' => 'خطأ أثناء أرشفة المنتج.']);
+            }
             break;
         }
         break;
@@ -6755,6 +7192,21 @@ switch ($module) {
         if ($perm_code) {
             check_permission_or_die($pdo, 'orders', $perm_code);
         }
+        // Ensure optional columns exist for newer features: employee and page
+        try {
+            if (!column_exists($pdo, 'orders', 'employee')) {
+                execute_query($pdo, "ALTER TABLE orders ADD COLUMN employee VARCHAR(255) NULL");
+            }
+        } catch (Exception $e) {
+            // ignore migration failure - keep backward compatibility
+        }
+        try {
+            if (!column_exists($pdo, 'orders', 'page')) {
+                execute_query($pdo, "ALTER TABLE orders ADD COLUMN page VARCHAR(255) NULL");
+            }
+        } catch (Exception $e) {
+            // ignore migration failure
+        }
         if ($action === 'getAll') {
             $statusFilter = isset($_GET['status']) ? $_GET['status'] : null;
             $ordersHasDiscountType = column_exists($pdo, 'orders', 'discount_type');
@@ -6763,7 +7215,14 @@ switch ($module) {
             $ordersHasTaxType = column_exists($pdo, 'orders', 'tax_type');
             $ordersHasTaxValue = column_exists($pdo, 'orders', 'tax_value');
             $ordersHasTaxAmount = column_exists($pdo, 'orders', 'tax_amount');
+            $ordersHasEmployee = column_exists($pdo, 'orders', 'employee');
+            $ordersHasPage = column_exists($pdo, 'orders', 'page');
             $ordersHasSalesOfficeId = column_exists($pdo, 'orders', 'sales_office_id');
+            $ordersHasEmployee = column_exists($pdo, 'orders', 'employee');
+            $ordersHasPage = column_exists($pdo, 'orders', 'page');
+            $ordersHasShippingCompanyId = column_exists($pdo, 'orders', 'shipping_company_id');
+            $ordersHasEmployee = column_exists($pdo, 'orders', 'employee');
+            $ordersHasPage = column_exists($pdo, 'orders', 'page');
 
             $extraCols = [];
             if ($ordersHasDiscountType) $extraCols[] = 'o.discount_type';
@@ -6772,10 +7231,15 @@ switch ($module) {
             if ($ordersHasTaxType) $extraCols[] = 'o.tax_type';
             if ($ordersHasTaxValue) $extraCols[] = 'o.tax_value';
             if ($ordersHasTaxAmount) $extraCols[] = 'o.tax_amount';
+            if ($ordersHasEmployee) $extraCols[] = 'o.employee';
+            if ($ordersHasPage) $extraCols[] = 'o.page';
             if ($ordersHasSalesOfficeId) $extraCols[] = 'o.sales_office_id';
+            if ($ordersHasShippingCompanyId) $extraCols[] = 'o.shipping_company_id';
+            if ($ordersHasEmployee) $extraCols[] = 'o.employee';
+            if ($ordersHasPage) $extraCols[] = 'o.page';
             $extraColsSql = count($extraCols) > 0 ? (', ' . implode(', ', $extraCols)) : '';
 
-            $sql = "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, o.created_at{$extraColsSql}, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, c.address as address, o.id as order_id
+            $sql = "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, o.created_at{$extraColsSql}, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, c.address as address, c.governorate as governorate, o.id as order_id
                 FROM orders o LEFT JOIN customers c ON o.customer_id = c.id";
             if ($statusFilter) {
                 $sql .= " WHERE o.status = '" . str_replace("'", "\'", $statusFilter) . "'";
@@ -6794,6 +7258,7 @@ switch ($module) {
                     'phone1' => $r['phone1'],
                     'phone2' => $r['phone2'],
                     'address' => $r['address'],
+                    'governorate' => $r['governorate'] ?? '',
                     'status' => $r['status'],
                     'total' => $r['total_amount'],
                     'shipping' => $r['shipping_fees'],
@@ -6806,9 +7271,13 @@ switch ($module) {
                     'taxAmount' => $r['tax_amount'] ?? null,
                     'salesOfficeId' => $r['sales_office_id'] ?? null,
                     'sales_office_id' => $r['sales_office_id'] ?? null,
+                    'shipping_company_id' => $r['shipping_company_id'] ?? null,
+                    'shippingCompanyId' => $r['shipping_company_id'] ?? null,
                     'created_at' => $r['created_at'],
                     'rep_id' => $r['rep_id'],
                     'repId' => $r['rep_id'],
+                    'employee' => $r['employee'] ?? null,
+                    'page' => $r['page'] ?? null,
                     'products' => []
                 ];
             }
@@ -6855,6 +7324,11 @@ switch ($module) {
             $ordersHasTaxValue = column_exists($pdo, 'orders', 'tax_value');
             $ordersHasTaxAmount = column_exists($pdo, 'orders', 'tax_amount');
             $ordersHasSalesOfficeId = column_exists($pdo, 'orders', 'sales_office_id');
+            $ordersHasEmployee = column_exists($pdo, 'orders', 'employee');
+            $ordersHasPage = column_exists($pdo, 'orders', 'page');
+            $ordersHasShippingCompanyId = column_exists($pdo, 'orders', 'shipping_company_id');
+            $ordersHasEmployee = column_exists($pdo, 'orders', 'employee');
+            $ordersHasPage = column_exists($pdo, 'orders', 'page');
 
             $extraCols = [];
             if ($ordersHasDiscountType) $extraCols[] = 'o.discount_type';
@@ -6864,10 +7338,13 @@ switch ($module) {
             if ($ordersHasTaxValue) $extraCols[] = 'o.tax_value';
             if ($ordersHasTaxAmount) $extraCols[] = 'o.tax_amount';
             if ($ordersHasSalesOfficeId) $extraCols[] = 'o.sales_office_id';
+            if ($ordersHasShippingCompanyId) $extraCols[] = 'o.shipping_company_id';
+            if ($ordersHasEmployee) $extraCols[] = 'o.employee';
+            if ($ordersHasPage) $extraCols[] = 'o.page';
             $extraColsSql = count($extraCols) > 0 ? (', ' . implode(', ', $extraCols)) : '';
 
             // Fetch the order
-            $sql = "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, o.created_at, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, c.address as address
+                $sql = "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, o.created_at, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, c.address as address, c.governorate as governorate
                     {$extraColsSql}
                     FROM orders o LEFT JOIN customers c ON o.customer_id = c.id
                     WHERE o.order_number = ?";
@@ -6882,13 +7359,14 @@ switch ($module) {
 
             // Now fetch the items for this order
             $orderId = $order['id'];
-            $orderData = [
+                $orderData = [
                 'id' => $order['id'],
                 'orderNumber' => $order['order_number'],
                 'customerName' => $order['customer_name'],
                 'phone1' => $order['phone1'],
                 'phone2' => $order['phone2'],
-                'address' => $order['address'],
+                    'address' => $order['address'],
+                    'governorate' => $order['governorate'] ?? '',
                 'status' => $order['status'],
                 'total' => $order['total_amount'],
                 'shipping' => $order['shipping_fees'],
@@ -6901,9 +7379,13 @@ switch ($module) {
                 'taxAmount' => $order['tax_amount'] ?? null,
                 'salesOfficeId' => $order['sales_office_id'] ?? null,
                 'sales_office_id' => $order['sales_office_id'] ?? null,
+                'shipping_company_id' => $order['shipping_company_id'] ?? null,
+                'shippingCompanyId' => $order['shipping_company_id'] ?? null,
                 'created_at' => $order['created_at'],
                 'rep_id' => $order['rep_id'],
                 'repId' => $order['rep_id'],
+                'employee' => $order['employee'] ?? null,
+                'page' => $order['page'] ?? null,
                 'products' => []
             ];
             
@@ -6959,6 +7441,41 @@ switch ($module) {
             echo json_encode(['success' => true, 'data' => $orders]);
             break;
         }
+        if ($action === 'customersByStatus') {
+            // Returns customers grouped by order status with counts.
+            // Optional GET param: statuses (comma-separated), default: delivered,returned
+            $statusesRaw = trim((string)($_GET['statuses'] ?? ''));
+            $statuses = $statusesRaw !== '' ? array_map('trim', explode(',', $statusesRaw)) : ['delivered', 'returned'];
+            // Ensure statuses are safe (allow only known enum values)
+            $allowed = ['pending','with_rep','delivered','returned','partial','postponed','in_delivery'];
+            $statuses = array_values(array_intersect($statuses, $allowed));
+            if (empty($statuses)) {
+                echo json_encode(['success' => false, 'message' => 'No valid statuses specified.']);
+                break;
+            }
+
+            check_permission_or_die($pdo, 'customers', 'view');
+
+            $in = implode(',', array_fill(0, count($statuses), '?'));
+            $sql = "SELECT o.status, o.customer_id, c.name as customer_name, c.phone1, COUNT(*) as orders_count FROM orders o JOIN customers c ON o.customer_id = c.id WHERE o.status IN ($in) GROUP BY o.status, o.customer_id ORDER BY o.status, orders_count DESC";
+            $stmt = execute_query($pdo, $sql, $statuses);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            $out = [];
+            foreach ($rows as $r) {
+                $st = $r['status'];
+                if (!isset($out[$st])) $out[$st] = [];
+                $out[$st][] = [
+                    'id' => intval($r['customer_id']),
+                    'name' => $r['customer_name'],
+                    'phone1' => $r['phone1'],
+                    'count' => intval($r['orders_count'])
+                ];
+            }
+
+            echo json_encode(['success' => true, 'data' => $out]);
+            break;
+        }
         if ($action === 'getByRep') {
             $repId = intval($_GET['rep_id'] ?? 0);
             if (!$repId) {
@@ -7002,7 +7519,7 @@ switch ($module) {
                 $params[] = $endDate . ' 23:59:59';
             }
 
-            $sql = "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, o.created_at{$extraColsSql}, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, c.address as address, o.id as order_id
+                $sql = "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, o.created_at{$extraColsSql}, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, c.address as address, c.governorate as governorate, o.id as order_id
                     FROM orders o LEFT JOIN customers c ON o.customer_id = c.id
                     WHERE " . implode(' AND ', $where) . " ORDER BY o.created_at DESC";
 
@@ -7019,6 +7536,7 @@ switch ($module) {
                     'phone1' => $r['phone1'],
                     'phone2' => $r['phone2'],
                     'address' => $r['address'],
+                    'governorate' => $r['governorate'] ?? '',
                     'status' => $r['status'],
                     'total' => $r['total_amount'],
                     'shipping' => $r['shipping_fees'],
@@ -7062,6 +7580,117 @@ switch ($module) {
 
             echo json_encode(['success' => true, 'data' => array_values($ordersMap)]);
             break;
+        }
+        if ($action === 'partialReturn') {
+            // Partial return of order items: adjust order_items.quantity, orders.total_amount, and optionally restock warehouse
+            $orderId = intval($input['order_id'] ?? 0);
+            $repId = intval($input['rep_id'] ?? 0);
+            $items = $input['items'] ?? [];
+            $warehouseId = isset($input['warehouse_id']) ? intval($input['warehouse_id']) : 0;
+            $notes = isset($input['notes']) ? trim($input['notes']) : '';
+
+            if (!$orderId || !is_array($items) || count($items) === 0) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'order_id and items are required']);
+                break;
+            }
+
+            // load order
+            $ordStmt = execute_query($pdo, "SELECT * FROM orders WHERE id = ? LIMIT 1", [$orderId]);
+            $orderRow = $ordStmt->fetch(PDO::FETCH_ASSOC);
+            if (!$orderRow) { http_response_code(404); echo json_encode(['success'=>false,'message'=>'Order not found']); break; }
+
+            // optional: ensure rep matches
+            if ($repId && intval($orderRow['rep_id'] ?? 0) !== $repId) {
+                // allow but warn — for safety, require rep to match if provided
+                http_response_code(400); echo json_encode(['success'=>false,'message'=>'rep_id does not match order.rep_id']); break;
+            }
+
+            try {
+                $pdo->beginTransaction();
+                $returnedValue = 0.0;
+                foreach ($items as $it) {
+                    $prodId = intval($it['productId'] ?? ($it['product_id'] ?? 0));
+                    $retQty = intval($it['returnedQuantity'] ?? ($it['qty'] ?? 0));
+                    if ($prodId <= 0 || $retQty <= 0) continue;
+
+                    $oiStmt = execute_query($pdo, "SELECT id, quantity, price_per_unit FROM order_items WHERE order_id = ? AND product_id = ? LIMIT 1", [$orderId, $prodId]);
+                    $oi = $oiStmt->fetch(PDO::FETCH_ASSOC);
+                    if (!$oi) { if ($pdo->inTransaction()) $pdo->rollBack(); http_response_code(400); echo json_encode(['success'=>false,'message'=>'Order item not found for product ' . $prodId]); break 2; }
+                    $prevQty = intval($oi['quantity']);
+                    if ($retQty > $prevQty) { if ($pdo->inTransaction()) $pdo->rollBack(); http_response_code(400); echo json_encode(['success'=>false,'message'=>'Returned quantity greater than item quantity for product ' . $prodId]); break 2; }
+
+                    $newQty = $prevQty - $retQty;
+                    execute_query($pdo, "UPDATE order_items SET quantity = ? WHERE id = ?", [$newQty, $oi['id']]);
+
+                    $linePrice = floatval($oi['price_per_unit'] ?? 0);
+                    $lineValue = $retQty * $linePrice;
+                    $returnedValue += $lineValue;
+
+                    // restock if warehouse provided
+                    if ($warehouseId) {
+                        $sstmt = execute_query($pdo, "SELECT quantity FROM stock WHERE product_id = ? AND warehouse_id = ?", [$prodId, $warehouseId]);
+                        $prevStock = 0;
+                        if ($srow = $sstmt->fetch(PDO::FETCH_ASSOC)) {
+                            $prevStock = intval($srow['quantity']);
+                            $newStock = $prevStock + $retQty;
+                            execute_query($pdo, "UPDATE stock SET quantity = ? WHERE product_id = ? AND warehouse_id = ?", [$newStock, $prodId, $warehouseId]);
+                        } else {
+                            $newStock = $retQty;
+                            execute_query($pdo, "INSERT INTO stock (product_id, warehouse_id, quantity) VALUES (?, ?, ?)", [$prodId, $warehouseId, $newStock]);
+                        }
+                        $mt = pick_allowed_enum($pdo, 'product_movements', 'movement_type', 'return_in', ['return_in','return','purchase','transfer','return_out']);
+                        $movement_notes = json_encode(['order_id'=>$orderId,'rep_id'=>$repId,'notes'=>$notes]);
+                        execute_query($pdo, "INSERT INTO product_movements (product_id, warehouse_id, movement_type, quantity_change, previous_quantity, new_quantity, reference_id, reference_type, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [$prodId, $warehouseId, $mt, $retQty, $prevStock, $newStock, $orderId, 'order_partial_return', $movement_notes, null]);
+                    }
+                }
+
+                if ($returnedValue > 0) {
+                    // decrement order total by returnedValue
+                    execute_query($pdo, "UPDATE orders SET total_amount = (COALESCE(total_amount,0) - ?) WHERE id = ?", [$returnedValue, $orderId]);
+                    // Record transaction adjusting rep account for the partial return
+                    try {
+                        // Consignment model: returned goods CREDIT the Rep (decrease debt)
+                        $txType = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_return_credit', ['rep_return_credit','rep_settlement','rep_payment_in','payment_in']);
+                        $rel_local = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
+                        execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txType, null, null, $rel_local, intval($orderRow['rep_id'] ?? 0), $returnedValue, json_encode(['subtype'=>'partial_return','order_id'=>$orderId,'notes'=>$notes,'model'=>'consignment'])]);
+                    } catch (Exception $e) {
+                        // If transaction logging fails, continue but roll back whole op
+                        if ($pdo->inTransaction()) $pdo->rollBack();
+                        http_response_code(500);
+                        echo json_encode(['success'=>false,'message'=>'Failed to record rep transaction: '.$e->getMessage()]);
+                        break;
+                    }
+                }
+
+                $pdo->commit();
+
+                // return updated order
+                $stmt = execute_query($pdo, "SELECT order_number FROM orders WHERE id = ? LIMIT 1", [$orderId]);
+                $orderNumber = $stmt->fetchColumn();
+                if ($orderNumber) {
+                    // reuse getByNumber behavior
+                    $urlOrderNumber = $orderNumber;
+                    $orderStmt = execute_query($pdo, "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, o.created_at, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, c.address as address FROM orders o LEFT JOIN customers c ON o.customer_id = c.id WHERE o.order_number = ?", [$urlOrderNumber]);
+                    $orderData = $orderStmt->fetch(PDO::FETCH_ASSOC);
+                    if ($orderData) {
+                        $orderId2 = $orderData['id'];
+                        $itStmt = execute_query($pdo, "SELECT oi.order_id, oi.product_id, oi.quantity, oi.price_per_unit, (oi.quantity * oi.price_per_unit) as line_total, p.name, p.color, p.size FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = ?", [$orderId2]);
+                        $itemsRes = $itStmt->fetchAll(PDO::FETCH_ASSOC);
+                        $orderData['products'] = array_map(function($it){ return ['productId'=>$it['product_id'],'name'=>$it['name'],'color'=>$it['color'],'size'=>$it['size'],'quantity'=>$it['quantity'],'price'=>$it['price_per_unit'],'total'=>$it['line_total']]; }, $itemsRes);
+                        echo json_encode(['success'=>true,'returnedValue'=> $returnedValue, 'order' => $orderData]);
+                        break;
+                    }
+                }
+
+                echo json_encode(['success'=>true,'returnedValue'=> $returnedValue]);
+                break;
+            } catch (Exception $e) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+                http_response_code(500);
+                echo json_encode(['success'=>false,'message'=>'Failed to process partial return: '.$e->getMessage()]);
+                break;
+            }
         }
         if ($action === 'getTimeline') {
             $id = intval($_GET['id'] ?? 0);
@@ -7111,6 +7740,12 @@ switch ($module) {
         }
         if ($action === 'create') {
             $ordersInput = $input['orders'] ?? [];
+            // DEBUG: log entire incoming payload to PHP error log and temp file for troubleshooting
+            try {
+                error_log('orders.create.payload: ' . json_encode($input, JSON_UNESCAPED_UNICODE));
+                $tmpf = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'orders_payload_debug.log';
+                @file_put_contents($tmpf, date('c') . " " . json_encode($input, JSON_UNESCAPED_UNICODE) . "\n", FILE_APPEND | LOCK_EX);
+            } catch (Exception $e) {}
             if (!is_array($ordersInput) || count($ordersInput) === 0) {
                 http_response_code(400);
                 echo json_encode(['success' => false, 'message' => 'No orders provided for import.']);
@@ -7131,6 +7766,11 @@ switch ($module) {
                 $pdo->beginTransaction();
                 $created = [];
                 foreach ($ordersInput as $ord) {
+                        // DEBUG: log incoming order payload for troubleshooting employee/page mapping
+                        try {
+                            $logFile = __DIR__ . '/order_import_debug.log';
+                            file_put_contents($logFile, date('c') . " " . json_encode($ord, JSON_UNESCAPED_UNICODE) . "\n", FILE_APPEND);
+                        } catch (Exception $e) {}
                     $customerName = $ord['customerName'] ?? $ord['name'] ?? '';
                     $phone = trim((string)($ord['phone'] ?? $ord['phone1'] ?? ''));
                     $gov = $ord['governorate'] ?? '';
@@ -7144,8 +7784,25 @@ switch ($module) {
                     }
                     // if still not found, try exact name match (to avoid creating duplicates when phone absent)
                     if (!$customerId && !empty($customerName)) {
-                        $stmt = execute_query($pdo, "SELECT id FROM customers WHERE name = ? LIMIT 1", [$customerName]);
-                        if ($row = $stmt->fetch(PDO::FETCH_ASSOC)) $customerId = $row['id'];
+                        $stmt = execute_query($pdo, "SELECT id, phone1, phone2 FROM customers WHERE name = ? LIMIT 1", [$customerName]);
+                        if ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                            $customerId = $row['id'];
+                            // If the incoming order provided a phone and the stored customer lacks it,
+                            // update the customer record so future orders/showing the customer include the phone.
+                            try {
+                                if (!empty($phone)) {
+                                    $existingPhone1 = trim((string)($row['phone1'] ?? ''));
+                                    $existingPhone2 = trim((string)($row['phone2'] ?? ''));
+                                    if ($existingPhone1 === '') {
+                                        execute_query($pdo, "UPDATE customers SET phone1 = ? WHERE id = ?", [$phone, $customerId]);
+                                    } elseif ($existingPhone1 !== $phone && $existingPhone2 === '') {
+                                        execute_query($pdo, "UPDATE customers SET phone2 = ? WHERE id = ?", [$phone, $customerId]);
+                                    }
+                                }
+                            } catch (Exception $e) {
+                                // ignore update failures and continue with existing customerId
+                            }
+                        }
                     }
                     // create customer when none found (we want to persist all customers on import)
                     if (!$customerId) {
@@ -7154,6 +7811,17 @@ switch ($module) {
                     }
 
                     $orderNumber = $ord['orderNumber'] ?? null;
+                    // optional incoming employee/page from import payload - accept several key variants (english, raw, arabic)
+                    $employee = null;
+                    $employeeKeys = ['employee','employee_raw','created_by','createdBy','employee_name','الموظف','الموظف_name','employeeName'];
+                    foreach ($employeeKeys as $k) {
+                        if (isset($ord[$k]) && $ord[$k] !== '') { $employee = $ord[$k]; break; }
+                    }
+                    $page = null;
+                    $pageKeys = ['page','page_raw','page_source','pageName','page_name','البيدج','pageSource'];
+                    foreach ($pageKeys as $k2) {
+                        if (isset($ord[$k2]) && $ord[$k2] !== '') { $page = $ord[$k2]; break; }
+                    }
                     $providedTotal = isset($ord['total']) ? floatval($ord['total']) : 0;
                     $providedSubtotal = isset($ord['subTotal']) ? floatval($ord['subTotal']) : (isset($ord['sub_total']) ? floatval($ord['sub_total']) : 0);
                     $shipping = isset($ord['shippingCost']) ? floatval($ord['shippingCost']) : 0;
@@ -7233,6 +7901,8 @@ switch ($module) {
                     $maxAttempts = 5;
                     $attempt = 0;
                     while ($attempt < $maxAttempts) {
+                            if (!isset($ordersHasEmployee)) { $ordersHasEmployee = column_exists($pdo, 'orders', 'employee'); }
+                            if (!isset($ordersHasPage)) { $ordersHasPage = column_exists($pdo, 'orders', 'page'); }
                         try {
                             $insertCols = ['order_number','customer_id','rep_id','status','total_amount','shipping_fees','notes'];
                             $insertVals = [$useOrderNumber, $customerId, null, $status, $total, $shipping, $notes];
@@ -7243,9 +7913,23 @@ switch ($module) {
                             if ($ordersHasTaxValue) { $insertCols[] = 'tax_value'; $insertVals[] = $taxValue; }
                             if ($ordersHasTaxAmount) { $insertCols[] = 'tax_amount'; $insertVals[] = $taxAmount; }
                             if ($ordersHasSalesOfficeId) { $insertCols[] = 'sales_office_id'; $insertVals[] = $salesOfficeId; }
+                            if ($ordersHasEmployee) { $insertCols[] = 'employee'; $insertVals[] = $employee; }
+                            if ($ordersHasPage) { $insertCols[] = 'page'; $insertVals[] = $page; }
 
                             $placeholders = implode(',', array_fill(0, count($insertCols), '?'));
                             $sql = "INSERT INTO orders (" . implode(',', $insertCols) . ") VALUES (" . $placeholders . ")";
+                            // Temporary debug logging: capture incoming order and final INSERT params
+                            try {
+                                $dbgFile = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'nexus_orders_debug.log';
+                                $dbgEntry = "[" . date('c') . "] CREATE ORDER ATTEMPT\n";
+                                $dbgEntry .= "REMOTE_ADDR=" . ($_SERVER['REMOTE_ADDR'] ?? 'unknown') . " PHPSESSID=" . (session_id() ?? '') . "\n";
+                                $dbgEntry .= "ORD_RAW=" . json_encode($ord, JSON_UNESCAPED_UNICODE) . "\n";
+                                $dbgEntry .= "SQL=" . $sql . "\n";
+                                $dbgEntry .= "COLS=" . json_encode($insertCols) . "\n";
+                                $dbgEntry .= "VALS=" . json_encode($insertVals, JSON_UNESCAPED_UNICODE) . "\n\n";
+                                @file_put_contents($dbgFile, $dbgEntry, FILE_APPEND | LOCK_EX);
+                                @error_log("nexus: wrote order create debug to {$dbgFile}");
+                            } catch (Exception $e) {}
                             execute_query($pdo, $sql, $insertVals);
                             $orderId = $pdo->lastInsertId();
                             break; // success
@@ -7367,7 +8051,10 @@ switch ($module) {
         if ($action === 'update') {
             $id = intval($input['id'] ?? 0);
             $status = array_key_exists('status', $input) ? $input['status'] : null;
-            $repId = array_key_exists('repId', $input) ? $input['repId'] : null; // can be null to clear
+            $repIdProvided = (array_key_exists('repId', $input) || array_key_exists('rep_id', $input));
+            $repId = $repIdProvided ? ($input['repId'] ?? $input['rep_id']) : null; // may be null to clear
+            $shippingCompanyProvided = (array_key_exists('shippingCompanyId', $input) || array_key_exists('shipping_company_id', $input));
+            $shippingCompanyId = $shippingCompanyProvided ? ($input['shippingCompanyId'] ?? $input['shipping_company_id']) : null; // may be null to clear
             $statusNote = trim((string)($input['status_note'] ?? ($input['note'] ?? '')));
             $penaltyApply = isset($input['penalty_apply']) ? boolval($input['penalty_apply']) : (isset($input['penaltyApply']) ? boolval($input['penaltyApply']) : (isset($input['with_fine']) ? boolval($input['with_fine']) : false));
             $penaltyAmount = isset($input['penalty_amount']) ? floatval($input['penalty_amount']) : (isset($input['penaltyAmount']) ? floatval($input['penaltyAmount']) : 0);
@@ -7378,18 +8065,33 @@ switch ($module) {
                 break;
             }
             try {
-                $before = execute_query($pdo, "SELECT status, rep_id FROM orders WHERE id = ? LIMIT 1", [$id])->fetch(PDO::FETCH_ASSOC);
+                // Ensure optional column exists when requested
+                if ($shippingCompanyProvided && !column_exists($pdo, 'orders', 'shipping_company_id')) {
+                    try {
+                        execute_query($pdo, "ALTER TABLE orders ADD COLUMN shipping_company_id INT NULL DEFAULT NULL");
+                    } catch (Exception $e) {
+                        // ignore; subsequent queries will surface errors if any
+                    }
+                }
+
+                $hasShipCol = column_exists($pdo, 'orders', 'shipping_company_id');
+                $before = execute_query($pdo, "SELECT status, rep_id" . ($hasShipCol ? ", shipping_company_id" : "") . " FROM orders WHERE id = ? LIMIT 1", [$id])->fetch(PDO::FETCH_ASSOC);
                 $prevStatus = $before ? ($before['status'] ?? null) : null;
                 if ($penaltyApply && $penaltyAmount > 0) {
                     $statusNote = trim($statusNote . ' | غرامة على المندوب: ' . $penaltyAmount);
                 }
                 $set_parts = [];
                 $values = [];
-                if ($repId !== null) {
-                    // allow clearing rep by sending null
+                if ($repIdProvided) {
+                    // allow clearing rep by sending null or empty
                     if ($repId === '') $repId = null;
                     $set_parts[] = 'rep_id = ?';
                     $values[] = $repId;
+                }
+                if ($shippingCompanyProvided && $hasShipCol) {
+                    if ($shippingCompanyId === '') $shippingCompanyId = null;
+                    $set_parts[] = 'shipping_company_id = ?';
+                    $values[] = $shippingCompanyId;
                 }
                 if ($status !== null) {
                     // Map requested status to an allowed enum value in this installation
@@ -7405,18 +8107,23 @@ switch ($module) {
                     $sql .= ' WHERE id = ?';
                     $values[] = $id;
                     execute_query($pdo, $sql, $values);
-                    audit_log($pdo, 'orders', 'update', $id, json_encode(['status' => $status, 'rep_id' => $repId]));
+                    audit_log($pdo, 'orders', 'update', $id, json_encode(['status' => $status, 'rep_id' => $repIdProvided ? $repId : null, 'shipping_company_id' => $shippingCompanyProvided ? $shippingCompanyId : null]));
                 }
 
                 if ($before) {
                     $prevRep = $before['rep_id'] ?? null;
+                    $prevShip = $hasShipCol ? ($before['shipping_company_id'] ?? null) : null;
                     $newStatus = isset($allowedStatus) ? $allowedStatus : $prevStatus;
                     if ($status !== null && $newStatus !== $prevStatus) {
                         log_order_history($pdo, $id, $newStatus, 'status', $statusNote, $repId);
                     }
-                    if ($repId !== null && $repId !== $prevRep) {
+                    if ($repIdProvided && $repId !== $prevRep) {
                         $repAction = $repId ? 'rep_assign' : 'rep_clear';
                         log_order_history($pdo, $id, $newStatus, $repAction, null, $repId ?: null);
+                    }
+                    if ($shippingCompanyProvided && $hasShipCol && $shippingCompanyId !== $prevShip) {
+                        $shipAction = $shippingCompanyId ? 'shipping_assign' : 'shipping_clear';
+                        log_order_history($pdo, $id, $newStatus, $shipAction, null, $shippingCompanyId ?: null);
                     }
                 }
 
@@ -7445,7 +8152,7 @@ switch ($module) {
                         }
 
                         $repForTx = null;
-                        if ($repId !== null) $repForTx = $repId;
+                        if ($repIdProvided) $repForTx = $repId;
                         if (!$repForTx && isset($orderRow['rep_id'])) $repForTx = $orderRow['rep_id'];
 
                         if ($repForTx) {
@@ -7461,19 +8168,15 @@ switch ($module) {
                                 execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txTypePenalty, null, null, $relType, $repForTx, -1 * $penaltyAmount, json_encode($penaltyDetails)]);
                             }
 
-                            if ($status === 'delivered') {
-                                $amt = $orderSubtotal;
-                                if ($amt > 0) {
-                                    $txType = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_settlement', ['sale','payment_out','payment_in']);
-                                    execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txType, null, null, $relType, $repForTx, -1 * $amt, json_encode(['order_id'=>$id,'action'=>'delivered'])]);
-                                }
-                            }
+                            // Consignment model:
+                            // - delivered: NO financial transaction (Rep already took the debt at assignment)
+                            // - returned: CREDIT the Rep (decrease debt)
 
                             if ($status === 'returned') {
                                 $amt = $orderSubtotal;
                                 if ($amt > 0) {
-                                    $txType = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_settlement', ['sale','payment_in','payment_out']);
-                                    execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txType, null, null, $relType, $repForTx, $amt, json_encode(['order_id'=>$id,'action'=>'returned'])]);
+                                    $txType = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_return_credit', ['rep_return_credit','rep_settlement','payment_in','sale']);
+                                    execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txType, null, null, $relType, $repForTx, $amt, json_encode(['order_id'=>$id,'action'=>'returned','model'=>'consignment'])]);
                                 }
                                 // returned items should be restocked back to warehouse if provided
                                 $warehouseIdForReturn = isset($input['warehouseId']) ? intval($input['warehouseId']) : (isset($input['warehouse_id']) ? intval($input['warehouse_id']) : 0);
@@ -7511,13 +8214,10 @@ switch ($module) {
                                 $deliveredAmt = floatval($input['deliveredAmount']);
                                 $deliveredAmt = max(0, min($deliveredAmt, $orderSubtotal));
                                 $returnedAmt = $orderSubtotal - $deliveredAmt;
-                                if ($deliveredAmt > 0) {
-                                    $txType = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_settlement', ['sale','payment_out','payment_in']);
-                                    execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txType, null, null, $relType, $repForTx, -1 * $deliveredAmt, json_encode(['order_id'=>$id,'action'=>'partial_delivered','delivered'=>$deliveredAmt])]);
-                                }
+                                // delivered portion: no financial transaction
                                 if ($returnedAmt > 0) {
-                                    $txType = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_settlement', ['sale','payment_in','payment_out']);
-                                    execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txType, null, null, $relType, $repForTx, $returnedAmt, json_encode(['order_id'=>$id,'action'=>'partial_returned','returned'=>$returnedAmt])]);
+                                    $txType = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_return_credit', ['rep_return_credit','rep_settlement','payment_in','sale']);
+                                    execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txType, null, null, $relType, $repForTx, $returnedAmt, json_encode(['order_id'=>$id,'action'=>'partial_returned','returned'=>$returnedAmt,'model'=>'consignment'])]);
                                     // handle restocking of returned portion when warehouse provided or per-item returnedItems
                                     $warehouseIdForReturn = isset($input['warehouseId']) ? intval($input['warehouseId']) : (isset($input['warehouse_id']) ? intval($input['warehouse_id']) : 0);
                                     $order_update_reason = isset($input['reason']) ? trim($input['reason']) : (isset($input['notes']) ? trim($input['notes']) : '');
@@ -7724,7 +8424,25 @@ switch ($module) {
                 if (!$id) { 
                     echo json_encode(['success'=>false,'message'=>'Treasury ID required']); break; 
                 }
-                $stmt = execute_query($pdo, "SELECT * FROM transactions WHERE treasury_id = ? ORDER BY transaction_date DESC", [$id]);
+                // Optional date filters (YYYY-MM-DD)
+                $start_date = isset($_GET['start_date']) && $_GET['start_date'] !== '' ? $_GET['start_date'] : null;
+                $end_date = isset($_GET['end_date']) && $_GET['end_date'] !== '' ? $_GET['end_date'] : null;
+
+                $sql = "SELECT * FROM transactions WHERE treasury_id = ?";
+                $params = [$id];
+                if ($start_date && $end_date) {
+                    $sql .= " AND DATE(transaction_date) BETWEEN ? AND ?";
+                    $params[] = $start_date;
+                    $params[] = $end_date;
+                } elseif ($start_date) {
+                    $sql .= " AND DATE(transaction_date) >= ?";
+                    $params[] = $start_date;
+                } elseif ($end_date) {
+                    $sql .= " AND DATE(transaction_date) <= ?";
+                    $params[] = $end_date;
+                }
+                $sql .= " ORDER BY transaction_date DESC";
+                $stmt = execute_query($pdo, $sql, $params);
                 echo json_encode(['success' => true, 'data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
             } elseif ($action === 'getById') {
                 $id = intval($_GET['id'] ?? 0);
@@ -7743,13 +8461,18 @@ switch ($module) {
                     return;
                 }
 
-                $pdo->beginTransaction();
+                $txBegan = false;
+                try {
+                    $txBegan = $pdo->beginTransaction();
+                } catch (Exception $e) {
+                    $txBegan = false;
+                }
                 try {
                     // 1. Check balance and lock source treasury
                     $treasuryStmt = execute_query($pdo, "SELECT current_balance FROM treasuries WHERE id = ? FOR UPDATE", [$from_treasury_id]);
                     $from_treasury = $treasuryStmt->fetch(PDO::FETCH_ASSOC);
                     if (!$from_treasury || $from_treasury['current_balance'] < $amount) {
-                        $pdo->rollBack();
+                        if ($pdo->inTransaction()) $pdo->rollBack();
                         http_response_code(400);
                         echo json_encode(['success' => false, 'message' => 'رصيد الخزينة المصدر غير كافٍ.']);
                         return;
@@ -7780,7 +8503,7 @@ switch ($module) {
                     $pdo->commit();
                     echo json_encode(['success' => true, 'message' => 'تم التحويل بنجاح.']);
                 } catch (Exception $e) {
-                    $pdo->rollBack();
+                    if ($pdo->inTransaction()) $pdo->rollBack();
                     http_response_code(500);
                     echo json_encode(['success' => false, 'message' => 'فشل التحويل: ' . $e->getMessage()]);
                 }
@@ -7801,6 +8524,48 @@ switch ($module) {
                     $details['notes'] = $notes;
                 }
                 $direction = isset($input['direction']) ? $input['direction'] : null; // 'in' (company received) | 'out' (company paid)
+
+                // Special-case: insurance deposit for representatives should always go to the fixed insurance treasury,
+                // and should not be blocked by user's locked default treasury setting.
+                $isInsuranceDeposit = (is_array($details) && isset($details['subtype']) && $details['subtype'] === 'rep_insurance_deposit');
+
+                $resolveInsuranceTreasuryId = function() use ($pdo) {
+                    try {
+                        if (!table_exists($pdo, 'treasuries') || !column_exists($pdo, 'treasuries', 'name')) return null;
+                        $id = execute_query($pdo, "SELECT id FROM treasuries WHERE name = ? LIMIT 1", ['تأمين المناديب'])->fetchColumn();
+                        if ($id) return intval($id);
+
+                        // Create if missing (best-effort)
+                        $hasIsFixed = column_exists($pdo, 'treasuries', 'is_fixed');
+                        $hasCreatedAt = column_exists($pdo, 'treasuries', 'created_at');
+                        if ($hasIsFixed && $hasCreatedAt) {
+                            execute_query($pdo, "INSERT INTO treasuries (name, is_fixed, created_at) VALUES (?, 1, NOW())", ['تأمين المناديب']);
+                        } elseif ($hasIsFixed && !$hasCreatedAt) {
+                            execute_query($pdo, "INSERT INTO treasuries (name, is_fixed) VALUES (?, 1)", ['تأمين المناديب']);
+                        } elseif (!$hasIsFixed && $hasCreatedAt) {
+                            execute_query($pdo, "INSERT INTO treasuries (name, created_at) VALUES (?, NOW())", ['تأمين المناديب']);
+                        } else {
+                            execute_query($pdo, "INSERT INTO treasuries (name) VALUES (?)", ['تأمين المناديب']);
+                        }
+                        $newId = execute_query($pdo, "SELECT id FROM treasuries WHERE name = ? LIMIT 1", ['تأمين المناديب'])->fetchColumn();
+                        return $newId ? intval($newId) : null;
+                    } catch (Exception $e) {
+                        return null;
+                    }
+                };
+
+                if ($isInsuranceDeposit) {
+                    $insTid = $resolveInsuranceTreasuryId();
+                    if ($insTid) {
+                        if (!$treasuryId) $treasuryId = $insTid;
+                        // Force insurance treasury only for this subtype
+                        if ($treasuryId !== $insTid) {
+                            http_response_code(400);
+                            echo json_encode(['success' => false, 'message' => 'لا يمكن إيداع التأمين إلا في خزينة "تأمين المناديب".']);
+                            return;
+                        }
+                    }
+                }
                 // Apply user defaults and enforce locks: if a user has defaults set and cannot change them,
                 // either apply the default when omitted, or reject if a different value was provided.
                 $defaults = get_user_defaults($pdo);
@@ -7809,13 +8574,26 @@ switch ($module) {
                     $defTid = isset($defaults['default_treasury_id']) ? intval($defaults['default_treasury_id']) : null;
                     $canChangeT = isset($defaults['can_change_treasury']) ? boolval($defaults['can_change_treasury']) : true;
                     if (!$canChangeT && $defTid) {
-                        if ($treasuryId && $treasuryId !== $defTid) {
-                            $pdo->rollBack();
-                            http_response_code(400);
-                            echo json_encode(['success' => false, 'message' => 'الخزينة مقفلة للمستخدم الحالي ولا يمكن تغييرها.']);
-                            return;
+                        // Allow the fixed insurance treasury for rep insurance deposits
+                        if ($isInsuranceDeposit) {
+                            $insTid = $resolveInsuranceTreasuryId();
+                            if ($insTid) {
+                                if (!$treasuryId) $treasuryId = $insTid;
+                                if ($treasuryId !== $insTid) {
+                                    http_response_code(400);
+                                    echo json_encode(['success' => false, 'message' => 'الخزينة مقفلة للمستخدم الحالي ولا يمكن تغييرها (إلا خزينة التأمين).']);
+                                    return;
+                                }
+                            }
+                        } else {
+                            if ($treasuryId && $treasuryId !== $defTid) {
+                                if ($pdo->inTransaction()) $pdo->rollBack();
+                                http_response_code(400);
+                                echo json_encode(['success' => false, 'message' => 'الخزينة مقفلة للمستخدم الحالي ولا يمكن تغييرها.']);
+                                return;
+                            }
+                            if (!$treasuryId) $treasuryId = $defTid;
                         }
-                        if (!$treasuryId) $treasuryId = $defTid;
                     } else {
                         // if user can change but has a default, prefill when not provided
                         if (!$treasuryId && $defTid) $treasuryId = $defTid;
@@ -7826,7 +8604,7 @@ switch ($module) {
                     $canChangeW = isset($defaults['can_change_warehouse']) ? boolval($defaults['can_change_warehouse']) : true;
                     if (!$canChangeW && $defWid) {
                         if ($warehouseId && $warehouseId !== $defWid) {
-                            $pdo->rollBack();
+                            if ($pdo->inTransaction()) $pdo->rollBack();
                             http_response_code(400);
                             echo json_encode(['success' => false, 'message' => 'المستودع مقفل للمستخدم الحالي ولا يمكن تغييره.']);
                             return;
@@ -7845,7 +8623,17 @@ switch ($module) {
                         else $type = 'payment_out';
                     }
                     $typeAllowed = pick_allowed_enum($pdo, 'transactions', 'type', $type ?? 'payment', ['payment_in','payment_out','sale','transfer','rep_payment_in','rep_payment_out','rep_settlement']);
-                    $relAllowed = $related ? pick_allowed_enum($pdo, 'transactions', 'related_to_type', $related, ['rep','customer','supplier','employee','none']) : pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
+                    // Important: if the DB enum lacks 'rep', do NOT fall back to 'customer'/'supplier'.
+                    // Reps are stored in users and their balances are computed using the rep/employee/none mapping.
+                    if ($related === 'rep') {
+                        $relAllowed = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
+                    } elseif ($related === 'employee') {
+                        $relAllowed = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'employee', ['employee','rep','none']);
+                    } else {
+                        $relAllowed = $related
+                            ? pick_allowed_enum($pdo, 'transactions', 'related_to_type', $related, ['rep','customer','supplier','employee','none'])
+                            : pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
+                    }
                     
                     // Adjust sign for rep-related transactions based on direction
                     $txAmount = $amount; // Default to signed amount from input
@@ -7854,6 +8642,17 @@ switch ($module) {
                             $txAmount = ($direction === 'out') ? -abs($amount) : abs($amount);
                         } else {
                             $txAmount = ($direction === 'in') ? abs($amount) : -abs($amount);
+                        }
+                    }
+
+                    // Consignment rules: certain rep transactions are accounting-only (no treasury impact)
+                    // and have enforced sign conventions.
+                    if ($relAllowed === 'rep' && in_array($typeAllowed, ['rep_assignment', 'rep_return_credit'], true)) {
+                        $treasuryId = 0;
+                        if ($typeAllowed === 'rep_assignment') {
+                            $txAmount = -abs($amount);
+                        } elseif ($typeAllowed === 'rep_return_credit') {
+                            $txAmount = abs($amount);
                         }
                     }
 
@@ -7871,15 +8670,26 @@ switch ($module) {
                         // also consider subtype set in details
                         if (!$isFinancial && isset($details['subtype']) && in_array($details['subtype'], $financial_types)) $isFinancial = true;
 
+                        // Rep consignment accounting-only types should never require a treasury.
+                        if ($checkType && in_array($checkType, ['rep_assignment', 'rep_return_credit'], true)) {
+                            $isFinancial = false;
+                        }
+
+                        // Allow certain internal rep adjustments to be recorded without affecting treasuries.
+                        // These are used for accounting-only moves such as adding a penalty to a rep's debt.
+                        if ($isFinancial && is_array($details) && isset($details['subtype']) && in_array($details['subtype'], ['rep_penalty','rep_insurance_apply'])) {
+                            $isFinancial = false;
+                        }
+
                         if ($isFinancial) {
                             if (!$treasuryId) {
-                                $pdo->rollBack();
+                                if ($pdo->inTransaction()) $pdo->rollBack();
                                 http_response_code(400);
                                 echo json_encode(['success' => false, 'message' => 'يجب اختيار الخزينة في المعاملات المالية.']);
                                 return;
                             }
                             if (empty($details_reason)) {
-                                $pdo->rollBack();
+                                if ($pdo->inTransaction()) $pdo->rollBack();
                                 http_response_code(400);
                                 echo json_encode(['success' => false, 'message' => 'يرجى تحديد سبب/بيان المعاملة في حقل "notes" أو details.reason.']);
                                 return;
@@ -7890,10 +8700,12 @@ switch ($module) {
                         if ($treasuryId && $txAmount < 0) {
                             $treasuryStmt = execute_query($pdo, "SELECT current_balance FROM treasuries WHERE id = ? FOR UPDATE", [$treasuryId]);
                             $treasury = $treasuryStmt->fetch(PDO::FETCH_ASSOC);
-                            if (!$treasury || $treasury['current_balance'] < abs($txAmount)) {
-                                $pdo->rollBack();
+                            $curBal = $treasury ? floatval($treasury['current_balance']) : 0;
+                            $need = abs($txAmount);
+                            if (!$treasury || $curBal < $need) {
+                                if ($pdo->inTransaction()) $pdo->rollBack();
                                 http_response_code(400);
-                                echo json_encode(['success' => false, 'message' => 'رصيد الخزينة غير كافٍ لإتمام العملية.']);
+                                echo json_encode(['success' => false, 'message' => 'رصيد الخزينة غير كافٍ لإتمام العملية. (الخزينة #' . $treasuryId . ' | المطلوب: ' . $need . ' | الرصيد: ' . $curBal . ')']);
                                 return;
                             }
                         }
@@ -7901,7 +8713,9 @@ switch ($module) {
                     $txId = $pdo->lastInsertId();
                     audit_log($pdo, 'transactions', 'create', $txId, json_encode(['type' => $typeAllowed, 'amount' => $txAmount]));
                     $memo = is_array($details) ? ($details['notes'] ?? $details['note'] ?? null) : null;
-                    finance_auto_post_transaction($pdo, $txId, $typeAllowed, $txAmount, $relAllowed, $memo);
+                    if (function_exists('finance_auto_post_transaction')) {
+                        finance_auto_post_transaction($pdo, $txId, $typeAllowed, $txAmount, $relAllowed, $memo);
+                    }
                     // Update treasury balance
                     if ($treasuryId && $txAmount != 0) {
                         execute_query($pdo, "UPDATE treasuries SET current_balance = current_balance + ? WHERE id = ?", [$txAmount, $treasuryId]);
@@ -7914,10 +8728,15 @@ switch ($module) {
                         }
                     }
 
-                    $pdo->commit();
+                    // Commit only when a transaction is actually active.
+                    // Some environments/drivers may return false from beginTransaction() without throwing,
+                    // or a nested helper may end the transaction.
+                    if ($pdo->inTransaction()) {
+                        $pdo->commit();
+                    }
                     echo json_encode(['success' => true, 'transaction_id' => $txId]);
                 } catch (Exception $e) {
-                    $pdo->rollBack();
+                    if ($pdo->inTransaction()) $pdo->rollBack();
                     http_response_code(500);
                     echo json_encode(['success' => false, 'message' => 'Failed to create transaction: ' . $e->getMessage()]);
                 }
@@ -7939,11 +8758,171 @@ switch ($module) {
         break;
     case 'sales':
         $action = $_GET['action'] ?? 'create';
+        if ($action === 'getRepDailyStats') {
+            $repId = intval($_GET['rep_id'] ?? 0);
+            if (!$repId) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'rep_id required']);
+                break;
+            }
+
+            try {
+                // Determine the best timestamp column we can rely on for daily grouping.
+                $dateCol = null;
+                if (column_exists($pdo, 'orders', 'updated_at')) $dateCol = 'updated_at';
+                elseif (column_exists($pdo, 'orders', 'created_at')) $dateCol = 'created_at';
+                elseif (column_exists($pdo, 'orders', 'date')) $dateCol = 'date';
+
+                $orderItemsHasTotal = column_exists($pdo, 'order_items', 'total_price');
+                $itemsExpr = $orderItemsHasTotal ? 'SUM(oi.total_price)' : 'SUM(oi.quantity * oi.price_per_unit)';
+                $subTotals = "(SELECT oi.order_id, COALESCE($itemsExpr,0) AS total_value FROM order_items oi GROUP BY oi.order_id)";
+
+                $whereDate = '';
+                if ($dateCol) {
+                    $whereDate = " AND o.`$dateCol` >= CURDATE() AND o.`$dateCol` < DATE_ADD(CURDATE(), INTERVAL 1 DAY)";
+                }
+
+                $sqlAgg = "SELECT COUNT(DISTINCT o.id) AS cnt, COALESCE(SUM(t.total_value), 0) AS val
+                           FROM orders o
+                           LEFT JOIN $subTotals t ON t.order_id = o.id
+                           WHERE o.rep_id = ? AND o.status = ? $whereDate";
+
+                $deliveredStmt = execute_query($pdo, $sqlAgg, [$repId, 'delivered']);
+                $del = $deliveredStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+                $returnedStmt = execute_query($pdo, $sqlAgg, [$repId, 'returned']);
+                $ret = $returnedStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+                echo json_encode([
+                    'success' => true,
+                    'data' => [
+                        'deliveredCount' => intval($del['cnt'] ?? 0),
+                        'deliveredValue' => floatval($del['val'] ?? 0),
+                        'returnedCount' => intval($ret['cnt'] ?? 0),
+                        'returnedValue' => floatval($ret['val'] ?? 0)
+                    ]
+                ]);
+            } catch (Exception $e) {
+                http_response_code(500);
+                echo json_encode(['success' => false, 'message' => 'Failed to load rep daily stats: ' . $e->getMessage()]);
+            }
+            break;
+        }
+
+        if ($action === 'settleDaily') {
+            $repId = intval($input['repId'] ?? 0);
+            $treasuryId = intval($input['treasuryId'] ?? 0);
+            $paidAmount = isset($input['paidAmount']) ? floatval($input['paidAmount']) : 0;
+
+            // enforce defaults/locks for treasury when settling
+            $defaults = get_user_defaults($pdo);
+            if ($defaults) {
+                $defTid = isset($defaults['default_treasury_id']) ? intval($defaults['default_treasury_id']) : null;
+                $canChangeT = isset($defaults['can_change_treasury']) ? boolval($defaults['can_change_treasury']) : true;
+                if (!$canChangeT && $defTid) {
+                    if ($treasuryId && $treasuryId !== $defTid) {
+                        http_response_code(400);
+                        echo json_encode(['success' => false, 'message' => 'الخزينة المقفلة للمستخدم، لا يمكن تغييرها.']);
+                        break;
+                    }
+                    if (!$treasuryId) $treasuryId = $defTid;
+                } else {
+                    if (!$treasuryId && $defTid) $treasuryId = $defTid;
+                }
+            }
+
+            if (!$repId || !$treasuryId) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'repId and treasuryId are required']);
+                break;
+            }
+            if ($paidAmount <= 0) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'paidAmount must be greater than 0']);
+                break;
+            }
+
+            try {
+                // Validate rep exists (most installs store reps in users table)
+                if (table_exists($pdo, 'users') && column_exists($pdo, 'users', 'role')) {
+                    $repCheck = execute_query($pdo, "SELECT id, name FROM users WHERE id = ? AND role = 'representative' LIMIT 1", [$repId]);
+                    $repRow = $repCheck->fetch(PDO::FETCH_ASSOC);
+                    if (!$repRow) {
+                        http_response_code(404);
+                        echo json_encode(['success' => false, 'message' => 'Representative not found']);
+                        break;
+                    }
+                }
+
+                // Get current rep balance from transactions (canonical source used by getAllWithBalance)
+                $repRelatedType = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
+                $balStmt = execute_query($pdo, "SELECT COALESCE(SUM(amount),0) AS bal FROM transactions WHERE related_to_type = ? AND related_to_id = ?", [$repRelatedType, $repId]);
+                $balRow = $balStmt->fetch(PDO::FETCH_ASSOC);
+                $currentBal = floatval($balRow['bal'] ?? 0);
+
+                // Negative balance means debt (عليه). Settlement is payment-in to reduce debt.
+                if ($currentBal >= 0) {
+                    http_response_code(400);
+                    echo json_encode(['success' => false, 'message' => 'لا توجد مديونية على هذا المندوب لإغلاقها.']);
+                    break;
+                }
+                if ($paidAmount > abs($currentBal)) {
+                    http_response_code(400);
+                    echo json_encode(['success' => false, 'message' => 'مبلغ التقفيل أكبر من المديونية الحالية.']);
+                    break;
+                }
+
+                $pdo->beginTransaction();
+                try {
+                    // Lock treasury and update balance (cash in)
+                    execute_query($pdo, "SELECT current_balance FROM treasuries WHERE id = ? FOR UPDATE", [$treasuryId]);
+
+                    $txType = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_settlement', ['rep_settlement','rep_payment_in','payment_in','payment']);
+                    $relType = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
+                    $details = [
+                        'action' => 'settleDaily',
+                        'rep_id' => $repId,
+                        'treasury_id' => $treasuryId,
+                        'paidAmount' => abs($paidAmount),
+                        'model' => 'consignment'
+                    ];
+
+                    execute_query(
+                        $pdo,
+                        "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)",
+                        [$txType, null, $treasuryId, $relType, $repId, abs($paidAmount), json_encode($details)]
+                    );
+                    $txId = $pdo->lastInsertId();
+
+                    execute_query($pdo, "UPDATE treasuries SET current_balance = current_balance + ? WHERE id = ?", [abs($paidAmount), $treasuryId]);
+
+                    if ($pdo->inTransaction()) $pdo->commit();
+
+                    // Return updated balance
+                    $newBalStmt = execute_query($pdo, "SELECT COALESCE(SUM(amount),0) AS bal FROM transactions WHERE related_to_type = ? AND related_to_id = ?", [$repRelatedType, $repId]);
+                    $newBalRow = $newBalStmt->fetch(PDO::FETCH_ASSOC);
+
+                    echo json_encode([
+                        'success' => true,
+                        'transaction_id' => $txId,
+                        'new_balance' => floatval($newBalRow['bal'] ?? 0)
+                    ]);
+                } catch (Exception $e) {
+                    if ($pdo->inTransaction()) $pdo->rollBack();
+                    throw $e;
+                }
+            } catch (Exception $e) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+                http_response_code(500);
+                echo json_encode(['success' => false, 'message' => 'Settle daily failed: ' . $e->getMessage()]);
+            }
+            break;
+        }
+
         if ($action === 'completeDaily') {
             $repId = intval($input['repId'] ?? 0);
             $orders = $input['orders'] ?? [];
             $paymentAdjustment = isset($input['paymentAdjustment']) ? floatval($input['paymentAdjustment']) : 0;
-            $paymentDirection = $input['paymentDirection'] ?? 'pay';
             $treasuryId = isset($input['treasuryId']) ? intval($input['treasuryId']) : 0;
             $warehouseId = isset($input['warehouseId']) ? intval($input['warehouseId']) : 0;
 
@@ -7968,6 +8947,13 @@ switch ($module) {
             if (!$repId || !is_array($orders) || count($orders) === 0) {
                 http_response_code(400);
                 echo json_encode(['success' => false, 'message' => 'Missing rep or orders for daily completion.']);
+                break;
+            }
+
+            // Consignment model: upfront payment is always Rep -> Company.
+            if ($paymentAdjustment > 0 && $treasuryId <= 0) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'Treasury is required when paymentAdjustment > 0.']);
                 break;
             }
 
@@ -8020,31 +9006,35 @@ switch ($module) {
                     }
                 }
 
-                // create main transaction record for the daily assignment (optional)
-                $totalAmount = isset($input['totalAmount']) ? floatval($input['totalAmount']) : 0;
-                $details = json_encode(['orders' => $orders, 'rep_id' => $repId, 'reason' => ($daily_reason ?? '')]);
+                // Consignment model: assigning orders creates DEBT on the Rep.
+                // Ensure the assignment amount is computed from order items ONLY (exclude shipping_fees).
+                // Do NOT trust client-provided totals which may include shipping; always compute server-side.
+                $in = implode(',', array_map('intval', $orders));
+                $order_items_has_total_col = column_exists($pdo, 'order_items', 'total_price');
+                if ($order_items_has_total_col) {
+                    $sumStmt = $pdo->query("SELECT COALESCE(SUM(total_price),0) as s FROM order_items WHERE order_id IN ($in)");
+                } else {
+                    $sumStmt = $pdo->query("SELECT COALESCE(SUM(quantity * price_per_unit),0) as s FROM order_items WHERE order_id IN ($in)");
+                }
+                $sumRow = $sumStmt->fetch(PDO::FETCH_ASSOC);
+                $totalAmount = floatval($sumRow['s'] ?? 0);
+
+                $detailsArr = ['orders' => $orders, 'rep_id' => $repId, 'reason' => ($daily_reason ?? ''), 'model' => 'consignment'];
+                $details = json_encode($detailsArr);
+                $assignmentTxId = null;
                 if ($totalAmount > 0) {
-                    $txType = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_assignment', ['transfer','sale','purchase','payment_in','payment_out']);
+                    $txType = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_assignment', ['rep_assignment','rep_settlement','sale','payment_in','payment_out']);
                     $rel_local = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
-                    execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txType, $warehouseId ?: null, $treasuryId ?: null, $rel_local, $repId, $totalAmount, $details]);
+                    execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txType, $warehouseId ?: null, null, $rel_local, $repId, -1 * abs($totalAmount), $details]);
                     $assignmentTxId = $pdo->lastInsertId();
                 }
 
-                // handle payment adjustment between company and rep via treasury
-                if ($paymentAdjustment > 0 && $treasuryId) {
-                    if ($paymentDirection === 'pay') {
-                        // company pays rep: treasury decreases
-                        $txType2 = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_payment_out', ['payment_out','payment','payment_in','payment_out']);
-                        $rel_local2 = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
-                        execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txType2, $warehouseId ?: null, $treasuryId, $rel_local2, $repId, $paymentAdjustment, json_encode(['direction'=>'out'])]);
-                        execute_query($pdo, "UPDATE treasuries SET current_balance = current_balance - ? WHERE id = ?", [$paymentAdjustment, $treasuryId]);
-                    } else {
-                        // company receives from rep: treasury increases
-                        $txType3 = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_payment_in', ['payment_in','payment','payment_in','payment_out']);
-                        $rel_local3 = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
-                        execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txType3, $warehouseId ?: null, $treasuryId, $rel_local3, $repId, $paymentAdjustment, json_encode(['direction'=>'in'])]);
-                        execute_query($pdo, "UPDATE treasuries SET current_balance = current_balance + ? WHERE id = ?", [$paymentAdjustment, $treasuryId]);
-                    }
+                // Upfront payment (Rep -> Company): credits Rep (reduces debt) and increases Treasury.
+                if ($paymentAdjustment > 0) {
+                    $txType3 = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_payment_in', ['rep_payment_in','payment_in','payment','rep_settlement']);
+                    $rel_local3 = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
+                    execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txType3, $warehouseId ?: null, $treasuryId, $rel_local3, $repId, abs($paymentAdjustment), json_encode(['direction'=>'in','orders'=>$orders,'rep_id'=>$repId,'assignment_tx_id'=>$assignmentTxId,'model'=>'consignment'])]);
+                    execute_query($pdo, "UPDATE treasuries SET current_balance = current_balance + ? WHERE id = ?", [abs($paymentAdjustment), $treasuryId]);
                 }
 
                 $pdo->commit();
@@ -8076,6 +9066,7 @@ switch ($module) {
         } elseif ($action === 'create') {
             $customerId = intval($input['customerId'] ?? 0);
             $warehouseId = intval($input['warehouseId'] ?? 0);
+            $treasuryId = intval($input['treasuryId'] ?? 0);
             $items = $input['items'] ?? [];
             $paidAmount = isset($input['paidAmount']) ? floatval($input['paidAmount']) : 0;
 
@@ -8094,16 +9085,17 @@ switch ($module) {
                 $defTid = isset($defaults['default_treasury_id']) ? intval($defaults['default_treasury_id']) : null;
                 $canChangeT = isset($defaults['can_change_treasury']) ? boolval($defaults['can_change_treasury']) : true;
                 if (!$canChangeT && $defTid) {
-                    // if paid amount will require treasury and user isn't allowed to change, ensure it matches
-                    if ($paidAmount > 0) {
-                        $providedTid = isset($input['treasuryId']) ? intval($input['treasuryId']) : 0;
-                        if ($providedTid && $providedTid !== $defTid) { http_response_code(400); echo json_encode(['success'=>false,'message'=>'الخزينة مقفلة للمستخدم ولا يمكن تغييرها.']); break; }
-                        if (!$providedTid) $treasuryId = $defTid; // set if not provided
-                    } else {
-                        if (!$treasuryId && $defTid) $treasuryId = $defTid;
-                    }
+                    if ($treasuryId && $treasuryId !== $defTid) { http_response_code(400); echo json_encode(['success'=>false,'message'=>'الخزينة مقفلة للمستخدم ولا يمكن تغييرها.']); break; }
+                    if (!$treasuryId) $treasuryId = $defTid;
                 } else { if (!$treasuryId && $defTid) $treasuryId = $defTid; }
             }
+
+            if ($paidAmount > 0 && $treasuryId <= 0) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'Treasury is required when paidAmount > 0.']);
+                break;
+            }
+
             if (!$customerId || !$warehouseId || !is_array($items) || count($items) === 0) {
                 http_response_code(400);
                 echo json_encode(['success' => false, 'message' => 'Missing required sale data.']);
@@ -8118,6 +9110,7 @@ switch ($module) {
 
             try {
                 $pdo->beginTransaction();
+                $current_user = $_SESSION['user_id'] ?? null;
                 $total = 0;
                 foreach ($items as $it) {
                     $qty = intval($it['qty'] ?? 0);
@@ -8151,7 +9144,7 @@ switch ($module) {
                     }
 
                     $movement_notes = json_encode(array_merge(is_array($it) ? $it : ['info' => $it], ['reason' => $sale_reason]));
-                    execute_query($pdo, "INSERT INTO product_movements (product_id, warehouse_id, movement_type, quantity_change, previous_quantity, new_quantity, reference_id, reference_type, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [$productId, $warehouseId, 'sale', -$qty, $prevQty, $newQty, $saleId, 'sale_invoice', $movement_notes, null]);
+                    execute_query($pdo, "INSERT INTO product_movements (product_id, warehouse_id, movement_type, quantity_change, previous_quantity, new_quantity, reference_id, reference_type, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [$productId, $warehouseId, 'sale', -$qty, $prevQty, $newQty, $saleId, 'sale_invoice', $movement_notes, $current_user]);
                 }
 
                 // Update customer totals (increase debit)
@@ -8163,8 +9156,14 @@ switch ($module) {
                 if ($paidAmount > 0) {
                     $txType_local = pick_allowed_enum($pdo, 'transactions', 'type', 'payment_in', ['payment_in','payment','payment_out']);
                     $rel_local = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'customer', ['customer','rep','supplier','none']);
-                    execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txType_local, $warehouseId, null, $rel_local, $customerId, $paidAmount, json_encode(['paid_for' => $saleId])]);
+                    execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txType_local, $warehouseId, $treasuryId, $rel_local, $customerId, $paidAmount, json_encode(['paid_for' => $saleId])]);
                     execute_query($pdo, "UPDATE customers SET total_credit = total_credit + ? WHERE id = ?", [$paidAmount, $customerId]);
+
+                    // Update treasury balance (cash in)
+                    if ($treasuryId) {
+                        execute_query($pdo, "SELECT current_balance FROM treasuries WHERE id = ? FOR UPDATE", [$treasuryId]);
+                        execute_query($pdo, "UPDATE treasuries SET current_balance = current_balance + ? WHERE id = ?", [$paidAmount, $treasuryId]);
+                    }
                 }
 
                 $pdo->commit();
@@ -9946,7 +10945,19 @@ function handle_crud($pdo, $table, $input, $fields, $select_fields = "*") {
 
     switch ($action) {
         case 'getAll':
-            $stmt = execute_query($pdo, "SELECT $select_fields FROM $table ORDER BY id DESC");
+            // For products, hide archived items by default and ensure column exists
+            if ($table === 'products') {
+                try {
+                    if (!column_exists($pdo, 'products', 'is_archived')) {
+                        execute_query($pdo, "ALTER TABLE products ADD COLUMN is_archived TINYINT(1) NOT NULL DEFAULT 0");
+                    }
+                } catch (Exception $e) {
+                    // ignore migration failure
+                }
+                $stmt = execute_query($pdo, "SELECT $select_fields FROM $table WHERE COALESCE(is_archived,0) = 0 ORDER BY id DESC");
+            } else {
+                $stmt = execute_query($pdo, "SELECT $select_fields FROM $table ORDER BY id DESC");
+            }
             echo json_encode(['success' => true, 'data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
             break;
 
@@ -10116,6 +11127,27 @@ function handle_crud($pdo, $table, $input, $fields, $select_fields = "*") {
                     echo json_encode(['success' => false, 'message' => 'Cannot delete with a non-zero balance.']);
                     return;
                 }
+            }
+
+            // If deleting products, perform soft-delete (archive) instead of hard delete
+            if ($table === 'products') {
+                try {
+                    if (!column_exists($pdo, 'products', 'is_archived')) {
+                        execute_query($pdo, "ALTER TABLE products ADD COLUMN is_archived TINYINT(1) NOT NULL DEFAULT 0");
+                    }
+                } catch (Exception $e) {
+                    // ignore migration failure
+                }
+                $stmt = execute_query($pdo, "UPDATE products SET is_archived = 1 WHERE id = ? LIMIT 1", [$id]);
+                $affected = is_object($stmt) && method_exists($stmt, 'rowCount') ? $stmt->rowCount() : 0;
+                if ($affected === 0) {
+                    http_response_code(404);
+                    echo json_encode(['success' => false, 'message' => 'لم يتم العثور على المنتج أو لم يتم أرشفته.']);
+                } else {
+                    audit_log($pdo, $table, 'archive', $id, null);
+                    echo json_encode(['success' => true, 'message' => 'تم إخفاء المنتج (مؤرشف).']);
+                }
+                break;
             }
 
             execute_query($pdo, "DELETE FROM $table WHERE id = ?", [$id]);

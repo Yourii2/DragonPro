@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { translateTxnLabel } from '../services/labelHelpers';
 import { 
   BarChart3, 
   Filter, 
@@ -43,6 +44,7 @@ import Swal from 'sweetalert2';
 import DailyReport from './DailyReport';
 import TotalsReport from './TotalsReport';
 import { useTheme } from './ThemeContext';
+import CustomSelect from './CustomSelect';
 
 interface ReportsModuleProps {
   initialView?: string;
@@ -328,82 +330,99 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
   const salesFilters = (
     <div className="flex gap-2 w-full md:w-auto flex-wrap">
       {dateRangeInputs}
-      <select value={salesStatus} onChange={(e) => setSalesStatus(e.target.value)} className="bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-2 px-3 text-sm text-slate-900 dark:text-white">
-        <option value="">كل الحالات</option>
-        <option value="pending">قيد الانتظار</option>
-        <option value="with_rep">مع المندوب</option>
-        <option value="delivered">تم التسليم</option>
-        <option value="returned">مرتجع</option>
-        <option value="partial">جزئي</option>
-        <option value="postponed">مؤجل</option>
-      </select>
-      <select value={salesCustomerId} onChange={(e) => setSalesCustomerId(e.target.value)} className="bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-2 px-3 text-sm text-slate-900 dark:text-white">
-        <option value="">كل العملاء</option>
-        {customers.map((c: any) => (
-          <option key={c.id} value={c.id}>{c.name}</option>
-        ))}
-      </select>
-      <select value={salesRepId} onChange={(e) => setSalesRepId(e.target.value)} className="bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-2 px-3 text-sm text-slate-900 dark:text-white">
-        <option value="">كل المناديب</option>
-        {reps.map((r: any) => (
-          <option key={r.id} value={r.id}>{r.name}</option>
-        ))}
-      </select>
+      <CustomSelect
+        value={salesStatus}
+        onChange={(v) => setSalesStatus(v)}
+        options={[
+          { value: '', label: 'كل الحالات' },
+          { value: 'pending', label: 'قيد الانتظار' },
+          { value: 'with_rep', label: 'مع المندوب' },
+          { value: 'delivered', label: 'تم التسليم' },
+          { value: 'returned', label: 'مرتجع' },
+          { value: 'partial', label: 'جزئي' },
+          { value: 'postponed', label: 'مؤجل' }
+        ]}
+        placeholder="حالة الفاتورة"
+      />
+      <CustomSelect
+        value={salesCustomerId}
+        onChange={(v) => setSalesCustomerId(v)}
+        options={[{ value: '', label: 'كل العملاء' }, ...customers.map((c: any) => ({ value: String(c.id), label: c.name }))]}
+        placeholder="العملاء"
+      />
+      <CustomSelect
+        value={salesRepId}
+        onChange={(v) => setSalesRepId(v)}
+        options={[{ value: '', label: 'كل المناديب' }, ...reps.map((r: any) => ({ value: String(r.id), label: r.name }))]}
+        placeholder="المناديب"
+      />
     </div>
   );
 
   const inventoryFilters = (
     <div className="flex gap-2 w-full md:w-auto flex-wrap">
       {dateRangeInputs}
-      <select value={inventoryWarehouseId} onChange={(e) => setInventoryWarehouseId(e.target.value)} className="bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-2 px-3 text-sm text-slate-900 dark:text-white">
-        <option value="">كل المستودعات</option>
-        {warehouses.map((w: any) => (
-          <option key={w.id} value={w.id}>{w.name}</option>
-        ))}
-      </select>
-      <select value={inventoryMovementType} onChange={(e) => setInventoryMovementType(e.target.value)} className="bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-2 px-3 text-sm text-slate-900 dark:text-white">
-        <option value="">كل الحركات</option>
-        <option value="purchase">شراء</option>
-        <option value="sale">بيع</option>
-        <option value="return_in">مرتجع وارد</option>
-        <option value="return_out">مرتجع صادر</option>
-        <option value="transfer_in">تحويل وارد</option>
-        <option value="transfer_out">تحويل صادر</option>
-        <option value="adjustment">تسوية</option>
-        <option value="initial_balance">رصيد افتتاحي</option>
-      </select>
+      <CustomSelect
+        value={inventoryWarehouseId}
+        onChange={(v) => setInventoryWarehouseId(v)}
+        options={[{ value: '', label: 'كل المستودعات' }, ...warehouses.map((w: any) => ({ value: String(w.id), label: w.name }))]}
+        placeholder="المستودع"
+      />
+      <CustomSelect
+        value={inventoryMovementType}
+        onChange={(v) => setInventoryMovementType(v)}
+        options={[
+          { value: '', label: 'كل الحركات' },
+          { value: 'purchase', label: 'شراء' },
+          { value: 'sale', label: 'بيع' },
+          { value: 'return_in', label: 'مرتجع وارد' },
+          { value: 'return_out', label: 'مرتجع صادر' },
+          { value: 'transfer_in', label: 'تحويل وارد' },
+          { value: 'transfer_out', label: 'تحويل صادر' },
+          { value: 'adjustment', label: 'تسوية' },
+          { value: 'initial_balance', label: 'رصيد افتتاحي' }
+        ]}
+        placeholder="نوع الحركة"
+      />
     </div>
   );
 
   const financeFilters = (
     <div className="flex gap-2 w-full md:w-auto flex-wrap">
       {dateRangeInputs}
-      <select value={financeTreasuryId} onChange={(e) => setFinanceTreasuryId(e.target.value)} className="bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-2 px-3 text-sm text-slate-900 dark:text-white">
-        <option value="">كل الخزائن</option>
-        {treasuries.map((t: any) => (
-          <option key={t.id} value={t.id}>{t.name}</option>
-        ))}
-      </select>
-      <select value={financeTxnType} onChange={(e) => setFinanceTxnType(e.target.value)} className="bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-2 px-3 text-sm text-slate-900 dark:text-white">
-        <option value="">كل الأنواع</option>
-        <option value="sale">مبيعات</option>
-        <option value="purchase">مشتريات</option>
-        <option value="payment_in">إيداع</option>
-        <option value="payment_out">دفعة</option>
-        <option value="expense">مصروف</option>
-        <option value="transfer">تحويل</option>
-      </select>
+      <CustomSelect
+        value={financeTreasuryId}
+        onChange={(v) => setFinanceTreasuryId(v)}
+        options={[{ value: '', label: 'كل الخزائن' }, ...treasuries.map((t: any) => ({ value: String(t.id), label: t.name }))]}
+        placeholder="الخزينة"
+      />
+      <CustomSelect
+        value={financeTxnType}
+        onChange={(v) => setFinanceTxnType(v)}
+        options={[
+          { value: '', label: 'كل الأنواع' },
+          { value: 'sale', label: 'مبيعات' },
+          { value: 'purchase', label: 'مشتريات' },
+          { value: 'payment_in', label: 'إيداع' },
+          { value: 'payment_out', label: 'دفعة' },
+          { value: 'expense', label: 'مصروف' },
+          { value: 'transfer', label: 'تحويل' }
+        ]}
+        placeholder="نوع المعاملة"
+      />
     </div>
   );
 
   const compareFilters = (
     <div className="flex gap-2 w-full md:w-auto flex-wrap">
-      <select value={compareYear} onChange={(e) => setCompareYear(Number(e.target.value))} className="bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-2 px-3 text-sm text-slate-900 dark:text-white">
-        {Array.from({ length: 5 }).map((_, i) => {
+      <CustomSelect
+        value={String(compareYear)}
+        onChange={(v) => setCompareYear(Number(v))}
+        options={Array.from({ length: 5 }).map((_, i) => {
           const y = today.getFullYear() - i;
-          return <option key={y} value={y}>{y}</option>;
+          return { value: String(y), label: String(y) };
         })}
-      </select>
+      />
     </div>
   );
 
@@ -684,10 +703,10 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
                     <td className="px-6 py-4 font-bold">{item.date}</td>
                     <td className="px-6 py-4">
                       <span className={`px-3 py-1 rounded-lg text-[10px] font-black ${item.type === 'revenue' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
-                        {item.type === 'revenue' ? 'إيراد' : 'مصروف'}
+                        {translateTxnLabel(item.type, item.desc, item.txn_type)}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-xs">{item.desc}</td>
+                    <td className="px-6 py-4 text-xs">{translateTxnLabel(item.type, item.desc, item.txn_type)}</td>
                     <td className={`px-6 py-4 font-black ${item.amount >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{item.amount.toLocaleString()}</td>
                     <td className="px-6 py-4 text-xs">{item.treasury}</td>
                   </tr>

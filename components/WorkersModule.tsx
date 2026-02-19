@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { Briefcase, CircleDollarSign, FileText, Fingerprint, List, Pencil, Plus, ReceiptText, Trash2 } from 'lucide-react';
+import CustomSelect from './CustomSelect';
 
 interface WorkersModuleProps {
 	initialView?: string;
@@ -871,18 +872,11 @@ const WorkersModule: React.FC<WorkersModuleProps> = ({ initialView }) => {
 			{activeView === 'salary-report' && (
 				<div className="card p-4 space-y-4">
 					<div className="flex items-center gap-2 flex-wrap">
-						<select
-							value={reportWorkerId || ''}
-							onChange={(e) => setReportWorkerId(Number(e.target.value))}
-							className="border rounded-xl px-3 py-2 text-xs dark:bg-slate-900"
-						>
-							<option value="">اختر عامل</option>
-							{workers.map((w) => (
-								<option key={w.id} value={w.id}>
-									{w.name}
-								</option>
-							))}
-						</select>
+						<CustomSelect
+							value={reportWorkerId ? String(reportWorkerId) : ''}
+							onChange={(v) => setReportWorkerId(v ? Number(v) : 0)}
+							options={[{ value: '', label: 'اختر عامل' }, ...workers.map((w) => ({ value: String(w.id), label: w.name }))]}
+						/>
 						<input
 							value={reportMonth}
 							onChange={(e) => setReportMonth(e.target.value)}

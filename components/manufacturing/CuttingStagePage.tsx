@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 
 import { Eye, Plus, X, Save, Printer } from 'lucide-react';
 import Swal from 'sweetalert2';
+import CustomSelect from '../CustomSelect';
 import { API_BASE_PATH } from '../../services/apiConfig';
 import { printBarcode } from '../../services/printUtils';
 
@@ -219,52 +220,34 @@ const CuttingStagePage = () => {
 							<div className="grid grid-cols-1 md:grid-cols-6 gap-4">
 								<div className="space-y-1 md:col-span-2">
 									<label className="text-xs font-bold text-slate-500 mr-2">المخزن</label>
-									<select
-										value={form.warehouse_id}
-										onChange={e => setForm(f => ({ ...f, warehouse_id: Number(e.target.value) }))}
-										className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
+									<CustomSelect
+										value={String(form.warehouse_id || 0)}
+										onChange={v => setForm(f => ({ ...f, warehouse_id: Number(v || 0) }))}
+										options={[{ value: '0', label: 'اختر المخزن' }, ...warehouses.map(w => ({ value: String(w.id), label: w.name }))]}
+										className="w-full text-sm"
 										required
-									>
-										<option value={0}>اختر المخزن</option>
-										{warehouses.map(w => (
-											<option key={w.id} value={w.id}>
-												{w.name}
-											</option>
-										))}
-									</select>
+									/>
 								</div>
 								<div className="space-y-1 md:col-span-2">
 									<label className="text-xs font-bold text-slate-500 mr-2">القماش</label>
-									<select
-										value={form.fabric_id}
-										onChange={e => setForm(f => ({ ...f, fabric_id: Number(e.target.value) }))}
-										className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
+									<CustomSelect
+										value={String(form.fabric_id || 0)}
+										onChange={v => setForm(f => ({ ...f, fabric_id: Number(v || 0) }))}
+										options={[{ value: '0', label: form.warehouse_id ? 'اختر القماش' : 'اختر المخزن أولاً' }, ...fabrics.map(f => ({ value: String(f.id), label: `${f.name}${f.code ? ` (${f.code})` : ''}` }))]}
+										className="w-full text-sm"
 										required
 										disabled={!form.warehouse_id}
-									>
-										<option value={0}>{form.warehouse_id ? 'اختر القماش' : 'اختر المخزن أولاً'}</option>
-										{fabrics.map(f => (
-											<option key={f.id} value={f.id}>
-												{f.name}{f.code ? ` (${f.code})` : ''}
-											</option>
-										))}
-									</select>
+									/>
 								</div>
 								<div className="space-y-1 md:col-span-2">
 									<label className="text-xs font-bold text-slate-500 mr-2">المنتج</label>
-									<select
-										value={form.factory_product_id}
-										onChange={e => setForm(f => ({ ...f, factory_product_id: Number(e.target.value) }))}
-										className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
+									<CustomSelect
+										value={String(form.factory_product_id || 0)}
+										onChange={v => setForm(f => ({ ...f, factory_product_id: Number(v || 0) }))}
+										options={[{ value: '0', label: 'اختر المنتج' }, ...products.map(p => ({ value: String(p.id), label: `${p.name}${p.code ? ` (${p.code})` : ''}` }))]}
+										className="w-full text-sm"
 										required
-									>
-										<option value={0}>اختر المنتج</option>
-										{products.map(p => (
-											<option key={p.id} value={p.id}>
-												{p.name}{p.code ? ` (${p.code})` : ''}
-											</option>
-										))}
-									</select>
+									/>
 								</div>
 								<div className="space-y-1 md:col-span-2">
 									<label className="text-xs font-bold text-slate-500 mr-2">الكمية المراد قصها</label>

@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Eye, Plus, Save, Trash2, X } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../../services/apiConfig';
+import CustomSelect from '../CustomSelect';
 
 type Warehouse = { id: number; name: string };
 type MetaColor = { id: number; name: string; code?: string | null };
@@ -426,17 +427,22 @@ const SendProductsPage = () => {
 							<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 								<div className="space-y-1">
 									<label className="text-xs font-bold text-slate-500 mr-2">المخزن المرسل منه</label>
-									<select value={fromWarehouseId || ''} onChange={e => setFromWarehouseId(Number(e.target.value) || 0)} disabled={!canChangeFromWarehouse} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white">
-										<option value="">اختر المخزن</option>
-										{warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-									</select>
+									<CustomSelect
+										value={String(fromWarehouseId || '')}
+										onChange={v => setFromWarehouseId(Number(v) || 0)}
+										disabled={!canChangeFromWarehouse}
+										options={[{ value: '', label: 'اختر المخزن' }, ...warehouses.map((w:any) => ({ value: String(w.id), label: w.name }))]}
+										className="w-full"
+									/>
 								</div>
 								<div className="space-y-1">
 									<label className="text-xs font-bold text-slate-500 mr-2">المخزن المرسل إليه (المبيعات)</label>
-									<select value={toWarehouseId || ''} onChange={e => setToWarehouseId(Number(e.target.value) || 0)} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white">
-										<option value="">اختر المخزن</option>
-										{warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-									</select>
+									<CustomSelect
+										value={String(toWarehouseId || '')}
+										onChange={v => setToWarehouseId(Number(v) || 0)}
+										options={[{ value: '', label: 'اختر المخزن' }, ...warehouses.map((w:any) => ({ value: String(w.id), label: w.name }))]}
+										className="w-full"
+									/>
 								</div>
 									<div className="space-y-1">
 										<label className="text-xs font-bold text-slate-500 mr-2">ملاحظات</label>
@@ -464,26 +470,30 @@ const SendProductsPage = () => {
 									<div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
 										<div className="md:col-span-2 space-y-1">
 											<label className="text-xs font-bold text-slate-500 mr-2">المنتج (من المخزن المرسل منه)</label>
-											<select value={selectedProductId || ''} onChange={e => setSelectedProductId(Number(e.target.value) || 0)} className="w-full bg-white dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white">
-												<option value="">اختر المنتج</option>
-												{availableProducts.map(p => (
-													<option key={p.id} value={p.id}>{p.name}{p.code ? ` (${p.code})` : ''} — المتاح: {p.available_quantity}</option>
-												))}
-											</select>
+											<CustomSelect
+												value={String(selectedProductId || '')}
+												onChange={v => setSelectedProductId(Number(v) || 0)}
+												options={[{ value: '', label: 'اختر المنتج' }, ...availableProducts.map((p:any) => ({ value: String(p.id), label: `${p.name}${p.code ? ` (${p.code})` : ''} — المتاح: ${p.available_quantity}` }))]}
+												className="w-full"
+											/>
 										</div>
 											<div className="space-y-1">
 												<label className="text-xs font-bold text-slate-500 mr-2">المقاس</label>
-												<select value={selectedSizeId || ''} onChange={e => setSelectedSizeId(Number(e.target.value) || 0)} className="w-full bg-white dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white">
-													<option value="">اختر المقاس</option>
-													{metaSizes.map(s => <option key={s.id} value={s.id}>{s.name}{s.code ? ` (${s.code})` : ''}</option>)}
-												</select>
+												<CustomSelect
+													value={String(selectedSizeId || '')}
+													onChange={v => setSelectedSizeId(Number(v) || 0)}
+													options={[{ value: '', label: 'اختر المقاس' }, ...metaSizes.map((s:any) => ({ value: String(s.id), label: `${s.name}${s.code ? ` (${s.code})` : ''}` }))]}
+													className="w-full"
+												/>
 											</div>
 										<div className="space-y-1">
 												<label className="text-xs font-bold text-slate-500 mr-2">اللون</label>
-												<select value={selectedColor} onChange={e => setSelectedColor(e.target.value)} className="w-full bg-white dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white">
-													<option value="">اختر اللون</option>
-													{metaColors.map(c => <option key={c.id} value={c.name}>{c.name}{c.code ? ` (${c.code})` : ''}</option>)}
-												</select>
+												<CustomSelect
+													value={String(selectedColor || '')}
+													onChange={v => setSelectedColor(v)}
+													options={[{ value: '', label: 'اختر اللون' }, ...metaColors.map((c:any) => ({ value: String(c.name), label: `${c.name}${c.code ? ` (${c.code})` : ''}` }))]}
+													className="w-full"
+												/>
 										</div>
 											<div className="space-y-1">
 												<label className="text-xs font-bold text-slate-500 mr-2">الكمية</label>

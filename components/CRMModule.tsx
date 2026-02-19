@@ -4,6 +4,7 @@ import { Search, UserPlus, FileText, Calculator, X, Save, Edit, Trash2, Eye, Arc
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { ensurePermissionsLoaded, hasPermission } from '../services/permissions';
+import CustomSelect from './CustomSelect';
 
 interface CRMModuleProps {
   initialView?: string;
@@ -43,6 +44,9 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
 
 
   const [customers, setCustomers] = useState<any[]>([]);
+  const [filterMode, setFilterMode] = useState<'all'|'received'|'returned'>('all');
+  const [statusCustomerIds, setStatusCustomerIds] = useState<number[]>([]);
+  const [stats, setStats] = useState<any>({ deliveredCount: 0, returnedCount: 0, satisfactionPct: 0, topCustomers: [] });
 
   const [formData, setFormData] = useState({ name: '', phone1: '', phone2: '', governorate: '', address: '', landmark: '' });
 
@@ -56,6 +60,11 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
       await fetchCustomers();
     })();
   }, [initialView]);
+
+  // Recompute delivery/return stats whenever customers list or filter mode changes
+  useEffect(() => {
+    if (customers.length > 0) loadDeliveryStats();
+  }, [customers, filterMode]);
 
   useEffect(() => {
     fetchCustomers();
@@ -226,6 +235,93 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
     }
   };
 
+  // Load delivered/returned orders and compute stats & matching customer IDs
+  const loadDeliveryStats = async () => {
+    try {
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=customersByStatus&statuses=delivered,returned`);
+      const json = await res.json().catch(() => ({ success: false, data: {} }));
+      if (!json.success) throw new Error(json.message || 'Failed to load');
+
+      const data = json.data || {};
+      const delivered = data['delivered'] || [];
+      const returned = data['returned'] || [];
+
+      const deliveredIds = delivered.map((d:any) => Number(d.id));
+      const returnedIds = returned.map((d:any) => Number(d.id));
+
+      const totalDeliveredCustomers = deliveredIds.length;
+      const totalReturnedCustomers = returnedIds.length;
+      const satisfactionPct = (totalDeliveredCustomers + totalReturnedCustomers) === 0 ? 0 : Math.round((totalDeliveredCustomers / (totalDeliveredCustomers + totalReturnedCustomers)) * 100);
+
+      // Top customers from delivered data (already ordered by DB orders_count DESC per status)
+      const topList = (delivered || []).slice(0,10).map((t:any) => ({ id: Number(t.id), name: t.name, phone: t.phone1, count: Number(t.count) }));
+
+      setStats({ deliveredCount: totalDeliveredCustomers, returnedCount: totalReturnedCustomers, satisfactionPct, topCustomers: topList });
+
+      if (filterMode === 'received') setStatusCustomerIds(deliveredIds);
+      else if (filterMode === 'returned') setStatusCustomerIds(returnedIds);
+      else setStatusCustomerIds([]);
+    } catch (e) {
+      console.error('Failed to load delivery stats', e);
+      setStats({ deliveredCount: 0, returnedCount: 0, satisfactionPct: 0, topCustomers: [] });
+      setStatusCustomerIds([]);
+    }
+  };
+
+  const getVisibleCustomers = () => {
+    return customers.filter(c => 
+      (c.name.toLowerCase().includes(searchTerm.toLowerCase()) || c.phone1.includes(searchTerm)) &&
+      (filterMode === 'all' ? true : statusCustomerIds.includes(c.id))
+    );
+  };
+
+  const exportVisibleCustomers = () => {
+    const rows = getVisibleCustomers();
+    if (!rows || rows.length === 0) {
+      Swal.fire('تنبيه', 'لا توجد بيانات للتصدير.', 'info');
+      return;
+    }
+    const headers = ['ID','اسم العميل','الهاتف 1','الهاتف 2','المحافظة','العنوان','الرصيد'];
+    const escape = (v: any) => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+    const csvLines = [headers.map(escape).join(',')];
+    rows.forEach((r:any) => {
+      const line = [r.id, r.name, r.phone1 || '', r.phone2 || '', r.governorate || '', r.address || '', r.balance || 0].map(escape).join(',');
+      csvLines.push(line);
+    });
+    const csvContent = csvLines.join('\n');
+    // Prepend UTF-8 BOM so Excel opens Arabic correctly
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `customers_export_${new Date().toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const [selectedOrderDetail, setSelectedOrderDetail] = useState<any | null>(null);
+  const [isOrderModalOpen, setIsOrderModalOpen] = useState(false);
+
+  const handleViewOrder = async (order: any) => {
+    try {
+      const or = order.orderNumber || order.order_number || order.orderNum || '';
+      if (!or) return;
+      const r = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getByNumber&orderNumber=${encodeURIComponent(or)}`);
+      const j = await r.json();
+      if (j && j.success && j.data) {
+        setSelectedOrderDetail(j.data);
+        setIsOrderModalOpen(true);
+      } else {
+        Swal.fire('خطأ', 'تعذر جلب بيانات الطلبية.', 'error');
+      }
+    } catch (e) {
+      console.error('Failed to load order', e);
+      Swal.fire('خطأ', 'تعذر جلب بيانات الطلبية.', 'error');
+    }
+  };
+
   const addInteraction = async () => {
     if (!selectedCustomer) return;
     if (!interactionNote.trim()) {
@@ -290,8 +386,8 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
   };
 
   const filteredCustomers = customers.filter(c => 
-    c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    c.phone1.includes(searchTerm)
+    (c.name.toLowerCase().includes(searchTerm.toLowerCase()) || c.phone1.includes(searchTerm)) &&
+    (filterMode === 'all' ? true : statusCustomerIds.includes(c.id))
   );
 
   const canAdd = hasPermission('customers', 'add');
@@ -303,20 +399,32 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
     <div className="space-y-6 transition-colors duration-300">
       <div className="flex justify-between items-center">
         <h2 className="text-xl font-black">إدارة العملاء</h2>
-                <div className="flex gap-1 p-1 rounded-2xl border border-card shadow-sm" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
-              <button 
-                onClick={() => setView('list')} 
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${view === 'list' ? 'bg-accent text-white shadow-md' : 'hover:bg-slate-50 dark:hover:bg-slate-700'}`}
-              >
-                قائمة العملاء
-              </button>
-              <button 
-                onClick={() => setView('ledger')} 
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${view === 'ledger' ? 'bg-accent text-white shadow-md' : 'hover:bg-slate-50 dark:hover:bg-slate-700'}`}
-              >
-                كشف الحساب العام
-              </button>
-            </div>
+        <div className="flex items-center gap-3">
+          <div className="flex gap-1 p-1 rounded-2xl border border-card shadow-sm" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+            <button 
+              onClick={() => setView('list')} 
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${view === 'list' ? 'bg-accent text-white shadow-md' : 'hover:bg-slate-50 dark:hover:bg-slate-700'}`}
+            >
+              قائمة العملاء
+            </button>
+            <button 
+              onClick={() => setView('ledger')} 
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${view === 'ledger' ? 'bg-accent text-white shadow-md' : 'hover:bg-slate-50 dark:hover:bg-slate-700'}`}
+            >
+              كشف الحساب العام
+            </button>
+          </div>
+
+          <div className="flex gap-2 items-center p-2 rounded-2xl border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+            <button onClick={() => { setFilterMode(filterMode === 'received' ? 'all' : 'received'); }} className={`px-3 py-1 rounded-xl text-xs font-bold ${filterMode === 'received' ? 'bg-emerald-600 text-white' : 'hover:bg-emerald-50'}`}>
+              تم الاستلام <span className="mr-2 text-[11px] font-bold">{stats.deliveredCount || 0}</span>
+            </button>
+            <button onClick={() => { setFilterMode(filterMode === 'returned' ? 'all' : 'returned'); }} className={`px-3 py-1 rounded-xl text-xs font-bold ${filterMode === 'returned' ? 'bg-rose-600 text-white' : 'hover:bg-rose-50'}`}>
+              تم الارتجاع <span className="mr-2 text-[11px] font-bold">{stats.returnedCount || 0}</span>
+            </button>
+            <div className="text-xs text-muted mr-3">نسبة رضا العملاء: <span className="font-black ml-2">{stats.satisfactionPct || 0}%</span></div>
+          </div>
+        </div>
       </div>
 
       {view === 'list' ? (
@@ -325,16 +433,35 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
             <div className="flex flex-col md:flex-row items-center justify-between gap-4 w-full">
   
   {/* محرك البحث - سياخذ المساحة المتاحة */}
-  <div className="flex flex-col md:flex-row items-center justify-between gap-4 w-full py-6">
-    <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-    <input 
-      type="text" 
-      placeholder="بحث بالاسم أو رقم الهاتف..." 
-      className="w-auto pr-10 pl-4 py-2.5 border-none rounded-2xl text-sm focus:ring-2 ring-blue-500/20 text-right"
-      style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}
-      value={searchTerm}
-      onChange={(e) => setSearchTerm(e.target.value)}
-    />
+  {/* Search + centered compact stats */}
+  <div className="w-full py-4">
+    <div className="flex items-center gap-4">
+      <div className="flex-1 relative">
+        <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+        <input 
+          type="text" 
+          placeholder="بحث بالاسم أو رقم الهاتف..." 
+          className="w-full pr-10 pl-4 py-2.5 border-none rounded-2xl text-sm focus:ring-2 ring-blue-500/20 text-right"
+          style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+      </div>
+      <div className="flex-shrink-0 flex items-center gap-3">
+        <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-100 text-center">
+          <div className="text-xs text-emerald-700">استلام</div>
+          <div className="font-black text-lg text-emerald-800">{stats.deliveredCount || 0}</div>
+        </div>
+        <div className="p-3 rounded-lg bg-rose-50 border border-rose-100 text-center">
+          <div className="text-xs text-rose-700">ارتجاع</div>
+          <div className="font-black text-lg text-rose-800">{stats.returnedCount || 0}</div>
+        </div>
+        <div className="p-3 rounded-lg bg-blue-50 border border-blue-100 text-center">
+          <div className="text-xs text-blue-700">رضا</div>
+          <div className="font-black text-lg text-blue-800">{stats.satisfactionPct || 0}%</div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div className="flex items-center gap-2">
@@ -360,6 +487,7 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
 
 </div>
           </div>
+
           <div className="overflow-x-auto">
             <table className="w-full text-right text-sm">
               <thead className="bg-slate-50 dark:bg-slate-900/50 text-muted">
@@ -420,12 +548,7 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
               </div>
             </div>
             <div className="flex flex-wrap gap-2 items-center">
-              <select value={ledgerCustomerId} onChange={(e) => setLedgerCustomerId(e.target.value)} className="bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-2 px-3 text-sm text-slate-900 dark:text-white">
-                <option value="">اختر عميل</option>
-                {customers.map((c: any) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
+              <CustomSelect value={ledgerCustomerId} onChange={v => setLedgerCustomerId(v)} options={[{ value: '', label: 'اختر عميل' }, ...customers.map((c:any)=>({ value: String(c.id), label: c.name }))]} className="bg-slate-50 rounded-2xl" />
               <input type="date" value={ledgerStartDate} onChange={(e) => setLedgerStartDate(e.target.value)} className="bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-2 px-3 text-sm" />
               <input type="date" value={ledgerEndDate} onChange={(e) => setLedgerEndDate(e.target.value)} className="bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-2 px-3 text-sm" />
               <button onClick={loadLedger} className="px-4 py-2 bg-blue-600 text-white rounded-2xl text-sm font-bold">تحميل</button>
@@ -494,28 +617,32 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
                    <div className="text-center p-8">جاري تحميل الطلبيات...</div>
                  ) : customerOrders.length > 0 ? (
                    <div className="overflow-auto max-h-96">
-                     <table className="w-full text-sm text-right">
-                       <thead className="bg-slate-100 dark:bg-slate-900">
-                         <tr>
-                           <th className="p-3">رقم الطلب</th>
-                           <th className="p-3">التاريخ</th>
-                           <th className="p-3">الإجمالي</th>
-                           <th className="p-3">الحالة</th>
-                           <th className="p-3">المندوب</th>
-                         </tr>
-                       </thead>
-                       <tbody className="divide-y dark:divide-slate-700">
-                         {customerOrders.map(order => (
-                           <tr key={order.id}>
-                             <td className="p-3 font-mono">{order.orderNumber}</td>
-                             <td className="p-3">{new Date(order.created_at).toLocaleDateString('ar-EG')}</td>
-                             <td className="p-3 font-bold">{Number(order.total).toLocaleString()} {currencySymbol}</td>
-                             <td className="p-3">{getStatusChip(order.status)}</td>
-                             <td className="p-3">{order.repName || '-'}</td>
-                           </tr>
-                         ))}
-                       </tbody>
-                     </table>
+                                <table className="w-full text-sm text-right">
+                                  <thead className="bg-slate-100 dark:bg-slate-900">
+                                    <tr>
+                                      <th className="p-3">رقم الطلب</th>
+                                      <th className="p-3">التاريخ</th>
+                                      <th className="p-3">الإجمالي</th>
+                                      <th className="p-3">الحالة</th>
+                                      <th className="p-3">المندوب</th>
+                                      <th className="p-3">عرض</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y dark:divide-slate-700">
+                                    {customerOrders.map(order => (
+                                      <tr key={order.id}>
+                                        <td className="p-3 font-mono">{order.orderNumber}</td>
+                                        <td className="p-3">{new Date(order.created_at).toLocaleDateString('ar-EG')}</td>
+                                        <td className="p-3 font-bold">{Number(order.total).toLocaleString()} {currencySymbol}</td>
+                                        <td className="p-3">{getStatusChip(order.status)}</td>
+                                        <td className="p-3">{order.repName || '-'}</td>
+                                        <td className="p-3">
+                                          <button onClick={() => handleViewOrder(order)} className="px-3 py-1 bg-slate-100 rounded-lg text-xs font-bold hover:bg-slate-200">عرض</button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
                    </div>
                  ) : (
                    <div className="text-center p-8 text-muted">لا توجد طلبيات لهذا العميل.</div>
@@ -524,12 +651,7 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
               <div className="pt-4 border-t dark:border-slate-700">
                 <h4 className="font-bold mb-3">سجل التفاعلات</h4>
                 <div className="flex flex-wrap gap-2 items-center mb-4">
-                  <select value={interactionType} onChange={(e) => setInteractionType(e.target.value)} className="bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-2 px-3 text-xs">
-                    <option value="note">ملاحظة</option>
-                    <option value="call">مكالمة</option>
-                    <option value="visit">زيارة</option>
-                    <option value="email">بريد</option>
-                  </select>
+                  <CustomSelect value={interactionType} onChange={v => setInteractionType(v)} options={[{ value: 'note', label: 'ملاحظة' }, { value: 'call', label: 'مكالمة' }, { value: 'visit', label: 'زيارة' }, { value: 'email', label: 'بريد' }]} className="bg-slate-50 rounded-2xl" />
                   <input type="text" value={interactionNote} onChange={(e) => setInteractionNote(e.target.value)} placeholder="أضف ملاحظة مختصرة..." className="flex-1 bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-2 px-3 text-xs" />
                   <button onClick={addInteraction} className="px-3 py-2 bg-blue-600 text-white rounded-2xl text-xs font-bold">إضافة</button>
                 </div>
@@ -550,6 +672,50 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
                     ))}
                   </div>
                 )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Order Detail Modal */}
+      {isOrderModalOpen && selectedOrderDetail && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-2xl rounded-[2.5rem] shadow-2xl overflow-hidden border border-card card">
+            <div className="p-6 border-b dark:border-slate-700 flex justify-between items-center" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+              <h3 className="text-lg font-black">عرض الطلبية: {selectedOrderDetail.orderNumber}</h3>
+              <button onClick={() => { setIsOrderModalOpen(false); setSelectedOrderDetail(null); }} className="hover:text-rose-500 transition-colors"><X size={24} /></button>
+            </div>
+            <div className="p-6 text-right">
+              <div className="mb-4">
+                <div>التاريخ: <span className="font-black">{new Date(selectedOrderDetail.created_at || selectedOrderDetail.createdAt || Date.now()).toLocaleString('ar-EG')}</span></div>
+                <div>الإجمالي: <span className="font-black">{Number(selectedOrderDetail.total || selectedOrderDetail.total_amount || 0).toLocaleString()} {currencySymbol}</span></div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm text-right">
+                  <thead className="bg-slate-100 dark:bg-slate-900">
+                    <tr>
+                      <th className="p-2">العنصر</th>
+                      <th className="p-2">اللون</th>
+                      <th className="p-2">المقاس</th>
+                      <th className="p-2">الكمية</th>
+                      <th className="p-2">السعر</th>
+                      <th className="p-2">الإجمالي</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y dark:divide-slate-700">
+                    {(selectedOrderDetail.products || []).map((it:any, idx:number) => (
+                      <tr key={idx}>
+                        <td className="p-2">{it.name}</td>
+                        <td className="p-2">{it.color}</td>
+                        <td className="p-2">{it.size}</td>
+                        <td className="p-2">{it.quantity}</td>
+                        <td className="p-2">{Number(it.price || it.price_per_unit || 0).toLocaleString()}</td>
+                        <td className="p-2">{Number(it.total || it.line_total || (it.quantity* (it.price||0))).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>

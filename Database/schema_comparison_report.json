@@ -1,0 +1,1393 @@
+{
+  "tables_only_in_current": [
+    "accessories",
+    "accessory_movements",
+    "accessory_stock",
+    "accounts",
+    "attendance_daily_summary",
+    "attendance_device_users",
+    "attendance_device_workers",
+    "attendance_holidays",
+    "attendance_logs",
+    "attendance_schedules",
+    "attendance_worker_daily_summary",
+    "audit_logs",
+    "backup_email_otps",
+    "colors",
+    "composite_product_items",
+    "customer_interactions",
+    "cutting_orders",
+    "dispatch_order_items",
+    "dispatch_orders",
+    "dispatches",
+    "employee_advances",
+    "employee_salaries",
+    "employee_transactions",
+    "fabric_movements",
+    "fabric_stock",
+    "fabrics",
+    "factory_product_movements",
+    "factory_product_sizes",
+    "factory_product_stage_accessories",
+    "factory_product_stages",
+    "factory_products",
+    "factory_receiving",
+    "factory_stock",
+    "inventory_audit_items",
+    "inventory_audits",
+    "journal_entries",
+    "journal_lines",
+    "manufacturing_order_stages",
+    "manufacturing_orders",
+    "order_documents",
+    "order_items",
+    "order_status_history",
+    "permission_actions",
+    "product_movements",
+    "product_tracking",
+    "production_stages",
+    "products",
+    "rep_cash_custody",
+    "rep_stock_custody",
+    "report_archives",
+    "report_email_otps",
+    "sales_offices",
+    "settings",
+    "shipping_companies",
+    "sizes",
+    "stock",
+    "suppliers",
+    "transactions",
+    "treasuries",
+    "user_notifications",
+    "user_page_permissions",
+    "warehouses",
+    "worker_salaries",
+    "worker_transactions"
+  ],
+  "tables_only_in_base": [],
+  "diffs": {
+    "users": {
+      "missing_columns": [
+        {
+          "column": "IF",
+          "definition": {
+            "type": "NOT",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "NOT EXISTS `phone` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL AFTER `created_at`"
+          }
+        }
+      ],
+      "extra_columns": [
+        {
+          "column": "id",
+          "definition": {
+            "type": "int(11)",
+            "nullable": false,
+            "default": null,
+            "raw": "int(11) NOT NULL AUTO_INCREMENT"
+          }
+        },
+        {
+          "column": "name",
+          "definition": {
+            "type": "varchar(255)",
+            "nullable": false,
+            "default": null,
+            "raw": "varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL"
+          }
+        },
+        {
+          "column": "username",
+          "definition": {
+            "type": "varchar(255)",
+            "nullable": false,
+            "default": null,
+            "raw": "varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL"
+          }
+        },
+        {
+          "column": "password",
+          "definition": {
+            "type": "varchar(255)",
+            "nullable": false,
+            "default": null,
+            "raw": "varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL"
+          }
+        },
+        {
+          "column": "role",
+          "definition": {
+            "type": "enum('admin','manager','representative','accountant')",
+            "nullable": true,
+            "default": "'representative'",
+            "raw": "enum('admin','manager','representative','accountant') COLLATE utf8mb4_unicode_ci DEFAULT 'representative'"
+          }
+        },
+        {
+          "column": "restricted_treasury_id",
+          "definition": {
+            "type": "int(11)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "int(11) DEFAULT NULL"
+          }
+        },
+        {
+          "column": "restricted_warehouse_id",
+          "definition": {
+            "type": "int(11)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "int(11) DEFAULT NULL"
+          }
+        },
+        {
+          "column": "avatar",
+          "definition": {
+            "type": "varchar(255)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL"
+          }
+        },
+        {
+          "column": "created_at",
+          "definition": {
+            "type": "timestamp",
+            "nullable": false,
+            "default": "CURRENT_TIMESTAMP",
+            "raw": "timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP"
+          }
+        },
+        {
+          "column": "phone",
+          "definition": {
+            "type": "varchar(255)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL"
+          }
+        }
+      ],
+      "changed_columns": [
+        {
+          "column": "balance",
+          "base": {
+            "type": "DECIMAL(15,2)",
+            "nullable": false,
+            "default": "0",
+            "raw": "DECIMAL(15,2) NOT NULL DEFAULT 0 AFTER `phone`"
+          },
+          "current": {
+            "type": "decimal(15,2)",
+            "nullable": false,
+            "default": "'0.00'",
+            "raw": "decimal(15,2) NOT NULL DEFAULT '0.00'"
+          }
+        },
+        {
+          "column": "insurance_paid",
+          "base": {
+            "type": "TINYINT(1)",
+            "nullable": false,
+            "default": "0",
+            "raw": "TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'هل دفع تأمين'\""
+          },
+          "current": {
+            "type": "tinyint(1)",
+            "nullable": false,
+            "default": "'0'",
+            "raw": "tinyint(1) NOT NULL DEFAULT '0' COMMENT 'هل دفع تأمين'"
+          }
+        },
+        {
+          "column": "insurance_amount",
+          "base": {
+            "type": "DECIMAL(10,2)",
+            "nullable": false,
+            "default": "0.00",
+            "raw": "DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT 'مبلغ التأمين المدفوع'\""
+          },
+          "current": {
+            "type": "decimal(10,2)",
+            "nullable": false,
+            "default": "'0.00'",
+            "raw": "decimal(10,2) NOT NULL DEFAULT '0.00' COMMENT 'مبلغ التأمين المدفوع'"
+          }
+        }
+      ],
+      "missing_indexes": [],
+      "extra_indexes": [
+        {
+          "name": "username",
+          "cols": [
+            "username"
+          ]
+        }
+      ],
+      "pk_diff": {
+        "base": [],
+        "current": [
+          "id"
+        ]
+      },
+      "fk_diff": []
+    },
+    "orders": {
+      "missing_columns": [
+        {
+          "column": "IF",
+          "definition": {
+            "type": "NOT",
+            "nullable": true,
+            "default": "0",
+            "raw": "NOT EXISTS `tax_amount` decimal(10,2) DEFAULT 0"
+          }
+        },
+        {
+          "column": "discount_type",
+          "definition": {
+            "type": "VARCHAR(20)",
+            "nullable": true,
+            "default": null,
+            "raw": "VARCHAR(20) NULL"
+          }
+        },
+        {
+          "column": "discount_value",
+          "definition": {
+            "type": "DECIMAL(10,",
+            "nullable": true,
+            "default": "0",
+            "raw": "DECIMAL(10, 2) DEFAULT 0"
+          }
+        },
+        {
+          "column": "discount_amount",
+          "definition": {
+            "type": "DECIMAL(10,",
+            "nullable": true,
+            "default": "0",
+            "raw": "DECIMAL(10, 2) DEFAULT 0"
+          }
+        },
+        {
+          "column": "tax_type",
+          "definition": {
+            "type": "VARCHAR(20)",
+            "nullable": true,
+            "default": null,
+            "raw": "VARCHAR(20) NULL"
+          }
+        },
+        {
+          "column": "tax_value",
+          "definition": {
+            "type": "DECIMAL(10,",
+            "nullable": true,
+            "default": "0",
+            "raw": "DECIMAL(10, 2) DEFAULT 0"
+          }
+        },
+        {
+          "column": "tax_amount",
+          "definition": {
+            "type": "DECIMAL(10,",
+            "nullable": true,
+            "default": "0",
+            "raw": "DECIMAL(10, 2) DEFAULT 0"
+          }
+        }
+      ],
+      "extra_columns": [
+        {
+          "column": "id",
+          "definition": {
+            "type": "int(11)",
+            "nullable": false,
+            "default": null,
+            "raw": "int(11) NOT NULL AUTO_INCREMENT"
+          }
+        },
+        {
+          "column": "order_number",
+          "definition": {
+            "type": "varchar(50)",
+            "nullable": false,
+            "default": null,
+            "raw": "varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL"
+          }
+        },
+        {
+          "column": "customer_id",
+          "definition": {
+            "type": "int(11)",
+            "nullable": false,
+            "default": null,
+            "raw": "int(11) NOT NULL"
+          }
+        },
+        {
+          "column": "rep_id",
+          "definition": {
+            "type": "int(11)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "int(11) DEFAULT NULL"
+          }
+        },
+        {
+          "column": "status",
+          "definition": {
+            "type": "enum('pending','with_rep','delivered','returned','partial','postponed')",
+            "nullable": true,
+            "default": "'pending'",
+            "raw": "enum('pending','with_rep','delivered','returned','partial','postponed') COLLATE utf8mb4_unicode_ci DEFAULT 'pending'"
+          }
+        },
+        {
+          "column": "total_amount",
+          "definition": {
+            "type": "decimal(15,2)",
+            "nullable": false,
+            "default": null,
+            "raw": "decimal(15,2) NOT NULL"
+          }
+        },
+        {
+          "column": "shipping_fees",
+          "definition": {
+            "type": "decimal(10,2)",
+            "nullable": true,
+            "default": "'0.00'",
+            "raw": "decimal(10,2) DEFAULT '0.00'"
+          }
+        },
+        {
+          "column": "notes",
+          "definition": {
+            "type": "text",
+            "nullable": true,
+            "default": null,
+            "raw": "text COLLATE utf8mb4_unicode_ci"
+          }
+        },
+        {
+          "column": "created_at",
+          "definition": {
+            "type": "timestamp",
+            "nullable": false,
+            "default": "CURRENT_TIMESTAMP",
+            "raw": "timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP"
+          }
+        }
+      ],
+      "changed_columns": [
+        {
+          "column": "sales_office_id",
+          "base": {
+            "type": "INT",
+            "nullable": true,
+            "default": null,
+            "raw": "INT NULL"
+          },
+          "current": {
+            "type": "int(11)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "int(11) DEFAULT NULL"
+          }
+        }
+      ],
+      "missing_indexes": [],
+      "extra_indexes": [
+        {
+          "name": "order_number",
+          "cols": [
+            "order_number"
+          ]
+        },
+        {
+          "name": "customer_id",
+          "cols": [
+            "customer_id"
+          ]
+        },
+        {
+          "name": "rep_id",
+          "cols": [
+            "rep_id"
+          ]
+        },
+        {
+          "name": "idx_orders_sales_office_id",
+          "cols": [
+            "sales_office_id"
+          ]
+        }
+      ],
+      "pk_diff": {
+        "base": [],
+        "current": [
+          "id"
+        ]
+      },
+      "fk_diff": {
+        "base": {
+          "fk_orders_customer": {
+            "cols": [
+              "customer_id"
+            ],
+            "refTable": "customers",
+            "refCols": [
+              "id"
+            ]
+          },
+          "fk_orders_rep": {
+            "cols": [
+              "rep_id"
+            ],
+            "refTable": "users",
+            "refCols": [
+              "id"
+            ]
+          }
+        },
+        "current": {
+          "0": {
+            "cols": [
+              "customer_id"
+            ],
+            "refTable": "customers",
+            "refCols": [
+              "id"
+            ]
+          },
+          "1": {
+            "cols": [
+              "rep_id"
+            ],
+            "refTable": "users",
+            "refCols": [
+              "id"
+            ]
+          }
+        }
+      }
+    },
+    "employees": {
+      "missing_columns": [
+        {
+          "column": "fingerprint_device_id",
+          "definition": {
+            "type": "INT",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "INT DEFAULT NULL"
+          }
+        },
+        {
+          "column": "fingerprint_user_id",
+          "definition": {
+            "type": "VARCHAR(100)",
+            "nullable": true,
+            "default": null,
+            "raw": "VARCHAR(100)"
+          }
+        }
+      ],
+      "extra_columns": [
+        {
+          "column": "id",
+          "definition": {
+            "type": "int(11)",
+            "nullable": false,
+            "default": null,
+            "raw": "int(11) NOT NULL AUTO_INCREMENT"
+          }
+        },
+        {
+          "column": "name",
+          "definition": {
+            "type": "varchar(255)",
+            "nullable": false,
+            "default": null,
+            "raw": "varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL"
+          }
+        },
+        {
+          "column": "job_title",
+          "definition": {
+            "type": "varchar(100)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL"
+          }
+        },
+        {
+          "column": "salary",
+          "definition": {
+            "type": "decimal(10,2)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "decimal(10,2) DEFAULT NULL"
+          }
+        },
+        {
+          "column": "hire_date",
+          "definition": {
+            "type": "date",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "date DEFAULT NULL"
+          }
+        },
+        {
+          "column": "phone",
+          "definition": {
+            "type": "varchar(20)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL"
+          }
+        },
+        {
+          "column": "status",
+          "definition": {
+            "type": "enum('active','inactive','on_leave')",
+            "nullable": true,
+            "default": "'active'",
+            "raw": "enum('active','inactive','on_leave') COLLATE utf8mb4_unicode_ci DEFAULT 'active'"
+          }
+        },
+        {
+          "column": "created_at",
+          "definition": {
+            "type": "timestamp",
+            "nullable": false,
+            "default": "CURRENT_TIMESTAMP",
+            "raw": "timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP"
+          }
+        }
+      ],
+      "changed_columns": [
+        {
+          "column": "attendance_enabled",
+          "base": {
+            "type": "TINYINT(1)",
+            "nullable": true,
+            "default": "1",
+            "raw": "TINYINT(1) DEFAULT 1"
+          },
+          "current": {
+            "type": "tinyint(1)",
+            "nullable": true,
+            "default": "'1'",
+            "raw": "tinyint(1) DEFAULT '1'"
+          }
+        },
+        {
+          "column": "default_shift_id",
+          "base": {
+            "type": "INT",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "INT DEFAULT NULL"
+          },
+          "current": {
+            "type": "int(11)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "int(11) DEFAULT NULL"
+          }
+        }
+      ],
+      "missing_indexes": [],
+      "extra_indexes": [],
+      "pk_diff": {
+        "base": [],
+        "current": [
+          "id"
+        ]
+      },
+      "fk_diff": []
+    },
+    "attendance_shifts": {
+      "missing_columns": [],
+      "extra_columns": [
+        {
+          "column": "id",
+          "definition": {
+            "type": "int(11)",
+            "nullable": false,
+            "default": null,
+            "raw": "int(11) NOT NULL AUTO_INCREMENT"
+          }
+        },
+        {
+          "column": "name",
+          "definition": {
+            "type": "varchar(255)",
+            "nullable": false,
+            "default": null,
+            "raw": "varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL"
+          }
+        },
+        {
+          "column": "start_time",
+          "definition": {
+            "type": "time",
+            "nullable": false,
+            "default": null,
+            "raw": "time NOT NULL"
+          }
+        },
+        {
+          "column": "end_time",
+          "definition": {
+            "type": "time",
+            "nullable": false,
+            "default": null,
+            "raw": "time NOT NULL"
+          }
+        },
+        {
+          "column": "break_minutes",
+          "definition": {
+            "type": "int(11)",
+            "nullable": true,
+            "default": "'0'",
+            "raw": "int(11) DEFAULT '0'"
+          }
+        },
+        {
+          "column": "grace_in_minutes",
+          "definition": {
+            "type": "int(11)",
+            "nullable": true,
+            "default": "'0'",
+            "raw": "int(11) DEFAULT '0'"
+          }
+        },
+        {
+          "column": "grace_out_minutes",
+          "definition": {
+            "type": "int(11)",
+            "nullable": true,
+            "default": "'0'",
+            "raw": "int(11) DEFAULT '0'"
+          }
+        },
+        {
+          "column": "late_penalty_per_minute",
+          "definition": {
+            "type": "decimal(10,2)",
+            "nullable": true,
+            "default": "'0.00'",
+            "raw": "decimal(10,2) DEFAULT '0.00'"
+          }
+        },
+        {
+          "column": "early_leave_penalty_per_minute",
+          "definition": {
+            "type": "decimal(10,2)",
+            "nullable": true,
+            "default": "'0.00'",
+            "raw": "decimal(10,2) DEFAULT '0.00'"
+          }
+        },
+        {
+          "column": "absence_penalty_per_day",
+          "definition": {
+            "type": "decimal(10,2)",
+            "nullable": true,
+            "default": "'0.00'",
+            "raw": "decimal(10,2) DEFAULT '0.00'"
+          }
+        },
+        {
+          "column": "overtime_rate_per_hour",
+          "definition": {
+            "type": "decimal(10,2)",
+            "nullable": true,
+            "default": "'0.00'",
+            "raw": "decimal(10,2) DEFAULT '0.00'"
+          }
+        },
+        {
+          "column": "is_night_shift",
+          "definition": {
+            "type": "tinyint(1)",
+            "nullable": true,
+            "default": "'0'",
+            "raw": "tinyint(1) DEFAULT '0'"
+          }
+        },
+        {
+          "column": "created_at",
+          "definition": {
+            "type": "timestamp",
+            "nullable": false,
+            "default": "CURRENT_TIMESTAMP",
+            "raw": "timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP"
+          }
+        }
+      ],
+      "changed_columns": [],
+      "missing_indexes": [],
+      "extra_indexes": [],
+      "pk_diff": {
+        "base": [],
+        "current": [
+          "id"
+        ]
+      },
+      "fk_diff": []
+    },
+    "attendance_devices": {
+      "missing_columns": [],
+      "extra_columns": [
+        {
+          "column": "id",
+          "definition": {
+            "type": "int(11)",
+            "nullable": false,
+            "default": null,
+            "raw": "int(11) NOT NULL AUTO_INCREMENT"
+          }
+        },
+        {
+          "column": "name",
+          "definition": {
+            "type": "varchar(255)",
+            "nullable": false,
+            "default": null,
+            "raw": "varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL"
+          }
+        },
+        {
+          "column": "vendor",
+          "definition": {
+            "type": "enum('hikvision','zkteco','adms','other')",
+            "nullable": true,
+            "default": "'other'",
+            "raw": "enum('hikvision','zkteco','adms','other') COLLATE utf8mb4_unicode_ci DEFAULT 'other'"
+          }
+        },
+        {
+          "column": "protocol",
+          "definition": {
+            "type": "varchar(50)",
+            "nullable": true,
+            "default": "'http'",
+            "raw": "varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT 'http'"
+          }
+        },
+        {
+          "column": "ip",
+          "definition": {
+            "type": "varchar(100)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL"
+          }
+        },
+        {
+          "column": "port",
+          "definition": {
+            "type": "int(11)",
+            "nullable": true,
+            "default": "'80'",
+            "raw": "int(11) DEFAULT '80'"
+          }
+        },
+        {
+          "column": "serial_number",
+          "definition": {
+            "type": "varchar(100)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL"
+          }
+        },
+        {
+          "column": "username",
+          "definition": {
+            "type": "varchar(255)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL"
+          }
+        },
+        {
+          "column": "password",
+          "definition": {
+            "type": "varchar(255)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL"
+          }
+        },
+        {
+          "column": "location",
+          "definition": {
+            "type": "varchar(255)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL"
+          }
+        },
+        {
+          "column": "enabled",
+          "definition": {
+            "type": "tinyint(1)",
+            "nullable": true,
+            "default": "'1'",
+            "raw": "tinyint(1) DEFAULT '1'"
+          }
+        },
+        {
+          "column": "last_sync_at",
+          "definition": {
+            "type": "datetime",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "datetime DEFAULT NULL"
+          }
+        },
+        {
+          "column": "created_at",
+          "definition": {
+            "type": "timestamp",
+            "nullable": false,
+            "default": "CURRENT_TIMESTAMP",
+            "raw": "timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP"
+          }
+        }
+      ],
+      "changed_columns": [],
+      "missing_indexes": [],
+      "extra_indexes": [
+        {
+          "name": "idx_attendance_devices_vendor",
+          "cols": [
+            "vendor"
+          ]
+        }
+      ],
+      "pk_diff": {
+        "base": [],
+        "current": [
+          "id"
+        ]
+      },
+      "fk_diff": []
+    },
+    "workers": {
+      "missing_columns": [],
+      "extra_columns": [
+        {
+          "column": "id",
+          "definition": {
+            "type": "int(11)",
+            "nullable": false,
+            "default": null,
+            "raw": "int(11) NOT NULL AUTO_INCREMENT"
+          }
+        },
+        {
+          "column": "name",
+          "definition": {
+            "type": "varchar(255)",
+            "nullable": false,
+            "default": null,
+            "raw": "varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL"
+          }
+        },
+        {
+          "column": "job_title",
+          "definition": {
+            "type": "varchar(100)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL"
+          }
+        },
+        {
+          "column": "salary_type",
+          "definition": {
+            "type": "enum('daily','weekly','monthly','piecework')",
+            "nullable": true,
+            "default": "'daily'",
+            "raw": "enum('daily','weekly','monthly','piecework') COLLATE utf8mb4_unicode_ci DEFAULT 'daily'"
+          }
+        },
+        {
+          "column": "salary_amount",
+          "definition": {
+            "type": "decimal(10,2)",
+            "nullable": true,
+            "default": "'0.00'",
+            "raw": "decimal(10,2) DEFAULT '0.00'"
+          }
+        },
+        {
+          "column": "hire_date",
+          "definition": {
+            "type": "date",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "date DEFAULT NULL"
+          }
+        },
+        {
+          "column": "phone",
+          "definition": {
+            "type": "varchar(20)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL"
+          }
+        },
+        {
+          "column": "fingerprint_no",
+          "definition": {
+            "type": "varchar(50)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL"
+          }
+        },
+        {
+          "column": "status",
+          "definition": {
+            "type": "enum('active','inactive','on_leave')",
+            "nullable": true,
+            "default": "'active'",
+            "raw": "enum('active','inactive','on_leave') COLLATE utf8mb4_unicode_ci DEFAULT 'active'"
+          }
+        },
+        {
+          "column": "created_at",
+          "definition": {
+            "type": "timestamp",
+            "nullable": false,
+            "default": "CURRENT_TIMESTAMP",
+            "raw": "timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP"
+          }
+        }
+      ],
+      "changed_columns": [
+        {
+          "column": "attendance_enabled",
+          "base": {
+            "type": "TINYINT(1)",
+            "nullable": true,
+            "default": "0",
+            "raw": "TINYINT(1) DEFAULT 0 AFTER fingerprint_no"
+          },
+          "current": {
+            "type": "tinyint(1)",
+            "nullable": true,
+            "default": "'0'",
+            "raw": "tinyint(1) DEFAULT '0'"
+          }
+        },
+        {
+          "column": "default_shift_id",
+          "base": {
+            "type": "INT",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "INT DEFAULT NULL AFTER attendance_enabled"
+          },
+          "current": {
+            "type": "int(11)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "int(11) DEFAULT NULL"
+          }
+        }
+      ],
+      "missing_indexes": [],
+      "extra_indexes": [
+        {
+          "name": "fingerprint_no",
+          "cols": [
+            "fingerprint_no"
+          ]
+        },
+        {
+          "name": "idx_workers_fingerprint_no",
+          "cols": [
+            "fingerprint_no"
+          ]
+        }
+      ],
+      "pk_diff": {
+        "base": [],
+        "current": [
+          "id"
+        ]
+      },
+      "fk_diff": []
+    },
+    "customers": {
+      "missing_columns": [],
+      "extra_columns": [
+        {
+          "column": "id",
+          "definition": {
+            "type": "int(11)",
+            "nullable": false,
+            "default": null,
+            "raw": "int(11) NOT NULL AUTO_INCREMENT"
+          }
+        },
+        {
+          "column": "name",
+          "definition": {
+            "type": "varchar(255)",
+            "nullable": false,
+            "default": null,
+            "raw": "varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL"
+          }
+        },
+        {
+          "column": "phone1",
+          "definition": {
+            "type": "varchar(20)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL"
+          }
+        },
+        {
+          "column": "phone2",
+          "definition": {
+            "type": "varchar(20)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL"
+          }
+        },
+        {
+          "column": "address",
+          "definition": {
+            "type": "text",
+            "nullable": true,
+            "default": null,
+            "raw": "text COLLATE utf8mb4_unicode_ci"
+          }
+        },
+        {
+          "column": "governorate",
+          "definition": {
+            "type": "varchar(100)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL"
+          }
+        },
+        {
+          "column": "landmark",
+          "definition": {
+            "type": "text",
+            "nullable": true,
+            "default": null,
+            "raw": "text COLLATE utf8mb4_unicode_ci"
+          }
+        },
+        {
+          "column": "total_debit",
+          "definition": {
+            "type": "decimal(15,2)",
+            "nullable": true,
+            "default": "'0.00'",
+            "raw": "decimal(15,2) DEFAULT '0.00'"
+          }
+        },
+        {
+          "column": "total_credit",
+          "definition": {
+            "type": "decimal(15,2)",
+            "nullable": true,
+            "default": "'0.00'",
+            "raw": "decimal(15,2) DEFAULT '0.00'"
+          }
+        }
+      ],
+      "changed_columns": [
+        {
+          "column": "is_archived",
+          "base": {
+            "type": "TINYINT(1)",
+            "nullable": true,
+            "default": "0",
+            "raw": "TINYINT(1) DEFAULT 0"
+          },
+          "current": {
+            "type": "tinyint(1)",
+            "nullable": true,
+            "default": "'0'",
+            "raw": "tinyint(1) DEFAULT '0'"
+          }
+        },
+        {
+          "column": "archived_at",
+          "base": {
+            "type": "DATETIME",
+            "nullable": true,
+            "default": null,
+            "raw": "DATETIME NULL"
+          },
+          "current": {
+            "type": "datetime",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "datetime DEFAULT NULL"
+          }
+        }
+      ],
+      "missing_indexes": [],
+      "extra_indexes": [],
+      "pk_diff": {
+        "base": [],
+        "current": [
+          "id"
+        ]
+      },
+      "fk_diff": []
+    },
+    "user_permissions": {
+      "missing_columns": [],
+      "extra_columns": [
+        {
+          "column": "id",
+          "definition": {
+            "type": "int(11)",
+            "nullable": false,
+            "default": null,
+            "raw": "int(11) NOT NULL AUTO_INCREMENT"
+          }
+        },
+        {
+          "column": "user_id",
+          "definition": {
+            "type": "int(11)",
+            "nullable": false,
+            "default": null,
+            "raw": "int(11) NOT NULL"
+          }
+        },
+        {
+          "column": "module_id",
+          "definition": {
+            "type": "int(11)",
+            "nullable": false,
+            "default": null,
+            "raw": "int(11) NOT NULL"
+          }
+        },
+        {
+          "column": "action_id",
+          "definition": {
+            "type": "int(11)",
+            "nullable": false,
+            "default": null,
+            "raw": "int(11) NOT NULL"
+          }
+        },
+        {
+          "column": "allowed",
+          "definition": {
+            "type": "tinyint(1)",
+            "nullable": true,
+            "default": "'0'",
+            "raw": "tinyint(1) DEFAULT '0'"
+          }
+        }
+      ],
+      "changed_columns": [],
+      "missing_indexes": [],
+      "extra_indexes": [
+        {
+          "name": "user_id",
+          "cols": [
+            "user_id"
+          ]
+        },
+        {
+          "name": "module_id",
+          "cols": [
+            "module_id"
+          ]
+        },
+        {
+          "name": "action_id",
+          "cols": [
+            "action_id"
+          ]
+        }
+      ],
+      "pk_diff": {
+        "base": [],
+        "current": [
+          "id"
+        ]
+      },
+      "fk_diff": []
+    },
+    "permission_modules": {
+      "missing_columns": [],
+      "extra_columns": [
+        {
+          "column": "id",
+          "definition": {
+            "type": "int(11)",
+            "nullable": false,
+            "default": null,
+            "raw": "int(11) NOT NULL AUTO_INCREMENT"
+          }
+        },
+        {
+          "column": "name",
+          "definition": {
+            "type": "varchar(191)",
+            "nullable": false,
+            "default": null,
+            "raw": "varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL"
+          }
+        },
+        {
+          "column": "parent_id",
+          "definition": {
+            "type": "int(11)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "int(11) DEFAULT NULL"
+          }
+        },
+        {
+          "column": "order",
+          "definition": {
+            "type": "int(11)",
+            "nullable": true,
+            "default": "'0'",
+            "raw": "int(11) DEFAULT '0'"
+          }
+        }
+      ],
+      "changed_columns": [],
+      "missing_indexes": [],
+      "extra_indexes": [
+        {
+          "name": "parent_id",
+          "cols": [
+            "parent_id"
+          ]
+        }
+      ],
+      "pk_diff": {
+        "base": [],
+        "current": [
+          "id"
+        ]
+      },
+      "fk_diff": []
+    },
+    "user_defaults": {
+      "missing_columns": [],
+      "extra_columns": [
+        {
+          "column": "user_id",
+          "definition": {
+            "type": "int(11)",
+            "nullable": false,
+            "default": null,
+            "raw": "int(11) NOT NULL"
+          }
+        },
+        {
+          "column": "default_warehouse_id",
+          "definition": {
+            "type": "int(11)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "int(11) DEFAULT NULL"
+          }
+        },
+        {
+          "column": "default_treasury_id",
+          "definition": {
+            "type": "int(11)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "int(11) DEFAULT NULL"
+          }
+        },
+        {
+          "column": "can_change_warehouse",
+          "definition": {
+            "type": "tinyint(1)",
+            "nullable": true,
+            "default": "'0'",
+            "raw": "tinyint(1) DEFAULT '0'"
+          }
+        },
+        {
+          "column": "can_change_treasury",
+          "definition": {
+            "type": "tinyint(1)",
+            "nullable": true,
+            "default": "'0'",
+            "raw": "tinyint(1) DEFAULT '0'"
+          }
+        }
+      ],
+      "changed_columns": [
+        {
+          "column": "default_sales_office_id",
+          "base": {
+            "type": "INT",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "INT DEFAULT NULL"
+          },
+          "current": {
+            "type": "int(11)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "int(11) DEFAULT NULL"
+          }
+        },
+        {
+          "column": "can_change_sales_office",
+          "base": {
+            "type": "TINYINT(1)",
+            "nullable": true,
+            "default": "0",
+            "raw": "TINYINT(1) DEFAULT 0"
+          },
+          "current": {
+            "type": "tinyint(1)",
+            "nullable": true,
+            "default": "'0'",
+            "raw": "tinyint(1) DEFAULT '0'"
+          }
+        }
+      ],
+      "missing_indexes": [],
+      "extra_indexes": [],
+      "pk_diff": {
+        "base": [],
+        "current": [
+          "user_id"
+        ]
+      },
+      "fk_diff": []
+    }
+  }
+}

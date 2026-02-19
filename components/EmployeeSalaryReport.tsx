@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { FileText, RefreshCw } from 'lucide-react';
+import CustomSelect from './CustomSelect';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
 
@@ -239,10 +240,7 @@ const EmployeeSalaryReport: React.FC<EmployeeSalaryReportProps> = ({ employees }
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 text-xs">
           <div className="space-y-1">
             <label className="text-[11px] text-muted">الموظف</label>
-            <select className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2" value={selectedEmployee} onChange={e => setSelectedEmployee(e.target.value)}>
-              <option value="">اختر موظف</option>
-              {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
-            </select>
+            <CustomSelect value={String(selectedEmployee || '')} onChange={v => setSelectedEmployee(v)} options={[{ value: '', label: 'اختر موظف' }, ...employees.map((emp:any)=>({ value: String(emp.id), label: emp.name }))]} className="w-full" />
           </div>
           <div className="space-y-1">
             <label className="text-[11px] text-muted">الشهر</label>
