@@ -192,7 +192,7 @@ const PointOfSale: React.FC = () => {
       setLoading(true);
       try {
         const [pr, cr, tr, wr, ud] = await Promise.all([
-          fetch(`${API_BASE_PATH}/api.php?module=products&action=getAll`).then(r => r.json()).catch(() => ({ success: false, data: [] })),
+          fetch(`${API_BASE_PATH}/api.php?module=products&action=getFlat`).then(r => r.json()).catch(() => ({ success: false, data: [] })),
           fetch(`${API_BASE_PATH}/api.php?module=customers&action=getAll`).then(r => r.json()).catch(() => ({ success: false, data: [] })),
           fetch(`${API_BASE_PATH}/api.php?module=treasuries&action=getAll`).then(r => r.json()).catch(() => ({ success: false, data: [] })),
           fetch(`${API_BASE_PATH}/api.php?module=warehouses&action=getAll`).then(r => r.json()).catch(() => ({ success: false, data: [] })),

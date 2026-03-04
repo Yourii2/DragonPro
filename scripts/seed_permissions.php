@@ -94,4 +94,31 @@ try {
 
 echo "Seeding complete. You may now assign permissions via the admin UI or run further seeding.".PHP_EOL;
 
+// Additional: ensure daily pages exist and grant admin page access
+$dailyPages = ['sales-daily' => 100, 'sales-update-status' => 110, 'close-daily' => 120, 'sales-report' => 50];
+foreach ($dailyPages as $slug => $order) {
+    try {
+        $stmt = $pdo->prepare("SELECT id FROM permission_modules WHERE name = ? LIMIT 1");
+        $stmt->execute([$slug]);
+        if ($stmt->rowCount() === 0) {
+            $ins = $pdo->prepare("INSERT INTO permission_modules (name, parent_id, `order`) VALUES (?, NULL, ?)");
+            $ins->execute([$slug, $order]);
+            echo "Inserted page module $slug".PHP_EOL;
+        } else {
+            echo "Page module $slug already exists".PHP_EOL;
+        }
+    } catch (Exception $e) { echo "Error ensuring page $slug: " . $e->getMessage() . PHP_EOL; }
+    // Grant to admin user
+    try {
+        $stmt = $pdo->prepare("SELECT 1 FROM user_page_permissions WHERE user_id = 1 AND page_slug = ? LIMIT 1");
+        $stmt->execute([$slug]);
+        if ($stmt->rowCount() === 0) {
+            $ins = $pdo->prepare("INSERT INTO user_page_permissions (user_id, page_slug, can_access) VALUES (1, ?, 1)");
+            $ins->execute([$slug]);
+            echo "Granted admin access to $slug".PHP_EOL;
+        }
+    } catch (Exception $e) { echo "Error granting admin page $slug: " . $e->getMessage() . PHP_EOL; }
+}
+
+echo "Daily pages ensured and admin access granted.".PHP_EOL;
 ?>

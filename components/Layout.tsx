@@ -42,7 +42,7 @@ const Layout: React.FC<LayoutProps> = ({
   const [allowedModules, setAllowedModules] = useState<string[] | null>(null);
   const [allowedModulesRaw, setAllowedModulesRaw] = useState<any[] | null>(null);
   const [showPermsModal, setShowPermsModal] = useState(false);
-  const [openAccordion, setOpenAccordion] = useState<string | null>(null);
+  const [openAccordions, setOpenAccordions] = useState<string[]>([]);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -173,13 +173,28 @@ const Layout: React.FC<LayoutProps> = ({
     // If the item has sub-items, treat the header click as accordion toggle only
     // (navigation happens when user clicks a sub-item).
     if (item.subItems) {
-      setOpenAccordion(openAccordion === item.id ? null : item.id);
+      setOpenAccordions(prev => prev.includes(item.id) ? prev.filter(id => id !== item.id) : [...prev, item.id]);
       return;
     }
 
+    // If this item was promoted to top-level but actually represents a sub-page
+    // (e.g., 'sales-daily' belongs to parent 'sales'), detect its parent and
+    // navigate to the parent's route with the subSlug so the App router renders it.
+    const findParentForSub = () => {
+      try {
+        const parent = MENU_ITEMS.find((mi: any) => mi.subItems && mi.subItems.some((s: any) => (s.slug || '').toString().toLowerCase() === (item.slug || '').toString().toLowerCase()));
+        return parent || null;
+      } catch (e) { return null; }
+    };
+
+    const parent = findParentForSub();
     console.debug('Layout: main menu click ->', item.slug);
-    setOpenAccordion(null);
-    setActiveView(item.slug, '');
+    setOpenAccordions([]);
+    if (parent) {
+      setActiveView(parent.slug, item.slug);
+    } else {
+      setActiveView(item.slug, '');
+    }
   };
 
   useEffect(() => {
@@ -235,7 +250,7 @@ const Layout: React.FC<LayoutProps> = ({
       lastNotifFetchRef.current = now;
       try {
         const [productsRes, serverNotifRes] = await Promise.all([
-          fetch(`${API_BASE_PATH}/api.php?module=products&action=getAll`, { credentials: 'include' }).then(r => r.json()).catch(() => ({ success: false, data: [] })),
+          fetch(`${API_BASE_PATH}/api.php?module=products&action=getFlat`, { credentials: 'include' }).then(r => r.json()).catch(() => ({ success: false, data: [] })),
           fetch(`${API_BASE_PATH}/api.php?module=notifications&action=getMy`, { credentials: 'include' }).then(r => r.json()).catch(() => ({ success: false, data: [] })),
         ]);
 
@@ -341,12 +356,12 @@ const Layout: React.FC<LayoutProps> = ({
                     <span className="font-semibold text-sm">{item.label}</span>
                   </div>
                   {item.subItems && (
-                    <span className={`transition-transform duration-200 ${openAccordion === item.id ? 'rotate-180' : ''}`}>
-                      {openAccordion === item.id ? <ChevronDown size={16} /> : <ChevronLeft size={16} className="rtl-flip" />}
-                    </span>
+                    <span className={`transition-transform duration-200 ${openAccordions.includes(item.id) ? 'rotate-180' : ''}`}>
+                        {openAccordions.includes(item.id) ? <ChevronDown size={16} /> : <ChevronLeft size={16} className="rtl-flip" />}
+                      </span>
                   )}
                 </button>
-                {item.subItems && openAccordion === item.id && (
+                {item.subItems && openAccordions.includes(item.id) && (
                   <div className="mt-2 mr-10 space-y-1 border-r-2 border-blue-500/30 dark:border-blue-400/30 pr-1">
                     {item.subItems.map(sub => (
                       <button 

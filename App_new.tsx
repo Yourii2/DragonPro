@@ -293,6 +293,27 @@ const App_new: React.FC = () => {
 
 
   const renderContent = () => {
+    // Handle promoted top-level sales pages (when they were moved out of the 'sales' submenu)
+    const promotedSlugs = ['sales-daily', 'sales-update-status', 'close-daily', 'sales-report'];
+    if (promotedSlugs.includes((activeSlug || '').toString().toLowerCase())) {
+      const chosen = (activeSlug || '').toString().toLowerCase();
+      if (!canAccessPage(chosen)) {
+        return (
+          <div className="flex flex-col items-center justify-center h-full text-center p-6">
+            <h2 className="text-xl font-bold mb-2">لا تمتلك صلاحيه الوصول الى هذه الصفحة</h2>
+            <p className="text-muted mb-4">تواصل مع مدير النظام لمنح الصلاحية.</p>
+          </div>
+        );
+      }
+      switch (chosen) {
+        case 'sales-daily': return <SalesDaily />;
+        case 'sales-update-status': return <SalesUpdateStatus />;
+        case 'close-daily': return <SalesDailyClose />;
+        case 'sales-report': return <SalesReport />;
+        default: return <SalesDaily />;
+      }
+    }
+
     switch (activeSlug) {
       case 'dashboard':
         return canAccessPage('dashboard') ? <Dashboard /> : <BrandedWelcome />;
@@ -311,11 +332,23 @@ const App_new: React.FC = () => {
       case 'shipping-companies':
         return <ShippingCompaniesModule />;
       case 'sales':
-        switch (activeSubSlug) {
+        // Enforce per-page access for sales subpages when page-level permissions exist
+        const sub = (activeSubSlug || '').toString().toLowerCase();
+        const defaultSub = 'sales-daily';
+        const chosen = sub || defaultSub;
+        if (!canAccessPage(chosen)) {
+          return (
+            <div className="flex flex-col items-center justify-center h-full text-center p-6">
+              <h2 className="text-xl font-bold mb-2">لا تمتلك صلاحيه الوصول الى هذه الصفحة</h2>
+              <p className="text-muted mb-4">تواصل مع مدير النظام لمنح الصلاحية.</p>
+            </div>
+          );
+        }
+        switch (chosen) {
           case 'sales-daily': return <SalesDaily />;
           case 'sales-update-status': return <SalesUpdateStatus />;
           case 'close-daily': return <SalesDailyClose />;
-          case 'sales-report': return <SalesReport />;          
+          case 'sales-report': return <SalesReport />;
           default: return <SalesDaily />;
         }
       case 'sales-offices':

@@ -1,524 +1,563 @@
-
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTheme } from './ThemeContext';
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  LineChart,
-  Line
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell
 } from 'recharts';
 import {
-  TrendingUp,
-  Users,
-  Package,
-  DollarSign,
-  ArrowUpRight,
-  ArrowDownRight,
-  ClipboardCheck,
-  Briefcase,
-  AlertTriangle,
-  Sparkles
+  TrendingUp, Users, Package, DollarSign,
+  ArrowUpRight, ArrowDownRight, ClipboardCheck, Briefcase,
+  AlertTriangle, Sparkles, Award, Building2, UserCheck,
+  ShoppingBag, Activity
 } from 'lucide-react';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { assetUrl } from '../services/assetUrl';
 
-const StatCard = ({ title, value, change, isPositive, icon: Icon, color }: any) => (
-  <div className="card p-6 rounded-2xl shadow-md border border-card flex items-center justify-between transition-all hover:shadow-xl hover:scale-[1.02] hover:-translate-y-1 duration-300 group">
-    <div className="text-right flex-1">
-      <p className="text-[11px] text-muted mb-2 font-semibold tracking-widest uppercase">{title}</p>
-      <h3 className="text-2xl font-black tracking-tight bg-gradient-to-l from-slate-900 to-slate-700 dark:from-slate-100 dark:to-slate-300 bg-clip-text text-transparent leading-tight">{value}</h3>
-      <div className={`flex items-center gap-1.5 mt-3 text-[11px] font-bold px-2.5 py-1 rounded-full w-fit ${isPositive ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30' : 'text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/30'}`}>
-        {isPositive ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
-        <span>{change}</span>
+const fmt = (n: number) => n.toLocaleString('ar-EG');
+const fmtCur = (n: number, sym = 'ج.م') => `${fmt(n)} ${sym}`;
+
+const MEDAL = ['🥇', '🥈', '🥉'];
+const PIE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
+
+const STATUS_LABELS: Record<string, string> = {
+  pending: 'معلق', confirmed: 'مؤكد', processing: 'قيد التنفيذ',
+  shipped: 'مشحون', delivered: 'مُسلَّم', cancelled: 'ملغي',
+};
+const STATUS_COLORS: Record<string, string> = {
+  pending: 'bg-amber-100 text-amber-700', confirmed: 'bg-blue-100 text-blue-700',
+  processing: 'bg-indigo-100 text-indigo-700', shipped: 'bg-cyan-100 text-cyan-700',
+  delivered: 'bg-emerald-100 text-emerald-700', cancelled: 'bg-rose-100 text-rose-700',
+};
+
+const KpiCard = ({ title, value, sub, isPositive, icon: Icon, gradient }: any) => (
+  <div className={`relative overflow-hidden rounded-3xl p-5 text-white shadow-lg ${gradient}`}>
+    <div className="absolute -top-8 -right-8 w-32 h-32 bg-white/10 rounded-full" />
+    <div className="absolute -bottom-6 -left-4 w-24 h-24 bg-white/10 rounded-full" />
+    <div className="relative z-10 flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <div className="bg-white/20 backdrop-blur-sm p-2.5 rounded-xl">
+          <Icon size={20} className="text-white" />
+        </div>
+        {sub && (
+          <span className={`flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded-full ${isPositive ? 'bg-white/20' : 'bg-black/20'}`}>
+            {isPositive ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
+            {sub}
+          </span>
+        )}
+      </div>
+      <div>
+        <div className="text-white/70 text-[11px] font-semibold tracking-wide">{title}</div>
+        <div className="text-2xl font-black mt-0.5 leading-tight">{value}</div>
       </div>
     </div>
-    <div className={`p-4 rounded-xl ${color} shadow-xl shadow-current/20 group-hover:scale-110 group-hover:rotate-6 transition-all duration-300`}>
-      <Icon className="text-white w-7 h-7" />
+  </div>
+);
+
+const LeaderCard = ({ title, icon: Icon, color, data, valueKey, labelKey, formatValue, emptyText }: any) => (
+  <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+    <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-700 flex items-center gap-2">
+      <div className={`p-2 rounded-xl ${color}`}>
+        <Icon size={16} className="text-white" />
+      </div>
+      <span className="font-black text-slate-800 dark:text-slate-100">{title}</span>
+    </div>
+    <div className="p-4 space-y-2">
+      {(!data || data.length === 0) ? (
+        <div className="text-center text-sm text-slate-400 py-6">{emptyText || 'لا توجد بيانات للفترة المحددة.'}</div>
+      ) : data.map((item: any, idx: number) => {
+        const maxVal = data[0][valueKey] || 1;
+        const pct = Math.round((item[valueKey] / maxVal) * 100);
+        return (
+          <div key={item.id || idx} className="flex items-center gap-3">
+            <span className="text-base w-6 text-center flex-shrink-0">{MEDAL[idx] || `${idx + 1}`}</span>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-sm font-bold text-slate-800 dark:text-slate-100 truncate">{item[labelKey]}</span>
+                <span className="text-xs font-black text-slate-600 dark:text-slate-300 mr-2 flex-shrink-0">{formatValue(item)}</span>
+              </div>
+              <div className="h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all duration-700"
+                  style={{ width: `${pct}%`, background: PIE_COLORS[idx % PIE_COLORS.length] }}
+                />
+              </div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   </div>
 );
 
-const Pill = ({ label, value }: { label: string; value: string }) => (
-  <div className="px-4 py-2 rounded-full bg-white/70 dark:bg-slate-800/70 border border-white/40 dark:border-slate-700/60 text-[11px] font-bold">
-    <span className="text-muted">{label}</span> <span className="text-slate-900 dark:text-slate-100">{value}</span>
+const SectionTitle = ({ title, sub, icon: Icon }: any) => (
+  <div className="flex items-center justify-between">
+    <div>
+      <h2 className="text-lg font-black text-slate-900 dark:text-white">{title}</h2>
+      {sub && <p className="text-xs text-slate-500 mt-0.5">{sub}</p>}
+    </div>
+    {Icon && <Icon size={18} className="text-blue-500" />}
   </div>
 );
-
-const Badge = ({ level, text }: { level: 'high' | 'medium' | 'low'; text: string }) => {
-  const styles = {
-    high: 'bg-rose-100 text-rose-700 border-rose-200',
-    medium: 'bg-amber-100 text-amber-700 border-amber-200',
-    low: 'bg-emerald-100 text-emerald-700 border-emerald-200'
-  };
-  return (
-    <span className={`px-3 py-1 rounded-full text-[11px] font-black border ${styles[level]}`}>{text}</span>
-  );
-};
 
 const Dashboard: React.FC = () => {
   const { isDark } = useTheme();
-  const currencySymbol = 'ج.م';
+  const currencySymbol = localStorage.getItem('Dragon_currency') || 'ج.م';
   const [loading, setLoading] = useState(true);
   const [overview, setOverview] = useState<any>(null);
   const today = new Date();
-  const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-  const [startDate, setStartDate] = useState(firstDayOfMonth.toISOString().split('T')[0]);
+  const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+  const [startDate, setStartDate] = useState(firstDay.toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(today.toISOString().split('T')[0]);
-
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const qs = `&start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`;
-        const res = await fetch(`${API_BASE_PATH}/api.php?module=dashboard&action=overview${qs}`);
-        const data = await res.json();
-        if (data.success) {
-          setOverview(data.data);
-        }
-      } catch (error) {
-        // ignore and keep placeholders
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
-  }, [startDate, endDate]);
-
-  const trend = useMemo(() => {
-    if (!overview || !Array.isArray(overview.trend)) return [];
-    return overview.trend.map((item: any) => ({
-      name: item.date?.slice(5) || '',
-      sales: Number(item.sales || 0),
-      profit: Number(item.profit || 0)
-    }));
-  }, [overview]);
-
-  const revenueMonth = Number(overview?.revenue_month || 0);
-  const profitMonth = Number(overview?.profit_month || 0);
-  const prevRevenue = Number(overview?.prev_revenue || 0);
-  const prevProfit = Number(overview?.prev_profit || 0);
-  const margin = revenueMonth > 0 ? (profitMonth / revenueMonth) * 100 : 0;
-  const changePct = typeof overview?.revenue_change_pct === 'number' ? overview.revenue_change_pct : null;
-  const bestDay = useMemo(() => {
-    if (!trend.length) return null;
-    return trend.reduce((acc: any, cur: any) => (cur.sales > acc.sales ? cur : acc), trend[0]);
-  }, [trend]);
 
   const companyLogo = localStorage.getItem('Dragon_company_logo') || assetUrl('Dragon.png');
   const companyName = localStorage.getItem('Dragon_company_name') || 'Dragon Pro';
   const userName = (() => {
-    try {
-      const u = JSON.parse(localStorage.getItem('Dragon_user') || '{}');
-      return u?.name || 'System';
-    } catch (e) {
-      return 'System';
-    }
+    try { return JSON.parse(localStorage.getItem('Dragon_user') || '{}')?.name || 'System'; }
+    catch { return 'System'; }
   })();
 
-  const signature = `${userName} • ${new Date().toLocaleDateString('ar-EG')} ${new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}`;
+  const load = async () => {
+    setLoading(true);
+    try {
+      const qs = `&start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`;
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=dashboard&action=overview${qs}`);
+      const data = await res.json();
+      if (data.success) setOverview(data.data);
+    } catch { /* keep placeholders */ }
+    finally { setLoading(false); }
+  };
 
-  const lowStockCount = Number(overview?.low_stock_count || 0);
+  useEffect(() => { load(); }, [startDate, endDate]);
+
+  const revenue   = Number(overview?.revenue_month || 0);
+  const profit    = Number(overview?.profit_month || 0);
+  const prevRev   = Number(overview?.prev_revenue || 0);
+  const margin    = revenue > 0 ? (profit / revenue) * 100 : 0;
+  const changePct = typeof overview?.revenue_change_pct === 'number' ? overview.revenue_change_pct : null;
+  const ordersMonth   = Number(overview?.orders_month || 0);
   const ordersPending = Number(overview?.orders_pending || 0);
-  const absentToday = Number(overview?.attendance_today?.absent || 0);
+  const lowStock      = Number(overview?.low_stock_count || 0);
+  const absent        = Number(overview?.attendance_today?.absent || 0);
+  const present       = Number(overview?.attendance_today?.present || 0);
 
-  const alertLevel = (value: number, high: number, medium: number) => {
-    if (value >= high) return 'high' as const;
-    if (value >= medium) return 'medium' as const;
-    return 'low' as const;
-  };
+  const trend = useMemo(() => {
+    if (!overview?.trend) return [];
+    return overview.trend.map((t: any) => ({
+      name: t.date?.slice(5) || '',
+      sales: Number(t.sales || 0),
+      profit: Number(t.profit || 0)
+    }));
+  }, [overview]);
 
-  const handleExportAdminReport = () => {
-    window.print();
-  };
+  const bestDay = useMemo(() =>
+    trend.length ? trend.reduce((a: any, c: any) => c.sales > a.sales ? c : a, trend[0]) : null,
+    [trend]);
 
-  const handleExportCsv = () => {
-    const rows = [
-      ['الفترة', `${overview?.range_start || startDate} -> ${overview?.range_end || endDate}`],
-      ['إيرادات الفترة', revenueMonth.toString()],
-      ['أرباح الفترة', profitMonth.toString()],
-      ['هامش الربح', margin.toFixed(2)],
-      ['طلبات الفترة', Number(overview?.orders_month || 0).toString()],
-      ['طلبات معلقة', Number(overview?.orders_pending || 0).toString()],
-      ['العملاء', Number(overview?.customers_count || 0).toString()],
-      ['المخزون (وحدات)', Number(overview?.stock_units || 0).toString()],
-      ['نقص المخزون', Number(overview?.low_stock_count || 0).toString()],
-      ['الحضور اليوم', Number(overview?.attendance_today?.present || 0).toString()],
-      ['غياب اليوم', Number(overview?.attendance_today?.absent || 0).toString()],
-      ['إيرادات الفترة السابقة', prevRevenue.toString()],
-      ['أرباح الفترة السابقة', prevProfit.toString()]
-    ];
+  const ordersByStatus: any[] = overview?.orders_by_status || [];
+  const pieData = ordersByStatus.map(r => ({ name: STATUS_LABELS[r.status] || r.status, value: r.count }));
 
-    const trendRows = (trend || []).map((t: any) => [t.name, t.sales?.toString() || '0', t.profit?.toString() || '0']);
-    const csvParts = [
-      'section,metric,value',
-      ...rows.map((r) => `kpi,${r[0]},${r[1]}`),
-      'trend,date,sales,profit',
-      ...trendRows.map((r) => `trend,${r[0]},${r[1]},${r[2]}`)
-    ];
+  const topReps:    any[] = overview?.top_reps          || [];
+  const topOffices: any[] = overview?.top_sales_offices || [];
+  const topEmps:    any[] = overview?.top_employees      || [];
+  const topProds:   any[] = overview?.top_products       || [];
 
-    const blob = new Blob([csvParts.join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `dashboard_${startDate}_to_${endDate}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+  const tooltip_style = {
+    borderRadius: '16px', border: 'none',
+    boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.12)',
+    textAlign: 'right' as const,
+    backgroundColor: isDark ? '#0f172a' : '#fff',
+    color: isDark ? '#f1f5f9' : '#0f172a',
+    padding: '10px 16px'
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500 transition-colors">
-      <div className="print-only">
-        <div className="border border-slate-200 rounded-2xl p-6">
-          <div className="flex items-center justify-between gap-6">
-            <div className="flex items-center gap-4">
-              <div className="w-16 h-16 rounded-2xl border border-slate-200 overflow-hidden">
-                <img src={companyLogo} alt="logo" className="w-full h-full object-cover" onError={(e: any) => { e.target.src = assetUrl('Dragon.png'); }} />
-              </div>
-              <div>
-                <div className="text-xs text-muted">الشركة</div>
-                <div className="text-lg font-black">{companyName}</div>
-              </div>
+    <div className="space-y-8 animate-in fade-in duration-500 transition-colors pb-12">
+
+      {/* Header */}
+      <div className="relative overflow-hidden rounded-[2rem] bg-gradient-to-l from-blue-700 via-blue-600 to-indigo-700 p-7 shadow-xl">
+        <div className="absolute -top-16 -right-12 w-56 h-56 bg-white/10 rounded-full blur-3xl" />
+        <div className="absolute -bottom-20 -left-10 w-64 h-64 bg-indigo-400/20 rounded-full blur-3xl" />
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center gap-5">
+          <div className="flex items-center gap-4 flex-1">
+            <div className="w-14 h-14 rounded-2xl bg-white/20 border border-white/30 overflow-hidden flex-shrink-0">
+              <img src={companyLogo} alt="logo" className="w-full h-full object-cover"
+                onError={(e: any) => { e.target.src = assetUrl('Dragon.png'); }} />
             </div>
-            <div className="text-right">
-              <div className="text-xs text-muted">تقرير الإدارة</div>
-              <div className="text-xl font-black">ملخص تنفيذي</div>
-              <div className="text-xs text-muted mt-1">{signature}</div>
-              <div className="text-[11px] text-muted mt-2">الفترة: {overview?.range_start || startDate} → {overview?.range_end || endDate}</div>
+            <div>
+              <div className="text-white/70 text-xs font-semibold">{companyName}</div>
+              <h1 className="text-3xl font-black text-white tracking-tight">لوحة التحكم</h1>
+              <div className="text-white/60 text-[11px] mt-1">
+                {userName} &bull; {new Date().toLocaleDateString('ar-EG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+              </div>
             </div>
           </div>
-          <div className="mt-6 grid grid-cols-2 gap-4 text-sm">
-            <div className="flex items-center justify-between border border-slate-200 rounded-xl px-4 py-3">
-              <span>إيرادات الفترة</span>
-              <strong>{loading ? '...' : `${revenueMonth.toLocaleString()} ${currencySymbol}`}</strong>
-            </div>
-            <div className="flex items-center justify-between border border-slate-200 rounded-xl px-4 py-3">
-              <span>الأرباح</span>
-              <strong>{loading ? '...' : `${profitMonth.toLocaleString()} ${currencySymbol}`}</strong>
-            </div>
-            <div className="flex items-center justify-between border border-slate-200 rounded-xl px-4 py-3">
-              <span>هامش الربح</span>
-              <strong>{loading ? '...' : `${margin.toFixed(1)}%`}</strong>
-            </div>
-            <div className="flex items-center justify-between border border-slate-200 rounded-xl px-4 py-3">
-              <span>طلبات معلقة</span>
-              <strong>{loading ? '...' : ordersPending.toLocaleString()}</strong>
-            </div>
-            <div className="flex items-center justify-between border border-slate-200 rounded-xl px-4 py-3">
-              <span>نقص المخزون</span>
-              <strong>{loading ? '...' : lowStockCount.toLocaleString()}</strong>
-            </div>
-            <div className="flex items-center justify-between border border-slate-200 rounded-xl px-4 py-3">
-              <span>غياب اليوم</span>
-              <strong>{loading ? '...' : absentToday.toLocaleString()}</strong>
-            </div>
+          <div className="flex flex-wrap gap-2 lg:justify-end">
+            {[
+              { label: 'الإيرادات', value: loading ? '...' : fmtCur(revenue, currencySymbol) },
+              { label: 'هامش الربح', value: loading ? '...' : `${margin.toFixed(1)}%` },
+              { label: 'أفضل يوم', value: bestDay?.name || '—' },
+              { label: 'طلبات معلقة', value: loading ? '...' : fmt(ordersPending) },
+            ].map(p => (
+              <div key={p.label} className="bg-white/15 backdrop-blur-sm border border-white/20 rounded-2xl px-4 py-2.5 text-right">
+                <div className="text-white/60 text-[10px] font-semibold">{p.label}</div>
+                <div className="text-white font-black text-sm">{p.value}</div>
+              </div>
+            ))}
           </div>
         </div>
       </div>
 
-      <div className="no-print space-y-6">
-        <div className="relative overflow-hidden rounded-[2.5rem] border border-blue-200/40 dark:border-blue-900/40 bg-gradient-to-l from-blue-50 via-white to-white dark:from-blue-900/20 dark:via-slate-900 dark:to-slate-900 p-8">
-          <div className="absolute -top-24 -right-16 w-64 h-64 bg-blue-200/40 dark:bg-blue-600/10 rounded-full blur-3xl"></div>
-          <div className="absolute -bottom-24 -left-12 w-64 h-64 bg-amber-200/30 dark:bg-amber-500/10 rounded-full blur-3xl"></div>
-
-          <div className="relative z-10 flex flex-col lg:flex-row lg:items-center gap-6">
-            <div className="flex items-center gap-4">
-              <div className="w-16 h-16 rounded-2xl bg-white/80 dark:bg-slate-800/70 border border-white/60 dark:border-slate-700/60 shadow-lg flex items-center justify-center overflow-hidden">
-                <img src={companyLogo} alt="logo" className="w-full h-full object-cover" onError={(e: any) => { e.target.src = assetUrl('Dragon.png'); }} />
-              </div>
-              <div className="hidden lg:block">
-                <div className="text-xs text-muted">الشركة</div>
-                <div className="text-lg font-black">{companyName}</div>
-              </div>
-            </div>
-            <div className="flex-1 text-right">
-              <div className="flex items-center gap-3 justify-end">
-                <span className="px-3 py-1 rounded-full text-[11px] font-black bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">ملخص الإدارة</span>
-              </div>
-              <h1 className="text-4xl font-black mt-4 tracking-tight bg-gradient-to-l from-slate-900 via-blue-700 to-slate-900 dark:from-slate-100 dark:via-blue-300 dark:to-slate-100 bg-clip-text text-transparent">الشاشه الرئيسيه</h1>
-              <p className="text-sm mt-3 font-medium text-muted">عرض مالي وتشغيلي مباشر من قاعدة البيانات — صُمّم لإدارة دقيقة وسريعة.</p>
-              <div className="mt-5 flex flex-wrap justify-end gap-2">
-                <Pill label="إيرادات الفترة" value={loading ? '...' : `${revenueMonth.toLocaleString()} ${currencySymbol}`} />
-                <Pill label="هامش الربح" value={loading ? '...' : `${margin.toFixed(1)}%`} />
-                <Pill label="أفضل يوم" value={bestDay ? bestDay.name : '—'} />
-                <Pill label="الفترة السابقة" value={overview?.prev_range_start ? `${overview.prev_range_start} → ${overview.prev_range_end}` : '—'} />
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3">
-              <button
-                className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border border-slate-200 dark:border-slate-700 px-6 py-3 rounded-2xl text-sm font-bold hover:bg-slate-50 dark:hover:bg-slate-700 transition-all shadow-md hover:shadow-lg hover:scale-105 active:scale-95"
-                onClick={handleExportAdminReport}
-              >
-                🖨️ طباعة التقرير
-              </button>
-              <button
-                className="bg-slate-900/90 text-white px-6 py-3 rounded-2xl text-sm font-bold hover:bg-slate-900 transition-all shadow-md hover:shadow-lg hover:scale-105 active:scale-95"
-                onClick={handleExportCsv}
-              >
-                ⬇️ تصدير CSV
-              </button>
-              <div className="px-4 py-3 rounded-2xl bg-white/70 dark:bg-slate-800/70 border border-white/60 dark:border-slate-700/60 text-[11px] font-bold text-right">
-                <div className="text-muted">توقيع رقمي</div>
-                <div className="mt-1">{signature}</div>
-              </div>
-            </div>
-          </div>
+      {/* Date Filter */}
+      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 flex flex-wrap gap-3 items-center justify-between shadow-sm">
+        <div>
+          <div className="text-sm font-black text-slate-800 dark:text-slate-100">فلترة الفترة الزمنية</div>
+          <div className="text-[11px] text-slate-500">جميع المؤشرات تُحسب خلال النطاق المحدد</div>
         </div>
-
-        <div className="flex items-center justify-between">
-          <div className="text-right">
-            <h2 className="text-xl font-black">ملخص الإدارة</h2>
-            <p className="text-xs text-muted">ملخص مؤشرات التنفيذ والنتائج الأساسية</p>
-          </div>
-          <Sparkles className="w-5 h-5 text-amber-500" />
-        </div>
-
-        <div className="card p-4 rounded-2xl border border-card shadow-sm">
-          <div className="flex flex-col lg:flex-row gap-3 items-center justify-between">
-            <div className="text-right">
-              <div className="text-sm font-black">فلترة الفترة</div>
-              <div className="text-[11px] text-muted">المقارنة تلقائية مع الفترة السابقة</div>
-            </div>
-            <div className="flex flex-wrap gap-2 items-center">
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-2 px-3 text-sm text-slate-900 dark:text-white"
-              />
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-2 px-3 text-sm text-slate-900 dark:text-white"
-              />
-              <div className="text-[11px] font-bold px-3 py-2 rounded-2xl bg-slate-100 dark:bg-slate-800 text-muted">
-                الفترة السابقة: {overview?.prev_range_start ? `${overview.prev_range_start} → ${overview.prev_range_end}` : '—'}
-              </div>
-            </div>
-          </div>
-        </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatCard
-          title="إجمالي الإيرادات"
-          value={loading ? '...' : `${revenueMonth.toLocaleString()} ${currencySymbol}`}
-          change={changePct === null ? '—' : `${Math.abs(changePct).toFixed(1)}% ${changePct >= 0 ? '↑' : '↓'}`}
-          isPositive={changePct === null ? true : changePct >= 0}
-          icon={DollarSign}
-          color="bg-gradient-to-br from-blue-700 to-blue-500"
-        />
-        <StatCard
-          title="العملاء"
-          value={loading ? '...' : `${Number(overview?.customers_count || 0).toLocaleString()} عميل`}
-          change={loading ? '—' : 'متابعة نشطة'}
-          isPositive={true}
-          icon={Users}
-          color="bg-gradient-to-br from-slate-900 to-slate-700"
-        />
-        <StatCard
-          title="المخزون"
-          value={loading ? '...' : `${Number(overview?.stock_units || 0).toLocaleString()} قطعة`}
-          change={loading ? '—' : `نقص: ${Number(overview?.low_stock_count || 0)}`}
-          isPositive={Number(overview?.low_stock_count || 0) === 0}
-          icon={Package}
-          color="bg-gradient-to-br from-amber-600 to-orange-500"
-        />
-        <StatCard
-          title="هامش الربح"
-          value={loading ? '...' : `${margin.toFixed(1)}%`}
-          change={loading ? '—' : `${profitMonth.toLocaleString()} ${currencySymbol}`}
-          isPositive={margin >= 0}
-          icon={TrendingUp}
-          color="bg-gradient-to-br from-emerald-600 to-teal-600"
-        />
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="card p-6 rounded-2xl shadow-md border border-card">
-          <div className="flex items-center justify-between">
-            <p className="text-[11px] text-muted font-semibold tracking-widest uppercase">طلبات الفترة</p>
-            <Briefcase className="w-5 h-5 text-blue-500" />
-          </div>
-          <div className="text-3xl font-black mt-4">{loading ? '...' : Number(overview?.orders_month || 0).toLocaleString()}</div>
-          <p className="text-[11px] text-muted mt-2">طلبات معلقة: {loading ? '...' : Number(overview?.orders_pending || 0).toLocaleString()}</p>
-        </div>
-        <div className="card p-6 rounded-2xl shadow-md border border-card">
-          <div className="flex items-center justify-between">
-            <p className="text-[11px] text-muted font-semibold tracking-widest uppercase">الحضور اليوم</p>
-            <ClipboardCheck className="w-5 h-5 text-emerald-500" />
-          </div>
-          <div className="text-3xl font-black mt-4">{loading ? '...' : Number(overview?.attendance_today?.present || 0)}</div>
-          <p className="text-[11px] text-muted mt-2">غياب اليوم: {loading ? '...' : Number(overview?.attendance_today?.absent || 0)}</p>
-        </div>
-        <div className="card p-6 rounded-2xl shadow-md border border-card">
-          <div className="flex items-center justify-between">
-            <p className="text-[11px] text-muted font-semibold tracking-widest uppercase">الجاهزية</p>
-            <AlertTriangle className="w-5 h-5 text-rose-500" />
-          </div>
-          <div className="text-3xl font-black mt-4">{loading ? '...' : Number(overview?.employees_count || 0).toLocaleString()}</div>
-          <p className="text-[11px] text-muted mt-2">فرق العمل النشطة</p>
+        <div className="flex flex-wrap gap-2 items-center">
+          {[
+            { label: 'اليوم', s: today.toISOString().split('T')[0], e: today.toISOString().split('T')[0] },
+            { label: 'هذا الشهر', s: firstDay.toISOString().split('T')[0], e: today.toISOString().split('T')[0] },
+            { label: 'آخر 90 يوم', s: new Date(today.getTime() - 89 * 86400000).toISOString().split('T')[0], e: today.toISOString().split('T')[0] },
+          ].map(q => (
+            <button key={q.label} onClick={() => { setStartDate(q.s); setEndDate(q.e); }}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${startDate === q.s && endDate === q.e ? 'bg-blue-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'}`}>
+              {q.label}
+            </button>
+          ))}
+          <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
+            className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-1.5 px-3 text-sm text-slate-800 dark:text-white" />
+          <span className="text-slate-400 text-sm">—</span>
+          <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
+            className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-1.5 px-3 text-sm text-slate-800 dark:text-white" />
         </div>
       </div>
 
-      <div className="card p-6 rounded-2xl border border-card shadow-md">
-        <div className="flex items-center gap-3 mb-4">
-          <Sparkles className="w-5 h-5 text-amber-500" />
-          <h3 className="font-black text-lg">لمحة تنفيذية سريعة</h3>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-          <div className="p-4 rounded-xl bg-slate-50/80 dark:bg-slate-900/40 border border-slate-200/60 dark:border-slate-700/60">
-            أفضل يوم مبيعات: <strong>{bestDay ? bestDay.name : '—'}</strong>
-          </div>
-          <div className="p-4 rounded-xl bg-slate-50/80 dark:bg-slate-900/40 border border-slate-200/60 dark:border-slate-700/60">
-            عدد التنبيهات الحرجة: <strong>{Number(overview?.low_stock_count || 0)}</strong>
-          </div>
-          <div className="p-4 rounded-xl bg-slate-50/80 dark:bg-slate-900/40 border border-slate-200/60 dark:border-slate-700/60">
-            نسبة الربحية الحالية: <strong>{margin.toFixed(1)}%</strong>
-          </div>
-        </div>
+      {/* KPI Row 1 */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <KpiCard title="إجمالي الإيرادات" gradient="bg-gradient-to-br from-blue-600 to-blue-800"
+          value={loading ? '...' : fmtCur(revenue, currencySymbol)}
+          sub={changePct !== null ? `${Math.abs(changePct).toFixed(1)}%` : undefined}
+          isPositive={changePct !== null ? changePct >= 0 : true} icon={DollarSign} />
+        <KpiCard title="صافي الأرباح" gradient="bg-gradient-to-br from-emerald-500 to-teal-700"
+          value={loading ? '...' : fmtCur(profit, currencySymbol)}
+          sub={loading ? undefined : `هامش ${margin.toFixed(1)}%`}
+          isPositive={profit >= 0} icon={TrendingUp} />
+        <KpiCard title="طلبات الفترة" gradient="bg-gradient-to-br from-violet-500 to-purple-700"
+          value={loading ? '...' : fmt(ordersMonth)}
+          sub={loading ? undefined : `معلق: ${fmt(ordersPending)}`}
+          isPositive={ordersPending < 10} icon={Briefcase} />
+        <KpiCard title="العملاء" gradient="bg-gradient-to-br from-rose-500 to-pink-700"
+          value={loading ? '...' : fmt(Number(overview?.customers_count || 0))}
+          sub={loading ? undefined : `موظف: ${fmt(Number(overview?.employees_count || 0))}`}
+          isPositive={true} icon={Users} />
       </div>
 
-      <div className="flex items-center justify-between">
-        <div className="text-right">
-          <h2 className="text-xl font-black">البث التشغيلي المباشر</h2>
-          <p className="text-xs text-muted">مؤشرات تشغيلية لحظية وتنبيهات ديناميكية</p>
-        </div>
-        <AlertTriangle className="w-5 h-5 text-rose-500" />
+      {/* KPI Row 2 */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <KpiCard title="المخزون (وحدة)" gradient="bg-gradient-to-br from-amber-500 to-orange-600"
+          value={loading ? '...' : fmt(Number(overview?.stock_units || 0))}
+          sub={loading ? undefined : `نقص: ${fmt(lowStock)}`}
+          isPositive={lowStock === 0} icon={Package} />
+        <KpiCard title="الحضور اليوم" gradient="bg-gradient-to-br from-cyan-500 to-sky-700"
+          value={loading ? '...' : fmt(present)}
+          sub={loading ? undefined : `غياب: ${fmt(absent)}`}
+          isPositive={absent === 0} icon={ClipboardCheck} />
+        <KpiCard title="الإيرادات السابقة" gradient="bg-gradient-to-br from-slate-500 to-slate-700"
+          value={loading ? '...' : fmtCur(prevRev, currencySymbol)}
+          sub={overview?.prev_range_start ? overview.prev_range_start.slice(5) : undefined}
+          isPositive={revenue >= prevRev} icon={Activity} />
+        <KpiCard title="نسبة النمو" gradient={`bg-gradient-to-br ${changePct !== null && changePct >= 0 ? 'from-green-500 to-emerald-700' : 'from-red-500 to-rose-700'}`}
+          value={changePct !== null ? `${changePct >= 0 ? '+' : ''}${changePct.toFixed(1)}%` : '—'}
+          sub={loading ? undefined : 'مقارنة بالفترة السابقة'}
+          isPositive={changePct !== null ? changePct >= 0 : true} icon={changePct !== null && changePct >= 0 ? ArrowUpRight : ArrowDownRight} />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="card backdrop-blur-sm p-6 rounded-2xl shadow-md border border-card transition-all hover:shadow-xl" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="font-black text-lg">الإيرادات مقابل الأرباح</h3>
-            <span className="text-[11px] text-muted font-medium px-3 py-1 bg-slate-100 dark:bg-slate-700/50 rounded-full">الفترة المحددة</span>
+      {/* Charts Section */}
+      <SectionTitle title="البيانات المالية" sub="الإيرادات والأرباح خلال الفترة المحددة" icon={TrendingUp} />
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <div className="lg:col-span-2 bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-5">
+            <h3 className="font-black text-slate-800 dark:text-slate-100">إيرادات وأرباح الفترة</h3>
+            <span className="text-[11px] text-slate-500 bg-slate-100 dark:bg-slate-700 px-3 py-1 rounded-full">يومي</span>
           </div>
-          <div className="h-72">
+          <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={trend}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#334155" : "#e2e8f0"} />
-                <XAxis
-                  dataKey="name"
-                  axisLine={false}
-                  tickLine={false}
-                  fontSize={11}
-                  tick={{ fill: isDark ? '#94a3b8' : '#64748b', fontWeight: 600 }}
-                />
-                <YAxis
-                  axisLine={false}
-                  tickLine={false}
-                  fontSize={11}
-                  orientation="right"
-                  tick={{ fill: isDark ? '#94a3b8' : '#64748b', fontWeight: 600 }}
-                />
-                <Tooltip
-                  cursor={{ fill: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(59, 130, 246, 0.05)' }}
-                  contentStyle={{
-                    borderRadius: '16px',
-                    border: 'none',
-                    boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)',
-                    textAlign: 'right',
-                    backgroundColor: isDark ? '#0f172a' : 'rgba(255, 255, 255, 0.98)',
-                    color: isDark ? '#f1f5f9' : '#0f172a'
-                  }}
-                  itemStyle={{ fontWeight: 700 }}
-                />
-                <Bar dataKey="sales" name="المبيعات" fill="#1d4ed8" radius={[6, 6, 0, 0]} barSize={24} />
-                <Bar dataKey="profit" name="الأرباح" fill="#10b981" radius={[6, 6, 0, 0]} barSize={24} />
+              <BarChart data={trend} barGap={4}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? '#334155' : '#e2e8f0'} />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} fontSize={11} tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
+                <YAxis axisLine={false} tickLine={false} fontSize={11} orientation="right" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
+                <Tooltip contentStyle={tooltip_style} itemStyle={{ fontWeight: 700 }} cursor={{ fill: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(59,130,246,0.04)' }} />
+                <Bar dataKey="sales" name="الإيرادات" fill="#3b82f6" radius={[6, 6, 0, 0]} barSize={18} />
+                <Bar dataKey="profit" name="الأرباح" fill="#10b981" radius={[6, 6, 0, 0]} barSize={18} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        <div className="card backdrop-blur-sm p-6 rounded-2xl shadow-md border border-card transition-all hover:shadow-xl" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="font-black text-lg">اتجاه المبيعات</h3>
-            <span className="text-[11px] text-muted font-medium px-3 py-1 bg-slate-100 dark:bg-slate-700/50 rounded-full">ديناميكي</span>
-          </div>
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={trend}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#334155" : "#e2e8f0"} />
-                <XAxis
-                  dataKey="name"
-                  axisLine={false}
-                  tickLine={false}
-                  fontSize={11}
-                  tick={{ fill: isDark ? '#94a3b8' : '#64748b', fontWeight: 600 }}
-                />
-                <YAxis
-                  axisLine={false}
-                  tickLine={false}
-                  fontSize={11}
-                  orientation="right"
-                  tick={{ fill: isDark ? '#94a3b8' : '#64748b', fontWeight: 600 }}
-                />
-                <Tooltip
-                  contentStyle={{
-                    borderRadius: '16px',
-                    border: 'none',
-                    boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)',
-                    textAlign: 'right',
-                    backgroundColor: isDark ? '#0f172a' : 'rgba(255, 255, 255, 0.98)',
-                    color: isDark ? '#f1f5f9' : '#0f172a'
-                  }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="sales"
-                  name="المبيعات"
-                  stroke="#1d4ed8"
-                  strokeWidth={4}
-                  dot={{ r: 5, fill: '#1d4ed8', strokeWidth: 2, stroke: isDark ? '#0f172a' : '#fff' }}
-                  activeDot={{ r: 8, strokeWidth: 0 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+        <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
+          <h3 className="font-black text-slate-800 dark:text-slate-100 mb-5">توزيع حالات الطلبات</h3>
+          {pieData.length > 0 ? (
+            <>
+              <div className="h-44">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={pieData} cx="50%" cy="50%" innerRadius={48} outerRadius={72} paddingAngle={3} dataKey="value">
+                      {pieData.map((_: any, i: number) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                    </Pie>
+                    <Tooltip contentStyle={tooltip_style} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="mt-3 space-y-1.5">
+                {ordersByStatus.map((r: any, i: number) => (
+                  <div key={r.status} className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${STATUS_COLORS[r.status] || 'bg-slate-100 text-slate-600'}`}>
+                        {STATUS_LABELS[r.status] || r.status}
+                      </span>
+                    </div>
+                    <span className="font-bold text-slate-700 dark:text-slate-200">{fmt(r.count)}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="flex items-center justify-center h-48 text-sm text-slate-400">لا توجد طلبات في هذه الفترة.</div>
+          )}
         </div>
+      </div>
+
+      {/* Line Chart */}
+      <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="font-black text-slate-800 dark:text-slate-100">مسار الإيرادات اليومي</h3>
+          <span className="text-[11px] bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 px-3 py-1 rounded-full font-bold">ديناميكي</span>
+        </div>
+        <div className="h-56">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={trend}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? '#334155' : '#e2e8f0'} />
+              <XAxis dataKey="name" axisLine={false} tickLine={false} fontSize={11} tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
+              <YAxis axisLine={false} tickLine={false} fontSize={11} orientation="right" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
+              <Tooltip contentStyle={tooltip_style} />
+              <Line type="monotone" dataKey="sales" name="الإيرادات" stroke="#3b82f6" strokeWidth={3}
+                dot={{ r: 4, fill: '#3b82f6', strokeWidth: 2, stroke: isDark ? '#0f172a' : '#fff' }} activeDot={{ r: 7 }} />
+              <Line type="monotone" dataKey="profit" name="الأرباح" stroke="#10b981" strokeWidth={3}
+                dot={{ r: 4, fill: '#10b981', strokeWidth: 2, stroke: isDark ? '#0f172a' : '#fff' }} activeDot={{ r: 7 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* Leaderboards */}
+      <SectionTitle title="لوحة الشرف" sub="أعلى المناديب والصفحات والموظفين والمنتجات أداءً خلال الفترة" icon={Award} />
+
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
+        <LeaderCard title="أفضل المناديب" icon={Award} color="bg-gradient-to-br from-amber-500 to-orange-600"
+          data={topReps} labelKey="name" valueKey="total_sales"
+          formatValue={(r: any) => fmtCur(r.total_sales, currencySymbol)} emptyText="لا توجد بيانات للمناديب." />
+        <LeaderCard title="أفضل الصفحات/الفروع" icon={Building2} color="bg-gradient-to-br from-blue-500 to-blue-700"
+          data={topOffices} labelKey="name" valueKey="total_sales"
+          formatValue={(r: any) => fmtCur(r.total_sales, currencySymbol)} emptyText="لا توجد بيانات للصفحات." />
+        <LeaderCard title="أفضل الموظفين" icon={UserCheck} color="bg-gradient-to-br from-emerald-500 to-teal-600"
+          data={topEmps} labelKey="name" valueKey="orders_count"
+          formatValue={(r: any) => `${fmt(r.orders_count)} أوردر`} emptyText="لا توجد بيانات للموظفين." />
+        <LeaderCard title="أكثر المنتجات مبيعاً" icon={ShoppingBag} color="bg-gradient-to-br from-violet-500 to-purple-700"
+          data={topProds} labelKey="product_name" valueKey="qty_sold"
+          formatValue={(r: any) => `${fmt(r.qty_sold)} قطعة`} emptyText="لا توجد بيانات للمنتجات." />
+      </div>
+
+      {/* Detail Tables */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-700 flex items-center gap-2">
+            <Award size={16} className="text-amber-500" />
+            <span className="font-black text-slate-800 dark:text-slate-100">تفاصيل أداء المناديب</span>
+          </div>
+          {topReps.length === 0 ? (
+            <div className="text-center text-sm text-slate-400 py-10">لا توجد بيانات.</div>
+          ) : (
+            <table className="w-full text-right text-sm">
+              <thead className="text-[11px] text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/30">
+                <tr>
+                  <th className="px-4 py-3 font-semibold">#</th>
+                  <th className="px-4 py-3 font-semibold">المندوب</th>
+                  <th className="px-4 py-3 font-semibold">الأوردرات</th>
+                  <th className="px-4 py-3 font-semibold">المبيعات</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topReps.map((r: any, i: number) => (
+                  <tr key={r.id} className="border-t border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+                    <td className="px-4 py-3 text-base font-bold">{MEDAL[i] || i + 1}</td>
+                    <td className="px-4 py-3 font-bold text-slate-800 dark:text-slate-100">{r.name}</td>
+                    <td className="px-4 py-3">
+                      <span className="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full text-[11px] font-bold">{fmt(r.orders_count)}</span>
+                    </td>
+                    <td className="px-4 py-3 font-black text-emerald-600 dark:text-emerald-400">{fmtCur(r.total_sales, currencySymbol)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
 
-        <div className="card p-6 rounded-2xl border border-card shadow-md">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-black text-lg">نظام التنبيهات الذكي</h3>
-            <Sparkles className="w-5 h-5 text-amber-500" />
+        <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-700 flex items-center gap-2">
+            <UserCheck size={16} className="text-emerald-500" />
+            <span className="font-black text-slate-800 dark:text-slate-100">تفاصيل أداء الموظفين</span>
           </div>
-          <div className="space-y-4 text-sm">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="font-bold">تنبيه المخزون</div>
-                <div className="text-[11px] text-muted">منتجات أقل من الحد</div>
-              </div>
-              <Badge level={alertLevel(lowStockCount, 12, 4)} text={lowStockCount > 0 ? 'عالي' : 'منخفض'} />
+          {topEmps.length === 0 ? (
+            <div className="text-center text-sm text-slate-400 py-10">لا توجد بيانات.</div>
+          ) : (
+            <table className="w-full text-right text-sm">
+              <thead className="text-[11px] text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/30">
+                <tr>
+                  <th className="px-4 py-3 font-semibold">#</th>
+                  <th className="px-4 py-3 font-semibold">الموظف</th>
+                  <th className="px-4 py-3 font-semibold">الأوردرات</th>
+                  <th className="px-4 py-3 font-semibold">المبيعات</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topEmps.map((r: any, i: number) => (
+                  <tr key={r.id} className="border-t border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+                    <td className="px-4 py-3 text-base font-bold">{MEDAL[i] || i + 1}</td>
+                    <td className="px-4 py-3 font-bold text-slate-800 dark:text-slate-100">{r.name}</td>
+                    <td className="px-4 py-3">
+                      <span className="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded-full text-[11px] font-bold">{fmt(r.orders_count)}</span>
+                    </td>
+                    <td className="px-4 py-3 font-black text-blue-600 dark:text-blue-400">{fmtCur(r.total_sales, currencySymbol)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      {/* Top Products */}
+      <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-700 flex items-center gap-2">
+          <ShoppingBag size={16} className="text-violet-500" />
+          <span className="font-black text-slate-800 dark:text-slate-100">أكثر المنتجات مبيعاً خلال الفترة</span>
+        </div>
+        {topProds.length === 0 ? (
+          <div className="text-center text-sm text-slate-400 py-10">لا توجد بيانات للمنتجات في هذه الفترة.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-right text-sm">
+              <thead className="text-[11px] text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/30">
+                <tr>
+                  <th className="px-4 py-3 font-semibold">#</th>
+                  <th className="px-4 py-3 font-semibold">المنتج</th>
+                  <th className="px-4 py-3 font-semibold">اللون</th>
+                  <th className="px-4 py-3 font-semibold">المقاس</th>
+                  <th className="px-4 py-3 font-semibold">الكمية المباعة</th>
+                  <th className="px-4 py-3 font-semibold">الإيرادات</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topProds.map((p: any, i: number) => (
+                  <tr key={i} className="border-t border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+                    <td className="px-4 py-3 text-base font-bold">{MEDAL[i] || i + 1}</td>
+                    <td className="px-4 py-3 font-bold text-slate-800 dark:text-slate-100">{p.product_name}</td>
+                    <td className="px-4 py-3 text-xs text-slate-500">{p.color || '—'}</td>
+                    <td className="px-4 py-3 text-xs text-slate-500">{p.size || '—'}</td>
+                    <td className="px-4 py-3">
+                      <span className="bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 px-2 py-0.5 rounded-full text-[11px] font-bold">{fmt(p.qty_sold)} قطعة</span>
+                    </td>
+                    <td className="px-4 py-3 font-black text-emerald-600 dark:text-emerald-400">{fmtCur(p.revenue, currencySymbol)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Alerts & Summary */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
+          <div className="flex items-center gap-2 mb-5">
+            <AlertTriangle size={16} className="text-rose-500" />
+            <h3 className="font-black text-slate-800 dark:text-slate-100">التنبيهات الذكية</h3>
+          </div>
+          <div className="space-y-3">
+            {[
+              { label: 'نقص المخزون', sub: `${lowStock} منتج أقل من الحد`, value: lowStock, high: 10, med: 3, icon: Package },
+              { label: 'طلبات معلقة', sub: `${ordersPending} طلب ينتظر`, value: ordersPending, high: 20, med: 6, icon: Briefcase },
+              { label: 'غياب اليوم', sub: `${absent} موظف`, value: absent, high: 6, med: 2, icon: Users },
+            ].map(a => {
+              const level = a.value >= a.high ? 'rose' : a.value >= a.med ? 'amber' : 'emerald';
+              const colors: any = { rose: 'bg-rose-50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/50', amber: 'bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/50', emerald: 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/50' };
+              const tColors: any = { rose: 'text-rose-700 dark:text-rose-400', amber: 'text-amber-700 dark:text-amber-400', emerald: 'text-emerald-700 dark:text-emerald-400' };
+              return (
+                <div key={a.label} className={`flex items-center gap-3 p-3 rounded-2xl border ${colors[level]}`}>
+                  <a.icon size={16} className={tColors[level]} />
+                  <div className="flex-1">
+                    <div className={`text-sm font-bold ${tColors[level]}`}>{a.label}</div>
+                    <div className={`text-[11px] ${tColors[level]} opacity-70`}>{a.sub}</div>
+                  </div>
+                  <span className={`text-xl font-black ${tColors[level]}`}>{a.value}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
+          <div className="flex items-center gap-2 mb-5">
+            <Building2 size={16} className="text-blue-500" />
+            <h3 className="font-black text-slate-800 dark:text-slate-100">أفضل الفروع</h3>
+          </div>
+          {topOffices.length === 0 ? (
+            <div className="text-center text-sm text-slate-400 py-8">لا توجد بيانات.</div>
+          ) : (
+            <div className="space-y-3">
+              {topOffices.slice(0, 5).map((o: any, i: number) => (
+                <div key={o.id} className="flex items-center gap-3">
+                  <span className="text-xl w-7 text-center flex-shrink-0">{MEDAL[i] || `${i + 1}`}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-bold text-slate-800 dark:text-slate-100 truncate">{o.name}</span>
+                      <span className="text-xs font-black text-blue-600 dark:text-blue-400 mr-2 flex-shrink-0">{fmtCur(o.total_sales, currencySymbol)}</span>
+                    </div>
+                    <div className="text-[10px] text-slate-400">{fmt(o.orders_count)} أوردر</div>
+                  </div>
+                </div>
+              ))}
             </div>
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="font-bold">تكدس الطلبات</div>
-                <div className="text-[11px] text-muted">طلبات معلقة</div>
+          )}
+        </div>
+
+        <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-3xl p-6 shadow-sm text-white">
+          <div className="flex items-center gap-2 mb-5">
+            <Sparkles size={16} className="text-amber-400" />
+            <h3 className="font-black">ملخص الفترة</h3>
+          </div>
+          <div className="space-y-3">
+            {[
+              { label: 'إيرادات الفترة', value: loading ? '...' : fmtCur(revenue, currencySymbol) },
+              { label: 'صافي الأرباح', value: loading ? '...' : fmtCur(profit, currencySymbol) },
+              { label: 'هامش الربح', value: loading ? '...' : `${margin.toFixed(1)}%` },
+              { label: 'إجمالي الطلبات', value: loading ? '...' : fmt(ordersMonth) },
+              { label: 'أفضل يوم', value: bestDay?.name || '—' },
+              { label: 'إيرادات سابقة', value: loading ? '...' : fmtCur(prevRev, currencySymbol) },
+            ].map(s => (
+              <div key={s.label} className="flex items-center justify-between py-2 border-b border-white/10 last:border-0">
+                <span className="text-white/60 text-xs">{s.label}</span>
+                <span className="font-black text-sm">{s.value}</span>
               </div>
-              <Badge level={alertLevel(ordersPending, 20, 6)} text={ordersPending >= 20 ? 'عالي' : ordersPending >= 6 ? 'متوسط' : 'منخفض'} />
-            </div>
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="font-bold">غياب اليوم</div>
-                <div className="text-[11px] text-muted">نسبة الغياب اللحظي</div>
-              </div>
-              <Badge level={alertLevel(absentToday, 6, 2)} text={absentToday >= 6 ? 'عالي' : absentToday >= 2 ? 'متوسط' : 'منخفض'} />
-            </div>
+            ))}
           </div>
         </div>
       </div>
-      </div>
+
     </div>
   );
 };
 
 export default Dashboard;
-

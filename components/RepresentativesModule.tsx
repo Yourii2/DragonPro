@@ -1,10 +1,11 @@
-// آخر تحديث: 2026-02-11 (إصدار 1.0.4)
+﻿// آخر تحديث: 2026-02-11 (إصدار 1.0.4)
 import React, { useState, useEffect } from 'react';
 import { Users, Box, FileText, Search, UserCheck, RefreshCcw, Edit, Trash2, Eye, X, Save, PlusCircle, MinusCircle, Play, Square, Wallet, ShoppingCart } from 'lucide-react';
 import Swal from 'sweetalert2';
 
 import { API_BASE_PATH } from '../services/apiConfig';
 import CustomSelect from './CustomSelect';
+import { PrintableOrders } from './PrintableOrderCard';
 
 interface RepresentativesModuleProps {
   initialView?: string;
@@ -46,6 +47,29 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
   const [perfLoading, setPerfLoading] = useState(false);
   const [perfRows, setPerfRows] = useState<any[]>([]);
   const [perfTop10, setPerfTop10] = useState<any[]>([]);
+
+  // ─── يوميات المندوب ───
+  const [journalFrom, setJournalFrom] = useState<string>(todayISO);
+  const [journalTo, setJournalTo] = useState<string>(todayISO);
+  const [repJournalLoading, setRepJournalLoading] = useState(false);
+  const [repJournalRows, setRepJournalRows] = useState<any[]>([]);
+  const [expandedJournalIds, setExpandedJournalIds] = useState<Set<number>>(new Set());
+  const toggleJournalExpand = (id: number) => setExpandedJournalIds(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const [waybillPrintOrders, setWaybillPrintOrders] = useState<any[] | null>(null);
+  // Live stats per journal row (computed on-demand)
+  const [journalLiveStats, setJournalLiveStats] = useState<Record<number, any>>({});
+  useEffect(() => {
+    if (!waybillPrintOrders) return;
+    const t = setTimeout(() => {
+      window.print();
+      setTimeout(() => setWaybillPrintOrders(null), 1200);
+    }, 500);
+    return () => clearTimeout(t);
+  }, [waybillPrintOrders]);
 
   const parseTxDetails = (details: any) => {
     if (!details) return {};
@@ -405,6 +429,292 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
     setPaymentForm(prev => ({ ...prev, type: 'settlement', amount: '', note: '' }));
   };
 
+  // ─── يوميات المندوب: تحميل و طباعة ───
+
+  const loadRepJournal = async (repId: number, from: string, to: string) => {
+    setRepJournalLoading(true);
+    setRepJournalRows([]);
+    try {
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getRepDailyJournal&rep_id=${repId}&from=${from}&to=${to}`);
+      const js = await res.json();
+      if (js.success) {
+        setRepJournalRows(js.data || []);
+      } else {
+        Swal.fire('تنبيه', js.message || 'لا توجد يوميات أو الجدول غير موجود', 'info');
+        setRepJournalRows([]);
+      }
+    } catch (e) {
+      console.error('loadRepJournal error', e);
+      setRepJournalRows([]);
+    } finally {
+      setRepJournalLoading(false);
+    }
+  };
+
+  const _parseJournalOrders = (row: any): Array<{id: number; order_number: string; source: string}> => {
+    try {
+      const raw = row.orders_json;
+      if (!raw) return [];
+      const arr = Array.isArray(raw) ? raw : JSON.parse(raw);
+      return Array.isArray(arr) ? arr : [];
+    } catch (_) { return []; }
+  };
+
+  const _fetchOrdersByIds = async (ids: number[]): Promise<any[]> => {
+    if (!ids.length) return [];
+    // Use module=sales to avoid orders-module permission restrictions
+    const res = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getOrdersByIds&ids=${ids.join(',')}`);
+    const js = await res.json();
+    return js.success ? (js.data || []) : [];
+  };
+
+  const computeJournalLiveStats = async (row: any) => {
+    try {
+      setJournalLiveStats(prev => ({ ...prev, [row.id]: { loading: true } }));
+      const jOrders = _parseJournalOrders(row);
+      if (!jOrders || jOrders.length === 0) {
+        setJournalLiveStats(prev => ({ ...prev, [row.id]: { loading: false, deliveredCount: 0, deliveredTotal: 0, returnedCount: 0, postponedCount: 0, postponedTotal: 0, oldOrdersCount: 0, todayOrdersCount: 0 } }));
+        return;
+      }
+      const ids = jOrders.map((o:any) => o.id).filter(Boolean);
+      const full = await _fetchOrdersByIds(ids);
+
+      let delivered = 0, deliveredVal = 0, returned = 0, postponed = 0, postponedVal = 0;
+      full.forEach((o:any) => {
+        const status = o.status || o.order_status || '';
+        const total = Number(o.total || o.total_amount || 0) || 0;
+        if (status === 'delivered') { delivered++; deliveredVal += total; }
+        else if (status === 'returned') { returned++; }
+        else { postponed++; postponedVal += total; }
+      });
+
+      setJournalLiveStats(prev => ({
+        ...prev,
+        [row.id]: {
+          loading: false,
+          deliveredCount: delivered,
+          deliveredTotal: deliveredVal,
+          returnedCount: returned,
+          postponedCount: postponed,
+          postponedTotal: postponedVal,
+          oldOrdersCount: jOrders.filter((o:any) => o.source === 'old').length,
+          todayOrdersCount: jOrders.filter((o:any) => o.source === 'today').length
+        }
+      }));
+    } catch (e) {
+      console.error('computeJournalLiveStats failed', e);
+      setJournalLiveStats(prev => ({ ...prev, [row.id]: { loading: false } }));
+    }
+  };
+
+  const _toN = (v: any) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+  const _orderSub = (o: any) => {
+    if (Array.isArray(o.products) && o.products.length > 0) {
+      return o.products.reduce((s: number, p: any) => {
+        const qty = _toN(p.quantity ?? p.qty ?? 0);
+        let line = _toN(p.total ?? p.line_total ?? p.total_price ?? 0);
+        if (!line) line = _toN(p.price ?? p.price_per_unit ?? 0) * qty;
+        return s + line;
+      }, 0);
+    }
+    return _toN(o.total ?? o.total_amount ?? 0);
+  };
+  const _orderPieces = (o: any) =>
+    (o.products || []).reduce((s: number, p: any) => s + _toN(p.quantity ?? p.qty ?? 0), 0);
+  const _balLabel = (v: number) => (v > 0 ? 'له' : v < 0 ? 'عليه' : '');
+
+  const printDailyJournalRow = async (row: any) => {
+    const repName = representatives.find((r: any) => r.id === selectedRepId)?.name || '';
+    const dateStr = row.journal_date || new Date().toLocaleDateString();
+    const journalOrders = _parseJournalOrders(row);
+    const allIds = journalOrders.map(x => x.id).filter(Boolean);
+
+    let fullOrders: any[] = [];
+    if (allIds.length > 0) {
+      try { fullOrders = await _fetchOrdersByIds(allIds); } catch (_) {}
+    }
+    const byId: Record<number, any> = {};
+    fullOrders.forEach(o => { byId[o.id] = o; });
+
+    const oldIds   = new Set(journalOrders.filter(x => x.source === 'old').map(x => x.id));
+    const todayIds = new Set(journalOrders.filter(x => x.source === 'today').map(x => x.id));
+    const oldOrders   = journalOrders.filter(x => x.source === 'old').map(x => byId[x.id] || {id: x.id, orderNumber: x.order_number, order_number: x.order_number, products: []});
+    const todayOrders = journalOrders.filter(x => x.source === 'today').map(x => byId[x.id] || {id: x.id, orderNumber: x.order_number, order_number: x.order_number, products: []});
+    const allOrdersFull = journalOrders.map(x => byId[x.id] || {id: x.id, orderNumber: x.order_number, order_number: x.order_number, products: []});
+
+    const prevBal         = _toN(row.prev_balance ?? 0);
+    const oldOrdersValue  = _toN(row.old_orders_value ?? 0);
+    const oldOrdersCount  = _toN(row.opening_orders_count ?? 0);
+    const oldPiecesCount  = _toN(row.opening_pieces_count ?? 0);
+    const sumValue        = _toN(row.assigned_value ?? 0);
+    const todayPieces     = _toN(row.pieces_assigned_count ?? 0);
+    const totalOrdersCount = _toN(row.total_orders_count ?? 0);
+    const totalPieces     = _toN(row.total_pieces_count ?? 0);
+    const totalValue      = _toN(row.total_orders_value ?? 0);
+    const finalBeforePay  = _toN(row.final_before_payment ?? 0);
+    const paymentAmt      = _toN(row.payment_amount ?? 0);
+    const paymentAction   = row.payment_action || 'collect';
+    const afterPay        = _toN(row.balance_after_payment ?? 0);
+    const paidNow         = paymentAction === 'collect' ? paymentAmt : -paymentAmt;
+    const localTotalShipping = allOrdersFull.reduce((s: number, o: any) => s + _toN(o.shipping ?? o.shipping_fees ?? 0), 0);
+
+    // Products summary (old + today combined)
+    const summaryMap: Record<string, {name:string; color:string; size:string; qty:number}> = {};
+    allOrdersFull.forEach((o: any) => {
+      (o.products || []).forEach((p: any) => {
+        const key = `${p.name||''}||${p.color||''}||${p.size||''}`;
+        if (!summaryMap[key]) summaryMap[key] = {name: p.name||'', color: p.color||'', size: p.size||'', qty: 0};
+        summaryMap[key].qty += _toN(p.quantity ?? p.qty ?? 0);
+      });
+    });
+    const prodRows = Object.values(summaryMap);
+
+    const orderRow = (o: any) => {
+      const sub = _orderSub(o);
+      const ship = _toN(o.shipping ?? o.shipping_fees ?? 0);
+      const empVal = o.employee ?? o.employee_name ?? o.assigneeName ?? row.employee ?? '';
+      const pgVal  = o.page ?? o.page_raw ?? o.page_name ?? o.pageName ?? o.source ?? row.page ?? '';
+      return `<tr>
+        <td>${o.orderNumber ?? o.order_number ?? o.id ?? ''}</td>
+        <td>${o.customerName ?? o.customer_name ?? ''}</td>
+        <td>${o.phone ?? o.phone1 ?? ''}</td>
+        <td>${o.governorate ?? ''}</td>
+        <td>${o.address ?? ''}</td>
+        <td>${empVal}</td>
+        <td>${pgVal}</td>
+        <td>${sub.toLocaleString()}</td>
+        <td>${ship.toLocaleString()}</td>
+        <td>${(sub + ship).toLocaleString()}</td>
+        <td>${o.notes ?? ''}</td>
+      </tr>`;
+    };
+
+    const colHeaders = `<tr><th>رقم اوردر</th><th>اسم العميل</th><th>الهاتف</th><th>المحافظة</th><th>العنوان</th><th>الموظف</th><th>البيدج</th><th>الإجمالي</th><th>شحن</th><th>الإجمالي الكلي</th><th>ملاحظات</th></tr>`;
+
+    const pageVal = row.page || row.page_number || row.page_no || row.pageName || row.page_name || row.source || '';
+
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>يومية المندوب</title>
+<style>
+body{font-family:Arial,Helvetica,'Noto Naskh Arabic',sans-serif;direction:rtl;padding:12px;font-size:12px;}
+h1{font-size:18px;text-align:center;margin:0 0 6px 0}
+.header{display:flex;justify-content:space-between;align-items:center;}
+table{width:100%;border-collapse:collapse;margin-top:8px;}
+th,td{border:1px solid #333;padding:5px;font-size:11px;text-align:right}
+th{background:#eee;}
+h3{font-size:13px;margin:14px 0 4px;}
+</style></head><body>
+<div class="header"><div></div><div style="text-align:center;"><h1>يومية المندوب "${repName}"</h1></div><div></div></div>
+<div style="display:flex;gap:12px;align-items:flex-start;margin-top:8px;font-size:12px">
+  <div style="flex:0 0 auto;min-width:140px;padding:6px">التاريخ: <b>${dateStr}</b>${row.employee ? `<br>الموظف: <b>${row.employee}</b>` : ''}${pageVal ? `<br>البيدج: <b>${pageVal}</b>` : ''}</div>
+  <div style="flex:1;display:flex;gap:8px;flex-wrap:wrap">
+    <div style="flex:1;min-width:150px;padding:6px;border:1px solid #ddd;border-radius:6px">
+      <div style="font-weight:700;">الأرصدة القديمة</div>
+      <div>قيمة اوردرات قديمة: <b>${oldOrdersValue.toLocaleString()} ج.م</b></div>
+      <div>المستحق: <b>${_balLabel(prevBal)} ${Math.abs(prevBal).toLocaleString()} ج.م</b></div>
+      <div>الاوردرات: <b>${oldOrdersCount}</b> • قطع: <b>${oldPiecesCount}</b></div>
+    </div>
+    <div style="flex:1;min-width:150px;padding:6px;border:1px solid #ddd;border-radius:6px">
+      <div style="font-weight:700;">تسليم اليوم</div>
+      <div>قيمة اوردرات اليوم: <b>${sumValue.toLocaleString()} ج.م</b></div>
+      <div>عدد اوردرات: <b>${todayOrders.length}</b> • قطع: <b>${todayPieces}</b></div>
+    </div>
+    <div style="flex:1;min-width:150px;padding:6px;border:1px solid #ddd;border-radius:6px;background:#f0fdf4">
+      <div style="font-weight:700;">المبلغ المدفوع</div>
+      <div>النوع: <b>${paymentAction === 'collect' ? 'تحصيل' : 'دفع'}</b></div>
+      <div>المبلغ: <b>${paymentAmt.toLocaleString()} ج.م</b></div>
+    </div>
+    <div style="flex:0 0 160px;padding:6px;border:1px solid #ddd;border-radius:6px;background:#fff5f6">
+      <div style="font-weight:700;">الباقي بعد الدفع</div>
+      <div style="font-weight:800;font-size:14px">${Math.abs(afterPay).toLocaleString()} ${_balLabel(afterPay)} ج.م</div>
+    </div>
+  </div>
+</div>
+${todayOrders.length > 0 ? `<h3>اوردرات اليوم (${todayOrders.length})</h3>
+<table><thead>${colHeaders}</thead><tbody>${todayOrders.map(orderRow).join('')}</tbody></table>` : ''}
+${oldOrders.length > 0 ? `<h3>اوردرات نزول / قديمة (${oldOrders.length})</h3>
+<table><thead>${colHeaders}</thead><tbody>${oldOrders.map(orderRow).join('')}</tbody></table>` : ''}
+${prodRows.length > 0 ? `<h3>البضاعة المستلمة — جميع المنتجات (قديم + اليوم)</h3>
+<table><thead><tr><th>المنتج</th><th>اللون</th><th>المقاس</th><th>الكمية</th></tr></thead>
+<tbody>${prodRows.map(r => `<tr><td>${r.name}</td><td>${r.color}</td><td>${r.size}</td><td>${r.qty}</td></tr>`).join('')}</tbody></table>` : ''}
+</body></html>`;
+
+    const w = window.open('', '_blank', 'toolbar=0,location=0,menubar=0,scrollbars=1,width=960,height=720');
+    if (!w) { Swal.fire('تنبيه', 'يرجى السماح بفتح النوافذ المنبثقة', 'warning'); return; }
+    w.document.write(html); w.document.close(); w.focus(); setTimeout(() => w.print(), 500);
+  };
+
+  const printDeliveryPermit = async (row: any) => {
+    const repName = representatives.find((r: any) => r.id === selectedRepId)?.name || '';
+    const dateStr = row.journal_date || new Date().toLocaleDateString();
+    const journalOrders = _parseJournalOrders(row);
+    const allIds = journalOrders.map(x => x.id).filter(Boolean);
+
+    let fullOrders: any[] = [];
+    if (allIds.length > 0) {
+      try { fullOrders = await _fetchOrdersByIds(allIds); } catch (_) {}
+    }
+    const byId: Record<number, any> = {};
+    fullOrders.forEach(o => { byId[o.id] = o; });
+    const allOrdersFull = journalOrders.map(x => byId[x.id] || {id: x.id, orderNumber: x.order_number, order_number: x.order_number, products: []});
+
+    // Build products summary map (same as SalesDaily printThermal)
+    const summaryMap: Record<string, {name:string; color:string; size:string; qty:number}> = {};
+    allOrdersFull.forEach((o: any) => {
+      (o.products || []).forEach((p: any) => {
+        const key = `${p.name||''}||${p.color||''}||${p.size||''}`;
+        if (!summaryMap[key]) summaryMap[key] = {name: p.name||'', color: p.color||'', size: p.size||'', qty: 0};
+        summaryMap[key].qty += _toN(p.quantity ?? p.qty ?? 0);
+      });
+    });
+    const rows = Object.values(summaryMap);
+    const totalProducts = rows.length;
+    const totalPieces = rows.reduce((s, r) => s + r.qty, 0);
+
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>أذن تسليم</title>
+<style>body{font-family:Arial,Helvetica,'Noto Naskh Arabic',sans-serif;direction:rtl;width:340px;padding:6px;} h2{text-align:center;} table{width:100%;border-collapse:collapse;} th,td{font-size:12px;padding:4px;border-bottom:1px solid #ddd;} th{font-weight:700;text-align:right;} .totals{margin-top:8px;font-weight:700;} .sign{margin-top:30px;display:flex;justify-content:space-around;} .sign-box{text-align:center;min-width:120px;border-top:1px solid #333;padding-top:8px;font-size:12px;}</style>
+</head><body>
+<h2>أذن تسليم</h2>
+<div>التاريخ: ${dateStr}</div>
+<div>استلام بضاعة للمندوب "${repName}"</div>
+<br/>
+<table><thead><tr><th>المنتج</th><th>اللون</th><th>المقاس</th><th>الكمية</th></tr></thead><tbody>
+${rows.map(r => `<tr><td>${r.name}</td><td>${r.color}</td><td>${r.size}</td><td style="text-align:left">${r.qty}</td></tr>`).join('')}
+</tbody></table>
+<div class="totals">اجمالى المنتجات: ${totalProducts}</div>
+<div class="totals">اجمالى القطع: ${totalPieces}</div>
+<div class="sign"><div class="sign-box">توقيع المستلم (المندوب)</div><div class="sign-box">توقيع المسؤول</div></div>
+</body></html>`;
+
+    const w = window.open('', '_blank', 'toolbar=0,location=0,menubar=0,scrollbars=1,width=420,height=700');
+    if (!w) { Swal.fire('تنبيه', 'يرجى السماح بفتح النوافذ المنبثقة', 'warning'); return; }
+    w.document.write(html); w.document.close(); w.focus(); setTimeout(() => w.print(), 500);
+  };
+
+  const printWaybills = async (row: any) => {
+    const journalOrders = _parseJournalOrders(row);
+    const allIds = journalOrders.map(x => x.id).filter(Boolean);
+    if (allIds.length === 0) {
+      Swal.fire('تنبيه', 'لا توجد أوردرات مسجلة لهذه اليومية', 'warning');
+      return;
+    }
+    let fullOrders: any[] = [];
+    try { fullOrders = await _fetchOrdersByIds(allIds); } catch (_) {}
+    if (fullOrders.length === 0) {
+      Swal.fire('تنبيه', 'تعذر تحميل بيانات الأوردرات', 'warning');
+      return;
+    }
+    // Normalise field names so PrintableContent gets what it expects
+    const normalised = fullOrders.map(o => ({
+      ...o,
+      orderNumber: o.orderNumber ?? o.order_number ?? String(o.id ?? ''),
+      customerName: o.customerName ?? o.customer_name ?? '',
+      phone:  o.phone  ?? o.phone1 ?? '',
+      phone1: o.phone1 ?? o.phone  ?? '',
+      phone2: o.phone2 ?? '',
+    }));
+    setWaybillPrintOrders(normalised);
+  };
+
   const fetchRepTransactions = async () => {
     try {
       const r = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=getByRelated&related_to_type=rep&related_to_id=${selectedRepId}`);
@@ -412,7 +722,7 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
       if (jr.success) {
         const txs = (jr.data || []).map((t:any) => ({
           ...t,
-          _label: getTxLabelEnhanced(t.type || t.tx_type || '', parseTxDetails(t.details || t.data || {}))
+          _label: (t.title && String(t.title).trim()) ? t.title : ((t.memo && String(t.memo).trim()) ? t.memo : getTxLabelEnhanced(t.type || t.tx_type || '', parseTxDetails(t.details || t.data || {})))
         }));
         setRepTransactions(txs);
       }
@@ -459,6 +769,9 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
         ? { notes: paymentForm.note, subtype: 'rep_penalty' }
         : { notes: paymentForm.note }
     };
+    // include human-friendly title and memo so transaction lists can show descriptive names
+    payload['title'] = getTxLabelEnhanced(payload.type, payload.details);
+    payload['memo'] = paymentForm.note || '';
 
     try {
       const res = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=create`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
@@ -489,6 +802,10 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
         setIsPartialReturnOpen(false);
         setPartialReturnOrder(null);
         await refreshAssignedAndTx();
+        // Refresh the rep journal rows so the daily journal reflects the partial return
+        try {
+          if (selectedRepId) await loadRepJournal(selectedRepId, journalFrom, journalTo);
+        } catch (e) { console.error('Failed to refresh rep journal after partial return', e); }
       } else {
         Swal.fire('فشل', js.message || 'فشل معالجة المرتجع الجزئي', 'error');
       }
@@ -576,6 +893,12 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
       };
 
       const createTx = async (payload: any, failMsg: string) => {
+        // Ensure title/memo present for server record
+        try {
+          if (!payload.title && payload.type) payload.title = getTxLabelEnhanced(payload.type, payload.details || {});
+          if (!payload.memo && payload.details && (payload.details.notes || payload.details.note)) payload.memo = payload.details.notes || payload.details.note || '';
+        } catch (e) {}
+
         const res = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=create`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -894,7 +1217,7 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
       rows.push(['الحقل', 'القيمة']);
       rows.push(['التاريخ', dailySummary.date || '']);
       rows.push(['رصيد الافتتاح', Number(dailySummary.openingBalance||0).toString()]);
-      rows.push(['عدد الطلبيات القديمة', String(dailySummary.oldOrdersCount||0)]);
+      rows.push(['عدد الاوردرات القديمة', String(dailySummary.oldOrdersCount||0)]);
       rows.push(['قطع قديمة', String(dailySummary.oldPieces||0)]);
       rows.push(['استلام اليوم (عدد)', String(dailySummary.todaysOrdersCount||0)]);
       rows.push(['قيمة المسلّم اليوم', Number(dailySummary.totalDeliveredValue||0).toString()]);
@@ -903,12 +1226,12 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
       rows.push(['مجموع المرتجع الجزئي (قيمة)', Number(dailySummary.partialReturnAmount||0).toString()]);
       rows.push(['المبلغ المرتجع اليوم', Number(dailySummary.returnedAmount||0).toString()]);
       rows.push(['المنقوص/المتبقي', Number(dailySummary.remaining||0).toString()]);
-      rows.push(['الطلبيات المؤجلة (عدد)', String(dailySummary.postponedCount||0)]);
+      rows.push(['الاوردرات المؤجلة (عدد)', String(dailySummary.postponedCount||0)]);
 
       if (Array.isArray(dailySummary.postponedOrders) && dailySummary.postponedOrders.length > 0) {
         rows.push([]);
-        rows.push(['الطلبيات المؤجلة — تفاصيل']);
-        rows.push(['رقم الطلب', 'العميل', 'قيمة', 'الحالة']);
+        rows.push(['الاوردرات المؤجلة — تفاصيل']);
+        rows.push(['رقم الاوردر', 'العميل', 'قيمة', 'الحالة']);
         for (const o of dailySummary.postponedOrders) {
           rows.push([o.order_number || o.orderNumber || ('#' + (o.id||'')), o.customer_name || o.customerName || '', String(o.total || o.total_amount || 0), o.status || '']);
         }
@@ -943,7 +1266,7 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
           <button onClick={() => handleOpenModal(null)} className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black bg-green-600 text-white hover:opacity-90"><PlusCircle size={16}/> إضافة مندوب</button>
           <button onClick={() => setView('list')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${view === 'list' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Users size={16}/> قائمة المناديب</button>
           <button onClick={() => setView('custody')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${view === 'custody' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Box size={16}/> عهدة المندوب</button>
-          <button onClick={() => setView('rep-cycle')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${view === 'rep-cycle' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Wallet size={16}/> ماليات المندوب</button>
+          <button onClick={() => setView('rep-cycle')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${view === 'rep-cycle' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Wallet size={16}/> يوميات المندوب</button>
           <button onClick={() => setView('transactions')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${view === 'transactions' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><FileText size={16}/> معاملات المندوب</button>
         </div>
       </div>
@@ -1094,7 +1417,7 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
               </div>
             </div>
           )}
-                      <p className="text-sm font-bold mb-2">الطلبيات المسندة لهذا المندوب:</p>
+                      <p className="text-sm font-bold mb-2">الاوردرات المسندة لهذا المندوب:</p>
                       <ul className="space-y-2">
                         {repAssignedOrders.map((order:any) => (
                           <li key={order.id} className="flex justify-between items-center p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800">
@@ -1338,108 +1661,313 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
       )}
 
       {view === 'rep-cycle' && (
-        <div className="p-8 rounded-3xl border border-card shadow-sm animate-in zoom-in duration-300 card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
-          <div className="flex justify-between items-center mb-6">
-            <h3 className="text-lg font-bold text-slate-900 dark:text-white">ماليات المندوب</h3>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="md:col-span-1 space-y-4">
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-muted mr-2">اختيار المندوب</label>
+        <div className="animate-in zoom-in duration-300 space-y-4">
+
+          {/* ─── فلاتر البحث ─── */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-700 p-5 shadow-sm">
+            <h3 className="text-base font-black text-slate-800 dark:text-white mb-4 flex items-center gap-2">
+              <FileText className="w-4 h-4 text-blue-500" /> يوميات المندوب
+            </h3>
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="flex-1 min-w-[200px]">
+                <label className="text-xs font-bold text-slate-500 block mb-1">المندوب</label>
                 <CustomSelect
                   value={String(selectedRepId || '')}
-                  onChange={v => setSelectedRepId(v ? Number(v) : null)}
-                  options={[{ value: '', label: '-- اختر مندوب --' }, ...representatives.map((rep:any) => ({ value: String(rep.id), label: rep.name }))]}
-                  className="w-full mt-1"
+                  onChange={v => { setSelectedRepId(v ? Number(v) : null); setRepJournalRows([]); }}
+                  options={[{ value: '', label: '-- اختر مندوب --' }, ...representatives.map((r:any) => ({ value: String(r.id), label: r.name }))]}
+                  className="w-full"
                 />
               </div>
-              <div className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-2xl border dark:border-slate-700 space-y-3">
-                <div className="flex justify-between items-center text-xs"><span className="text-muted">الرصيد الحالي:</span><span className="font-bold text-rose-500">{selectedRepData ? Math.abs(Number(selectedRepData.balance||0)).toLocaleString() + ' ' + currencySymbol + ' ' + (selectedRepData.balance>0? 'له' : selectedRepData.balance<0? 'عليه' : '') : '—'}</span></div>
-                <div className="flex justify-between items-center text-xs"><span className="text-muted">قيمة الطلبيات في العهدة:</span><span className="font-bold">{selectedRepCustody.reduce((s:any,o:any)=> s + (Number(o.total||0) || 0),0).toLocaleString()} {currencySymbol}</span></div>
+              <div>
+                <label className="text-xs font-bold text-slate-500 block mb-1">من</label>
+                <input
+                  type="date" value={journalFrom}
+                  onChange={e => setJournalFrom(e.target.value)}
+                  className="border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 rounded-xl px-3 py-2 text-sm"
+                />
               </div>
-              <form onSubmit={handleCreateTransaction} className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-2xl border dark:border-slate-700 space-y-3">
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-muted mr-2">نوع المعاملة</label>
-                  <CustomSelect
-                    value={paymentForm.type}
-                    onChange={v => setPaymentForm(prev => ({ ...prev, type: v as any }))}
-                    options={[{ value: 'payment', label: 'تحصيل' }, { value: 'fine', label: 'غرامة' }, { value: 'settlement', label: 'تسوية' }]}
-                    className="w-full"
-                  />
-                </div>
-                {paymentForm.type === 'payment' && (
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-muted mr-2">اتجاه الخزينة</label>
-                    <CustomSelect
-                      value={paymentForm.direction}
-                      onChange={v => setPaymentForm(prev => ({ ...prev, direction: v as any }))}
-                      options={[{ value: 'in', label: 'تحصيل من المندوب (إلى الخزينة)' }, { value: 'out', label: 'دفع إلى المندوب (من الخزينة)' }]}
-                      className="w-full"
-                    />
-                  </div>
-                )}
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-muted mr-2">{paymentForm.type === 'fine' ? 'مبلغ الغرامة' : (paymentForm.type === 'settlement' ? 'مبلغ التسوية' : 'المبلغ')}</label>
-                  <input readOnly={paymentForm.type === 'settlement'} value={paymentForm.amount} onChange={(e) => setPaymentForm(prev => ({ ...prev, amount: e.target.value }))} type="number" placeholder={paymentForm.type === 'fine' ? 'مبلغ الغرامة' : (paymentForm.type === 'settlement' ? 'مبلغ التسوية' : 'المبلغ')} className="w-full border-none rounded-lg py-2 px-3 text-sm card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }} />
-                </div>
-
-                {paymentForm.type === 'settlement' && (
-                  <div className="p-3 rounded-xl border dark:border-slate-700 bg-white/60 dark:bg-slate-800/30 space-y-2 text-xs">
-                    <div className="flex justify-between"><span className="text-muted">إجمالي رصيد المندوب</span><span className="font-black">{selectedRepData ? `${Math.abs(Number(repCashBalance||0)).toLocaleString()} ${currencySymbol} ${Number(repCashBalance||0) > 0 ? 'له' : (Number(repCashBalance||0) < 0 ? 'عليه' : '')}` : '—'}</span></div>
-                    <div className="flex justify-between"><span className="text-muted">مبلغ التأمين</span><span className="font-black">{selectedRepData && selectedRepData.insurance_paid ? `${Number(selectedRepData.insurance_amount||0).toLocaleString()} ${currencySymbol}` : `0 ${currencySymbol}`}</span></div>
-                    {selectedRepData ? (
-                      Number(repCashBalance || 0) > 0 ? (
-                        (() => {
-                          const bal = Number(repCashBalance || 0);
-                          const ins = (selectedRepData && selectedRepData.insurance_paid) ? Number(selectedRepData.insurance_amount || 0) : 0;
-                          const total = bal + ins;
-                          return (
-                            <>
-                              <div className="flex justify-between"><span className="text-muted">المستحق بعد اضافه التأمين</span><span className="font-black">{`${Math.abs(total).toLocaleString()} ${currencySymbol} ${total > 0 ? 'له' : total < 0 ? 'عليه' : ''}`}</span></div>
-                              <div className="flex justify-between text-xs text-muted"><span>تفصيل:</span><span className="font-black">{`${ins.toLocaleString()} ${currencySymbol} (تأمين) + ${Math.abs(bal).toLocaleString()} ${currencySymbol} (مستحق للمندوب)`}</span></div>
-                            </>
-                          );
-                        })()
-                      ) : (
-                        (() => {
-                          const bal = Number(repCashBalance || 0);
-                          const ins = (selectedRepData && selectedRepData.insurance_paid) ? Number(selectedRepData.insurance_amount || 0) : 0;
-                          const remaining = ins + bal;
-                          return (
-                            <>
-                              <div className="flex justify-between"><span className="text-muted">المتبقي بعد خصم التأمين</span><span className="font-black">{`${Math.abs(remaining).toLocaleString()} ${currencySymbol} ${remaining > 0 ? 'له' : remaining < 0 ? 'عليه' : ''}`}</span></div>
-                              <div className="flex justify-between text-xs text-muted"><span>تفصيل:</span><span className="font-black">{`${ins.toLocaleString()} ${currencySymbol} (تأمين) - ${Math.abs(bal).toLocaleString()} ${currencySymbol} (مستحق على المندوب)`}</span></div>
-                            </>
-                          );
-                        })()
-                      )
-                    ) : null}
-                  </div>
-                )}
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-muted mr-2">الخزينة</label>
-                  <CustomSelect
-                    disabled={userDefaults && userDefaults.default_treasury_id && !userDefaults.can_change_treasury}
-                    value={paymentForm.treasuryId}
-                    onChange={v => setPaymentForm(prev => ({ ...prev, treasuryId: v }))}
-                    options={[{ value: '', label: '-- اختر خزينة --' }, ...treasuries.map((t:any) => ({ value: String(t.id), label: t.name || t.title || `خزينة ${t.id}` }))]}
-                    className="w-full"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-muted mr-2">خانة ملاحظات</label>
-                  <input value={paymentForm.note} onChange={(e) => setPaymentForm(prev => ({ ...prev, note: e.target.value }))} type="text" placeholder="ملاحظة أو سبب العملية" className="w-full border-none rounded-lg py-2 px-3 text-sm card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }} />
-                </div>
-                {paymentForm.type !== 'settlement' ? (
-                  <button type="submit" className="w-full bg-accent text-white py-3 rounded-2xl font-black shadow-xl shadow-blue-500/30 hover:bg-blue-700 transition-all">{paymentForm.type === 'fine' ? 'تسجيل الغرامة' : 'تسجيل التحصيل'}</button>
-                ) : (
-                  <button type="button" onClick={handleSettleRepAccount} className="w-full bg-accent text-white py-3 rounded-2xl font-black shadow-xl shadow-blue-500/30 hover:bg-blue-700 transition-all">تنفيذ التسوية</button>
-                )}
-              </form>
-              {/* Daily summary and pending-orders boxes removed per request */}
+              <div>
+                <label className="text-xs font-bold text-slate-500 block mb-1">إلى</label>
+                <input
+                  type="date" value={journalTo}
+                  onChange={e => setJournalTo(e.target.value)}
+                  className="border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 rounded-xl px-3 py-2 text-sm"
+                />
+              </div>
+              <button
+                type="button"
+                disabled={!selectedRepId || repJournalLoading}
+                onClick={() => { if (selectedRepId) loadRepJournal(selectedRepId, journalFrom, journalTo); }}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-sm font-black transition-colors"
+              >
+                {repJournalLoading
+                  ? <RefreshCcw className="w-4 h-4 animate-spin" />
+                  : <Eye className="w-4 h-4" />}
+                عرض اليوميات
+              </button>
+              <button type="button" className="px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-bold text-slate-600 hover:bg-blue-50 transition-colors"
+                onClick={() => { const d = new Date(); const f = (x:Date)=>x.toISOString().slice(0,10); setJournalFrom(f(d)); setJournalTo(f(d)); }}>اليوم</button>
+              <button type="button" className="px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-bold text-slate-600 hover:bg-blue-50 transition-colors"
+                onClick={() => { const f=(x:Date)=>x.toISOString().slice(0,10); const to=new Date(); const from=new Date(); from.setDate(to.getDate()-7); setJournalFrom(f(from)); setJournalTo(f(to)); }}>آخر أسبوع</button>
+              <button type="button" className="px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-bold text-slate-600 hover:bg-blue-50 transition-colors"
+                onClick={() => { const d=new Date(); const from=new Date(d.getFullYear(),d.getMonth(),1); const f=(x:Date)=>x.toISOString().slice(0,10); setJournalFrom(f(from)); setJournalTo(f(d)); }}>هذا الشهر</button>
+            </div>
           </div>
+
+          {/* ─── حالة التحميل ─── */}
+          {repJournalLoading && (
+            <div className="flex items-center justify-center py-16 text-slate-400 gap-3">
+              <RefreshCcw className="w-5 h-5 animate-spin" />
+              <span className="text-sm font-bold">جاري تحميل اليوميات...</span>
+            </div>
+          )}
+
+          {/* ─── اختر مندوب ─── */}
+          {!repJournalLoading && !selectedRepId && (
+            <div className="text-center py-16 text-slate-400">
+              <Users className="w-14 h-14 mx-auto mb-3 opacity-20" />
+              <p className="text-sm font-bold">اختر مندوباً لعرض يومياته</p>
+            </div>
+          )}
+
+          {/* ─── لا توجد نتائج ─── */}
+          {!repJournalLoading && selectedRepId !== null && repJournalRows.length === 0 && (
+            <div className="text-center py-16 text-slate-400">
+              <FileText className="w-14 h-14 mx-auto mb-3 opacity-20" />
+              <p className="text-sm font-bold">لا توجد يوميات في النطاق المحدد</p>
+              <p className="text-xs mt-1 opacity-60">اضغط "عرض اليوميات" بعد تحديد المندوب والتاريخ</p>
+            </div>
+          )}
+
+          {/* ─── قائمة اليوميات ─── */}
+          {!repJournalLoading && repJournalRows.length > 0 && (
+            <div className="space-y-3">
+              {repJournalRows.map((row: any) => (
+                <div key={row.id} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm hover:shadow-md transition-shadow">
+                  <div className="flex flex-wrap items-center gap-4">
+
+                    {/* معلومات اليومية */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-3 flex-wrap">
+                        <div className="w-2.5 h-2.5 rounded-full bg-blue-500 flex-shrink-0" />
+                        <span className="font-black text-slate-800 dark:text-white">{row.journal_date}</span>
+                        {row.employee && (
+                          <span className="text-xs text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-lg">👤 {row.employee}</span>
+                        )}
+                        {(row.page || row.page_number || row.page_no || row.pageName || row.page_name || row.source) && (
+                          <span className="text-xs text-blue-600 bg-blue-50 dark:bg-blue-900/20 px-2 py-0.5 rounded-lg font-bold">بيدج: {row.page || row.page_number || row.page_no || row.pageName || row.page_name || row.source}</span>
+                        )}
+                        {row.session_seq && Number(row.session_seq) > 1 && (
+                          <span className="text-xs text-amber-600 bg-amber-50 dark:bg-amber-900/20 px-2 py-0.5 rounded-lg font-bold">جلسة {row.session_seq}</span>
+                        )}
+                        {row.notes && (
+                          <span className="text-xs text-slate-500 italic truncate max-w-[200px]">{row.notes}</span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <div className="text-center bg-slate-50 dark:bg-slate-800 rounded-xl p-2">
+                          <div className="text-[10px] text-slate-500 font-bold mb-0.5">الأوردرات</div>
+                          <div className="text-sm font-black text-slate-700 dark:text-slate-200">{row.total_orders_count || _parseJournalOrders(row).length || 0}</div>
+                        </div>
+                        <div className="text-center bg-slate-50 dark:bg-slate-800 rounded-xl p-2">
+                          <div className="text-[10px] text-slate-500 font-bold mb-0.5">القطع</div>
+                          <div className="text-sm font-black text-slate-700 dark:text-slate-200">{row.total_pieces_count || 0}</div>
+                        </div>
+                        <div className="text-center bg-emerald-50 dark:bg-emerald-900/20 rounded-xl p-2">
+                          <div className="text-[10px] text-emerald-600 font-bold mb-0.5">قيمة اليومية</div>
+                          <div className="text-sm font-black text-emerald-700 dark:text-emerald-400">{Number(row.total_orders_value||0).toLocaleString()} {currencySymbol}</div>
+                        </div>
+                        <div className="text-center bg-blue-50 dark:bg-blue-900/20 rounded-xl p-2">
+                          <div className="text-[10px] text-blue-600 font-bold mb-0.5">الرصيد بعد دفع</div>
+                          <div className="text-sm font-black text-blue-700 dark:text-blue-400">{Number(row.balance_after_payment||0).toLocaleString()} {currencySymbol}</div>
+                        </div>
+                      </div>
+
+                      {/* ─── تفاصيل إضافية لليومية (مطابقة طلب المستخدم) ─── */}
+                      <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+                        <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-3 text-sm">
+                          <div className="text-xs text-slate-500 font-bold mb-1">بداية اليومية</div>
+                          <div>الموظف: <b>{row.employee || row.opened_by || row.started_by || '—'}</b></div>
+                          <div>تاريخ/وقت البدء: <b>{row.opened_at || row.start_time || row.opening_time || row.created_at || row.journal_date || '—'}</b></div>
+                          <div>المخزن: <b>{row.opening_warehouse_name || row.start_warehouse || row.warehouse_name || '—'}</b></div>
+                          <div>الخزينة: <b>{row.opening_treasury_name || row.start_treasury || row.treasury_name || '—'}</b></div>
+                          <div>تم دفع مبلغ بالبداية: <b>{Number(row.opening_payment_amount || row.payment_amount || row.initial_payment || 0).toLocaleString()} {currencySymbol}</b></div>
+                        </div>
+
+                        <div className="bg-white dark:bg-slate-900 rounded-xl p-3 text-sm border dark:border-slate-700">
+                          <div className="text-xs text-slate-500 font-bold mb-1">حالة الحساب</div>
+                          <div>الحساب القديم: <b>{Number(row.prev_balance || row.opening_balance || 0).toLocaleString()} {currencySymbol}</b></div>
+                          <div>الحساب بعد مبلغ البداية: <b>{Number(row.balance_after_opening || row.balance_after_payment || 0).toLocaleString()} {currencySymbol}</b></div>
+                          <div>الحساب النهائى (بعد الإغلاق): <b>{Number(row.final_balance || row.closing_balance || row.balance_after_close || row.balance_after_payment || 0).toLocaleString()} {currencySymbol}</b></div>
+                          <div>نوع التسويه: <b>{row.settlement_type || row.payment_action || row.settlement_subtype || '—'}</b></div>
+                          <div>جهة التسوية: <b>{(row.payment_action === 'collect' || row.settlement_direction === 'in') ? 'تحصيل من المندوب' : (row.payment_action === 'pay' || row.settlement_direction === 'out' ? 'دفع إلى المندوب' : '—')}</b></div>
+                        </div>
+                      </div>
+
+                      <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
+                        <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-2 text-center">
+                          <div className="text-[10px] text-slate-500 font-bold">أوردرات قديمة</div>
+                          <div className="text-sm font-black">{_parseJournalOrders(row).filter((o:any)=>o.source==='old').length || (row.opening_orders_count || 0)}</div>
+                        </div>
+                        <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-2 text-center">
+                          <div className="text-[10px] text-slate-500 font-bold">قطع قديمة</div>
+                          <div className="text-sm font-black">{(row.opening_pieces_count || 0)}</div>
+                        </div>
+                        <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl p-2 text-center">
+                          <div className="text-[10px] text-emerald-600 font-bold">تسليم - أوردرات</div>
+                          <div className="text-sm font-black">{row.delivered_orders_count ?? row.deliveredCount ?? journalLiveStats[row.id]?.deliveredCount ?? 0}</div>
+                        </div>
+                        <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl p-2 text-center">
+                          <div className="text-[10px] text-emerald-600 font-bold">تسليم - قطع</div>
+                          <div className="text-sm font-black">{row.delivered_pieces_count ?? row.deliveredPieces ?? 0}</div>
+                        </div>
+                      </div>
+
+                      <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
+                        <div className="bg-rose-50 dark:bg-rose-900/20 rounded-xl p-2 text-center">
+                          <div className="text-[10px] text-rose-600 font-bold">مرتجع - أوردرات</div>
+                          <div className="text-sm font-black">{row.returned_orders_count ?? row.returnedCount ?? 0}</div>
+                        </div>
+                        <div className="bg-rose-50 dark:bg-rose-900/20 rounded-xl p-2 text-center">
+                          <div className="text-[10px] text-rose-600 font-bold">مرتجع - قطع</div>
+                          <div className="text-sm font-black">{row.returned_pieces_count ?? row.returnedPieces ?? 0}</div>
+                        </div>
+                        <div className="bg-rose-50 dark:bg-rose-900/20 rounded-xl p-2 text-center">
+                          <div className="text-[10px] text-rose-600 font-bold">مرتجع - مبلغ</div>
+                          <div className="text-sm font-black">{Number(row.returned_value ?? row.returnedValue ?? 0).toLocaleString()} {currencySymbol}</div>
+                        </div>
+                        <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-2 text-center">
+                          <div className="text-[10px] text-blue-600 font-bold">نزول (أوردرات)</div>
+                          <div className="text-sm font-black">{row.deferred_orders_count ?? row.deferredCount ?? 0}</div>
+                        </div>
+                      </div>
+
+                      <div className="mt-2 flex items-center gap-2">
+                        <button type="button" onClick={async()=>{
+                          const amt = await Swal.fire({ title: 'مبلغ الحافز', input: 'number', inputAttributes: { min: '0' }, showCancelButton:true });
+                          if (!amt.value) return; const noteRes = await Swal.fire({ title:'البيان', input:'text', showCancelButton:true });
+                          if (noteRes.isDismissed) return; const payload = { type: 'rep_payment_in', related_to_type: 'rep', related_to_id: row.rep_id || selectedRepId, amount: Number(amt.value||0), treasuryId: paymentForm.treasuryId || null, direction: 'in', details: { notes: noteRes.value || 'حافز مندوب', subtype: 'rep_bonus', journal_date: row.journal_date } };
+                          try { await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=create`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) }); Swal.fire('تم','تم إضافة الحافز','success'); } catch(e){ Swal.fire('فشل','تعذر إضافة الحافز','error'); }
+                        }} className="px-3 py-2 bg-emerald-600 text-white rounded-xl text-xs font-black">إضافة حافز</button>
+
+                        <button type="button" onClick={async()=>{
+                          const amt = await Swal.fire({ title: 'مبلغ الغرامة', input: 'number', inputAttributes: { min: '0' }, showCancelButton:true });
+                          if (!amt.value) return; const noteRes = await Swal.fire({ title:'البيان', input:'text', showCancelButton:true });
+                          if (noteRes.isDismissed) return; const payload = { type: 'rep_payment_out', related_to_type: 'rep', related_to_id: row.rep_id || selectedRepId, amount: Number(amt.value||0), treasuryId: paymentForm.treasuryId || null, direction: 'out', details: { notes: noteRes.value || 'غرامة مندوب', subtype: 'rep_penalty', journal_date: row.journal_date } };
+                          try { await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=create`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) }); Swal.fire('تم','تم تطبيق الغرامة','success'); } catch(e){ Swal.fire('فشل','تعذر تطبيق الغرامة','error'); }
+                        }} className="px-3 py-2 bg-rose-600 text-white rounded-xl text-xs font-black">تطبيق غرامة</button>
+
+                        <div className="text-xs text-muted">الخزنـة الآن: <b>{row.closing_treasury_name || row.closed_treasury || '' || '—'}</b></div>
+                      </div>
+
+                      {/* ─── قائمة الطلبيات المطوية ─── */}
+                      {(() => {
+                        const jOrders = _parseJournalOrders(row);
+                        if (jOrders.length === 0) return null;
+                        const isExp = expandedJournalIds.has(row.id);
+                        const oldList   = jOrders.filter(x => x.source === 'old');
+                        const todayList = jOrders.filter(x => x.source === 'today');
+                        return (
+                          <div className="mt-2">
+                            <button
+                              type="button"
+                              onClick={() => toggleJournalExpand(row.id)}
+                              className="flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-800 transition-colors"
+                            >
+                              <span className={`inline-block transition-transform ${isExp ? 'rotate-90' : ''}`}>▶</span>
+                              {isExp ? 'إخفاء الطلبيات' : `عرض الطلبيات (${jOrders.length})`}
+                            </button>
+                            {isExp && (
+                              <div className="mt-2 space-y-2">
+                                {todayList.length > 0 && (
+                                  <div>
+                                    <div className="text-[10px] font-bold text-emerald-600 mb-1">طلبيات اليوم ({todayList.length})</div>
+                                    <div className="flex flex-wrap gap-1.5">
+                                      {todayList.map(o => (
+                                        <span key={o.id} className="bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 text-[11px] font-bold px-2 py-0.5 rounded-lg border border-emerald-200 dark:border-emerald-700">
+                                          #{o.order_number || o.id}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                                {oldList.length > 0 && (
+                                  <div>
+                                    <div className="text-[10px] font-bold text-slate-500 mb-1">طلبيات قديمة / نزول ({oldList.length})</div>
+                                    <div className="flex flex-wrap gap-1.5">
+                                      {oldList.map(o => (
+                                        <span key={o.id} className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px] font-bold px-2 py-0.5 rounded-lg border border-slate-200 dark:border-slate-600">
+                                          #{o.order_number || o.id}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+
+                    {/* أزرار الطباعة */}
+                    <div className="flex flex-col gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => printDailyJournalRow(row)}
+                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black transition-colors whitespace-nowrap"
+                      >
+                        <Eye className="w-3.5 h-3.5" /> عرض و طباعة يومية المندوب
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => printDeliveryPermit(row)}
+                        className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black transition-colors whitespace-nowrap"
+                      >
+                        <FileText className="w-3.5 h-3.5" /> عرض و طباعة إذن التسليم
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => printWaybills(row)}
+                        className="flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-black transition-colors whitespace-nowrap"
+                      >
+                        <Box className="w-3.5 h-3.5" /> عرض و طباعة بوالص التسليم
+                      </button>
+                    </div>
+
+                    {/* Live stats button & display */}
+                    <div className="flex flex-col gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => computeJournalLiveStats(row)}
+                        className="flex items-center gap-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-black transition-colors whitespace-nowrap"
+                      >
+                        حساب مباشر
+                      </button>
+                      {journalLiveStats[row.id] && (
+                        <div className="text-xs p-2 bg-white rounded-lg border">
+                          {journalLiveStats[row.id].loading ? (
+                            <div>جاري الحساب…</div>
+                          ) : (
+                            <div className="space-y-1">
+                              <div>تم التسليم: <b>{journalLiveStats[row.id].deliveredCount || 0}</b> — <span className="text-emerald-600">{(journalLiveStats[row.id].deliveredTotal||0).toLocaleString()} ج.م</span></div>
+                              <div>مرتجع كلي: <b>{journalLiveStats[row.id].returnedCount || 0}</b></div>
+                              <div>أوردرات النزول: <b>{journalLiveStats[row.id].postponedCount || 0}</b> — <span className="text-amber-600">{(journalLiveStats[row.id].postponedTotal||0).toLocaleString()} ج.م</span></div>
+                              <div className="text-muted">({journalLiveStats[row.id].todayOrdersCount || 0} جديد + {journalLiveStats[row.id].oldOrdersCount || 0} قديم)</div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
         </div>
-      
+      )}
 
       {/* Edit Rep Modal */}
       {isModalOpen && (
@@ -1475,7 +2003,14 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
           </div>
         </div>
       )}
-    </div>
+      {/* Waybill print layer — same component as SalesModule order printing */}
+      {waybillPrintOrders && (
+        <PrintableOrders
+          orders={waybillPrintOrders}
+          companyName={localStorage.getItem('Dragon_company_name') || ''}
+          companyPhone={localStorage.getItem('Dragon_company_phone') || ''}
+          terms={localStorage.getItem('Dragon_company_terms') || ''}
+        />
       )}
     </div>
   );

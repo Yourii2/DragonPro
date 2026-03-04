@@ -20,13 +20,16 @@ if "%VERSION%"=="" (
 
 for /f %%i in ('powershell -NoProfile -Command "(Get-Date).ToString('yyyy-MM-dd')"') do set "BUILD_DATE=%%i"
 
-echo [1/5] Writing version.json...
+echo [1/5] Writing version.json and updating package.json...
 (
   echo {
   echo   "version": "%VERSION%",
   echo   "buildDate": "%BUILD_DATE%"
   echo }
 ) > "%cd%\version.json"
+
+rem Update version in package.json via Node (avoids BOM/encoding issues)
+node -e "const fs=require('fs');const f='package.json';const p=JSON.parse(fs.readFileSync(f,'utf8'));p.version='%VERSION%';fs.writeFileSync(f,JSON.stringify(p,null,2)+'\n','utf8');"
 
 echo [2/5] Building frontend (vite build)...
 if not exist "node_modules" (
@@ -52,9 +55,17 @@ rem - index.html + assets/ at project root (Apache serves root)
 rem - components/ for PHP APIs
 
 xcopy /e /i /y "components" "%STAGE%\components" >nul
+rem Remove files not needed in production (source, debug, temp)
+for /r "%STAGE%\components" %%f in (*.tsx *.ts *.log *.tmp *.bak) do del /f /q "%%f" >nul 2>nul
+if exist "%STAGE%\components\test.php" del /f /q "%STAGE%\components\test.php" >nul 2>nul
+if exist "%STAGE%\components\test_db.php" del /f /q "%STAGE%\components\test_db.php" >nul 2>nul
 
 if exist "migrations" (
   xcopy /e /i /y "migrations" "%STAGE%\migrations" >nul
+)
+
+if exist "tools" (
+  xcopy /e /i /y "tools" "%STAGE%\tools" >nul
 )
 
 if exist "dist\assets" (
@@ -87,8 +98,13 @@ if not exist "%OUTDIR%" mkdir "%OUTDIR%" >nul
 set "ZIP=%OUTDIR%\DragonPro_v%VERSION%.zip"
 if exist "%ZIP%" del /f /q "%ZIP%" >nul
 
-rem Always create a standard ZIP (compatible with PHP ZipArchive)
-powershell -NoProfile -Command "Compress-Archive -Path '%STAGE%\*' -DestinationPath '%ZIP%' -Force"
+rem Copy stage to TEMP to avoid VS Code file-watcher locks
+set "TMPSTAGE=%TEMP%\DragonPro_stage_%VERSION%"
+if exist "%TMPSTAGE%" rmdir /s /q "%TMPSTAGE%"
+xcopy /e /i /q "%STAGE%\*" "%TMPSTAGE%\" >nul
+
+powershell -NoProfile -Command "Compress-Archive -Path '%TMPSTAGE%\*' -DestinationPath '%ZIP%' -Force"
+rmdir /s /q "%TMPSTAGE%" >nul 2>nul
 
 if not exist "%ZIP%" (
   echo Failed to create zip.

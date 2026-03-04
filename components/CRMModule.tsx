@@ -314,11 +314,11 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
         setSelectedOrderDetail(j.data);
         setIsOrderModalOpen(true);
       } else {
-        Swal.fire('خطأ', 'تعذر جلب بيانات الطلبية.', 'error');
+        Swal.fire('خطأ', 'تعذر جلب بيانات الاوردر.', 'error');
       }
     } catch (e) {
       console.error('Failed to load order', e);
-      Swal.fire('خطأ', 'تعذر جلب بيانات الطلبية.', 'error');
+      Swal.fire('خطأ', 'تعذر جلب بيانات الاوردر.', 'error');
     }
   };
 
@@ -612,15 +612,15 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
                   </div>
                </div>
                <div className="pt-4 border-t dark:border-slate-700">
-                 <h4 className="font-bold mb-3">طلبيات العميل</h4>
+                 <h4 className="font-bold mb-3">الاوردارات العميل</h4>
                  {isLoadingOrders ? (
-                   <div className="text-center p-8">جاري تحميل الطلبيات...</div>
+                   <div className="text-center p-8">جاري تحميل الاوردرات...</div>
                  ) : customerOrders.length > 0 ? (
                    <div className="overflow-auto max-h-96">
                                 <table className="w-full text-sm text-right">
                                   <thead className="bg-slate-100 dark:bg-slate-900">
                                     <tr>
-                                      <th className="p-3">رقم الطلب</th>
+                                      <th className="p-3">رقم الاوردر</th>
                                       <th className="p-3">التاريخ</th>
                                       <th className="p-3">الإجمالي</th>
                                       <th className="p-3">الحالة</th>
@@ -683,7 +683,7 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
         <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
           <div className="w-full max-w-2xl rounded-[2.5rem] shadow-2xl overflow-hidden border border-card card">
             <div className="p-6 border-b dark:border-slate-700 flex justify-between items-center" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
-              <h3 className="text-lg font-black">عرض الطلبية: {selectedOrderDetail.orderNumber}</h3>
+              <h3 className="text-lg font-black">عرض الاوردر: {selectedOrderDetail.orderNumber}</h3>
               <button onClick={() => { setIsOrderModalOpen(false); setSelectedOrderDetail(null); }} className="hover:text-rose-500 transition-colors"><X size={24} /></button>
             </div>
             <div className="p-6 text-right">

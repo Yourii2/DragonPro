@@ -28,7 +28,13 @@ const parseNumeric = (v: any) => {
   const n = Number(s);
   return Number.isFinite(n) ? n : 0;
 };
-
+const normalizeText = (text: string) => {
+  return (text || "")
+    .trim()
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ة/g, "ه")
+    .replace(/\s+/g, " ");
+};// التحقق من الأصناف الجديدة فقط في الأوردر الحالي
 const orderTotal = (o: any) => {
   // Prefer computing from products to avoid relying on inconsistent stored subtotal fields
   let sub: number = 0;
@@ -49,7 +55,7 @@ const orderTotal = (o: any) => {
   return sub + ship;
 };
 
-// Server-consistent subtotal (exclude shipping) — used for rep assignment and "قيمة طلبيات اليوم"
+// Server-consistent subtotal (exclude shipping) — used for rep assignment and "قيمة اوردرات اليوم"
 const orderSubtotal = (o: any) => {
   if (Array.isArray(o.products) && o.products.length > 0) {
     return o.products.reduce((s: number, p: any) => {
@@ -226,11 +232,20 @@ const SalesDaily: React.FC = () => {
       }
 
       try {
-        const pr = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=pending`);
-        const jpr = await pr.json();
-        if (jpr && jpr.success) setPendingOrdersList(jpr.data || []);
+        // سحب قيد الانتظار
+        const prPending = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=pending`);
+        const jrPending = await prPending.json().catch(() => ({ success: false }));
+        const listPending = jrPending.success ? (jrPending.data || []) : [];
+
+        // سحب المرتجع
+        const prReturned = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=returned`);
+        const jrReturned = await prReturned.json().catch(() => ({ success: false }));
+        const listReturned = jrReturned.success ? (jrReturned.data || []) : [];
+
+        // دمجهم مع بعض
+        setPendingOrdersList([...listPending, ...listReturned]);
       } catch (e) {
-        console.debug('Failed to load pending orders', e);
+        console.debug('Failed to load orders lists', e);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -325,14 +340,154 @@ const SalesDaily: React.FC = () => {
     }
   };
 
+  const startDailyHandler = async () => {
+    if (!selectedRepId && !selectedShippingCompanyId) {
+      Swal.fire('حدد المندوب', 'الرجاء اختيار المندوب أولاً.', 'warning');
+      return;
+    }
+    if (!selectedTreasuryId) {
+      Swal.fire('حدد الخزينة', 'الرجاء اختيار الخزينة أولاً.', 'warning');
+      return;
+    }
+    try {
+      const payload: any = {
+        repId: Number(selectedRepId) || null,
+        treasuryId: selectedTreasuryId ? Number(selectedTreasuryId) : null,
+        warehouseId: selectedWarehouseId ? Number(selectedWarehouseId) : null,
+        employee: employee || null,
+        page: page || null,
+        notes: null
+      };
+      const r = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=startDaily`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      });
+      const j = await r.json().catch(() => null);
+      if (j && j.success) {
+        Swal.fire('تم', 'تم تسجيل بداية اليومية بنجاح.', 'success');
+        if (selectedRepId) await loadRepContext(Number(selectedRepId));
+      } else {
+        Swal.fire('فشل', j?.message || 'فشل بدء اليومية.', 'error');
+      }
+    } catch (e) {
+      console.error('startDaily failed', e);
+      Swal.fire('خطأ', 'فشل الاتصال بالخادم أثناء بدء اليومية.', 'error');
+    }
+  };
+
+  // Re-fetch pending/returned orders from DB so the available list reflects the latest DB state.
+  // Called after completeDaily so newly-assigned orders (now with_rep) disappear immediately.
+  const refreshPendingOrdersList = async () => {
+    try {
+      const [rPending, rReturned] = await Promise.all([
+        fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=pending`).then(r => r.json()).catch(() => ({ success: false })),
+        fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=returned`).then(r => r.json()).catch(() => ({ success: false }))
+      ]);
+      const listPending  = rPending.success  ? (rPending.data  || []) : [];
+      const listReturned = rReturned.success ? (rReturned.data || []) : [];
+      setPendingOrdersList([...listPending, ...listReturned]);
+    } catch (e) {
+      console.debug('refreshPendingOrdersList failed', e);
+    }
+  };
+
   const togglePending = (id: number) => {
     setSelectedPendingIds(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
   };
 
-  const addSelectedFromPending = () => {
+  // Validate order products against product catalog and stock for the selected warehouse
+  const validateOrderProducts = async (order: any) : Promise<{ ok: boolean; message?: string }> => {
+    try {
+      const prodsRes = await fetch(`${API_BASE_PATH}/api.php?module=products&action=getFlat`);
+      const prodsJson = await prodsRes.json().catch(() => null);
+      const allProducts = (prodsJson && prodsJson.success) ? prodsJson.data : [];
+
+      const norm = (txt: any) => (txt || "").toString().trim().replace(/[أإآ]/g, "ا").replace(/ة/g, "ه");
+
+      const prodMap: Record<string, any> = {};
+      const unlinkedItems: string[] = [];
+
+      (Array.isArray(order.products) ? order.products : []).forEach((p: any) => {
+        let pid = Number(p.productId ?? p.product_id ?? 0);
+        const name = (p.name ?? p.product_name ?? '').toString();
+        const color = (p.color ?? p.variant_color ?? p.variant ?? '').toString();
+        const size = (p.size ?? p.variant_size ?? p.measure ?? '').toString();
+        const qty = toNum(p.quantity ?? p.qty ?? 0);
+
+        if (qty <= 0) return;
+
+        if (pid <= 0 && allProducts.length > 0) {
+          let found = allProducts.find((ep:any) => 
+              norm(ep.name) === norm(name) && 
+              norm(ep.color) === norm(color) && 
+              norm(ep.size) === norm(size)
+          );
+          if (!found) {
+            const potentials = allProducts.filter((ep:any) => norm(ep.name) === norm(name));
+            if (potentials.length === 1) found = potentials[0];
+          }
+          if (found) pid = Number(found.id);
+        }
+
+        if (pid <= 0) {
+          unlinkedItems.push(`${name} (لون: ${color || '-'}، مقاس: ${size || '-'})`);
+          return;
+        }
+
+        const key = `${pid}`;
+        if (!prodMap[key]) prodMap[key] = { product_id: pid, name: name, quantity: 0 };
+        prodMap[key].quantity += qty;
+      });
+
+      if (unlinkedItems.length > 0) {
+        let html = `<div style="text-align: right; font-size: 14px;">الاوردر يحتوي على منتجات غير متعرفة على المخزن (تم كتابتها يدوياً بدون ربطها):<br/><br/><ul style="padding-right: 20px; list-style-type: disc;">`;
+        unlinkedItems.forEach(item => { html += `<li style="color: #e11d48; margin-bottom: 4px;">${item}</li>`; });
+        html += `</ul></div>`;
+        return { ok: false, message: html };
+      }
+
+      const items = Object.values(prodMap);
+      if (items.length > 0) {
+        const stockResp = await fetch(`${API_BASE_PATH}/api.php?module=stock&action=checkAvailability`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ warehouse_id: selectedWarehouseId || 0, items })
+        });
+        const stockJr = await stockResp.json().catch(() => null);
+        if (!stockJr || stockJr.success === false) {
+          const unavailable = (stockJr && stockJr.unavailable_items) || [];
+          if (unavailable.length > 0) {
+            let msg = `الاوردر يحتوي على منتجات غير متاحة أو كمياتها لا تكفي للمستودع المحدد:\n\n`;
+            unavailable.forEach((it: any) => {
+              const name = it.name || it.product_name || 'منتج غير معروف';
+              const required = typeof it.required !== 'undefined' ? it.required : it.requested_qty ?? '';
+              const available = typeof it.available !== 'undefined' ? it.available : it.available_qty ?? 0;
+              if (typeof available === 'number' && available <= 0) {
+                msg += `- ${name}: غير موجود في المخزن\n`;
+              } else if (typeof available === 'number' && typeof required === 'number' && available < required) {
+                msg += `- ${name}: الكمية لا تكفي (مطلوب ${required}، متوفر ${available})\n`;
+              } else if (it.reason) {
+                msg += `- ${name}: ${String(it.reason)}\n`;
+              } else {
+                msg += `- ${name}: غير متاح\n`;
+              }
+            });
+            return { ok: false, message: msg };
+          }
+          if (!stockJr) return { ok: false, message: 'فشل التحقق من المخزون. حاول مرة أخرى.' };
+        }
+      }
+
+      return { ok: true };
+    } catch (e) {
+      console.debug('Validation failed', e);
+      return { ok: false, message: 'فشل التحقق من منتجات الاوردر.' };
+    }
+  };
+
+  const addSelectedFromPending = async () => {
     const toAdd = pendingOrdersList.filter(p => selectedPendingIds.includes(Number(p.id)));
     if (toAdd.length === 0) {
-      Swal.fire('تنبيه', 'اختر طلبيات أولاً.', 'info');
+      Swal.fire('تنبيه', 'اختر اوردرات أولاً.', 'info');
       return;
     }
 
@@ -344,17 +499,39 @@ const SalesDaily: React.FC = () => {
     const newOnes = accepted.filter(t => !existingIds.has(Number(t.id)));
 
     if (newOnes.length === 0) {
-      Swal.fire('لا توجد طلبيات جديدة', 'الطلبيات المحددة قد تكون مضافة بالفعل.', 'info');
+      Swal.fire('لا توجد اوردرات جديدة', 'الاوردرات المحددة قد تكون مضافة بالفعل.', 'info');
       return;
     }
 
-    setSelectedOrders(prev => [...prev, ...newOnes]);
-    setPendingOrdersList(prev => prev.filter(p => !newOnes.some(n => Number(n.id) === Number(p.id))));
-    setSelectedPendingIds([]);
+    const finallyAccepted: any[] = [];
+    const stockRejected: Array<{ order: any; message: string }> = [];
 
-    let msg = `تم إضافة ${newOnes.length} طلبيات لليومية.`;
-    if (rejected.length > 0) msg += ` ${rejected.length} طلبيات لم تُضاف لأن حالتها ليست 'قيد الانتظار' أو 'مرتجع'.`;
-    Swal.fire('تم الإضافة', msg, 'success');
+    for (const ord of newOnes) {
+      const v = await validateOrderProducts(ord);
+      if (!v.ok) {
+        stockRejected.push({ order: ord, message: v.message || 'مشكلة في التحقق من المنتجات' });
+      } else {
+        finallyAccepted.push(ord);
+      }
+    }
+
+    if (finallyAccepted.length > 0) {
+      setSelectedOrders(prev => [...prev, ...finallyAccepted]);
+      setPendingOrdersList(prev => prev.filter(p => !finallyAccepted.some(n => Number(n.id) === Number(p.id))));
+      setSelectedPendingIds([]);
+    }
+
+    let successMsg = `تم إضافة ${finallyAccepted.length} اوردرات لليومية.`;
+    if (rejected.length > 0) successMsg += ` ${rejected.length} اوردرات لم تُضاف لأن حالتها ليست 'قيد الانتظار' أو 'مرتجع'.`;
+    if (stockRejected.length > 0) successMsg += ` ${stockRejected.length} اوردرات لم تُضاف لمشاكل في المنتج/المخزون.`;
+    Swal.fire('انتهاء', successMsg, 'success');
+
+    if (stockRejected.length > 0) {
+      // show details for the first few rejected orders
+      const first = stockRejected[0];
+      const html = typeof first.message === 'string' && first.message.startsWith('<') ? first.message : `<div style="white-space:pre-wrap; text-align:right">${first.message}</div>`;
+      Swal.fire('غير مسموح', html, 'warning');
+    }
   };
 
   const removeSelectedOrder = (id: number) => {
@@ -363,7 +540,7 @@ const SalesDaily: React.FC = () => {
     if (removed) setPendingOrdersList(prev => [removed, ...prev.filter(p => Number(p.id) !== Number(id))]);
   };
 
-  const scanBarcodeAddOrder = async () => {
+  /* const scanBarcodeAddOrder = async () => {
     const code = String(barcodeInput || '').trim();
     if (!code) return;
 
@@ -373,7 +550,109 @@ const SalesDaily: React.FC = () => {
       pendingOrdersList.find(p => String(p.id ?? '') === code);
 
     if (!match) {
-      Swal.fire('غير موجود', 'لم يتم العثور على طلبية بهذا الباركود/الرقم ضمن الطلبيات المتاحة.', 'warning');
+      // Try to detect status from client-side lists first
+      const inSelected = selectedOrders.find(o => String(o.barcode ?? o.order_number ?? o.id ?? '') === code || String(o.id ?? '') === code);
+      if (inSelected) {
+        Swal.fire('موجود في اليومية', 'الاوردر موجود بالفعل في قائمة "اوردرات اليوم المختارة".', 'info');
+        setBarcodeInput('');
+        return;
+      }
+
+      const inAssigned = assignedOrders.find(o => String(o.barcode ?? o.order_number ?? o.id ?? '') === code || String(o.id ?? '') === code);
+      if (inAssigned) {
+        const repId = inAssigned.rep_id ?? inAssigned.repId ?? inAssigned.assigned_to ?? inAssigned.assignee_id ?? null;
+        const compId = inAssigned.shipping_company_id ?? inAssigned.shippingCompanyId ?? inAssigned.shippingCompany ?? null;
+        if (repId) {
+          const repName = reps.find(r => Number(r.id) === Number(repId))?.name || '';
+          Swal.fire('موجود مع مندوب', `الاوردر مع المندوب ${repName || ('#' + repId)} حالياً.`, 'info');
+          setBarcodeInput('');
+          return;
+        }
+        if (compId) {
+          const compName = shippingCompanies.find(c => Number(c.id) === Number(compId))?.name || '';
+          Swal.fire('موجود مع شركة شحن', `الاوردر مع شركة الشحن ${compName || ('#' + compId)} حالياً.`, 'info');
+          setBarcodeInput('');
+          return;
+        }
+        // fallback: assigned but no assignee info
+        Swal.fire('موجود في العهدة', 'الاوردر موجود ضمن الاوردرات المخصصة (عهدة).', 'info');
+        setBarcodeInput('');
+        return;
+      }
+
+      // Not found locally — query server for more details (try several endpoints gracefully)
+      try {
+        let foundOrder: any = null;
+        // If code is numeric, try lookup by id
+        if (/^\d+$/.test(code)) {
+          const r = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=get&id=${encodeURIComponent(code)}`);
+          const jr = await r.json().catch(() => null);
+          if (jr && jr.success && jr.data) foundOrder = jr.data;
+        }
+
+        // try by barcode
+        if (!foundOrder) {
+          const r2 = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getByBarcode&barcode=${encodeURIComponent(code)}`);
+          const jr2 = await r2.json().catch(() => null);
+          if (jr2 && jr2.success && jr2.data) foundOrder = jr2.data;
+        }
+
+        // try by order number
+        if (!foundOrder) {
+          const r3 = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getByNumber&order_number=${encodeURIComponent(code)}`);
+          const jr3 = await r3.json().catch(() => null);
+          if (jr3 && jr3.success && jr3.data) foundOrder = jr3.data;
+        }
+
+        if (foundOrder) {
+          const status = (foundOrder.status || '').toString();
+          const repId = foundOrder.rep_id ?? foundOrder.repId ?? foundOrder.assigned_to ?? foundOrder.assignee_id ?? null;
+          const compId = foundOrder.shipping_company_id ?? foundOrder.shippingCompanyId ?? foundOrder.shippingCompany ?? null;
+          if (status === 'delivered' || status === 'delivered_to_customer' || status === 'closed') {
+            Swal.fire('تم التسليم', 'هذا الاوردر تم تسليمه بالفعل.', 'info');
+            setBarcodeInput('');
+            return;
+          }
+            if (repId) {
+            // try to resolve rep name
+            let repName = reps.find(r => Number(r.id) === Number(repId))?.name || '';
+            // fetch rep details if unknown
+            if (!repName) {
+              try {
+                const rr = await fetch(`${API_BASE_PATH}/api.php?module=users&action=get&id=${encodeURIComponent(repId)}`);
+                const rjr = await rr.json().catch(() => null);
+                if (rjr && rjr.success && rjr.data) repName = rjr.data.name || '';
+              } catch (e) {}
+            }
+            Swal.fire('موجود مع مندوب', `الاوردر مع المندوب ${repName || ('#' + repId)} حالياً.`, 'info');
+            setBarcodeInput('');
+            return;
+          }
+            if (compId) {
+            let compName = shippingCompanies.find(c => Number(c.id) === Number(compId))?.name || '';
+            if (!compName) {
+              try {
+                const rc = await fetch(`${API_BASE_PATH}/api.php?module=shipping_companies&action=get&id=${encodeURIComponent(compId)}`);
+                const jc = await rc.json().catch(() => null);
+                if (jc && jc.success && jc.data) compName = jc.data.name || '';
+              } catch (e) {}
+            }
+            Swal.fire('موجود مع شركة شحن', `الاوردر مع شركة الشحن ${compName || ('#' + compId)} حالياً.`, 'info');
+            setBarcodeInput('');
+            return;
+          }
+
+          // generic server-known order but not assigned/delivered
+          Swal.fire('موجود في النظام', `تم العثور على الاوردر في النظام. الحالة: ${status || 'غير معروفة'}.`, 'info');
+          setBarcodeInput('');
+          return;
+        }
+      } catch (e) {
+        console.debug('Order lookup failed', e);
+      }
+
+      // Fallback message
+      Swal.fire('غير موجود', 'لم يتم العثور على اوردر بهذا الباركود/الرقم ضمن الاوردرات المتاحة أو في النظام.', 'warning');
       setBarcodeInput('');
       return;
     }
@@ -406,7 +685,42 @@ const SalesDaily: React.FC = () => {
           return (pidMatch || nameMatch) && colorMatch && sizeMatch && qtyOk;
         });
         if (!found) {
-          Swal.fire('غير مسموح', 'الطلبية لا تحتوي المنتج/اللون/المقاس المطلوب أو الكمية غير كافية.', 'warning');
+          // Build a clearer message explaining what is missing or mismatched
+          let detail = '';
+          const prodsCheck = Array.isArray(prods) ? prods : [];
+          // try to detect nearest matches and reasons
+          let matchedByIdOrName = null as any;
+          for (const p of prodsCheck) {
+            const pid = p.productId ?? p.product_id ?? p.id ?? '';
+            const name = (p.name || p.product_name || '').toString();
+            const pidMatch = sel.productId ? Number(sel.productId) === Number(pid) : false;
+            const nameMatch = sel.name ? sel.name.toString().trim() === name.toString().trim() : false;
+            if (pidMatch || nameMatch) {
+              matchedByIdOrName = p;
+              break;
+            }
+          }
+
+          if (!matchedByIdOrName) {
+            detail += `- المنتج ${sel.name || sel.productId || ''} غير موجود في الاوردر.\n`;
+          } else {
+            const p = matchedByIdOrName;
+            const color = (p.color || p.variant_color || p.variant || '').toString();
+            const size = (p.size || p.variant_size || p.measure || '').toString();
+            const qty = toNum(p.quantity ?? p.qty ?? 0);
+            if (sel.color && sel.color.toString().trim() !== color.toString().trim()) {
+              detail += `- اللون المطلوب ${sel.color} لا يطابق الموجود في الاوردر (${color || 'غير محدد'}).\n`;
+            }
+            if (sel.size && sel.size.toString().trim() !== size.toString().trim()) {
+              detail += `- المقاس المطلوب ${sel.size} لا يطابق الموجود في الاوردر (${size || 'غير محدد'}).\n`;
+            }
+            if (typeof sel.qty !== 'undefined' && sel.qty !== null && qty < Number(sel.qty)) {
+              detail += `- الكمية غير كافية: مطلوب ${sel.qty}، موجود في الاوردر ${qty}.\n`;
+            }
+          }
+
+          const msg = `الاوردر لا يحتوي المنتج/اللون/المقاس المطلوب أو الكمية غير كافية.\n\nتفاصيل:\n${detail}`;
+          Swal.fire('غير مسموح', msg, 'warning');
           setBarcodeInput('');
           return;
         }
@@ -417,7 +731,7 @@ const SalesDaily: React.FC = () => {
 
     const allowedStatuses = ['pending', 'returned'];
     if (!allowedStatuses.includes(String(match.status || 'pending'))) {
-      Swal.fire('غير مسموح', 'لا يمكن إضافة طلبية ليست حالتها قيد الانتظار/مرتجع.', 'warning');
+      Swal.fire('غير مسموح', 'لا يمكن إضافة اوردر ليست حالتها قيد الانتظار/مرتجع.', 'warning');
       setBarcodeInput('');
       return;
     }
@@ -427,7 +741,7 @@ const SalesDaily: React.FC = () => {
       const repId = match.rep_id ?? match.repId ?? match.assigned_to ?? match.assignee_id ?? null;
       if (repId) {
         const repName = reps.find((r: any) => Number(r.id) === Number(repId))?.name || (match.assigned && (match.assigned.name || match.assigned.employee)) || match.assigneeName || '';
-        Swal.fire('موجود', `الطلبية مع المندوب ${repName}`, 'info');
+        Swal.fire('موجود', `الاوردر مع المندوب ${repName}`, 'info');
         setBarcodeInput('');
         return;
       }
@@ -440,7 +754,7 @@ const SalesDaily: React.FC = () => {
       const compId = match.shipping_company_id ?? match.shippingCompanyId ?? match.shippingCompany ?? null;
       if (compId) {
         const companyName = shippingCompanies.find((c: any) => Number(c.id) === Number(compId))?.name || match.shipping_company_name || match.shippingCompanyName || '';
-        Swal.fire('موجود', `الطلبية مع شركة الشحن ${companyName}`, 'info');
+        Swal.fire('موجود', `الاوردر مع شركة الشحن ${companyName}`, 'info');
         setBarcodeInput('');
         return;
       }
@@ -475,9 +789,21 @@ const SalesDaily: React.FC = () => {
         if (!stockJr || stockJr.success === false) {
           const unavailable = (stockJr && stockJr.unavailable_items) || [];
           if (unavailable.length > 0) {
-            let msg = `لا يمكن إضافة الطلبية بسبب عدم توفر المنتجات التالية في المخزن المختار:\n`;
+            let msg = `لا يمكن إضافة الاوردر بسبب مشاكل في المخزون للمستودع المحدد:\n`;
             unavailable.forEach((it: any) => {
-              msg += `- ${it.name || it.product_id || ''}: مطلوب ${it.required}, متوفر ${it.available}\n`;
+              const id = it.product_id || it.productId || '';
+              const name = it.name || it.product_name || '';
+              const required = typeof it.required !== 'undefined' ? it.required : it.requested_qty ?? '';
+              const available = typeof it.available !== 'undefined' ? it.available : it.available_qty ?? 0;
+              const parts: string[] = [];
+              if (typeof available === 'number' && available <= 0) parts.push('غير موجود في المخزن');
+              if (typeof available === 'number' && typeof required === 'number' && available < required) parts.push(`الكمية غير كافية (مطلوب ${required}، متوفر ${available})`);
+              if (it.requested_color && it.color && it.requested_color.toString().trim() !== it.color.toString().trim()) parts.push(`اللون لا يطابق (مطلوب ${it.requested_color}، في المخزن ${it.color})`);
+              if (it.requested_size && it.size && it.requested_size.toString().trim() !== it.size.toString().trim()) parts.push(`المقاس لا يطابق (مطلوب ${it.requested_size}، في المخزن ${it.size})`);
+              // fallback: if API provided a reason field
+              if (it.reason) parts.push(String(it.reason));
+              if (parts.length === 0) parts.push('مشكلة غير محددة في توفر المنتج');
+              msg += `- ${name || id}: ${parts.join('، ')}\n`;
             });
             Swal.fire('نقص في المخزون', msg, 'warning');
             setBarcodeInput('');
@@ -498,8 +824,258 @@ const SalesDaily: React.FC = () => {
     setSelectedOrders(prev => [...prev, match]);
     setPendingOrdersList(prev => prev.filter(p => Number(p.id) !== Number(match.id)));
     setBarcodeInput('');
-  };
+  }; */
+const scanBarcodeAddOrder = async () => {
+    const code = String(barcodeInput || '').trim();
+    if (!code) return;
 
+    // 1. استخدام let بدلاً من const عشان نقدر نضيف الاوردر لو لقيناها في السيرفر
+    let match: any =
+      pendingOrdersList.find(p => String(p.barcode ?? '') === code) ||
+      pendingOrdersList.find(p => String(p.order_number ?? p.orderNumber ?? '') === code);
+
+    if (!match) {
+      // 2. التحقق مما إذا كانت الاوردر مختارة بالفعل
+      const inSelected = selectedOrders.find(o => String(o.barcode ?? o.order_number ?? '') === code);
+      if (inSelected) {
+        Swal.fire('موجود في اليومية', 'الاوردر موجود بالفعل في قائمة "اوردرات اليوم المختارة".', 'info');
+        setBarcodeInput('');
+        return;
+      }
+
+      // 3. التحقق مما إذا كان الاوردر في عهدة مندوب حالياً في نفس الجلسة
+      const inAssigned = assignedOrders.find(o => String(o.barcode ?? o.order_number ?? '') === code);
+      if (inAssigned) {
+        const repId = inAssigned.rep_id ?? inAssigned.repId ?? inAssigned.assigned_to ?? inAssigned.assignee_id ?? null;
+        const compId = inAssigned.shipping_company_id ?? inAssigned.shippingCompanyId ?? inAssigned.shippingCompany ?? null;
+        if (repId) {
+          const repName = reps.find(r => Number(r.id) === Number(repId))?.name || '';
+          Swal.fire('موجود مع مندوب', `الاوردر مع المندوب ${repName || ('#' + repId)} حالياً.`, 'info');
+          setBarcodeInput('');
+          return;
+        }
+        if (compId) {
+          const compName = shippingCompanies.find(c => Number(c.id) === Number(compId))?.name || '';
+          Swal.fire('موجود مع شركة شحن', `الاوردر مع شركة الشحن ${compName || ('#' + compId)} حالياً.`, 'info');
+          setBarcodeInput('');
+          return;
+        }
+        Swal.fire('موجود في العهدة', 'الاوردر موجود ضمن الاوردرات المخصصة (عهدة).', 'info');
+        setBarcodeInput('');
+        return;
+      }
+
+      // 4. البحث في السيرفر (بديل آمن لتجنب خطأ الـ API اللي بيظهر في الكونسول)
+      try {
+        let foundOrder: any = null;
+
+        // سحب كل الاوردرات والبحث فيها بأمان تام
+        const rAll = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll`);
+        const jAll = await rAll.json().catch(() => null);
+        
+        if (jAll && jAll.success && Array.isArray(jAll.data)) {
+          foundOrder = jAll.data.find((o: any) => 
+            String(o.barcode ?? '') === code || 
+            String(o.order_number ?? o.orderNumber ?? '') === code
+          );
+        }
+
+        if (foundOrder) {
+          match = foundOrder;
+        }
+      } catch (e) {
+        console.debug('Order lookup failed', e);
+      }
+
+      // لو بعد كل ده ملقيناش الاوردر نهائياً
+      if (!match) {
+        Swal.fire('غير موجود', 'لم يتم العثور على اوردر بهذا الباركود/الرقم نهائياً.', 'warning');
+        setBarcodeInput('');
+        return;
+      }
+    }
+
+    // --- 5. فحص حالة الاوردر والبحث عن اسم المندوب ---
+    const status = String(match.status || 'pending');
+    const allowedStatuses = ['pending', 'returned'];
+    
+    if (!allowedStatuses.includes(status)) {
+      
+      // 1. لو الاوردر في عهدة مندوب، نجيب اسمه ونعرض رسالتك المخصصة
+      const repId = match.rep_id ?? match.repId ?? match.assigned_to ?? match.assignee_id ?? null;
+      if (repId || status === 'with_rep') {
+        // البحث عن اسم المندوب
+        const repName = reps.find((r: any) => Number(r.id) === Number(repId))?.name 
+                        || match.assigneeName 
+                        || (match.assigned && (match.assigned.name || match.assigned.employee)) 
+                        || 'مندوب آخر';
+                        
+        Swal.fire('عفواً، غير مسموح', `لا يمكن إضافة الاوردر لأنها في عهدة "${repName}"`, 'warning');
+        setBarcodeInput('');
+        return;
+      }
+
+      // 2. لو الاوردر مع شركة شحن (علشان نقفل كل الثغرات)
+      const compId = match.shipping_company_id ?? match.shippingCompanyId ?? match.shippingCompany ?? null;
+      if (compId || status === 'in_delivery') {
+        const compName = shippingCompanies.find((c: any) => Number(c.id) === Number(compId))?.name 
+                         || match.shipping_company_name 
+                         || match.shippingCompanyName 
+                         || 'شركة شحن';
+                         
+        Swal.fire('عفواً، غير مسموح', `لا يمكن إضافة الاوردر لأنها مع شركة شحن "${compName}"`, 'warning');
+        setBarcodeInput('');
+        return;
+      }
+
+      // 3. لو الاوردر حالته حاجة تانية (تم التسليم مثلاً)
+      let statusAr = status;
+      switch(status) {
+        case 'delivered': statusAr = 'تم التسليم بنجاح'; break;
+        case 'delivered_to_customer': statusAr = 'تم التسليم للعميل'; break;
+        case 'closed': statusAr = 'مغلقة'; break;
+        case 'canceled': statusAr = 'ملغاة'; break;
+        case 'postponed': statusAr = 'مؤجلة'; break;
+        case 'partial_return': statusAr = 'مرتجع جزئي'; break;
+      }
+      
+      Swal.fire('عفواً، غير مسموح', `لا يمكن إضافة الاوردر لأن حالته: "${statusAr}".\nمسموح فقط بإضافة الاوردرات "قيد الانتظار" أو "المرتجعة".`, 'warning');
+      setBarcodeInput('');
+      return;
+    }
+
+    // منع التكرار في نفس اليومية
+    if (todayOrdersUnique.some(o => Number(o.id) === Number(match.id))) {
+      setBarcodeInput('');
+      return;
+    }
+    // --- فحص المخزون والـ Smart Match ---
+    // (باقي الكود كما هو من أول هنا بدون تغيير)
+
+    // --- بداية الجزء العبقري لفحص المخزون والتعرف على المنتجات تلقائياً ---
+    try {
+      // 1. جلب قائمة المنتجات من الداتابيز عشان ندور فيها لو المنتج مش مربوط
+      const prodsRes = await fetch(`${API_BASE_PATH}/api.php?module=products&action=getFlat`);
+      const prodsJson = await prodsRes.json().catch(() => null);
+      const allProducts = (prodsJson && prodsJson.success) ? prodsJson.data : [];
+
+      const norm = (txt: any) => (txt || "").toString().trim().replace(/[أإآ]/g, "ا").replace(/ة/g, "ه");
+
+      const prodMap: Record<string, any> = {};
+      const unlinkedItems: string[] = [];
+
+      (Array.isArray(match.products) ? match.products : []).forEach((p: any) => {
+        // حذاري نستخدم p.id لأنه ده بيكون رقم سطر الأوردر الوهمي مش المنتج!
+        let pid = Number(p.productId ?? p.product_id ?? 0); 
+        const name = (p.name ?? p.product_name ?? '').toString();
+        const color = (p.color ?? p.variant_color ?? p.variant ?? '').toString();
+        const size = (p.size ?? p.variant_size ?? p.measure ?? '').toString();
+        const qty = toNum(p.quantity ?? p.qty ?? 0);
+
+        if (qty <= 0) return;
+
+        // لو المنتج ملوش ID (جاي من استيراد نصي ومش مربوط)، ندور عليه بذكاء
+        if (pid <= 0 && allProducts.length > 0) {
+          let found = allProducts.find((ep:any) => 
+              norm(ep.name) === norm(name) && 
+              norm(ep.color) === norm(color) && 
+              norm(ep.size) === norm(size)
+          );
+          
+          if (!found) {
+            const potentials = allProducts.filter((ep:any) => norm(ep.name) === norm(name));
+            if (potentials.length === 1) found = potentials[0]; // لو مفيش غير منتج واحد بنفس الاسم
+          }
+
+          if (found) {
+             pid = Number(found.id);
+          }
+        }
+
+        // لو بعد الفحص الدقيق ملقيناش الـ ID، نرفض الأوردر ونطلب من المستخدم يربطه
+        if (pid <= 0) {
+          unlinkedItems.push(`${name} (لون: ${color || '-'}، مقاس: ${size || '-'})`);
+          return;
+        }
+
+        const key = `${pid}`;
+        if (!prodMap[key]) {
+          prodMap[key] = { product_id: pid, name: name, quantity: 0 };
+        }
+        prodMap[key].quantity += qty;
+      });
+
+      // لو فيه منتجات لسه مش مربوطة نعرض رسالة خطأ شيك
+      if (unlinkedItems.length > 0) {
+         let html = `<div style="text-align: right; font-size: 14px;">الاوردر يحتوي على منتجات غير متعرفة على المخزن (تم كتابتها يدوياً بدون ربطها). يرجى تعديل الاوردر من قسم الاوردرات أولاً.<br/><br/><ul style="padding-right: 20px; list-style-type: disc;">`;
+         unlinkedItems.forEach(item => { html += `<li style="color: #e11d48; margin-bottom: 4px;">${item}</li>`; });
+         html += `</ul></div>`;
+         
+         Swal.fire({ title: 'منتجات غير مرتبطة', html: html, icon: 'error', confirmButtonText: 'حسناً' });
+         setBarcodeInput('');
+         return;
+      }
+
+      const items = Object.values(prodMap);
+
+      if (items.length > 0) {
+        const stockResp = await fetch(`${API_BASE_PATH}/api.php?module=stock&action=checkAvailability`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ warehouse_id: selectedWarehouseId || 0, items })
+        });
+        const stockJr = await stockResp.json().catch(() => null);
+        
+        if (!stockJr || stockJr.success === false) {
+          const unavailable = (stockJr && stockJr.unavailable_items) || [];
+          if (unavailable.length > 0) {
+            let msgHTML = `
+              <div style="text-align: right; font-size: 14px;">
+                لا يمكن إضافة الاوردر بسبب نقص في المخزون للمستودع المحدد:<br/><br/>
+                <ul style="padding-right: 20px; list-style-type: disc;">
+            `;
+            
+            unavailable.forEach((it: any) => {
+              const name = it.name || it.product_name || 'منتج غير معروف';
+              const required = typeof it.required !== 'undefined' ? it.required : it.requested_qty ?? '';
+              const available = typeof it.available !== 'undefined' ? it.available : it.available_qty ?? 0;
+              const parts: string[] = [];
+              
+              if (typeof available === 'number' && available <= 0) {
+                parts.push('رصيده صفر في هذا المستودع');
+              } else if (typeof available === 'number' && typeof required === 'number' && available < required) {
+                parts.push(`مطلوب ${required}، المتاح ${available} فقط`);
+              }
+              
+              if (parts.length === 0 && it.reason) parts.push(String(it.reason));
+              if (parts.length === 0) parts.push('نقص في التوفر');
+              
+              msgHTML += `<li style="margin-bottom: 8px;"><strong>${name}:</strong> <span style="color: #e11d48;">${parts.join(' | ')}</span></li>`;
+            });
+            
+            msgHTML += `</ul></div>`;
+            
+            Swal.fire({ title: 'نقص في المخزون', html: msgHTML, icon: 'warning', confirmButtonText: 'حسناً' });
+            setBarcodeInput('');
+            return;
+          }
+          
+          if (!stockJr) {
+            Swal.fire('خطأ', 'فشل التحقق من المخزون. حاول مرة أخرى.', 'error');
+            setBarcodeInput('');
+            return;
+          }
+        }
+      }
+    } catch (e) {
+      console.debug('Stock check failed', e);
+    }
+    // --- نهاية الجزء العبقري ---
+
+    setSelectedOrders(prev => [...prev, match]);
+    setPendingOrdersList(prev => prev.filter(p => Number(p.id) !== Number(match.id)));
+    setBarcodeInput('');
+  };
   const printThermal = (orders: any[], extra: any) => {
     const win = window.open('', '_blank', 'width=400,height=800');
     if (!win) return;
@@ -542,7 +1118,7 @@ const SalesDaily: React.FC = () => {
     setTimeout(() => win.print(), 500);
   };
 
-  const printA4Report = (orders: any[], extra: any) => {
+  const printA4Report = async (orders: any[], extra: any) => {
     const win = window.open('', '_blank');
     if (!win) return;
 
@@ -583,6 +1159,59 @@ const SalesDaily: React.FC = () => {
     const localTodayShipping = ordersParam.reduce((s:number,o:any)=> s + parseNumeric(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0),0);
     const localTotalShipping = (localOldShipping || 0) + (localTodayShipping || 0);
 
+    // Prepare and save a delivery session snapshot to server so the exact data can be retrieved/printed later
+    try {
+      const sessionPayload: any = {
+        rep_id: Number(reps.find((r:any)=> Number(r.id) === Number(selectedRepId))?.id || selectedRepId) || null,
+        treasury_id: selectedTreasuryId ? Number(selectedTreasuryId) : null,
+        store_id: selectedWarehouseId ? Number(selectedWarehouseId) : null,
+        previous_balance: prevBal,
+        old_orders_count: localOldOrdersCount,
+        old_pieces_count: localOldPiecesCount,
+        old_orders_value: localOldOrdersValue,
+        today_orders_count: ordersParam.length,
+        today_pieces_count: localTodayPieces,
+        today_orders_value: sumValue,
+        total_orders_count: localTotalOrdersCount,
+        total_pieces_count: localTotalPieces,
+        total_orders_value: (localOldOrdersValue || 0) + (sumValue || 0),
+        final_balance_before_pay: finalBalBeforePay,
+        payment_type: String(typeof extra?.paymentAction !== 'undefined' ? extra.paymentAction : paymentAction),
+        paid_amount: Math.abs(typeof extra?.paidNow !== 'undefined' ? extra.paidNow : paidNowLocalSigned),
+        remaining_after_pay: afterPay,
+        orders_data: []
+      };
+
+      // Build orders list with source flag
+      const seen = new Set<number>();
+      (localOldOrders || []).forEach((o: any) => {
+        const id = Number(o.id || o.order_id || 0);
+        if (!id) return;
+        seen.add(id);
+        sessionPayload.orders_data.push({ id, order_number: o.orderNumber ?? o.order_number ?? id, customer_name: o.customerName ?? o.customer_name ?? '', type: 'old', pieces: orderPieces(o), value: orderSubtotal(o) });
+      });
+      (ordersParam || []).forEach((o: any) => {
+        const id = Number(o.id || o.order_id || 0);
+        if (!id) return;
+        if (seen.has(id)) return;
+        sessionPayload.orders_data.push({ id, order_number: o.orderNumber ?? o.order_number ?? id, customer_name: o.customerName ?? o.customer_name ?? '', type: 'today', pieces: orderPieces(o), value: orderSubtotal(o) });
+      });
+
+      try {
+        const r = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=createDeliverySession`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(sessionPayload)
+        });
+        const jr = await r.json().catch(()=>null);
+        if (!(jr && jr.success)) console.warn('Failed to save delivery session', jr);
+      } catch (err) {
+        console.warn('Error saving delivery session', err);
+      }
+    } catch (ex) {
+      console.warn('Preparing delivery session failed', ex);
+    }
+
     const html =
       `<!doctype html><html><head><meta charset="utf-8"><title>${reportTitle}</title>` +
       `<style>
@@ -604,25 +1233,25 @@ const SalesDaily: React.FC = () => {
         ? `<div style="display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-top:10px;">
             <div style="border:1px solid #ddd; padding:10px; border-radius:8px; background:#fff">
               <div style="font-weight:800; margin-bottom:8px;">الأرصدة القديمة</div>
-              <divقيمه الطلبيات القديمه: <b>${localOldOrdersValue.toLocaleString()} ج.م</b></div>
+              <div>قيمه الاوردرات القديمه: <b>${localOldOrdersValue.toLocaleString()} ج.م</b></div>
               <div style="margin-top:6px">الرصيد السابق (دين/رصيد): <b>${balanceLabel(prevBal)} ${Math.abs(prevBal).toLocaleString()} ج.م</b></div>
-              <div style="margin-top:6px"اجمالي الطلبيات القديمه: <b>${localOldOrdersCount}</b></div>
+              <div style="margin-top:6px">اجمالي الاوردرات القديمه: <b>${localOldOrdersCount}</b></div>
               <div style="margin-top:4px">منتجات مميزة: <b>${localOldDistinct}</b></div>
               <div style="margin-top:4px">قطع قديمة: <b>${localOldPiecesCount.toLocaleString()}</b></div>
             </div>
             <div style="border:1px solid #ddd; padding:10px; border-radius:8px; background:#fff">
               <div style="font-weight:800; margin-bottom:8px;">تسليم اليوم (المحدد الآن)</div>
-              <div>قيمة طلبيات اليوم: <b>${sumValue.toLocaleString()} ج.م</b></div>
-                  <div style="margin-top:6px">عدد طلبيات اليوم: <b>${ordersParam.length}</b></div>
+                <div>قيمة اوردرات اليوم: <b>${sumValue.toLocaleString()} ج.م</b></div>
+                  <div style="margin-top:6px">عدد اوردرات اليوم: <b>${ordersParam.length}</b></div>
               <div style="margin-top:6px">عدد قطع اليوم: <b>${localTodayPieces}</b></div>
               <div style="margin-top:4px">منتجات مميزة: <b>${localTodayDistinct}</b></div>
             </div>
             <div style="border:1px solid #ddd; padding:10px; border-radius:8px; background:#fff">
               <div style="font-weight:800; margin-bottom:8px;">الإجماليات</div>
-              <div>اجمالي الطلبياتقيمة: <b>${(localOldOrdersValue + sumValue).toLocaleString()} ج.م</b></div>
+              <div>اجمالي الاوردرات: <b>${(localOldOrdersValue + sumValue).toLocaleString()} ج.م</b></div>
               <div style="margin-top:6px">في عهدة: ${localOldOrdersValue.toLocaleString()} + اليوم: ${sumValue.toLocaleString()}</div>
               <div style="margin-top:6px">الدين النهائي (قديم + اليوم): <b>${balanceLabel(finalBalBeforePay)} ${Math.abs(finalBalBeforePay).toLocaleString()} ج.م</b></div>
-              <div style="margin-top:6px">إجمالي الطلبيات: <b>${localTotalOrdersCount}</b> (قديم ${localOldOrdersCount} + اليوم ${orders.length})</div>
+              <div style="margin-top:6px">إجمالي الاوردرات: <b>${localTotalOrdersCount}</b> (قديم ${localOldOrdersCount} + اليوم ${orders.length})</div>
               <div style="margin-top:6px">إجمالي القطع: <b>${localTotalPieces.toLocaleString()}</b> (قديم ${localOldPiecesCount.toLocaleString()} + اليوم ${localTodayPieces})</div>
             </div>
           </div>
@@ -640,8 +1269,8 @@ const SalesDaily: React.FC = () => {
             </div>
           </div>`
         : '') +
-      `<table><thead><tr>
-          <th>رقم الطلبية</th><th>اسم العميل</th><th>الهاتف</th><th>المحافظة</th><th>العنوان</th>
+        `<table><thead><tr>
+          <th>رقم اوردر</th><th>اسم العميل</th><th>الهاتف</th><th>المحافظة</th><th>العنوان</th>
           <th>الموظف</th><th>البيدج</th><th>الإجمالي</th><th>شحن</th><th>الإجمالي الكلي</th><th>ملاحظات</th>
         </tr></thead><tbody>` +
       ordersParam
@@ -691,7 +1320,7 @@ const SalesDaily: React.FC = () => {
 
     // If there are no orders and no assignedOrders, show a clear message so report isn't visually empty
     const noOrdersMessageHtml = (!Array.isArray(assignedOrders) || assignedOrders.length === 0) && ordersParam.length === 0
-      ? `<div style="margin-top:18px; padding:12px; border:1px dashed #ccc; text-align:center;">لا توجد طلبيات لعرضها في اليومية.</div>`
+      ? `<div style="margin-top:18px; padding:12px; border:1px dashed #ccc; text-align:center;">لا توجد اوردرات لعرضها في اليومية.</div>`
       : '';
 
     const mainTableHtml = `<!doctype html><html><head><meta charset="utf-8"><title>${reportTitle}</title>` +
@@ -708,21 +1337,21 @@ const SalesDaily: React.FC = () => {
         .muted{font-size:11px; color:#555}
       </style></head><body>` +
       `<div class="header"><div></div><div style="text-align:center;"><h1>${reportTitle} ${whoName}</h1></div><div></div></div>` +
-      `<div style="margin-top:8px">التاريخ: ${dateStr}</div>` +
-      (showMoney
-        ? `
-          <div style="display:flex; gap:10px; justify-content:space-between; align-items:flex-start; margin-top:8px; font-size:12px">
+      `<div style="display:flex; gap:12px; align-items:flex-start; margin-top:8px; font-size:12px">
+        <div style="flex:0 0 auto; min-width:160px; padding:6px">التاريخ: <b>${dateStr}</b></div>
+        ${showMoney ? `
+          <div style="flex:1; display:flex; gap:10px; align-items:flex-start">
             <div style="flex:1; padding:6px; border:1px solid #ddd; border-radius:6px">
               <div style="font-weight:700;">الأرصدة القديمة</div>
-              <div>قيمة طلبيات قديمة: <b>${localOldOrdersValue.toLocaleString()} ج.م</b></div>
-              <divالمستحق: <b>${balanceLabel(prevBal)} ${Math.abs(prevBal).toLocaleString()} ج.م</b></div>
-              <div> الطلبيات: <b>${localOldOrdersCount}</b> • <span>قطع: <b>${localOldPiecesCount.toLocaleString()}</b></span></div>
+              <div>قيمة اوردرات قديمة: <b>${localOldOrdersValue.toLocaleString()} ج.م</b></div>
+              <div>المستحق: <b>${balanceLabel(prevBal)} ${Math.abs(prevBal).toLocaleString()} ج.م</b></div>
+              <div>الاوردرات: <b>${localOldOrdersCount}</b> • قطع: <b>${localOldPiecesCount.toLocaleString()}</b></div>
             </div>
 
             <div style="flex:1; padding:6px; border:1px solid #ddd; border-radius:6px">
               <div style="font-weight:700;">تسليم اليوم (المحدد الآن)</div>
-              <div>قيمة طلبيات اليوم: <b>${sumValue.toLocaleString()} ج.م</b></div>
-              <div>عدد طلبيات: <b>${ordersParam.length}</b> • قطع: <b>${localTodayPieces}</b></div>
+              <div>قيمة اوردرات اليوم: <b>${sumValue.toLocaleString()} ج.م</b></div>
+              <div>عدد اوردرات: <b>${ordersParam.length}</b> • قطع: <b>${localTodayPieces}</b></div>
             </div>
 
             <div style="flex:1; padding:6px; border:1px solid #ddd; border-radius:6px; background:#f0fdf4">
@@ -731,14 +1360,14 @@ const SalesDaily: React.FC = () => {
               <div>المبلغ: <b>${Math.abs(paymentAdjustment).toLocaleString()} ج.م</b></div>
             </div>
 
-            <div style="flex:1; padding:6px; border:1px solid #ddd; border-radius:6px; background:#fff5f6">
+            <div style="flex:0 0 180px; padding:6px; border:1px solid #ddd; border-radius:6px; background:#fff5f6">
               <div style="font-weight:700;">الباقي بعد الدفع</div>
               <div style="font-weight:800; font-size:14px">${Math.abs(afterPay).toLocaleString()} ${balanceLabel(afterPay)} ج.م</div>
             </div>
-          </div>`
-        : '') +
-      `<table><thead><tr>
-          <th>رقم الطلبية</th><th>اسم العميل</th><th>الهاتف</th><th>المحافظة</th><th>العنوان</th>
+          </div>` : ''}
+      </div>` +
+        `<table><thead><tr>
+          <th>رقم اوردر</th><th>اسم العميل</th><th>الهاتف</th><th>المحافظة</th><th>العنوان</th>
           <th>الموظف</th><th>البيدج</th><th>الإجمالي</th><th>شحن</th><th>الإجمالي الكلي</th><th>ملاحظات</th>
         </tr></thead><tbody>` +
       ordersParam.map((o: any) => {
@@ -763,7 +1392,7 @@ const SalesDaily: React.FC = () => {
       }).join('') +
       `</tbody></table>`;
 
-    // Build an "طلبيات نزول" table for assigned (old) orders, show if any
+    // Build an "اوردرات نزول" table for assigned (old) orders, show if any
     const oldOrdersList = Array.isArray(assignedOrders) ? assignedOrders : [];
     let oldOrdersTableHtml = '';
     if (oldOrdersList.length > 0) {
@@ -789,10 +1418,10 @@ const SalesDaily: React.FC = () => {
       }).join('');
 
       oldOrdersTableHtml = `
-        <h3 style="margin-top:16px;">طلبيات نزول (الطلبيات القديمة)</h3>
+        <h3 style="margin-top:16px;">اوردرات نزول (الاوردرات القديمة)</h3>
         <table style="width:100%; border-collapse:collapse; margin-top:8px;">
           <thead><tr>
-            <th>رقم الطلبية</th><th>اسم العميل</th><th>الهاتف</th><th>المحافظة</th><th>العنوان</th>
+            <th>رقم اوردر</th><th>اسم العميل</th><th>الهاتف</th><th>المحافظة</th><th>العنوان</th>
             <th>الموظف</th><th>البيدج</th><th>الإجمالي</th><th>شحن</th><th>الإجمالي الكلي</th><th>ملاحظات</th>
           </tr></thead>
           <tbody>${oldRows}</tbody>
@@ -818,8 +1447,8 @@ const SalesDaily: React.FC = () => {
 
     if (isShippingMode) {
       const ordersToAssign = todayOrdersUnique;
-      if (ordersToAssign.length === 0) {
-        Swal.fire('اختر طلبيات', 'الرجاء اختيار طلبيات لتسليمها لشركة الشحن', 'error');
+        if (ordersToAssign.length === 0) {
+        Swal.fire('اختر اوردرات', 'الرجاء اختيار اوردرات لتسليمها لشركة الشحن', 'error');
         return;
       }
 
@@ -835,7 +1464,7 @@ const SalesDaily: React.FC = () => {
         );
 
         const companyName = shippingCompanies.find(c => Number(c.id) === Number(assigneeId))?.name || '';
-        Swal.fire('تم', 'تم تسليم الطلبيات لشركة الشحن.', 'success');
+        Swal.fire('تم', 'تم تسليم الاوردرات لشركة الشحن.', 'success');
         printA4Report(ordersToAssign, {
           assigneeLabel: 'شركة الشحن',
           assigneeName: companyName,
@@ -855,7 +1484,7 @@ const SalesDaily: React.FC = () => {
 
     const ordersToAssign = todayOrdersUnique;
     if (ordersToAssign.length === 0) {
-      Swal.fire('اختر طلبيات', 'الرجاء اختيار طلبيات لليومية قبل الإتمام.', 'error');
+      Swal.fire('اختر اوردرات', 'الرجاء اختيار اوردرات لليومية قبل الإتمام.', 'error');
       return;
     }
 
@@ -882,11 +1511,11 @@ const SalesDaily: React.FC = () => {
           <div><b>المندوب:</b> ${repName}</div>
           <hr/>
           <div><b>الرصيد السابق:</b> ${Math.abs(prevBalance).toLocaleString()} (${balanceLabel(prevBalance)})</div>
-          <div><b>طلبيات قديمة في العهدة:</b> ${oldOrdersCount}</div>
+          <div><b>اوردرات قديمة في العهدة:</b> ${oldOrdersCount}</div>
           <div><b>قطع قديمة:</b> ${oldPiecesCount.toLocaleString()}</div>
           <hr/>
-          <div><b>قيمة طلبيات اليوم:</b> ${todayValue.toLocaleString()}</div>
-          <div><b>عدد طلبيات اليوم:</b> ${todayOrdersCount}</div>
+          <div><b>قيمة اوردرات اليوم:</b> ${todayValue.toLocaleString()}</div>
+          <div><b>عدد اوردرات اليوم:</b> ${todayOrdersCount}</div>
           <div><b>عدد قطع اليوم:</b> ${todayPiecesCount.toLocaleString()}</div>
           <hr/>
           <div><b>الدين النهائي قبل الدفع:</b> ${Math.abs(finalBalanceBeforePayment).toLocaleString()} (${balanceLabel(finalBalanceBeforePayment)})</div>
@@ -894,7 +1523,7 @@ const SalesDaily: React.FC = () => {
           <div><b>المبلغ الآن:</b> ${Math.abs(paymentAdjustment).toLocaleString()} ({paymentAction === 'collect' ? 'له' : 'عليه'})</div>
           <div><b>الدين المتبقي بعد العملية:</b> ${Math.abs(remainingDebt).toLocaleString()} (${balanceLabel(balanceAfterPayment)})</div>
           <hr/>
-          <div><b>إجمالي الطلبيات:</b> ${totalOrdersCount} (قديم ${oldOrdersCount} + اليوم ${todayOrdersCount})</div>
+          <div><b>إجمالي الاوردرات:</b> ${totalOrdersCount} (قديم ${oldOrdersCount} + اليوم ${todayOrdersCount})</div>
           <div><b>إجمالي القطع:</b> ${totalPiecesCount.toLocaleString()}</div>
         </div>
       `
@@ -931,6 +1560,7 @@ const SalesDaily: React.FC = () => {
         setSelectedOrders([]);
         setSelectedPendingIds([]);
         setPaymentAdjustment(0);
+        refreshPendingOrdersList();
       } else {
         Swal.fire('فشل', jr?.message || 'لم يؤكد الخادم المعالجة.', 'error');
       }
@@ -1008,6 +1638,7 @@ const SalesDaily: React.FC = () => {
         setSelectedOrders([]);
         setSelectedPendingIds([]);
         setPaymentAdjustment(0);
+        refreshPendingOrdersList();
       } else {
         console.error('Silent complete failed', jr);
       }
@@ -1087,14 +1718,14 @@ const SalesDaily: React.FC = () => {
                   <div className="text-sm font-black text-slate-800 dark:text-white mb-3">الأرصدة القديمة</div>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="space-y-2">
-                      <StatCard label="قيمة طلبيات قديمة" value={`${oldOrdersValue.toLocaleString()} ج.م`} />
+                      <StatCard label="قيمة اوردرات قديمة" value={`${oldOrdersValue.toLocaleString()} ج.م`} />
                       <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/30 p-4 shadow-sm text-center">
                         <div className="text-xs text-slate-500 dark:text-slate-400">الرصيد السابق (دين/رصيد)</div>
                         <div className={`mt-2 text-2xl font-extrabold ${balanceClass(prevBalance)}`}>{balanceLabel(prevBalance)} {Math.abs(prevBalance).toLocaleString()} ج.م</div>
                       </div>
                     </div>
                     <StatCard
-                      label="اجمالي الطلبيات القديمه"
+                      label="اجمالي الاوردرات القديمه"
                       value={oldOrdersCount}
                       hint={`منتجات مميزة: ${oldDistinctProductsCount}`}
                     />
@@ -1108,8 +1739,8 @@ const SalesDaily: React.FC = () => {
                 <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/30 p-4 shadow-sm">
                   <div className="text-sm font-black text-slate-800 dark:text-white mb-3">تسليم اليوم (المحدد الآن)</div>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <StatCard label="قيمة طلبيات اليوم" value={`${Math.abs(todayValue).toLocaleString()} ج.م`} />
-                    <StatCard label="عدد طلبيات اليوم" value={todayOrdersCount} />
+                    <StatCard label="قيمة اوردرات اليوم" value={`${Math.abs(todayValue).toLocaleString()} ج.م`} />
+                    <StatCard label="عدد اوردرات اليوم" value={todayOrdersCount} />
                     <StatCard
                       label="عدد قطع اليوم"
                       value={todayPiecesCount.toLocaleString()}
@@ -1123,7 +1754,7 @@ const SalesDaily: React.FC = () => {
                   <div className="text-sm font-black text-slate-800 dark:text-white mb-3">الإجماليات</div>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="space-y-2">
-                      <StatCard label="قيمه اجمالى الطلبيات" value={`${(oldOrdersValue + todayValue).toLocaleString()} ج.م`} hint={`في عهدة: ${oldOrdersValue.toLocaleString()} + اليوم: ${todayValue.toLocaleString()}`} />
+                      <StatCard label="قيمه اجمالى الاوردرات" value={`${(oldOrdersValue + todayValue).toLocaleString()} ج.م`} hint={`في عهدة: ${oldOrdersValue.toLocaleString()} + اليوم: ${todayValue.toLocaleString()}`} />
                         <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/30 p-4 shadow-sm text-center">
                         <div className="text-xs text-slate-500 dark:text-slate-400">الباقي النهائي (قديم + اليوم)</div>
                         <div className={`mt-2 text-2xl font-extrabold ${balanceClass(finalBalanceBeforePayment)}`}>{balanceLabel(finalBalanceBeforePayment)} {Math.abs(finalBalanceBeforePayment).toLocaleString()} ج.م</div>
@@ -1131,8 +1762,8 @@ const SalesDaily: React.FC = () => {
                        {/*  <div className="mt-2 text-xs text-slate-600">مصروفات الشحن: <span className="font-black">{totalShipping.toLocaleString()} ج.م</span></div>
                         <div className="mt-1 text-xs text-slate-600">الإجمالي شامل الشحن: <span className="font-black">{(oldOrdersValue + todayValue + totalShipping).toLocaleString()} ج.م</span></div> */}
                     </div>
-                    <StatCard
-                      label="إجمالي الطلبيات"
+                      <StatCard
+                      label="إجمالي الاوردرات"
                       value={totalOrdersCount}
                       hint={`قديم ${oldOrdersCount} + اليوم ${todayOrdersCount}`}
                     />
@@ -1200,7 +1831,7 @@ const SalesDaily: React.FC = () => {
                 }
                 const ordersForPrint = todayOrdersUnique;
                 if (ordersForPrint.length === 0) {
-                  Swal.fire('تنبيه', 'لا توجد طلبيات للطباعة.', 'info');
+                  Swal.fire('تنبيه', 'لا توجد اوردرات للطباعة.', 'info');
                   return;
                 }
                 if (isShippingMode) {
@@ -1220,7 +1851,7 @@ const SalesDaily: React.FC = () => {
           <div className="bg-white dark:bg-slate-800 rounded-3xl p-4 shadow-sm border border-slate-200 dark:border-slate-700 flex items-center gap-3">
             <ShoppingCart className="w-6 h-6 text-blue-600" />
             <div className="flex-1">
-              <div className="text-xs text-slate-500">مسح باركود / رقم الطلبية</div>
+              <div className="text-xs text-slate-500">مسح باركود / رقم الاوردر</div>
               <div className="flex gap-3 mt-2">
                 <input
                   className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-500/30"
@@ -1259,7 +1890,7 @@ const SalesDaily: React.FC = () => {
           {showPendingOrdersBox && (
             <div className="bg-white dark:bg-slate-800 rounded-3xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="font-black">الطلبيات المتاحة (اختار عدة طلبيات)</h3>
+                <h3 className="font-black">الاوردرات المتاحة (اختار عدة اوردرات)</h3>
                 <button
                   onClick={() => {
                     if (!startDailyUnlocked) {
@@ -1275,7 +1906,7 @@ const SalesDaily: React.FC = () => {
               </div>
 
               <div className="divide-y max-h-[320px] overflow-auto">
-                {pendingOrdersList.length === 0 && <div className="p-6 text-center text-slate-400">لا توجد طلبيات متاحة</div>}
+                {pendingOrdersList.length === 0 && <div className="p-6 text-center text-slate-400">لا توجد اوردرات متاحة</div>}
                 {pendingOrdersList.map((p: any) => (
                   <div
                     key={p.id}
@@ -1311,7 +1942,7 @@ const SalesDaily: React.FC = () => {
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-3">
                 <Box className="text-slate-500" />
-                <h3 className="font-black">طلبيات اليوم المختارة ({todayOrdersCount})</h3>
+                <h3 className="font-black">اوردرات اليوم المختارة ({todayOrdersCount})</h3>
               </div>
               <div className="text-sm text-slate-500">
                 اجمالي اليوم: <span className="font-black">{todayValue.toLocaleString()}</span>
@@ -1319,7 +1950,7 @@ const SalesDaily: React.FC = () => {
             </div>
 
             <div className="divide-y max-h-[420px] overflow-auto">
-              {todayOrdersCount === 0 && <div className="p-6 text-center text-slate-400">لم يتم اختيار طلبيات اليوم بعد</div>}
+              {todayOrdersCount === 0 && <div className="p-6 text-center text-slate-400">لم يتم اختيار اوردرات اليوم بعد</div>}
               {todayOrdersUnique.map((o: any) => {
                 const sub = orderSubtotal(o);
                 const ship = parseNumeric(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0);
@@ -1369,7 +2000,7 @@ const SalesDaily: React.FC = () => {
             {!isShippingMode && selectedRepId && (
               <div className="mt-4 grid grid-cols-3 gap-3">
                 <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 p-4 rounded-2xl shadow-sm text-center">
-                  <div className="text-xs text-slate-400">طلبيات قديمة في العهدة</div>
+                  <div className="text-xs text-slate-400">اوردرات قديمة في العهدة</div>
                   <div className="font-black text-lg mt-1">{oldOrdersCount}</div>
                 </div>
                 <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 p-4 rounded-2xl shadow-sm text-center">
@@ -1388,6 +2019,44 @@ const SalesDaily: React.FC = () => {
               </div>
             )}
           </div>
+
+          {/* Assigned / Old custody orders (اوردرات نزول) */}
+          {Array.isArray(assignedOrders) && assignedOrders.length > 0 && (
+            <div className="bg-white dark:bg-slate-800 rounded-3xl p-4 shadow-sm border border-slate-200 dark:border-slate-700 mt-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  <Box className="text-slate-500" />
+                  <h3 className="font-black">اوردرات نزول ({assignedOrders.length})</h3>
+                </div>
+                <div className="text-sm text-slate-500">اجمالي: <span className="font-black">{oldOrdersValue.toLocaleString()}</span></div>
+              </div>
+
+              <div className="divide-y max-h-[320px] overflow-auto">
+                {assignedOrders.map((o: any) => {
+                  const sub = orderSubtotal(o);
+                  const ship = parseNumeric(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0);
+                  const tot = orderTotal(o);
+                  return (
+                    <div
+                      key={o.id}
+                      className="flex items-center justify-between py-3 px-2 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-900/30 transition-colors"
+                    >
+                      <div>
+                        <div className="font-bold">#{o.orderNumber ?? o.order_number ?? o.id} - {o.customerName ?? o.customer_name ?? ''}</div>
+                        <div className="text-xs text-slate-500 mt-1">{o.governorate || ''} • {o.phone || o.phone1 || ''}</div>
+                        <div className="text-xs text-slate-400 mt-1">{orderPieces(o).toLocaleString()} قطع</div>
+                      </div>
+                      <div className="text-right text-xs">
+                        <div>المجموع: <span className="font-black">{sub.toLocaleString()}</span></div>
+                        <div>الشحن: <span className="font-black">{ship.toLocaleString()}</span></div>
+                        <div className="font-black text-lg">الإجمالي: {tot.toLocaleString()}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

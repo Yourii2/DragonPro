@@ -78,7 +78,7 @@ const SRMModule: React.FC = () => {
           const [treasuryRes, warehouseRes, productRes] = await Promise.all([
               fetch(`${API_BASE_PATH}/api.php?module=treasuries&action=getAll`),
               fetch(`${API_BASE_PATH}/api.php?module=warehouses&action=getAll`),
-              fetch(`${API_BASE_PATH}/api.php?module=products&action=getAll`)
+              fetch(`${API_BASE_PATH}/api.php?module=products&action=getFlat`)
           ]);
 
           const treasuryResult = await treasuryRes.json();

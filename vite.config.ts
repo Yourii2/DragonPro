@@ -45,6 +45,9 @@ export default defineConfig(({ mode }) => {
       server: {
         port: 3000,
         host: '0.0.0.0',
+        // Allow specific external hosts when accessed via a public hostname
+        // (e.g. abofahd.a2zspot.com). Add hosts here to silence Vite's blocked request.
+        allowedHosts: ['abofahd.a2zspot.com'],
         proxy: {
           // Dev-only: proxy only PHP endpoints under /components to Apache.
           // Use a regex key so TS/TSX module requests (e.g. /components/*.tsx)

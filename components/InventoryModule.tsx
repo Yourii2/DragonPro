@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Package, ArrowDownLeft, ArrowUpRight, History, Box, QrCode, Plus, Edit, Trash2, Eye, MapPin, X, Save, ArrowLeftRight, CheckCircle2, MinusCircle, PlusCircle, FilePlus2, Search, FileText, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Package, ArrowDownLeft, ArrowUpRight, History, Box, QrCode, Plus, Edit, Trash2, Eye, MapPin, X, Save, ArrowLeftRight, CheckCircle2, MinusCircle, PlusCircle, FilePlus2, Search, FileText, RefreshCw, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { formatMovementDetails, translateMovementType } from '../services/labelHelpers';
@@ -29,6 +29,9 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
   const [treasuries, setTreasuries] = useState<any[]>([]);
   const [userDefaults, setUserDefaults] = useState<any>(null);
   const [products, setProducts] = useState<any[]>([]); 
+  const [parentProducts, setParentProducts] = useState<any[]>([]);
+  const [expandedParentIds, setExpandedParentIds] = useState<Set<number>>(new Set());
+  const [expandedColors, setExpandedColors] = useState<Set<string>>(new Set());
   const [fabrics, setFabrics] = useState<any[]>([]);
   const [accessories, setAccessories] = useState<any[]>([]);
   const [stockRows, setStockRows] = useState<any[]>([]);
@@ -43,7 +46,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
   const lastMissingSalePriceAlertKeyRef = useRef<string>('');
 
   const [warehouseFormData, setWarehouseFormData] = useState({ name: '', location: '' });
-  const [transferData, setTransferData] = useState({ from: '', to: '', items: [{ productId: '', qty: 1 }] });
+  const [transferData, setTransferData] = useState({ from: '', to: '', items: [{ transferType: '', productId: '', _parentId: '', _color: '', _size: '', qty: 1 }] });
   const [transferSuccess, setTransferSuccess] = useState(false);
 
   // --- Inventory Audit State ---
@@ -61,6 +64,18 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
   const [isProductHistoryModalOpen, setIsProductHistoryModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<any>(null);
   const [selectedProductHistory, setSelectedProductHistory] = useState<any>(null);
+
+  // --- Parent Product Modal State ---
+  const [isParentModalOpen, setIsParentModalOpen] = useState(false);
+  const [editingParent, setEditingParent] = useState<any>(null);
+  const [parentFormData, setParentFormData] = useState({ name: '', category: '' });
+
+  // --- Variant Modal State ---
+  const [isVariantModalOpen, setIsVariantModalOpen] = useState(false);
+  const [variantParentId, setVariantParentId] = useState<number | null>(null);
+  const [variantParentName, setVariantParentName] = useState('');
+  const [editingVariant, setEditingVariant] = useState<any>(null);
+  const [variantFormData, setVariantFormData] = useState({ color: '', size: '', barcode: '', cost: 0, price: 0, quantity: 0, reorderLevel: 5, warehouseId: '' });
 
   const [productFormData, setProductFormData] = useState({ 
     id: null, 
@@ -110,7 +125,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
   const [returnsData, setReturnsData] = useState({
     supplierId: '',
     warehouseId: '',
-    items: [{ id: Date.now(), productId: '', qty: 1, costPrice: 0, name: '' }],
+    items: [{ id: Date.now(), productId: '', qty: 1, costPrice: 0, name: '', returnType: '', _parentId: '', _color: '', _size: '' }],
     receivedAmount: 0,
     treasuryId: '',
   });
@@ -118,7 +133,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
   const [receivingData, setReceivingData] = useState({
     supplierId: '',
     warehouseId: '',
-    items: [{ id: Date.now(), itemType: ((localStorage.getItem('Dragon_product_source') || 'both').toString() === 'suppliers') ? 'product_new' : 'fabric_new', isNew: true, name: '', color: '', size: '', costPrice: 0, sellingPrice: 0, qty: 1, barcode: '', productId: '' }],
+    items: [{ id: Date.now(), itemType: ((localStorage.getItem('Dragon_product_source') || 'both').toString() === 'suppliers') ? 'product_new' : 'fabric_new', isNew: true, name: '', color: '', size: '', costPrice: 0, sellingPrice: 0, qty: 1, barcode: '', productId: '', _parentId: '', _color: '', _size: '' }],
     paidAmount: 0,
     treasuryId: '',
   });
@@ -221,7 +236,18 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
       const response = await fetch(`${API_BASE_PATH}/api.php?module=products&action=getAll`);
       const result = await response.json();
       if (result.success) {
-        setProducts(result.data || []);
+        const nested: any[] = result.data || [];
+        setParentProducts(nested);
+        // Derive flat variant list for backward-compat (receiving, POS, transfer, etc.)
+        const flat = nested.flatMap((p: any) =>
+          (p.variants || []).map((v: any) => ({
+            ...v,
+            name: p.name,           // use parent name
+            category: p.category,
+            parent_id: p.id,
+          }))
+        );
+        setProducts(flat);
       }
     } catch (error) {
       console.error('Failed to fetch products:', error);
@@ -732,6 +758,129 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
     });
   };
 
+  // --- Parent Product Handlers ---
+  const handleOpenParentModal = (parent: any = null) => {
+    if (parent) {
+      setEditingParent(parent);
+      setParentFormData({ name: parent.name, category: parent.category || '' });
+    } else {
+      setEditingParent(null);
+      setParentFormData({ name: '', category: '' });
+    }
+    setIsParentModalOpen(true);
+  };
+
+  const handleParentSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!parentFormData.name.trim()) return;
+    const action = editingParent ? 'updateParent' : 'createParent';
+    const body = editingParent
+      ? JSON.stringify({ id: editingParent.id, ...parentFormData })
+      : JSON.stringify(parentFormData);
+    try {
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=products&action=${action}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body
+      });
+      const result = await res.json();
+      if (result.success) {
+        await fetchProducts();
+        setIsParentModalOpen(false);
+        Swal.fire('تم الحفظ', '', 'success');
+      } else {
+        Swal.fire('خطأ', result.message || 'فشل الحفظ', 'error');
+      }
+    } catch { Swal.fire('خطأ في الاتصال', '', 'error'); }
+  };
+
+  const handleDeleteParent = (parent: any) => {
+    const totalStock = (parent.variants || []).reduce((s: number, v: any) => s + Number(v.stock || 0), 0);
+    if (totalStock > 0) {
+      Swal.fire('لا يمكن الحذف', `المنتج "${parent.name}" لديه كمية (${totalStock}) في المخزن. أفرغ الكمية أولاً.`, 'error');
+      return;
+    }
+    Swal.fire({
+      title: `حذف "${parent.name}"؟`,
+      text: 'سيتم أرشفة المنتج وجميع أصنافه.',
+      icon: 'warning', showCancelButton: true,
+      confirmButtonText: 'نعم، احذف', cancelButtonText: 'إلغاء'
+    }).then(async r => {
+      if (!r.isConfirmed) return;
+      try {
+        const res = await fetch(`${API_BASE_PATH}/api.php?module=products&action=deleteParent`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: parent.id })
+        });
+        const j = await res.json();
+        if (j.success) { await fetchProducts(); Swal.fire('تم الحذف', '', 'success'); }
+        else Swal.fire('خطأ', j.message, 'error');
+      } catch { Swal.fire('خطأ في الاتصال', '', 'error'); }
+    });
+  };
+
+  // --- Variant Handlers ---
+  const handleOpenVariantModal = (parentId: number, parentName: string, variant: any = null) => {
+    setVariantParentId(parentId);
+    setVariantParentName(parentName);
+    if (variant) {
+      setEditingVariant(variant);
+      setVariantFormData({
+        color: variant.color || '', size: variant.size || '', barcode: variant.barcode || '',
+        cost: variant.cost || variant.cost_price || 0, price: variant.price || variant.sale_price || 0,
+        quantity: 0, reorderLevel: variant.reorderLevel || variant.reorder_level || 5,
+        warehouseId: warehouses.length > 0 ? String(warehouses[0].id) : ''
+      });
+    } else {
+      setEditingVariant(null);
+      setVariantFormData({
+        color: '', size: '', barcode: '', cost: 0, price: 0, quantity: 0, reorderLevel: 5,
+        warehouseId: warehouses.length > 0 ? String(warehouses[0].id) : ''
+      });
+    }
+    setIsVariantModalOpen(true);
+  };
+
+  const handleVariantSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const action = editingVariant ? 'updateVariant' : 'createVariant';
+    const body = editingVariant
+      ? JSON.stringify({ id: editingVariant.id, ...variantFormData })
+      : JSON.stringify({ product_id: variantParentId, ...variantFormData });
+    try {
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=products&action=${action}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body
+      });
+      const result = await res.json();
+      if (result.success) {
+        await fetchProducts();
+        setIsVariantModalOpen(false);
+        Swal.fire('تم الحفظ', '', 'success');
+      } else {
+        Swal.fire('خطأ', result.message || 'فشل الحفظ', 'error');
+      }
+    } catch { Swal.fire('خطأ في الاتصال', '', 'error'); }
+  };
+
+  const handleDeleteVariant = (variant: any) => {
+    if (Number(variant.stock || 0) > 0) {
+      Swal.fire('لا يمكن الحذف', `الصنف لديه كمية (${variant.stock}) في المخزن.`, 'error');
+      return;
+    }
+    Swal.fire({
+      title: `حذف الصنف؟`, text: `${variant.color || ''} ${variant.size || ''}`,
+      icon: 'warning', showCancelButton: true,
+      confirmButtonText: 'نعم، احذف', cancelButtonText: 'إلغاء'
+    }).then(async r => {
+      if (!r.isConfirmed) return;
+      try {
+        const res = await fetch(`${API_BASE_PATH}/api.php?module=products&action=deleteVariant`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: variant.id })
+        });
+        const j = await res.json();
+        if (j.success) { await fetchProducts(); Swal.fire('تم الحذف', '', 'success'); }
+        else Swal.fire('خطأ', j.message, 'error');
+      } catch { Swal.fire('خطأ في الاتصال', '', 'error'); }
+    });
+  };
+
   const handleViewProductHistory = (product: any) => {
     setSelectedProductHistory(product);
     setMovements([]);
@@ -772,6 +921,9 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
             updatedItem.costPrice = 0;
             updatedItem.sellingPrice = 0;
             updatedItem.qty = 1;
+            updatedItem._parentId = '';
+            updatedItem._color = '';
+            updatedItem._size = '';
             // Auto-generate barcode for new
             updatedItem.barcode = Math.floor(100000000000 + Math.random() * 900000000000).toString();
           } else {
@@ -784,6 +936,9 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
             updatedItem.qty = 1;
             updatedItem.barcode = '';
             updatedItem.productId = '';
+            updatedItem._parentId = '';
+            updatedItem._color = '';
+            updatedItem._size = '';
           }
         }
         if (field === 'isNew') {
@@ -797,6 +952,62 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
             updatedItem.barcode = '';
           }
         }
+        // Cascade for product_existing: parent → color → size
+        if (item.itemType === 'product_existing') {
+          if (field === '_parentId') {
+            const pp = parentProducts.find((p: any) => String(p.id) === value);
+            const variants = pp ? (pp.variants || []) : [];
+            updatedItem._color = '';
+            updatedItem._size = '';
+            updatedItem.productId = '';
+            updatedItem.name = pp?.name || '';
+            updatedItem.color = '';
+            updatedItem.size = '';
+            updatedItem.barcode = '';
+            if (variants.length === 1) {
+              const v = variants[0];
+              updatedItem._color = v.color;
+              updatedItem._size = v.size;
+              updatedItem.productId = String(v.id);
+              updatedItem.color = v.color;
+              updatedItem.size = v.size;
+              updatedItem.barcode = v.barcode || '';
+              updatedItem.costPrice = Number(v.cost_price || 0);
+              updatedItem.sellingPrice = Number(v.sale_price || v.price || 0);
+            }
+            return updatedItem;
+          }
+          if (field === '_color') {
+            const pp = parentProducts.find((p: any) => String(p.id) === String((item as any)._parentId || ''));
+            const variants = (pp?.variants || []).filter((v: any) => v.color === value);
+            updatedItem._size = '';
+            updatedItem.productId = '';
+            updatedItem.color = value;
+            updatedItem.size = '';
+            if (variants.length === 1) {
+              const v = variants[0];
+              updatedItem._size = v.size;
+              updatedItem.productId = String(v.id);
+              updatedItem.size = v.size;
+              updatedItem.barcode = v.barcode || '';
+              updatedItem.costPrice = Number(v.cost_price || 0);
+              updatedItem.sellingPrice = Number(v.sale_price || v.price || 0);
+            }
+            return updatedItem;
+          }
+          if (field === '_size') {
+            const pp = parentProducts.find((p: any) => String(p.id) === String((item as any)._parentId || ''));
+            const variant = (pp?.variants || []).find((v: any) => v.color === (item as any)._color && v.size === value);
+            if (variant) {
+              updatedItem.productId = String(variant.id);
+              updatedItem.size = value;
+              updatedItem.barcode = variant.barcode || '';
+              updatedItem.costPrice = Number(variant.cost_price || 0);
+              updatedItem.sellingPrice = Number(variant.sale_price || variant.price || 0);
+            }
+            return updatedItem;
+          }
+        }
         return updatedItem;
       }
       return item;
@@ -807,7 +1018,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
   const addReceivingItem = () => {
     setReceivingData(prev => ({
       ...prev,
-      items: [...prev.items, { id: Date.now(), itemType: defaultReceivingItemType, isNew: true, name: '', color: '', size: '', costPrice: 0, sellingPrice: 0, qty: 1, barcode: '', productId: '' }]
+      items: [...prev.items, { id: Date.now(), itemType: defaultReceivingItemType, isNew: true, name: '', color: '', size: '', costPrice: 0, sellingPrice: 0, qty: 1, barcode: '', productId: '', _parentId: '', _color: '', _size: '' }]
     }));
   };
 
@@ -1055,7 +1266,68 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
 
   const handleReturnItemChange = (id: number, field: string, value: any) => {
     const newItems = returnsData.items.map(item => {
-      if (item.id === id) return { ...item, [field]: value };
+      if (item.id === id) {
+        let updatedItem: any = { ...item, [field]: value };
+        // Reset cascade on returnType change
+        if (field === 'returnType') {
+          updatedItem._parentId = '';
+          updatedItem._color = '';
+          updatedItem._size = '';
+          updatedItem.productId = '';
+          updatedItem.costPrice = 0;
+          updatedItem.name = '';
+        }
+        // Cascade for product type: parent → color → size
+        const t = String(field === 'returnType' ? value : (item as any).returnType || '').trim();
+        if (t === 'product') {
+          const stockRows = getWarehouseStock(String(returnsData.warehouseId || ''));
+          const stockIds = new Set(stockRows.map((r: any) => Number(r.product_id)));
+          if (field === '_parentId') {
+            const pp = parentProducts.find((p: any) => String(p.id) === value);
+            const availableVariants = (pp?.variants || []).filter((v: any) => stockIds.has(Number(v.id)));
+            updatedItem._color = '';
+            updatedItem._size = '';
+            updatedItem.productId = '';
+            updatedItem.name = pp?.name || '';
+            updatedItem.costPrice = 0;
+            if (availableVariants.length === 1) {
+              const v = availableVariants[0];
+              const stockRow = stockRows.find((r: any) => Number(r.product_id) === Number(v.id));
+              updatedItem._color = v.color;
+              updatedItem._size = v.size;
+              updatedItem.productId = String(v.id);
+              updatedItem.costPrice = Number(stockRow?.cost || v.cost_price || 0);
+            }
+            return updatedItem;
+          }
+          if (field === '_color') {
+            const pp = parentProducts.find((p: any) => String(p.id) === String((item as any)._parentId || ''));
+            const availableVariants = (pp?.variants || []).filter((v: any) => stockIds.has(Number(v.id)) && v.color === value);
+            updatedItem._size = '';
+            updatedItem.productId = '';
+            updatedItem.costPrice = 0;
+            if (availableVariants.length === 1) {
+              const v = availableVariants[0];
+              const stockRow = stockRows.find((r: any) => Number(r.product_id) === Number(v.id));
+              updatedItem._size = v.size;
+              updatedItem.productId = String(v.id);
+              updatedItem.costPrice = Number(stockRow?.cost || v.cost_price || 0);
+            }
+            return updatedItem;
+          }
+          if (field === '_size') {
+            const pp = parentProducts.find((p: any) => String(p.id) === String((item as any)._parentId || ''));
+            const variant = (pp?.variants || []).find((v: any) => v.color === (item as any)._color && v.size === value && stockIds.has(Number(v.id)));
+            if (variant) {
+              const stockRow = stockRows.find((r: any) => Number(r.product_id) === Number(variant.id));
+              updatedItem.productId = String(variant.id);
+              updatedItem.costPrice = Number(stockRow?.cost || variant.cost_price || 0);
+            }
+            return updatedItem;
+          }
+        }
+        return updatedItem;
+      }
       return item;
     });
     setReturnsData({ ...returnsData, items: newItems });
@@ -1064,7 +1336,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
   const addReturnItem = () => {
     setReturnsData(prev => ({
       ...prev,
-      items: [...prev.items, { id: Date.now(), productId: '', qty: 1, costPrice: 0, name: '' }]
+      items: [...prev.items, { id: Date.now(), productId: '', qty: 1, costPrice: 0, name: '', returnType: '', _parentId: '', _color: '', _size: '' }]
     }));
   };
 
@@ -1298,10 +1570,79 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
 
   const handleTransferItemChange = (index: number, field: string, value: any) => {
     const newItems = [...transferData.items];
-    let next = { ...newItems[index], [field]: value };
+    let next: any = { ...newItems[index], [field]: value };
+    // Reset cascade when transfer type changes
+    if (field === 'transferType') {
+      next._parentId = '';
+      next._color = '';
+      next._size = '';
+      next.productId = '';
+    }
+    const t = String(next.transferType || '').trim();
+    // Cascade for product type: parent → color → size
+    if (t === 'product') {
+      const stockRows = getWarehouseStock(String(transferData.from || ''));
+      const stockIds = new Set(stockRows.map((r: any) => Number(r.product_id)));
+      if (field === '_parentId') {
+        const pp = parentProducts.find((p: any) => String(p.id) === value);
+        const availableVariants = (pp?.variants || []).filter((v: any) => stockIds.has(Number(v.id)));
+        next._color = '';
+        next._size = '';
+        next.productId = '';
+        if (availableVariants.length === 1) {
+          const v = availableVariants[0];
+          const stockRow = stockRows.find((r: any) => Number(r.product_id) === Number(v.id));
+          next._color = v.color;
+          next._size = v.size;
+          next.productId = String(v.id);
+          next.name = pp?.name || '';
+          next.color = v.color;
+          next.size = v.size;
+          next.barcode = v.barcode || '';
+          next.costPrice = Number(stockRow?.cost || v.cost_price || 0);
+        }
+        newItems[index] = next;
+        setTransferData({ ...transferData, items: newItems });
+        return;
+      }
+      if (field === '_color') {
+        const pp = parentProducts.find((p: any) => String(p.id) === String(next._parentId || ''));
+        const availableVariants = (pp?.variants || []).filter((v: any) => stockIds.has(Number(v.id)) && v.color === value);
+        next._size = '';
+        next.productId = '';
+        if (availableVariants.length === 1) {
+          const v = availableVariants[0];
+          const stockRow = stockRows.find((r: any) => Number(r.product_id) === Number(v.id));
+          next._size = v.size;
+          next.productId = String(v.id);
+          next.color = value;
+          next.size = v.size;
+          next.barcode = v.barcode || '';
+          next.costPrice = Number(stockRow?.cost || v.cost_price || 0);
+        }
+        newItems[index] = next;
+        setTransferData({ ...transferData, items: newItems });
+        return;
+      }
+      if (field === '_size') {
+        const pp = parentProducts.find((p: any) => String(p.id) === String(next._parentId || ''));
+        const variant = (pp?.variants || []).find((v: any) => v.color === next._color && v.size === value && stockIds.has(Number(v.id)));
+        if (variant) {
+          const stockRow = stockRows.find((r: any) => Number(r.product_id) === Number(variant.id));
+          next.productId = String(variant.id);
+          next.color = variant.color;
+          next.size = value;
+          next.barcode = variant.barcode || '';
+          next.costPrice = Number(stockRow?.cost || variant.cost_price || 0);
+        }
+        newItems[index] = next;
+        setTransferData({ ...transferData, items: newItems });
+        return;
+      }
+    }
+    // For fabric/accessory: resolve product info from flat productId selection
     if (field === 'productId') {
       const pid = parseInt(String(value || '0'));
-      const t = String((next as any)?.transferType || '').trim();
       let resolved: any = null;
       if (t === 'fabric') {
         const rows = getWarehouseFabrics(String(transferData.from || ''));
@@ -1309,21 +1650,16 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
       } else if (t === 'accessory') {
         const rows = getWarehouseAccessories(String(transferData.from || ''));
         resolved = rows.find((r: any) => Number(r.id) === pid || Number(r.accessory_id) === pid) || null;
-      } else {
-        const fromRows = getWarehouseStock(String(transferData.from || ''));
-        const row = fromRows.find((r: any) => Number(r.product_id) === pid);
-        const prod = products.find(p => Number(p.id) === pid);
-        resolved = row || prod || null;
       }
       if (resolved) {
         next = {
           ...next,
           name: resolved.name,
-          barcode: (resolved as any).barcode || (resolved as any).code || '',
-          color: (resolved as any).color,
-          size: (resolved as any).size,
-          costPrice: Number((resolved as any).cost || (resolved as any).cost_price || (resolved as any).costPrice || 0),
-          sellingPrice: Number((resolved as any).price || (resolved as any).sellingPrice || 0),
+          barcode: resolved.barcode || resolved.code || '',
+          color: resolved.color,
+          size: resolved.size,
+          costPrice: Number(resolved.cost || resolved.cost_price || resolved.costPrice || 0),
+          sellingPrice: Number(resolved.price || resolved.sellingPrice || 0),
         };
       }
     }
@@ -1332,7 +1668,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
   };
 
   const addTransferItem = () => {
-    setTransferData(prev => ({ ...prev, items: [...prev.items, { productId: '', qty: 1 }] }));
+    setTransferData(prev => ({ ...prev, items: [...prev.items, { transferType: '', productId: '', _parentId: '', _color: '', _size: '', qty: 1 }] }));
   };
 
   const removeTransferItem = (index: number) => {
@@ -1608,16 +1944,15 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
       )}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 text-right">
         <div>
-          <h2 className="text-xl font-black text-slate-900 dark:text-white">المخزون والمستودعات</h2>
+          <h2 className="text-xl font-black text-slate-900 dark:text-white">المنتجات و المخازن</h2>
           <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">إدارة حركة الأصناف وتوزيع الكميات</p>
         </div>
         <div className="flex p-1.5 rounded-2xl border border-card shadow-sm overflow-x-auto max-w-full card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
-          <button onClick={() => setActiveTab('stock')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeTab === 'stock' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Box size={16}/> حالة المخزون</button>
-          <button onClick={() => setActiveTab('warehouses')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeTab === 'warehouses' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><MapPin size={16}/> المستودعات</button>
+          <button onClick={() => setActiveTab('stock')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeTab === 'stock' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Box size={16}/> المنتجات</button>
+          <button onClick={() => setActiveTab('warehouses')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeTab === 'warehouses' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><MapPin size={16}/> المخازن</button>
           <button onClick={() => setActiveTab('transfer')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeTab === 'transfer' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><ArrowLeftRight size={16}/> تحويل</button>
           <button onClick={() => setActiveTab('receiving')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeTab === 'receiving' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><ArrowDownLeft size={16}/> استلام</button>
           <button onClick={() => setActiveTab('returns')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeTab === 'returns' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><ArrowUpRight size={16}/> مرتجع</button>
-          <button onClick={() => setActiveTab('audit')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeTab === 'audit' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><CheckCircle2 size={16}/> جرد</button>
         </div>
       </div>
 
@@ -1638,65 +1973,168 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                     className="text-xs"
                    />
                    <button 
-                    onClick={() => handleOpenProductModal()}
+                    onClick={() => handleOpenParentModal()}
                     className="flex items-center gap-2 bg-accent text-white px-4 py-2 rounded-xl text-xs font-black hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20"
                    >
-                    <Plus size={16} /> إضافة منتج
+                    <Plus size={16} /> منتج جديد
                    </button>
                </div>
              </div>
              <div className="overflow-x-auto">
-               <table className="w-full text-right text-sm">
-                  <thead className="text-muted border-b dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/20">
-                    <tr>
-                      <th className="px-6 py-4 font-bold">اسم المنتج</th>
-                      <th className="px-6 py-4 font-bold">الباركود</th>
-                      <th className="px-6 py-4 font-bold">اللون</th>
-                      <th className="px-6 py-4 font-bold">المقاس</th>
-                      <th className="px-6 py-4 font-bold">الكمية</th>
-                      <th className="px-6 py-4 font-bold">الشراء</th>
-                      {salePriceSource === 'product' && (
-                        <th className="px-6 py-4 font-bold">البيع</th>
-                      )}
-                      <th className="px-6 py-4 font-bold text-center">تحكم</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y dark:divide-slate-700 text-slate-700 dark:text-slate-300">
-                    {stockRows.length === 0 ? (
-                      <tr><td colSpan={salePriceSource === 'product' ? 8 : 7} className="text-center py-10 text-muted">لا توجد منتجات مسجلة.</td></tr>
-                    ) : stockRows.map(p => (
-                      <tr key={p.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                        <td className="px-6 py-4 font-bold text-slate-800 dark:text-white">
-                          <div className="flex items-center gap-2">
-                            <span>{p.name}</span>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 text-xs font-mono text-muted">{p.barcode || '-'}</td>
-                        <td className="px-6 py-4 text-xs">{p.color || '-'}</td>
-                        <td className="px-6 py-4 text-xs font-mono">{p.size || '-'}</td>
-                        <td className="px-6 py-4">
-                            <span className={`px-2 py-1 rounded text-[10px] font-black ${p.stock <= p.reorderLevel ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-600'}`}>
-                                {p.stock}
-                            </span>
-                        </td>
-                        <td className="px-6 py-4 text-xs">{p.cost} {currencySymbol}</td>
-                        {salePriceSource === 'product' && (
-                          <td className="px-6 py-4 text-xs font-bold">
-                            {p.price} {currencySymbol}
-                          </td>
-                        )}
-                        <td className="px-6 py-4">
-                          <div className="flex items-center justify-center gap-1">
-                            <button onClick={() => openStockBarcodes(p)} className="p-2 bg-slate-50 text-slate-700 rounded-lg hover:bg-slate-100 transition-colors" title="عرض باركودات الكمية"><QrCode size={14} /></button>
-                            <button onClick={() => handleViewProductHistory(p)} className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors" title="سجل الحركات"><Eye size={14} /></button>
-                            <button onClick={() => handleOpenProductModal(p)} className="p-2 bg-amber-50 text-amber-600 rounded-lg hover:bg-amber-100 transition-colors" title="تعديل"><Edit size={14} /></button>
-                            <button onClick={() => handleDeleteProduct(p)} className="p-2 bg-rose-50 text-rose-600 rounded-lg hover:bg-rose-100 transition-colors" title="حذف"><Trash2 size={14} /></button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-               </table>
+               {(() => {
+                 const isFilteredView = selectedWarehouseFilter && selectedWarehouseFilter !== 'كل المستودعات';
+
+                 // Build variant→qty map from stockRows when a warehouse is selected
+                 const stockMap: Map<number, number> = isFilteredView
+                   ? new Map(stockRows.map((r: any) => [Number(r.product_id ?? r.id), Number(r.stock ?? r.quantity ?? 0)]))
+                   : new Map();
+
+                 // For warehouse view: filter parents to only those with variants in this warehouse
+                 const displayParents: any[] = isFilteredView
+                   ? parentProducts
+                       .map((pp: any) => ({
+                         ...pp,
+                         variants: (pp.variants || [])
+                           .map((v: any) => ({ ...v, stock: stockMap.has(Number(v.id)) ? stockMap.get(Number(v.id)) : v.stock }))
+                           .filter((v: any) => stockMap.has(Number(v.id)))
+                       }))
+                       .filter((pp: any) => pp.variants.length > 0)
+                   : parentProducts;
+
+                 return (
+                 <table className="w-full text-right text-sm">
+                   <thead className="text-muted border-b dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/20">
+                     <tr>
+                       <th className="px-4 py-4 w-8"></th>
+                       <th className="px-4 py-4 font-bold">اسم المنتج / الصنف</th>
+                       <th className="px-4 py-4 font-bold">الباركود</th>
+                       <th className="px-4 py-4 font-bold">اللون</th>
+                       <th className="px-4 py-4 font-bold">المقاس</th>
+                       <th className="px-4 py-4 font-bold">الكمية</th>
+                       <th className="px-4 py-4 font-bold">الشراء</th>
+                       {salePriceSource === 'product' && <th className="px-4 py-4 font-bold">البيع</th>}
+                       <th className="px-4 py-4 font-bold text-center">تحكم</th>
+                     </tr>
+                   </thead>
+                   <tbody className="text-slate-700 dark:text-slate-300">
+                     {displayParents.length === 0 ? (
+                       <tr><td colSpan={9} className="text-center py-10 text-muted">{isFilteredView ? 'لا توجد أصناف في هذا المستودع.' : 'لا توجد منتجات مسجلة.'}</td></tr>
+                     ) : displayParents.map((parent: any) => {
+                       const isExpanded = expandedParentIds.has(parent.id);
+                       const totalStock = (parent.variants || []).reduce((s: number, v: any) => s + Number(v.stock || 0), 0);
+                       return (
+                         <React.Fragment key={parent.id}>
+                           {/* Parent row */}
+                           <tr className="border-b dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/40 hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors cursor-pointer"
+                               onClick={() => setExpandedParentIds(prev => { const n = new Set(prev); isExpanded ? n.delete(parent.id) : n.add(parent.id); return n; })}>
+                             <td className="px-4 py-3 text-center">
+                               {isExpanded ? <ChevronDown size={16} className="text-blue-500 mx-auto" /> : <ChevronRight size={16} className="text-slate-400 mx-auto" />}
+                             </td>
+                             <td className="px-4 py-3">
+                               <div className="flex items-center gap-2">
+                                 <span className="font-black text-slate-800 dark:text-white">{parent.name}</span>
+                                 {parent.category && <span className="text-[10px] px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full">{parent.category}</span>}
+                                 <span className="text-[10px] px-2 py-0.5 bg-slate-200 dark:bg-slate-700 text-muted rounded-full">{(parent.variants || []).length} صنف</span>
+                               </div>
+                             </td>
+                             <td className="px-4 py-3 text-xs text-muted">—</td>
+                             <td className="px-4 py-3 text-xs text-muted">—</td>
+                             <td className="px-4 py-3 text-xs text-muted">—</td>
+                             <td className="px-4 py-3">
+                               <span className={`px-2 py-1 rounded text-[10px] font-black ${totalStock === 0 ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-600'}`}>{totalStock}</span>
+                             </td>
+                             <td className="px-4 py-3 text-xs text-muted">—</td>
+                             {salePriceSource === 'product' && <td className="px-4 py-3 text-xs text-muted">—</td>}
+                             <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                               <div className="flex items-center justify-center gap-1">
+                                 <button onClick={() => handleOpenVariantModal(parent.id, parent.name)} className="p-1.5 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100" title="إضافة صنف جديد"><Plus size={13} /></button>
+                                 <button onClick={() => handleOpenParentModal(parent)} className="p-1.5 bg-amber-50 text-amber-600 rounded-lg hover:bg-amber-100" title="تعديل اسم المنتج"><Edit size={13} /></button>
+                                 <button onClick={() => handleDeleteParent(parent)} className="p-1.5 bg-rose-50 text-rose-600 rounded-lg hover:bg-rose-100" title="حذف المنتج"><Trash2 size={13} /></button>
+                               </div>
+                             </td>
+                           </tr>
+                           {/* Color groups (shown when parent expanded) */}
+                           {isExpanded && (() => {
+                             const colorMap = new Map<string, any[]>();
+                             for (const v of (parent.variants || [])) {
+                               const c = v.color || '—';
+                               if (!colorMap.has(c)) colorMap.set(c, []);
+                               colorMap.get(c)!.push(v);
+                             }
+                             return Array.from(colorMap.entries()).map(([color, colorVariants]) => {
+                               const colorKey = `${parent.id}_${color}`;
+                               const isColorExpanded = expandedColors.has(colorKey);
+                               const colorStock = colorVariants.reduce((s: number, v: any) => s + Number(v.stock || 0), 0);
+                               return (
+                                 <React.Fragment key={colorKey}>
+                                   {/* Color row */}
+                                   <tr
+                                     className="border-b border-dashed dark:border-slate-700/50 bg-indigo-50/30 dark:bg-indigo-950/10 hover:bg-indigo-50/60 dark:hover:bg-indigo-950/20 cursor-pointer transition-colors"
+                                     onClick={() => setExpandedColors(prev => { const n = new Set(prev); isColorExpanded ? n.delete(colorKey) : n.add(colorKey); return n; })}
+                                   >
+                                     <td className="px-4 py-2.5 text-center">
+                                       {isColorExpanded ? <ChevronDown size={13} className="text-indigo-400 mx-auto" /> : <ChevronRight size={13} className="text-slate-400 mx-auto" />}
+                                     </td>
+                                     <td className="px-4 py-2.5 pr-8">
+                                       <div className="flex items-center gap-2 text-xs">
+                                         <span className="w-3 h-3 rounded-full bg-indigo-300 dark:bg-indigo-600 inline-block flex-shrink-0"></span>
+                                         <span className="font-semibold text-slate-700 dark:text-slate-200">{color}</span>
+                                         <span className="text-[10px] px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 text-muted rounded-full">{colorVariants.length} مقاس</span>
+                                       </div>
+                                     </td>
+                                     <td className="px-4 py-2.5 text-xs text-muted">—</td>
+                                     <td className="px-4 py-2.5"><span className="text-xs font-semibold text-indigo-700 dark:text-indigo-300">{color}</span></td>
+                                     <td className="px-4 py-2.5 text-xs text-muted">{colorVariants.length} مقاس</td>
+                                     <td className="px-4 py-2.5">
+                                       <span className={`px-2 py-0.5 rounded text-[10px] font-black ${colorStock === 0 ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-600'}`}>{colorStock}</span>
+                                     </td>
+                                     <td className="px-4 py-2.5 text-xs text-muted">—</td>
+                                     {salePriceSource === 'product' && <td className="px-4 py-2.5 text-xs text-muted">—</td>}
+                                     <td className="px-4 py-2.5" onClick={e => e.stopPropagation()}>
+                                       <div className="flex items-center justify-center gap-1">
+                                         <button onClick={() => handleOpenVariantModal(parent.id, parent.name)} className="p-1.5 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100" title="إضافة مقاس"><Plus size={12} /></button>
+                                       </div>
+                                     </td>
+                                   </tr>
+                                   {/* Size rows (shown when color expanded) */}
+                                   {isColorExpanded && colorVariants.map((v: any) => (
+                                     <tr key={v.id} className="border-b border-dashed dark:border-slate-700/40 bg-white dark:bg-slate-900/5 hover:bg-indigo-50/20 dark:hover:bg-indigo-950/10 transition-colors">
+                                       <td className="px-4 py-2"></td>
+                                       <td className="px-4 py-2 pr-14">
+                                         <div className="flex items-center gap-1 text-xs">
+                                           <span className="w-1.5 h-1.5 rounded-full bg-slate-300 inline-block"></span>
+                                           <span className="text-muted">#{v.id}</span>
+                                         </div>
+                                       </td>
+                                       <td className="px-4 py-2 text-xs font-mono text-muted">{v.barcode || '-'}</td>
+                                       <td className="px-4 py-2 text-xs text-muted">—</td>
+                                       <td className="px-4 py-2 text-xs font-mono font-semibold">{v.size || '-'}</td>
+                                       <td className="px-4 py-2">
+                                         <span className={`px-2 py-0.5 rounded text-[10px] font-black ${Number(v.stock) <= Number(v.reorderLevel || v.reorder_level || 0) ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-600'}`}>{v.stock ?? 0}</span>
+                                       </td>
+                                       <td className="px-4 py-2 text-xs">{v.cost_price || v.cost || 0} {currencySymbol}</td>
+                                       {salePriceSource === 'product' && <td className="px-4 py-2 text-xs font-bold">{v.sale_price || v.price || 0} {currencySymbol}</td>}
+                                       <td className="px-4 py-2">
+                                         <div className="flex items-center justify-center gap-1">
+                                           <button onClick={() => openStockBarcodes(v)} className="p-1.5 bg-slate-50 text-slate-600 rounded-lg hover:bg-slate-100" title="باركود"><QrCode size={12} /></button>
+                                           <button onClick={() => handleViewProductHistory(v)} className="p-1.5 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100" title="السجل"><Eye size={12} /></button>
+                                           <button onClick={() => handleOpenVariantModal(parent.id, parent.name, v)} className="p-1.5 bg-amber-50 text-amber-600 rounded-lg hover:bg-amber-100" title="تعديل"><Edit size={12} /></button>
+                                           <button onClick={() => handleDeleteVariant(v)} className="p-1.5 bg-rose-50 text-rose-600 rounded-lg hover:bg-rose-100" title="حذف"><Trash2 size={12} /></button>
+                                         </div>
+                                       </td>
+                                     </tr>
+                                   ))}
+                                 </React.Fragment>
+                               );
+                             });
+                           })()}
+                         </React.Fragment>
+                       );
+                     })}
+                   </tbody>
+                 </table>
+                 );
+               })()}
              </div>
           </div>
 
@@ -1725,6 +2163,103 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                     <button onClick={() => setIsStockBarcodeModalOpen(false)} className="px-4 py-2 bg-slate-200 rounded-xl text-xs font-black">إغلاق</button>
                   </div>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* --- Parent Product Modal --- */}
+          {isParentModalOpen && (
+            <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+              <div className="w-full max-w-md rounded-[2.5rem] shadow-2xl overflow-hidden border border-card card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+                <div className="p-6 border-b dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-900/50">
+                  <h3 className="text-lg font-black text-slate-900 dark:text-white">{editingParent ? 'تعديل اسم المنتج' : 'منتج جديد'}</h3>
+                  <button onClick={() => setIsParentModalOpen(false)} className="text-slate-400 hover:text-rose-500" aria-label="إغلاق"><X size={24} /></button>
+                </div>
+                <form onSubmit={handleParentSubmit} className="p-6 space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-muted mb-1">اسم المنتج *</label>
+                    <input required value={parentFormData.name} onChange={e => setParentFormData(p => ({...p, name: e.target.value}))}
+                      className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2.5 px-4 text-sm" placeholder="مثال: قميص، بنطلون..." />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-muted mb-1">الفئة</label>
+                    <input value={parentFormData.category} onChange={e => setParentFormData(p => ({...p, category: e.target.value}))}
+                      className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2.5 px-4 text-sm" placeholder="مثال: ملابس، أحذية..." />
+                  </div>
+                  <div className="flex gap-2 pt-2">
+                    <button type="submit" className="flex-1 bg-accent text-white py-2.5 rounded-xl text-sm font-black">حفظ</button>
+                    <button type="button" onClick={() => setIsParentModalOpen(false)} className="flex-1 bg-slate-200 dark:bg-slate-700 py-2.5 rounded-xl text-sm font-black">إلغاء</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* --- Variant Modal --- */}
+          {isVariantModalOpen && (
+            <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+              <div className="w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden border border-card card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+                <div className="p-6 border-b dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-900/50">
+                  <div>
+                    <h3 className="text-lg font-black text-slate-900 dark:text-white">{editingVariant ? 'تعديل الصنف' : 'إضافة صنف جديد'}</h3>
+                    <p className="text-xs text-muted mt-0.5">المنتج: {variantParentName}</p>
+                  </div>
+                  <button onClick={() => setIsVariantModalOpen(false)} className="text-slate-400 hover:text-rose-500" aria-label="إغلاق"><X size={24} /></button>
+                </div>
+                <form onSubmit={handleVariantSubmit} className="p-6 grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-muted mb-1">اللون</label>
+                    <input value={variantFormData.color} onChange={e => setVariantFormData(p => ({...p, color: e.target.value}))}
+                      className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm" placeholder="أسود، أبيض..." />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-muted mb-1">المقاس</label>
+                    <input value={variantFormData.size} onChange={e => setVariantFormData(p => ({...p, size: e.target.value}))}
+                      className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm" placeholder="S، M، L، XL..." />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-xs font-bold text-muted mb-1">الباركود</label>
+                    <div className="flex gap-2">
+                      <input value={variantFormData.barcode} onChange={e => setVariantFormData(p => ({...p, barcode: e.target.value}))}
+                        className="flex-1 bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm font-mono" placeholder="اختياري" />
+                      <button type="button" onClick={() => setVariantFormData(p => ({...p, barcode: Math.floor(100000000000 + Math.random() * 900000000000).toString()}))}
+                        className="px-3 py-2 bg-slate-200 dark:bg-slate-700 rounded-xl text-xs font-bold hover:bg-slate-300 transition-colors">توليد</button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-muted mb-1">سعر الشراء</label>
+                    <input type="number" min="0" step="0.01" value={variantFormData.cost} onChange={e => setVariantFormData(p => ({...p, cost: parseFloat(e.target.value) || 0}))}
+                      className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-muted mb-1">سعر البيع</label>
+                    <input type="number" min="0" step="0.01" value={variantFormData.price} onChange={e => setVariantFormData(p => ({...p, price: parseFloat(e.target.value) || 0}))}
+                      className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-muted mb-1">حد إعادة الطلب</label>
+                    <input type="number" min="0" value={variantFormData.reorderLevel} onChange={e => setVariantFormData(p => ({...p, reorderLevel: parseInt(e.target.value) || 0}))}
+                      className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm" />
+                  </div>
+                  {!editingVariant && (
+                    <>
+                      <div>
+                        <label className="block text-xs font-bold text-muted mb-1">الكمية الافتتاحية</label>
+                        <input type="number" min="0" value={variantFormData.quantity} onChange={e => setVariantFormData(p => ({...p, quantity: parseInt(e.target.value) || 0}))}
+                          className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm" />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="block text-xs font-bold text-muted mb-1">المستودع</label>
+                        <CustomSelect value={variantFormData.warehouseId} onChange={v => setVariantFormData(p => ({...p, warehouseId: v}))}
+                          options={[{ value: '', label: 'اختر المستودع' }, ...warehouses.map(w => ({ value: String(w.id), label: w.name }))]} />
+                      </div>
+                    </>
+                  )}
+                  <div className="col-span-2 flex gap-2 pt-2">
+                    <button type="submit" className="flex-1 bg-accent text-white py-2.5 rounded-xl text-sm font-black">حفظ</button>
+                    <button type="button" onClick={() => setIsVariantModalOpen(false)} className="flex-1 bg-slate-200 dark:bg-slate-700 py-2.5 rounded-xl text-sm font-black">إلغاء</button>
+                  </div>
+                </form>
               </div>
             </div>
           )}
@@ -2153,7 +2688,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                   <label className="text-xs font-bold text-slate-500 mr-2">الأصناف المحولة</label>
                   {transferData.items.map((item, index) => (
                     <div key={index} className="grid grid-cols-12 gap-2 items-center">
-                      <div className="col-span-4">
+                      <div className="col-span-3">
                         <CustomSelect
                           value={item.transferType || ''}
                           onChange={v => handleTransferItemChange(index, 'transferType', v)}
@@ -2165,35 +2700,82 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                           className="w-full"
                         />
                       </div>
-                      <div className="col-span-4">
-                        <CustomSelect
-                          required
-                          value={item.productId || ''}
-                          onChange={v => handleTransferItemChange(index, 'productId', v)}
-                          options={(() => {
-                            const t = String(item.transferType || '').trim();
-                            if (t === 'fabric') {
-                              const rows = getWarehouseFabrics(String(transferData.from || ''));
-                              return [{ value: '', label: 'اختر الصنف...' }, ...rows.map((r: any) => ({ value: String(r.id ?? r.fabric_id), label: `${r.name} (${r.color || '-'}-${r.size || '-'}) — ${Number(r.quantity || 0)}` }))];
-                            }
-                            if (t === 'accessory') {
-                              const rows = getWarehouseAccessories(String(transferData.from || ''));
-                              return [{ value: '', label: 'اختر الصنف...' }, ...rows.map((r: any) => ({ value: String(r.id ?? r.accessory_id), label: `${r.name} (${r.color || '-'}-${r.size || '-'}) — ${Number(r.quantity || 0)}` }))];
-                            }
-                            if (t === 'product') {
-                              const rows = getWarehouseStock(String(transferData.from || ''));
-                              const filtered = rows.filter((r: any) => {
-                                const cat = String(r.category || '').trim();
-                                return !cat || cat === 'product';
-                              });
-                              return [{ value: '', label: 'اختر الصنف...' }, ...filtered.map((r: any) => ({ value: String(r.product_id), label: `${r.name} (${r.color || '-'}-${r.size || '-'}) — ${Number(r.quantity || 0)}` }))];
-                            }
-                            return [{ value: '', label: 'اختر الصنف...' }];
-                          })()}
-                          className="w-full"
-                        />
-                      </div>
-                      <div className="col-span-3">
+                      {String(item.transferType || '').trim() === 'product' ? (
+                        <>
+                          <div className="col-span-3">
+                            <CustomSelect
+                              value={String((item as any)._parentId || '')}
+                              onChange={v => handleTransferItemChange(index, '_parentId', v)}
+                              options={[
+                                { value: '', label: '— منتج —' },
+                                ...(() => {
+                                  const stockIds = new Set(getWarehouseStock(String(transferData.from || '')).map((r: any) => Number(r.product_id)));
+                                  return parentProducts
+                                    .filter((p: any) => (p.variants || []).some((v: any) => stockIds.has(Number(v.id))))
+                                    .map((p: any) => ({ value: String(p.id), label: p.name }));
+                                })()
+                              ]}
+                              className="w-full"
+                            />
+                          </div>
+                          <div className="col-span-2">
+                            {(() => {
+                              const pp = parentProducts.find((p: any) => String(p.id) === String((item as any)._parentId || ''));
+                              const stockIds = new Set(getWarehouseStock(String(transferData.from || '')).map((r: any) => Number(r.product_id)));
+                              const colorOptions = pp ? [...new Set((pp.variants || []).filter((v: any) => stockIds.has(Number(v.id))).map((v: any) => v.color).filter(Boolean))] : [];
+                              return colorOptions.length > 0 ? (
+                                <CustomSelect
+                                  value={String((item as any)._color || '')}
+                                  onChange={v => handleTransferItemChange(index, '_color', v)}
+                                  options={[{ value: '', label: '— لون —' }, ...colorOptions.map((c: any) => ({ value: c, label: c }))]}
+                                  className="w-full"
+                                />
+                              ) : <div className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm text-slate-400 text-center">—</div>;
+                            })()}
+                          </div>
+                          <div className="col-span-2">
+                            {(() => {
+                              const pp = parentProducts.find((p: any) => String(p.id) === String((item as any)._parentId || ''));
+                              const stockIds = new Set(getWarehouseStock(String(transferData.from || '')).map((r: any) => Number(r.product_id)));
+                              const stockRows = getWarehouseStock(String(transferData.from || ''));
+                              const sizeOptions = pp ? (pp.variants || []).filter((v: any) => stockIds.has(Number(v.id)) && (!(item as any)._color || v.color === (item as any)._color)).map((v: any) => {
+                                const qty = Number(stockRows.find((r: any) => Number(r.product_id) === Number(v.id))?.quantity || 0);
+                                return { value: v.size, label: `${v.size} — ${qty}` };
+                              }) : [];
+                              return sizeOptions.length > 0 ? (
+                                <CustomSelect
+                                  value={String((item as any)._size || '')}
+                                  onChange={v => handleTransferItemChange(index, '_size', v)}
+                                  options={[{ value: '', label: '— مقاس —' }, ...sizeOptions]}
+                                  className="w-full"
+                                />
+                              ) : <div className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm text-slate-400 text-center">—</div>;
+                            })()}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="col-span-7">
+                          <CustomSelect
+                            required
+                            value={item.productId || ''}
+                            onChange={v => handleTransferItemChange(index, 'productId', v)}
+                            options={(() => {
+                              const t = String(item.transferType || '').trim();
+                              if (t === 'fabric') {
+                                const rows = getWarehouseFabrics(String(transferData.from || ''));
+                                return [{ value: '', label: 'اختر الصنف...' }, ...rows.map((r: any) => ({ value: String(r.id ?? r.fabric_id), label: `${r.name} (${r.color || '-'}-${r.size || '-'}) — ${Number(r.quantity || 0)}` }))];
+                              }
+                              if (t === 'accessory') {
+                                const rows = getWarehouseAccessories(String(transferData.from || ''));
+                                return [{ value: '', label: 'اختر الصنف...' }, ...rows.map((r: any) => ({ value: String(r.id ?? r.accessory_id), label: `${r.name} (${r.color || '-'}-${r.size || '-'}) — ${Number(r.quantity || 0)}` }))];
+                              }
+                              return [{ value: '', label: 'اختر الصنف...' }];
+                            })()}
+                            className="w-full"
+                          />
+                        </div>
+                      )}
+                      <div className="col-span-1">
                         <input type="number" placeholder="الكمية" min="1" required value={item.qty} onChange={e => handleTransferItemChange(index, 'qty', (String(item.transferType || '').trim() === 'fabric') ? parseFloat(e.target.value) : parseInt(e.target.value))} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm" />
                       </div>
                       <div className="col-span-1">
@@ -2284,7 +2866,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                             } else if (item.itemType === 'accessory_existing') {
                               return [{ value: '', label: 'اختر صنف موجود...' }, ...accessories.map((a:any) => ({ value: String(a.id), label: `${a.name} (${a.color || '-'}-${a.size || '-'}) ${a.code || a.barcode || ''}` }))];
                             } else if (item.itemType === 'product_existing') {
-                              return [{ value: '', label: 'اختر صنف موجود...' }, ...products.filter(p => { const cat = String(p.category || '').trim(); return !cat || cat === 'product'; }).map(p => ({ value: String(p.id), label: `${p.name} (${p.color || '-'}-${p.size || '-'}) ${p.barcode || ''}` }))];
+                              return [{ value: '', label: 'اختر صنف موجود...' }, ...products.map(p => ({ value: String(p.id), label: `${p.name} (${p.color || '-'}-${p.size || '-'}) ${p.barcode || ''}` }))];
                             }
                             return [{ value: '', label: 'اختر صنف موجود...' }, ...products.map(p => ({ value: String(p.id), label: `${p.name} (${p.color || '-'}-${p.size || '-'}) ${p.barcode || ''}` }))];
                           })()}
@@ -2361,6 +2943,53 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                       <span className="text-[11px] font-bold text-slate-500 block mb-1">اسم الصنف / الصنف المسجل</span>
                       {item.itemType && item.itemType.endsWith('_new') ? (
                         <input type="text" placeholder="اكتب اسم الصنف الجديد" value={item.name} onChange={e => handleReceivingItemChange(item.id, 'name', e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-2.5 px-3 text-sm font-bold text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-blue-500/20 outline-none transition-all" />
+                      ) : item.itemType === 'product_existing' ? (
+                        <div className="grid grid-cols-3 gap-2">
+                          <div>
+                            <span className="text-[11px] font-bold text-slate-400 block mb-1">المنتج</span>
+                            <CustomSelect
+                              value={String((item as any)._parentId || '')}
+                              onChange={v => handleReceivingItemChange(item.id, '_parentId', v)}
+                              options={[
+                                { value: '', label: '— منتج —' },
+                                ...parentProducts
+                                  .map((p: any) => ({ value: String(p.id), label: p.name }))
+                              ]}
+                              className="w-full"
+                            />
+                          </div>
+                          <div>
+                            <span className="text-[11px] font-bold text-slate-400 block mb-1">اللون</span>
+                            {(() => {
+                              const pp = parentProducts.find((p: any) => String(p.id) === String((item as any)._parentId || ''));
+                              const colorOptions = pp ? [...new Set((pp.variants || []).map((v: any) => v.color).filter(Boolean))] : [];
+                              return colorOptions.length > 0 ? (
+                                <CustomSelect
+                                  value={String((item as any)._color || '')}
+                                  onChange={v => handleReceivingItemChange(item.id, '_color', v)}
+                                  options={[{ value: '', label: '— لون —' }, ...colorOptions.map((c: any) => ({ value: c, label: c }))]}
+                                  className="w-full"
+                                />
+                              ) : <div className="w-full bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl py-2 px-3 text-sm text-slate-400">—</div>;
+                            })()}
+                          </div>
+                          <div>
+                            <span className="text-[11px] font-bold text-slate-400 block mb-1">المقاس</span>
+                            {(() => {
+                              const pp = parentProducts.find((p: any) => String(p.id) === String((item as any)._parentId || ''));
+                              const selColor = (item as any)._color || '';
+                              const sizeOptions = pp ? [...new Set((pp.variants || []).filter((v: any) => !selColor || v.color === selColor).map((v: any) => v.size).filter(Boolean))] : [];
+                              return sizeOptions.length > 0 ? (
+                                <CustomSelect
+                                  value={String((item as any)._size || '')}
+                                  onChange={v => handleReceivingItemChange(item.id, '_size', v)}
+                                  options={[{ value: '', label: '— مقاس —' }, ...sizeOptions.map((s: any) => ({ value: s, label: s }))]}
+                                  className="w-full"
+                                />
+                              ) : <div className="w-full bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl py-2 px-3 text-sm text-slate-400">—</div>;
+                            })()}
+                          </div>
+                        </div>
                       ) : (
                         <CustomSelect
                           required
@@ -2369,7 +2998,6 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                           options={(() => {
                             if (item.itemType === 'fabric_existing') return [{ value: '', label: 'اختر صنف موجود...' }, ...fabrics.map((f:any) => ({ value: String(f.id), label: `${f.name} (${f.color || '-'}-${f.size || '-'}) ${f.code || f.barcode || ''}` }))];
                             if (item.itemType === 'accessory_existing') return [{ value: '', label: 'اختر صنف موجود...' }, ...accessories.map((a:any) => ({ value: String(a.id), label: `${a.name} (${a.color || '-'}-${a.size || '-'}) ${a.code || a.barcode || ''}` }))];
-                            if (item.itemType === 'product_existing') return [{ value: '', label: 'اختر صنف موجود...' }, ...products.filter(p => { const cat = String(p.category || '').trim(); return !cat || cat === 'product'; }).map(p => ({ value: String(p.id), label: `${p.name} (${p.color || '-'}-${p.size || '-'}) ${p.barcode || ''}` }))];
                             return [{ value: '', label: 'اختر صنف موجود...' }, ...products.map(p => ({ value: String(p.id), label: `${p.name} (${p.color || '-'}-${p.size || '-'}) ${p.barcode || ''}` }))];
                           })()}
                           className="w-full text-sm font-bold"
@@ -2380,11 +3008,19 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                     {/* --- الصف الثاني: اللون، المقاس، الباركود --- */}
                     <div className="col-span-1 md:col-span-3">
                       <span className="text-[11px] font-bold text-slate-500 block mb-1">اللون</span>
-                      <input type="text" placeholder="اللون" value={item.color} onChange={e => handleReceivingItemChange(item.id, 'color', e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-2 px-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-blue-500/20" />
+                      {item.itemType === 'product_existing' ? (
+                        <div className="w-full bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl py-2 px-3 text-sm font-semibold text-slate-700 dark:text-slate-300 min-h-[38px]">{item.color || '—'}</div>
+                      ) : (
+                        <input type="text" placeholder="اللون" value={item.color} onChange={e => handleReceivingItemChange(item.id, 'color', e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-2 px-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-blue-500/20" />
+                      )}
                     </div>
                     <div className="col-span-1 md:col-span-3">
                       <span className="text-[11px] font-bold text-slate-500 block mb-1">المقاس</span>
-                      <input type="text" placeholder="المقاس" value={item.size} onChange={e => handleReceivingItemChange(item.id, 'size', e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-2 px-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-blue-500/20" />
+                      {item.itemType === 'product_existing' ? (
+                        <div className="w-full bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl py-2 px-3 text-sm font-semibold text-slate-700 dark:text-slate-300 min-h-[38px]">{item.size || '—'}</div>
+                      ) : (
+                        <input type="text" placeholder="المقاس" value={item.size} onChange={e => handleReceivingItemChange(item.id, 'size', e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-2 px-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-blue-500/20" />
+                      )}
                     </div>
                     <div className="col-span-1 md:col-span-6">
                       <span className="text-[11px] font-bold text-slate-500 block mb-1">الباركود</span>
@@ -2511,11 +3147,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                               }
                               if (t === 'product') {
                                 const rows = getWarehouseStock(String(returnsData.warehouseId || ''));
-                                const filtered = rows.filter((r: any) => {
-                                  const cat = String(r.category || '').trim();
-                                  return !cat || cat === 'product';
-                                });
-                                return [{ value: '', label: `اختر اسم المنتج...` }, ...filtered.map((r: any) => ({ value: String(r.product_id), label: `${r.name} (${r.color || '-'}-${r.size || '-'}) ${r.barcode || r.code || ''} — ${Number(r.quantity || 0)}` }))];
+                                return [{ value: '', label: `اختر اسم المنتج...` }, ...rows.map((r: any) => ({ value: String(r.product_id), label: `${r.name} (${r.color || '-'}-${r.size || '-'}) ${r.barcode || r.code || ''} — ${Number(r.quantity || 0)}` }))];
                               }
                               return [{ value: '', label: `اختر الصنف...` }];
                             })()}
@@ -2562,22 +3194,73 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                     </div>
                     <div className="col-span-1 md:col-span-8 lg:col-span-9">
                       <span className="text-[11px] font-bold text-slate-500 block mb-1">اسم الصنف المتوفر بالمخزن</span>
-                      <CustomSelect
-                        required
-                        value={item.productId || ''}
-                        onChange={v => handleSelectProductForReturn(item.id, v)}
-                        options={(() => {
-                          const t = String(item.returnType || '').trim();
-                          if (t === 'fabric') return [{ value: '', label: `اختر اسم القماش...` }, ...getWarehouseFabrics(String(returnsData.warehouseId || '')).map((r: any) => ({ value: String(r.id ?? r.fabric_id), label: `${r.name} (${r.color || '-'}-${r.size || '-'}) — متوفر: ${Number(r.quantity || 0)}` }))];
-                          if (t === 'accessory') return [{ value: '', label: `اختر اسم الاكسسوار...` }, ...getWarehouseAccessories(String(returnsData.warehouseId || '')).map((r: any) => ({ value: String(r.id ?? r.accessory_id), label: `${r.name} (${r.color || '-'}-${r.size || '-'}) — متوفر: ${Number(r.quantity || 0)}` }))];
-                          if (t === 'product') {
-                            const rows = getWarehouseStock(String(returnsData.warehouseId || ''));
-                            return [{ value: '', label: `اختر اسم المنتج...` }, ...rows.filter((r: any) => !r.category || r.category === 'product').map((r: any) => ({ value: String(r.product_id), label: `${r.name} (${r.color || '-'}-${r.size || '-'}) — متوفر: ${Number(r.quantity || 0)}` }))];
-                          }
-                          return [{ value: '', label: `اختر الصنف...` }];
-                        })()}
-                        className="w-full text-sm font-bold"
-                      />
+                      {String(item.returnType || '').trim() === 'product' ? (
+                        <div className="grid grid-cols-3 gap-2">
+                          <div>
+                            <CustomSelect
+                              value={String((item as any)._parentId || '')}
+                              onChange={v => handleReturnItemChange(item.id, '_parentId', v)}
+                              options={[
+                                { value: '', label: '— منتج —' },
+                                ...(() => {
+                                  const stockIds = new Set(getWarehouseStock(String(returnsData.warehouseId || '')).map((r: any) => Number(r.product_id)));
+                                  return parentProducts
+                                    .filter((p: any) => (p.variants || []).some((v: any) => stockIds.has(Number(v.id))))
+                                    .map((p: any) => ({ value: String(p.id), label: p.name }));
+                                })()
+                              ]}
+                              className="w-full"
+                            />
+                          </div>
+                          <div>
+                            {(() => {
+                              const pp = parentProducts.find((p: any) => String(p.id) === String((item as any)._parentId || ''));
+                              const stockIds = new Set(getWarehouseStock(String(returnsData.warehouseId || '')).map((r: any) => Number(r.product_id)));
+                              const colorOptions = pp ? [...new Set((pp.variants || []).filter((v: any) => stockIds.has(Number(v.id))).map((v: any) => v.color).filter(Boolean))] : [];
+                              return colorOptions.length > 0 ? (
+                                <CustomSelect
+                                  value={String((item as any)._color || '')}
+                                  onChange={v => handleReturnItemChange(item.id, '_color', v)}
+                                  options={[{ value: '', label: '— لون —' }, ...colorOptions.map((c: any) => ({ value: c, label: c }))]}
+                                  className="w-full"
+                                />
+                              ) : <div className="w-full bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl py-2 px-3 text-sm text-slate-400 min-h-[38px]">—</div>;
+                            })()}
+                          </div>
+                          <div>
+                            {(() => {
+                              const pp = parentProducts.find((p: any) => String(p.id) === String((item as any)._parentId || ''));
+                              const stockIds = new Set(getWarehouseStock(String(returnsData.warehouseId || '')).map((r: any) => Number(r.product_id)));
+                              const stockRows = getWarehouseStock(String(returnsData.warehouseId || ''));
+                              const sizeOptions = pp ? (pp.variants || []).filter((v: any) => stockIds.has(Number(v.id)) && (!(item as any)._color || v.color === (item as any)._color)).map((v: any) => {
+                                const qty = Number(stockRows.find((r: any) => Number(r.product_id) === Number(v.id))?.quantity || 0);
+                                return { value: v.size, label: `${v.size} — متوفر: ${qty}` };
+                              }) : [];
+                              return sizeOptions.length > 0 ? (
+                                <CustomSelect
+                                  value={String((item as any)._size || '')}
+                                  onChange={v => handleReturnItemChange(item.id, '_size', v)}
+                                  options={[{ value: '', label: '— مقاس —' }, ...sizeOptions]}
+                                  className="w-full"
+                                />
+                              ) : <div className="w-full bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl py-2 px-3 text-sm text-slate-400 min-h-[38px]">—</div>;
+                            })()}
+                          </div>
+                        </div>
+                      ) : (
+                        <CustomSelect
+                          required
+                          value={item.productId || ''}
+                          onChange={v => handleSelectProductForReturn(item.id, v)}
+                          options={(() => {
+                            const t = String(item.returnType || '').trim();
+                            if (t === 'fabric') return [{ value: '', label: `اختر اسم القماش...` }, ...getWarehouseFabrics(String(returnsData.warehouseId || '')).map((r: any) => ({ value: String(r.id ?? r.fabric_id), label: `${r.name} (${r.color || '-'}-${r.size || '-'}) — متوفر: ${Number(r.quantity || 0)}` }))];
+                            if (t === 'accessory') return [{ value: '', label: `اختر اسم الاكسسوار...` }, ...getWarehouseAccessories(String(returnsData.warehouseId || '')).map((r: any) => ({ value: String(r.id ?? r.accessory_id), label: `${r.name} (${r.color || '-'}-${r.size || '-'}) — متوفر: ${Number(r.quantity || 0)}` }))];
+                            return [{ value: '', label: `اختر الصنف...` }];
+                          })()}
+                          className="w-full text-sm font-bold"
+                        />
+                      )}
                     </div>
 
                     {/* --- الصف الثاني: الكمية والإجماليات --- */}

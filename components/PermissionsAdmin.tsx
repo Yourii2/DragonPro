@@ -36,6 +36,19 @@ const PermissionsAdmin: React.FC = () => {
     } catch (e) { console.error(e); }
   };
 
+  // Ensure modules/actions are loaded (used before loading user perms)
+  const ensureModulesActions = async () => {
+    if (modules.length > 0 && actions.length > 0) return;
+    try {
+      const [mRes, aRes] = await Promise.all([
+        fetch(`${API_BASE_PATH}/api.php?module=permissions&action=getModules`).then(r=>r.json()),
+        fetch(`${API_BASE_PATH}/api.php?module=permissions&action=getActions`).then(r=>r.json())
+      ]);
+      if (mRes.success) setModules(mRes.data || []);
+      if (aRes.success) setActions(aRes.data || []);
+    } catch (e) { console.error('Failed to ensure modules/actions', e); }
+  };
+
   const createModule = async (name:string, parent_id:number|null) => {
     try {
       const body = { name, parent_id };
@@ -56,6 +69,7 @@ const PermissionsAdmin: React.FC = () => {
 
   const loadUserPerms = async (uid:number) => {
     setSelectedUser(uid);
+    await ensureModulesActions();
     try {
       const res = await fetch(`${API_BASE_PATH}/api.php?module=permissions&action=getUserPermissions&user_id=${uid}`);
       const j = await res.json();
@@ -104,7 +118,7 @@ const PermissionsAdmin: React.FC = () => {
       warehouses: 'المستودعات',
       sales_offices: 'مكاتب المبيعات',
       products: 'المنتجات',
-      orders: 'الطلبيات',
+      orders: 'الاوردرات',
       transactions: 'المعاملات',
       sales: 'المبيعات',
       employees: 'الموظفين',
@@ -132,10 +146,25 @@ const PermissionsAdmin: React.FC = () => {
   const savePermissions = async () => {
     if (!selectedUser) return;
     try {
-      const body = { user_id: selectedUser, permissions: userPerms };
+      // Build a complete permissions matrix (all module x action pairs) to ensure full save
+      await ensureModulesActions();
+      const fullPerms = modules.flatMap((mod: any) => actions.map((act: any) => {
+        const existing = userPerms.find((p: any) => Number(p.module_id) === Number(mod.id) && Number(p.action_id) === Number(act.id));
+        return {
+          user_id: selectedUser,
+          module_id: mod.id,
+          action_id: act.id,
+          allowed: existing ? (existing.allowed ? 1 : 0) : 0
+        };
+      }));
+
+      const body = { user_id: selectedUser, permissions: fullPerms };
       const res = await fetch(`${API_BASE_PATH}/api.php?module=permissions&action=setUserPermissions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const j = await res.json();
-      if (j.success) Swal.fire('تم', 'تم حفظ الصلاحيات', 'success'); else Swal.fire('فشل', j.message || 'خطأ', 'error');
+      if (j.success) {
+        Swal.fire('تم', 'تم حفظ الصلاحيات كاملة', 'success');
+        setUserPerms(fullPerms);
+      } else Swal.fire('فشل', j.message || 'خطأ', 'error');
     } catch (e) { console.error(e); Swal.fire('خطأ', 'فشل حفظ الصلاحيات', 'error'); }
   };
 

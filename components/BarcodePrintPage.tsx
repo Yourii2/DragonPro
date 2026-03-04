@@ -104,7 +104,7 @@ const BarcodePrintPage: React.FC = () => {
 					url = `${API_BASE_PATH}/api.php?module=factory_products&action=getAll`;
 					break;
 				case 'products':
-					url = `${API_BASE_PATH}/api.php?module=products&action=getAll`;
+					url = `${API_BASE_PATH}/api.php?module=products&action=getFlat`;
 					break;
 				case 'cutting_stage':
 					url = `${API_BASE_PATH}/api.php?module=cutting_stage&action=getAll`;

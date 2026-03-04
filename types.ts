@@ -34,14 +34,48 @@ export interface Supplier {
   balance: number;
 }
 
+export interface ProductVariant {
+  id: number;
+  product_id: number;       // FK → parent product
+  name: string;             // denormalized parent name
+  color: string | null;
+  size: string | null;
+  barcode: string | null;
+  cost: number;
+  cost_price: number;
+  price: number;
+  sale_price: number;
+  reorderLevel: number;
+  reorder_level?: number;
+  stock: number;
+  is_archived: number;
+}
+
+/** Parent product — contains variants */
 export interface Product {
   id: number;
   name: string;
-  barcode: string;
-  category: string;
-  purchase_price: number;
+  category: string | null;
+  description?: string | null;
+  is_archived: number;
+  variants: ProductVariant[];
+}
+
+/** Flat product shape (backward compat for POS / receiving) */
+export interface FlatProduct {
+  id: number;
+  product_id: number;
+  name: string;
+  barcode: string | null;
+  color: string | null;
+  size: string | null;
+  cost: number;
+  cost_price: number;
+  price: number;
   sale_price: number;
-  stock_levels: { [warehouseId: number]: number };
+  reorderLevel: number;
+  stock: number;
+  category: string | null;
 }
 
 export interface Warehouse {

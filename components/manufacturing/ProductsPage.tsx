@@ -706,7 +706,7 @@ const ProductsPage = () => {
 	const formatMovementType = (t: string) => {
 		const v = (t || '').trim();
 		if (v === 'purchase') return { label: 'شراء', cls: 'bg-emerald-100 text-emerald-700' };
-		if (v === 'sale' || v === 'order') return { label: 'مبيعات / طلبية', cls: 'bg-rose-100 text-rose-700' };
+		if (v === 'sale' || v === 'order') return { label: 'مبيعات / اوردر', cls: 'bg-rose-100 text-rose-700' };
 		if (v === 'return_in') return { label: 'مرتجع من عميل', cls: 'bg-blue-100 text-blue-700' };
 		if (v === 'return_out') return { label: 'مرتجع لمورد', cls: 'bg-blue-100 text-blue-700' };
 		if (v === 'initial_balance') return { label: 'رصيد افتتاحي', cls: 'bg-blue-100 text-blue-700' };

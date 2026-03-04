@@ -184,7 +184,7 @@ const TotalsReport: React.FC = () => {
       </tr>
     `).join('');
 
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>ملخص الفترة ${startDate} - ${endDate}</title><style>body{font-family: Arial, "Noto Naskh Arabic", sans-serif; direction:rtl; padding:20px;} table{width:100%; border-collapse:collapse; font-size:12px;} th,td{border:1px solid #333; padding:6px; text-align:right;} th{background:#f3f4f6;} .summary{margin-bottom:12px; display:block;} .summary div{margin:4px 0;}</style></head><body><h1 style="text-align:center">ملخص الفترة</h1><div>الفترة: ${startDate} - ${endDate}</div><div class="summary"><div>رصيد البداية: ${startingBalance.toLocaleString()}</div><div>رصيد النهاية: ${endBalance.toLocaleString()}</div><div>إجمالي الإيرادات: ${totals.totalRevenue.toLocaleString()}</div><div>إجمالي المصروفات: ${totals.totalExpense.toLocaleString()}</div><div>إجمالي الإيداعات: ${totals.totalDeposits.toLocaleString()}</div><div>إجمالي الدفعات: ${totals.totalPayments.toLocaleString()}</div></div><table><thead><tr><th>التاريخ</th><th>عدد الطلبيات المسلمة</th><th>عدد الطلبيات المرتجعة</th><th>إجمالي القطع المسلمة</th><th>إجمالي القطع المرتجعة</th><th>إجمالي المبيعات (مبلغ)</th><th>إجمالي المرتجعات (مبلغ)</th><th>إجمالي المصروفات</th><th>إجمالي دفعات للموردين</th><th>إجمالي الإيداعات</th></tr></thead><tbody>${rowsHtml}</tbody></table></body></html>`;
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>ملخص الفترة ${startDate} - ${endDate}</title><style>body{font-family: Arial, "Noto Naskh Arabic", sans-serif; direction:rtl; padding:20px;} table{width:100%; border-collapse:collapse; font-size:12px;} th,td{border:1px solid #333; padding:6px; text-align:right;} th{background:#f3f4f6;} .summary{margin-bottom:12px; display:block;} .summary div{margin:4px 0;}</style></head><body><h1 style="text-align:center">ملخص الفترة</h1><div>الفترة: ${startDate} - ${endDate}</div><div class="summary"><div>رصيد البداية: ${startingBalance.toLocaleString()}</div><div>رصيد النهاية: ${endBalance.toLocaleString()}</div><div>إجمالي الإيرادات: ${totals.totalRevenue.toLocaleString()}</div><div>إجمالي المصروفات: ${totals.totalExpense.toLocaleString()}</div><div>إجمالي الإيداعات: ${totals.totalDeposits.toLocaleString()}</div><div>إجمالي الدفعات: ${totals.totalPayments.toLocaleString()}</div></div><table><thead><tr><th>التاريخ</th><th>عدد الاوردرات المسلمة</th><th>عدد الاوردرات المرتجعة</th><th>إجمالي القطع المسلمة</th><th>إجمالي القطع المرتجعة</th><th>إجمالي المبيعات (مبلغ)</th><th>إجمالي المرتجعات (مبلغ)</th><th>إجمالي المصروفات</th><th>إجمالي دفعات للموردين</th><th>إجمالي الإيداعات</th></tr></thead><tbody>${rowsHtml}</tbody></table></body></html>`;
     const w = window.open('', '_blank'); if (!w) return; w.document.write(html); w.document.close(); setTimeout(()=>w.print(), 500);
   }
 
@@ -208,8 +208,8 @@ const TotalsReport: React.FC = () => {
         <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>رصيد النهاية<br/><div className="font-black">{endBalance.toLocaleString()}</div></div>
       </div>
       <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 mt-2">
-        <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>عدد الطلبيات المسلمة<br/><div className="font-black">{perDay.reduce((s:any,d:any)=> s + Number(d.deliveredOrders||0),0)}</div></div>
-        <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>عدد الطلبيات المرتجعة<br/><div className="font-black">{perDay.reduce((s:any,d:any)=> s + Number(d.returnedOrders||0),0)}</div></div>
+        <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>عدد الاوردرات المسلمة<br/><div className="font-black">{perDay.reduce((s:any,d:any)=> s + Number(d.deliveredOrders||0),0)}</div></div>
+        <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>عدد الاوردرات المرتجعة<br/><div className="font-black">{perDay.reduce((s:any,d:any)=> s + Number(d.returnedOrders||0),0)}</div></div>
         <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>إجمالي القطع المسلمة<br/><div className="font-black">{perDay.reduce((s:any,d:any)=> s + Number(d.deliveredPieces||0),0)}</div></div>
         <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>إجمالي القطع المرتجعة<br/><div className="font-black">{perDay.reduce((s:any,d:any)=> s + Number(d.returnedPieces||0),0)}</div></div>
         <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>إجمالي المبيعات (مبلغ)<br/><div className="font-black">{perDay.reduce((s:any,d:any)=> s + Number(d.salesAmount||0),0).toLocaleString()}</div></div>
@@ -227,8 +227,8 @@ const TotalsReport: React.FC = () => {
           <thead className="bg-slate-50 text-slate-500">
             <tr>
               <th className="px-3 py-2">التاريخ</th>
-              <th className="px-3 py-2">عدد الطلبيات المسلمة</th>
-              <th className="px-3 py-2">عدد الطلبيات المرتجعة</th>
+              <th className="px-3 py-2">عدد الاوردرات المسلمة</th>
+              <th className="px-3 py-2">عدد الاوردرات المرتجعة</th>
               <th className="px-3 py-2">إجمالي القطع المسلمة</th>
               <th className="px-3 py-2">إجمالي القطع المرتجعة</th>
               <th className="px-3 py-2">إجمالي المبيعات (مبلغ)</th>

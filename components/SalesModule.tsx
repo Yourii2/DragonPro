@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { API_BASE_PATH } from '../services/apiConfig';
-import { ShoppingCart, Printer, History, Search, PlusCircle, MinusCircle, UploadCloud, FileText, RefreshCcw, ClipboardPaste, MapPin, Phone, User, CheckSquare, Square, Eye, Edit } from 'lucide-react';
+import { ShoppingCart, Printer, History, Search, PlusCircle, MinusCircle, UploadCloud, FileText, RefreshCcw, ClipboardPaste, MapPin, Phone, User, CheckSquare, Square, Eye, Edit, ChevronRight } from 'lucide-react';
 import Swal from 'sweetalert2';
 import CustomSelect from './CustomSelect';
 import Barcode from './Barcode';
@@ -80,6 +80,7 @@ const normalizeNumbers = (input: any): string => {
     '٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9',
     '۰':'0','۱':'1','۲':'2','۳':'3','۴':'4','۵':'5','۶':'6','۷':'7','۸':'8','۹':'9'
   };
+
   return s.split('').map(ch => map[ch] || ch).join('');
 };
 
@@ -114,6 +115,8 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
   const [discountValue, setDiscountValue] = useState<number>(0);
   const [taxType, setTaxType] = useState<RateType>('percent');
   const [taxValue, setTaxValue] = useState<number>(isNaN(defaultTaxRate) ? 0 : defaultTaxRate);
+  // Shipping for manual order
+  const [shippingValue, setShippingValue] = useState<number>(0);
 
   // Sales tax/discount (import defaults)
   const [importDiscountType, setImportDiscountType] = useState<RateType>('amount');
@@ -169,15 +172,24 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
   const [statusEditNote, setStatusEditNote] = useState('');
   const [returnFineMode, setReturnFineMode] = useState<'none' | 'fine'>('none');
   const [returnFineAmount, setReturnFineAmount] = useState('');
+  // Full-order edit state (for manual edit form)
+  const [editingOrderId, setEditingOrderId] = useState<number | null>(null);
+
+  // Derived: unique parent products for the cascade dropdown
+  const parentProductsMap = React.useMemo(() => {
+    const seen = new Map<string, { id: any; name: string }>();
+    for (const p of existingProducts) {
+      const pid = String(p.product_id || p.id);
+      if (!seen.has(pid)) seen.set(pid, { id: p.product_id || p.id, name: (p as any).parent_name || p.name || '' });
+    }
+    return Array.from(seen.values());
+  }, [existingProducts]);
 
   const filteredOrders = orders.filter(o => {
     const matchesStatus = statusFilter === 'all' || (o.status || '') === statusFilter;
-    // Date filter: compare YYYY-MM-DD of order's created date
+    // Date filter: compare YYYY-MM-DD directly from the raw string to avoid UTC timezone shift
     const rawDate = o.created_at || o.createdAt || o.date || '';
-    let orderDateStr = '';
-    if (rawDate) {
-      try { orderDateStr = (new Date(rawDate)).toISOString().slice(0,10); } catch(e) { orderDateStr = '' }
-    }
+    const orderDateStr = rawDate ? String(rawDate).slice(0, 10) : '';
     const matchesDate = dateFilter === 'all' || !dateFilter || orderDateStr === dateFilter;
     const phoneA = o.phone || o.phone1 || '';
     const phoneB = o.phone2 || '';
@@ -257,19 +269,20 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
     // load existing products for import validation
     (async () => {
       try {
-        const resp = await fetch(`${API_BASE_PATH}/api.php?module=products&action=getAll`);
+        const resp = await fetch(`${API_BASE_PATH}/api.php?module=products&action=getFlat`);
         const j = await resp.json();
         if (j.success) setExistingProducts(j.data || []);
       } catch (e) { console.error('Failed to load products for import validation', e); }
     })();
     // load warehouses for optional stock operations
-    (async () => {
+    const loadWarehouses = async () => {
       try {
         const r = await fetch(`${API_BASE_PATH}/api.php?module=warehouses&action=getAll`);
         const jr = await r.json();
-        if (jr.success) setWarehouses(jr.data || []);
-      } catch (e) { console.error('Failed to load warehouses', e); }
-    })();
+        if (jr && jr.success) setWarehouses(jr.data || []);
+      } catch (e) { console.error('Failed to load warehouses', e); setWarehouses([]); }
+    };
+    loadWarehouses();
     // load all orders for management view
     (async () => {
       try {
@@ -280,12 +293,12 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
           jr = JSON.parse(text);
         } catch (pe) {
           console.error('Failed to parse orders response as JSON:', pe, 'raw response:', text);
-          Swal.fire('خطأ', 'فشل تحميل الطلبيات من الخادم. راجع الكونسول للرد الخام.', 'error');
+          Swal.fire('خطأ', 'فشل تحميل الاوردرات من الخادم. راجع الكونسول للرد الخام.', 'error');
           setOrders([]);
           return;
         }
         if (jr && jr.success) setOrders(jr.data || []);
-      } catch (e) { console.error('Failed to load orders', e); Swal.fire('خطأ', 'فشل تحميل الطلبيات من الخادم.'); }
+      } catch (e) { console.error('Failed to load orders', e); Swal.fire('خطأ', 'فشل تحميل الاوردرات من الخادم.'); }
     })();
 
     // load customers for manual order creation
@@ -296,6 +309,14 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
         if (jr.success) setCustomers(jr.data || []);
       } catch (e) { console.error('Failed to load customers', e); }
     })();
+    // expose loader on locals (used below when opening an order)
+    (window as any)._loadDragonWarehouses = async () => { await (async () => {
+      try {
+        const r = await fetch(`${API_BASE_PATH}/api.php?module=warehouses&action=getAll`);
+        const jr = await r.json();
+        if (jr && jr.success) setWarehouses(jr.data || []);
+      } catch (e) { console.error('Failed to load warehouses', e); setWarehouses([]); }
+    })(); };
   }, []);
 
   useEffect(() => {
@@ -345,32 +366,89 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
   }, [userDefaults, salesDisplayMethod]);
 
   const addOrderItem = () => {
-    setOrderItems([...orderItems, { id: Date.now(), productId: '', color: '', size: '', qty: 1, price: 0 }]);
+    setOrderItems([...orderItems, { id: Date.now(), productId: '' as any, _parentId: '', _color: '', _size: '', color: '', size: '', qty: 1, price: 0 }]);
   };
 
-  const updateOrderItemField = (id:number, field:string, value:any) => {
+  // Helper: send bridge to server (best-effort)
+  const _sendBridge = (matched: any, qty: number) => {
+    try {
+      fetch(`${API_BASE_PATH}/api.php?module=selected_product&action=set`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productId: matched.id, name: matched.name || '', color: matched.color || '', size: matched.size || '', qty })
+      }).catch(() => {});
+    } catch (e) { /* ignore */ }
+  };
+
+  const updateOrderItemField = (id: number, field: string, value: any) => {
     setOrderItems(prev => prev.map(it => {
       if (it.id !== id) return it;
+      const ia = it as any;
+
+      // ── Cascade: parent product selected ──
+      if (field === '_parentId') {
+        // Check if this parent has any color variants
+        const siblings = existingProducts.filter(ep => String(ep.product_id || ep.id) === String(value));
+        const hasColors = siblings.some(ep => ep.color);
+        const hasSizes = siblings.some(ep => ep.size);
+        // If no colors and no sizes → resolve immediately to the first variant
+        if (!hasColors && !hasSizes && siblings.length > 0) {
+          const m = siblings[0];
+          _sendBridge(m, ia.qty || 1);
+          return { ...it, _parentId: value, _color: '', _size: '', productId: m.id, name: m.name || '', price: Number(m.sale_price || m.price || 0), color: '', size: '' };
+        }
+        return { ...it, _parentId: value, _color: '', _size: '', productId: '' as any, name: '', price: 0, color: '', size: '' };
+      }
+
+      // ── Cascade: color selected ──
+      if (field === '_color') {
+        const parentId = ia._parentId;
+        const siblings = existingProducts.filter(ep => String(ep.product_id || ep.id) === String(parentId) && ep.color === value);
+        const hasSizes = siblings.some(ep => ep.size);
+        if (!hasSizes && siblings.length > 0) {
+          const m = siblings[0];
+          _sendBridge(m, ia.qty || 1);
+          return { ...it, _color: value, _size: '', productId: m.id, name: m.name || '', price: Number(m.sale_price || m.price || 0), color: value, size: '' };
+        }
+        return { ...it, _color: value, _size: '', productId: '' as any, name: '', color: value, size: '' };
+      }
+
+      // ── Cascade: size selected ──
+      if (field === '_size') {
+        const parentId = ia._parentId;
+        const color = ia._color;
+        const m = existingProducts.find(ep =>
+          String(ep.product_id || ep.id) === String(parentId) &&
+          (color ? ep.color === color : true) &&
+          ep.size === value
+        );
+        if (m) {
+          _sendBridge(m, ia.qty || 1);
+          return { ...it, _size: value, productId: m.id, name: m.name || '', price: Number(m.sale_price || m.price || 0), color: m.color || '', size: value };
+        }
+        return { ...it, _size: value, size: value };
+      }
+
+      // ── Legacy: direct productId set (used by editOrder to pre-populate) ──
       if (field === 'productId') {
         const pid = value ? Number(value) : '';
         const matched = existingProducts.find(ep => Number(ep.id) === Number(pid));
         if (matched) {
-          // persist a lightweight selected-product bridge so other modules (e.g. SalesDaily) can validate
-          try {
-            const bridge = { productId: matched.id, name: matched.name || '', color: matched.color || '', size: matched.size || '', qty: it.qty || 1 };
-            // persist selection server-side (best-effort, non-blocking)
-            fetch(`${API_BASE_PATH}/api.php?module=selected_product&action=set`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(bridge)
-            }).catch(() => {});
-          } catch (e) {
-            // ignore
-          }
-          return { ...it, productId: matched.id, name: matched.name || '', price: Number(matched.sale_price || matched.price || matched.retail_price || 0), color: matched.color || '', size: matched.size || '' };
+          _sendBridge(matched, ia.qty || 1);
+          return {
+            ...it,
+            productId: matched.id,
+            _parentId: String(matched.product_id || matched.id),
+            _color: matched.color || '',
+            _size: matched.size || '',
+            name: matched.name || '',
+            price: Number(matched.sale_price || matched.price || matched.retail_price || 0),
+            color: matched.color || '',
+            size: matched.size || '',
+          };
         }
-        return { ...it, productId: pid };
+        return { ...it, productId: pid, _parentId: '', _color: '', _size: '' };
       }
+
       return { ...it, [field]: value };
     }));
   };
@@ -428,7 +506,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
     const addr = customerObj ? (customerObj.address || '') : newCustomer.address;
 
     const subtotal = importedProducts.reduce((s, p) => s + (Number(p.quantity || 0) * Number(p.price || 0)), 0);
-    const totals = calculateOrderTotals(subtotal, 0, discountType, discountValue, taxType, taxValue, salesCalcOrder);
+    const totals = calculateOrderTotals(subtotal, shippingValue, discountType, discountValue, taxType, taxValue, salesCalcOrder);
 
     const orderPayload = {
       orderNumber: null,
@@ -437,6 +515,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       phone2: normalizeNumbers(phone2),
       governorate: governorateVal,
       address: normalizeNumbers(addr),
+      shipping: shippingValue,
       notes,
       employee,
       page,
@@ -455,22 +534,83 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
     };
 
     try {
-      const resp = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=create`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orders: [orderPayload] })
-      });
-      const jr = await resp.json();
-      if (jr.success) {
-        Swal.fire('تم الحفظ', 'تم إنشاء الطلبية بنجاح.', 'success');
-        // refresh orders
-        const r = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll`);
-        const jr2 = await r.json(); if (jr2.success) setOrders(jr2.data || []);
-        setView('manage-orders');
+      if (editingOrderId) {
+        // Update existing order
+        // Ensure product lines are sent under both `products` and `importedProducts` to match different backend expectations
+        const updateBody: any = { id: editingOrderId, ...orderPayload, products: importedProducts, importedProducts };
+        try {
+          const resp = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updateBody)
+          });
+          const jr = await resp.json().catch(() => null);
+          // expose the last update response globally for easier debugging in the browser console
+          try {
+            (window as any).__lastOrderUpdate = { orderId: editingOrderId, jr, updateBody };
+          } catch (e) {}
+          console.debug('OrdersModule: updateOrder response', { orderId: editingOrderId, jr, updateBody });
+          // If developer debug flag is set in localStorage, show full server response in a modal for easier inspection
+          try {
+            const showResp = localStorage.getItem('Dragon_debug_show_server_response') === '1';
+            if (showResp) {
+              const escapeHtml = (str: string) => String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+              Swal.fire({
+                title: 'Server response (debug)',
+                html: `<pre style="text-align:left; direction:ltr; white-space:pre-wrap; max-height:400px; overflow:auto">${escapeHtml(JSON.stringify(jr, null, 2))}</pre>`,
+                width: 800
+              });
+            }
+          } catch (e) { console.debug('Failed to show debug response modal', e); }
+          if (jr && jr.success) {
+            // Update succeeded for order metadata. Ensure product lines are persisted
+            try {
+              const setResp = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=setItems`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: editingOrderId, products: importedProducts, shipping: orderPayload.shipping })
+              });
+              const setJ = await setResp.json().catch(() => null);
+              if (setJ && setJ.success) {
+                Swal.fire('تم الحفظ', 'تم تحديث الاوردر بنجاح.', 'success');
+                const r = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll`);
+                const jr2 = await r.json(); if (jr2 && jr2.success) setOrders(jr2.data || []);
+                setEditingOrderId(null);
+                setView('manage-orders');
+              } else {
+                console.error('setItems failed', setJ);
+                Swal.fire('تحذير', 'تم تحديث بيانات الاوردر ولكن فشل حفظ خطوط المنتجات على الخادم.', 'warning');
+              }
+            } catch (e) {
+              console.error('Failed to set items after update', e);
+              Swal.fire('تحذير', 'تم تحديث بيانات الاوردر ولكن فشل حفظ خطوط المنتجات على الخادم.', 'warning');
+            }
+          } else {
+            Swal.fire('فشل التحديث', (jr && jr.message) || 'فشل تحديث الاوردر', 'error');
+          }
+        } catch (e) {
+          console.error('Save manual order (update) failed', e);
+          Swal.fire('خطأ', 'فشل الاتصال بالخادم أثناء تحديث الاوردر.', 'error');
+        }
       } else {
-        Swal.fire('فشل الحفظ', jr.message || 'فشل إنشاء الطلبية', 'error');
+        // Create new order
+        const resp = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=create`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orders: [orderPayload] })
+        });
+        const jr = await resp.json();
+        if (jr.success) {
+          Swal.fire('تم الحفظ', 'تم إنشاء الاوردر بنجاح.', 'success');
+          // refresh orders
+          const r = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll`);
+          const jr2 = await r.json(); if (jr2.success) setOrders(jr2.data || []);
+          setView('manage-orders');
+        } else {
+          Swal.fire('فشل الحفظ', jr.message || 'فشل إنشاء الاوردر', 'error');
+        }
       }
     } catch (e) {
       console.error('Save manual order failed', e);
-      Swal.fire('خطأ', 'فشل الاتصال بالخادم أثناء حفظ الطلبية.', 'error');
+      Swal.fire('خطأ', 'فشل الاتصال بالخادم أثناء حفظ الاوردر.', 'error');
     }
   };
 
@@ -498,7 +638,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
 
   const handleParseScript = () => {
     if (!scriptText.trim()) {
-      Swal.fire('خطأ', 'يرجى لصق نص الطلبيات أولاً.', 'error');
+      Swal.fire('خطأ', 'يرجى لصق نص الاوردرات أولاً.', 'error');
       return;
     }
     setIsParsing(true);
@@ -564,10 +704,28 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
           orderData.governorate = normalizeNumbers(getGovernorateFromBlock(block));
           orderData.address = normalizeNumbers(extractField('العنوان', block, true));
 
-          let phoneText = extractField('التليفون', block) || extractField('تليفون', block) || extractField('موبايل', block) || '';
-          phoneText = normalizeNumbers(phoneText);
-          const phones = phoneText.match(/\d{11}/g) || [];
-          // Fallback: match any long digit sequence if strict 11-digit not present
+          // Phone extraction: phone numbers may span multiple lines (e.g. "01xxxxxxxx\n01xxxxxxxx")
+          // So we capture from التليفون label until the next known field label
+          const extractPhoneBlock = (content: string): string => {
+            const phoneKeys = ['التليفون', 'تليفون', 'موبايل'];
+            const phoneTerminators = ['تفاصيل المنتج', 'السعر:', 'الشحن:', 'الاجمالي:', 'الموظف:', 'البيدج:', 'ملاحظات:', 'ملاحظة:', 'الإسم:', 'الاسم:', 'المحافظة:', 'العنوان:'];
+            for (const key of phoneKeys) {
+              const startRe = new RegExp(`${key}\\s*:?\\s*`);
+              const m = content.match(startRe);
+              if (!m) continue;
+              const start = m.index! + m[0].length;
+              let end = content.length;
+              for (const term of phoneTerminators) {
+                const ti = content.indexOf(term, start);
+                if (ti !== -1 && ti < end) end = ti;
+              }
+              return content.substring(start, end).replace(/\n/g, ' ');
+            }
+            return '';
+          };
+          let phoneText = normalizeNumbers(extractPhoneBlock(block));
+          const phones = phoneText.match(/\d{10,11}/g) || [];
+          // Fallback: match any long digit sequence if no 10-11 digit found
           if (phones.length === 0) {
             const fallback = phoneText.match(/\d{7,}/g) || [];
             orderData.phone1 = fallback[0] || '';
@@ -688,7 +846,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
         setParsedOrders(extractedOrders);
       }
       setIsParsing(false);
-      Swal.fire('تم التحليل', `تم استخراج ${extractedOrders.length} طلبية بنجاح. تم احتساب القيم تلقائياً.`, 'success');
+      Swal.fire('تم التحليل', `تم استخراج ${extractedOrders.length} اوردر بنجاح. تم احتساب القيم تلقائياً.`, 'success');
     }, 1000);
   };
 
@@ -882,7 +1040,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
         const list = mismatchedTotals.map(m => (m.order.customerName || m.order.orderNumber || m.order.id)).slice(0, 10).join(', ');
         const proceed = await Swal.fire({
           title: 'تحذير: إجماليات غير مطابقة',
-          html: `تم اكتشاف ${mismatchedTotals.length} طلبيات فيها اختلاف بين إجمالى الأسطر والـ"اجمالي" المُدخل: <b>${list}</b>.<br>هل تريد المتابعة وحفظ الطلبيات؟ اختر إلغاء لمراجعة وتعديل الطلبيات أولاً.`,
+          html: `تم اكتشاف ${mismatchedTotals.length} اوردرات فيها اختلاف بين إجمالى الأسطر والـ"اجمالي" المُدخل: <b>${list}</b>.<br>هل تريد المتابعة وحفظ الاوردرات؟ اختر إلغاء لمراجعة وتعديل الاوردرات أولاً.`,
           icon: 'warning',
           showCancelButton: true,
           confirmButtonText: 'نعم، استمر',
@@ -895,8 +1053,8 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       if (problematic.length > 0) {
         const list = problematic.map((o:any) => (o.customerName || o.orderNumber || o.id)).slice(0, 10).join(', ');
         await Swal.fire({
-          title: 'خطأ: تم العثور على طلبيات غير صالحة',
-          html: `تم العثور على ${problematic.length} طلبيات تحتوي على منتجات غير متطابقة أو بدون سعر: <b>${list}</b>.<br>لم يُحفظ أي شيء. عدّل الطلبيات ثم حاول مرة أخرى.`,
+          title: 'خطأ: تم العثور على اوردرات غير صالحة',
+            html: `تم العثور على ${problematic.length} اوردرات تحتوي على منتجات غير متطابقة أو بدون سعر: <b>${list}</b>.<br>لم يُحفظ أي شيء. عدّل الاوردرات ثم حاول مرة أخرى.`,
           icon: 'error',
           confirmButtonText: 'حسناً'
         });
@@ -914,16 +1072,16 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       const jr = await resp.json();
       if (jr.success) {
         setOrders(prevOrders => [...newOrders, ...prevOrders]);
-        Swal.fire('تم الحفظ', `تم إنشاء ${jr.created.length || newOrders.length} طلبيات بنجاح.`, 'success');
+        Swal.fire('تم الحفظ', `تم إنشاء ${jr.created.length || newOrders.length} اوردرات بنجاح.`, 'success');
         setParsedOrders([]);
         setScriptText('');
         setView('manage-orders');
       } else {
-        Swal.fire('فشل الحفظ', jr.message || 'فشل حفظ الطلبيات على الخادم.', 'error');
+        Swal.fire('فشل الحفظ', jr.message || 'فشل حفظ الاوردرات على الخادم.', 'error');
       }
     } catch (e) {
       console.error('Import save failed', e);
-      Swal.fire('خطأ', 'فشل الاتصال بخادم الحفظ. تم حفظ الطلبيات محلياً.', 'warning');
+      Swal.fire('خطأ', 'فشل الاتصال بخادم الحفظ. تم حفظ الاوردرات محلياً.', 'warning');
       setOrders(prevOrders => [...newOrders, ...prevOrders]);
       setParsedOrders([]);
       setScriptText('');
@@ -979,7 +1137,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       const newTotal = Number((newSubtotal + shipping) || 0);
       return { ...po, products, price: newSubtotal, total: newTotal, parsedSubtotal: newSubtotal, parsedTotal: newTotal, computedTotal: computed, requiredTotal: newTotal, totalsMismatch: false };
     }));
-    try { Swal.fire('تم الحساب', 'تم تحديث إجماليات الطلبية بناءً على أسطر المنتجات.', 'success'); } catch (e) { /* ignore if Swal missing */ }
+    try { Swal.fire('تم الحساب', 'تم تحديث إجماليات الاوردر بناءً على أسطر المنتجات.', 'success'); } catch (e) { /* ignore if Swal missing */ }
   };
 
   // Recompute prices and totals for all parsed orders and return the new array
@@ -1030,13 +1188,13 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
 
   const allowSaveParsedOrderAsIs = (orderId: number) => {
     setParsedOrders(prev => prev.map(po => po.id === orderId ? { ...po, allowSaveAsIs: true } : po));
-    try { Swal.fire('تم', 'تم وضع الطلبية للسماح بالحفظ كما هي.', 'success'); } catch (e) {}
+    try { Swal.fire('تم', 'تم وضع الاوردر للسماح بالحفظ كما هو.', 'success'); } catch (e) {}
   };
 
   const saveParsedOrderLine = (orderId: number, index: number) => {
     // parsedOrders already updated by updateParsedProductField; just recompute totals for the order
     recalcParsedOrder(orderId);
-    try { Swal.fire('تم الحفظ', 'تم حفظ تعديل السطر وتحديث إجماليات الطلبية.', 'success'); } catch (e) {}
+    try { Swal.fire('تم الحفظ', 'تم حفظ تعديل السطر وتحديث إجماليات الاوردر.', 'success'); } catch (e) {}
   };
 
   const editParsedOrder = (order: any) => {
@@ -1049,6 +1207,49 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
     setEmployee(order.employee_raw || order.employee || '');
     setPage(order.page_raw || order.page || '');
     setView('new-order');
+  };
+
+  const editOrder = (order: any) => {
+    // Map a saved order into the manual new-order form for full editing
+    const mappedItems = (order.products || []).map((p: any, idx: number) => {
+      const productId = p.productId || p.product_id || (p.product && (p.product.id || p.product.product_id)) || p.id || '';
+      const variant = existingProducts.find((ep: any) => Number(ep.id) === Number(productId));
+      return {
+        id: Date.now() + idx,
+        productId: productId || '',
+        _parentId: variant ? String(variant.product_id || variant.id) : '',
+        _color: variant?.color || p.color || '',
+        _size: variant?.size || p.size || '',
+        name: p.name || '',
+        color: variant?.color || p.color || '',
+        size: variant?.size || p.size || '',
+        qty: Number(p.quantity || p.qty || 1),
+        price: Number(p.price || p.unit_price || 0),
+      };
+    });
+    setOrderItems(mappedItems.length ? mappedItems : [{ id: Date.now(), productId: '' as any, _parentId: '', _color: '', _size: '', color: '', size: '', qty: 1, price: 0 }]);
+    // customer
+    if (order.customerId || order.customer_id) setSelectedCustomerId(order.customerId || order.customer_id);
+    else setSelectedCustomerId('');
+    setNewCustomer({ name: order.customerName || order.name || '', phone1: order.phone || order.phone1 || '', phone2: order.phone2 || '', governorate: order.governorate || '', address: order.address || '' });
+    setNotes(order.notes || '');
+    setEmployee(order.employee_raw || order.employee || '');
+    setPage(order.page_raw || order.page || '');
+    // discounts / tax
+    setDiscountType((order.discount_type || order.discountType) ? (normalizeRateType(order.discount_type || order.discountType) as RateType) : 'amount');
+    setDiscountValue(Number(order.discount_value || order.discountValue || 0));
+    setTaxType((order.tax_type || order.taxType) ? (normalizeRateType(order.tax_type || order.taxType) as RateType) : 'percent');
+    setTaxValue(Number(order.tax_value || order.taxValue || 0));
+    // shipping
+    setShippingValue(Number(order.shipping || order.shippingCost || order.shipping_fees || 0));
+    // warehouses / sales office
+    if (order.sales_office_id || order.salesOfficeId) setSelectedSalesOfficeId(order.sales_office_id || order.salesOfficeId);
+    else setSelectedSalesOfficeId('');
+    setDefaultWarehouseId(order.warehouse_id || order.warehouseId || '');
+    // mark editing id and switch to form
+    setEditingOrderId(Number(order.id));
+    // ensure warehouses/options are loaded before showing form
+    ensureWarehousesLoaded().finally(() => setView('new-order'));
   };
 
   const updateParsedProductField = (orderId: number, index: number, field: string, value: any) => {
@@ -1234,6 +1435,17 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
     }
   };
 
+  // Ensure warehouses are available when editing an order
+  const ensureWarehousesLoaded = async () => {
+    if (!warehouses || warehouses.length === 0) {
+      try {
+        const r = await fetch(`${API_BASE_PATH}/api.php?module=warehouses&action=getAll`);
+        const jr = await r.json();
+        if (jr && jr.success) setWarehouses(jr.data || []);
+      } catch (e) { console.error('Failed to reload warehouses', e); }
+    }
+  };
+
   const addOrderDocument = async () => {
     if (!selectedOrder || !docUrl.trim()) {
       Swal.fire('بيانات ناقصة', 'يرجى إدخال رابط المستند.', 'warning');
@@ -1320,6 +1532,12 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
     setIsStatusEditOpen(true);
   };
 
+  // when opening details, also ensure warehouses available for potential edits
+  const openOrderAndEnsure = async (order: any) => {
+    await ensureWarehousesLoaded();
+    openOrderDetails(order);
+  };
+
   const submitStatusEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!statusEditOrder || !statusEditValue) {
@@ -1333,7 +1551,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
         return;
       }
       if (!statusEditOrder.rep_id && !statusEditOrder.repId) {
-        Swal.fire('تنبيه', 'لا يوجد مندوب مرتبط بهذه الطلبية لتطبيق الغرامة.', 'warning');
+        Swal.fire('تنبيه', 'لا يوجد مندوب مرتبط بهذا الاوردر لتطبيق الغرامة.', 'warning');
         return;
       }
     }
@@ -1376,10 +1594,15 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       {isOrderDetailsOpen && selectedOrder && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white w-full max-w-5xl rounded-3xl overflow-hidden shadow-2xl">
-            <div className="p-6 border-b flex justify-between items-center bg-slate-50">
+                <div className="p-6 border-b flex justify-between items-center bg-slate-50">
               <div>
                 <h3 className="text-lg font-black text-slate-800">تفاصيل الطلب #{selectedOrder.orderNumber}</h3>
-                <p className="text-xs text-slate-500">{selectedOrder.customerName} • {pickDisplayPhone(`${selectedOrder.phone || ''}\n${selectedOrder.phone1 || ''}\n${selectedOrder.phone2 || ''}`, '')}</p>
+                <p className="text-xs text-slate-500">
+                  {selectedOrder.customerName} • {pickDisplayPhone(`${selectedOrder.phone || ''}\n${selectedOrder.phone1 || ''}\n${selectedOrder.phone2 || ''}`, '')}
+                  {selectedOrder.phone2 && String(selectedOrder.phone2).trim() !== '' && (
+                    <span> • {normalizeNumbers(selectedOrder.phone2)}</span>
+                  )}
+                </p>
               </div>
               <button onClick={() => setIsOrderDetailsOpen(false)} className="text-slate-400 hover:text-rose-500">إغلاق</button>
             </div>
@@ -1557,161 +1780,471 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       
       <div className="flex flex-col md:flex-row justify-between items-center gap-4">
         <div>
-          <h2 className="text-xl font-black text-slate-900">إدارة الطلبيات</h2>
+          <h2 className="text-xl font-black text-slate-900">إدارة الاوردرات</h2>
           <p className="text-sm text-slate-500 font-medium">نظام تتبع وإدارة المبيعات</p>
         </div>
         <div className="flex gap-1 bg-white p-1.5 rounded-2xl border border-slate-200 shadow-sm w-full md:w-auto overflow-x-auto">
-          <button onClick={() => setView('new-order')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all whitespace-nowrap ${view === 'new-order' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}><PlusCircle size={16}/> طلبية جديدة</button>
-          <button onClick={() => setView('manage-orders')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all whitespace-nowrap ${view === 'manage-orders' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}><FileText size={16}/> إدارة الطلبيات</button>
+          <button onClick={() => setView('new-order')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all whitespace-nowrap ${view === 'new-order' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}><PlusCircle size={16}/> اوردر جديد</button>
+          <button onClick={() => setView('manage-orders')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all whitespace-nowrap ${view === 'manage-orders' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}><FileText size={16}/> إدارة الاوردرات</button>
           <button onClick={() => setView('import-orders')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all whitespace-nowrap ${view === 'import-orders' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}><UploadCloud size={16}/> استيراد</button>
         </div>
       </div>
 
       {/* --- Views --- */}
       {view === 'new-order' && (
-        <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
-             <h3 className="text-lg font-black mb-3">إنشاء طلبية يدوية</h3>
+        <div className="space-y-5">
 
-             {salesDisplayMethod === 'sales_offices' && (
-               <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-2xl">
-                 <div className="text-xs font-black text-slate-600 mb-2">مكتب المبيعات</div>
-                 {isSalesOfficeScopeNone ? (
-                   <div className="text-xs text-slate-500">هذا المستخدم بدون مكاتب مبيعات (سيتم استخدام بيانات الشركة في رأس الطلبية).</div>
-                 ) : (
-                   <div className="flex flex-col md:flex-row gap-2 md:items-center">
-                     <CustomSelect
-                       value={selectedSalesOfficeId ? String(selectedSalesOfficeId) : ''}
-                       onChange={v => setSelectedSalesOfficeId(v ? Number(v) : '')}
-                       options={[
-                         { value: '', label: 'اختيار مكتب' },
-                         ...((canChangeSalesOffice ? salesOffices : salesOffices.filter(o => Number(o.id) === Number(defaultSalesOfficeId))).map((o: any) => ({ value: String(o.id), label: o.name })))
-                       ]}
-                       disabled={!canChangeSalesOffice && defaultSalesOfficeId !== null && defaultSalesOfficeId !== undefined}
-                       className="w-full"
-                     />
-                     <div className="text-xs text-slate-500">
-                       {selectedSalesOffice ? (selectedSalesOffice.phones || '') : 'سيظهر اسم/هاتف المكتب في رأس الطلبية.'}
-                     </div>
-                   </div>
-                 )}
-               </div>
-             )}
+          {/* ── Page Header ── */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white px-6 py-4 rounded-3xl border border-slate-200 shadow-sm">
+            <div className="flex items-center gap-3">
+              {editingOrderId && (
+                <button
+                  onClick={() => { setEditingOrderId(null); setView('manage-orders'); }}
+                  className="w-10 h-10 flex items-center justify-center rounded-full bg-slate-100 hover:bg-slate-200 transition-colors flex-shrink-0"
+                  title="العودة لإدارة الاوردرات"
+                >
+                  <ChevronRight size={20} className="text-slate-600" />
+                </button>
+              )}
+              <div>
+                <h3 className="text-xl font-black text-slate-900">
+                  {editingOrderId ? 'تعديل الاوردر' : 'إنشاء اوردر جديد'}
+                </h3>
+                <p className="text-sm text-slate-500">
+                  {editingOrderId ? `رقم المرجع: #${editingOrderId}` : 'أدخل بيانات الاوردر اليدوي'}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={saveManualOrder}
+              className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white px-6 py-3 rounded-2xl text-sm font-black shadow-lg shadow-emerald-200/60 transition-all"
+            >
+              <ShoppingCart size={18} />
+              {editingOrderId ? 'حفظ التعديلات' : 'حفظ الاوردر'}
+            </button>
+          </div>
 
-             <div className="flex gap-2 items-center mb-3">
-                 <div className="flex-1">
-                 <label className="text-xs font-bold text-slate-500">زبون</label>
-                 <CustomSelect
-                   value={selectedCustomerId ? String(selectedCustomerId) : ''}
-                   onChange={v => setSelectedCustomerId(v ? Number(v) : '')}
-                   options={[{ value: '', label: 'اختيار زبون موجود' }, ...customers.map((c:any) => ({ value: String(c.id), label: `${c.name} - ${c.phone1 || ''}` }))]}
-                   className="w-full"
-                 />
-               </div>
-               <div className="self-end">
-                 <button className="btn" onClick={()=>{ setSelectedCustomerId(''); setNewCustomer({ name: '', phone1: '', phone2: '', governorate: '', address: '' }) }}>زبون جديد</button>
-               </div>
-             </div>
+          {/* ── Main Two-Column Grid ── */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
-             {selectedCustomerId === '' && (
-               <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-3">
-                 <div>
-                   <label className="text-xs text-slate-500">اسم الزبون</label>
-                   <input placeholder="اسم الزبون" className="border p-2 rounded mt-1 w-full" value={newCustomer.name} onChange={e=>setNewCustomer({...newCustomer, name:e.target.value})} />
-                 </div>
-                 <div>
-                   <label className="text-xs text-slate-500">هاتف 1</label>
-                   <input placeholder="هاتف 1" className="border p-2 rounded mt-1 w-full" value={newCustomer.phone1} onChange={e=>setNewCustomer({...newCustomer, phone1:e.target.value})} />
-                 </div>
-                 <div>
-                   <label className="text-xs text-slate-500">هاتف 2</label>
-                   <input placeholder="هاتف 2" className="border p-2 rounded mt-1 w-full" value={newCustomer.phone2} onChange={e=>setNewCustomer({...newCustomer, phone2:e.target.value})} />
-                 </div>
-                 <div>
-                   <label className="text-xs text-slate-500">المحافظة</label>
-                   <input placeholder="المحافظة" className="border p-2 rounded mt-1 w-full" value={newCustomer.governorate} onChange={e=>setNewCustomer({...newCustomer, governorate:e.target.value})} />
-                 </div>
-                 <div className="md:col-span-2">
-                   <label className="text-xs text-slate-500">العنوان</label>
-                   <input placeholder="العنوان" className="border p-2 rounded mt-1 w-full" value={newCustomer.address} onChange={e=>setNewCustomer({...newCustomer, address:e.target.value})} />
-                 </div>
-               </div>
-             )}
+            {/* ── LEFT COLUMN ── */}
+            <div className="lg:col-span-1 space-y-4">
 
-             <div>
-               <h4 className="font-bold mb-2">عناصر الطلب</h4>
-               {orderItems.map(it => (
-                 <div key={it.id} className="flex gap-2 items-center mb-2">
-                   <div className="flex-1">
-                     <label className="text-xs text-slate-500">المنتج</label>
-                     <CustomSelect
-                       value={String((it as any).productId || '')}
-                       onChange={v => updateOrderItemField(it.id, 'productId', v)}
-                       options={[{ value: '', label: 'اختر منتج' }, ...existingProducts.map((p:any) => ({ value: String(p.id), label: `${p.name}${p.size ? ` - ${p.size}` : ''}${p.color ? ` - ${p.color}` : ''}` }))]}
-                       className="w-full"
-                     />
-                   </div>
-                   <div>
-                     <label className="text-xs text-slate-500">الكم</label>
-                     <input className="border p-2 rounded w-20 text-center mt-1" placeholder="كم" value={it.qty} onChange={e=> updateOrderItemField(it.id, 'qty', Number(e.target.value || 0))} />
-                   </div>
-                   <div>
-                     <label className="text-xs text-slate-500">السعر</label>
-                     <input className="border p-2 rounded w-28 text-center mt-1" placeholder="سعر" value={it.price} onChange={e=> updateOrderItemField(it.id, 'price', Number(e.target.value || 0))} />
-                   </div>
-                   <div className="self-end">
-                     <button className="btn bg-rose-500 text-white px-3 py-1 rounded" onClick={()=> removeOrderItem(it.id)}>حذف</button>
-                   </div>
-                 </div>
-               ))}
-               <div className="mt-2 text-xs text-slate-500">المنتجات يجب أن تُختار من القائمة الموجودة فقط.</div>
-               <div className="flex gap-2 mt-2">
-                 <button className="btn bg-blue-600 text-white px-4 py-2 rounded" onClick={addOrderItem}>إضافة عنصر</button>
-                 <button className="btn bg-emerald-600 text-white px-4 py-2 rounded" onClick={saveManualOrder}>حفظ الطلبية</button>
-               </div>
-               <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-                 <div className="border rounded p-3">
-                   <label className="text-xs font-bold text-slate-500">الخصم</label>
-                   <div className="flex gap-2 mt-1">
-                     <CustomSelect
-                       value={discountType}
-                       onChange={v => setDiscountType(v as RateType)}
-                       options={[{ value: 'amount', label: 'قيمة' }, { value: 'percent', label: 'نسبة %' }]}
-                       className="text-sm"
-                     />
-                     <input type="number" min={0} value={discountValue} onChange={e => setDiscountValue(Number(e.target.value || 0))} className="border rounded px-2 py-1 text-sm w-full" placeholder="0" />
-                   </div>
-                 </div>
-                 <div className="border rounded p-3">
-                   <label className="text-xs font-bold text-slate-500">الضريبة</label>
-                   <div className="flex gap-2 mt-1">
-                     <CustomSelect
-                       value={taxType}
-                       onChange={v => setTaxType(v as RateType)}
-                       options={[{ value: 'percent', label: 'نسبة %' }, { value: 'amount', label: 'قيمة' }]}
-                       className="text-sm"
-                     />
-                     <input type="number" min={0} value={taxValue} onChange={e => setTaxValue(Number(e.target.value || 0))} className="border rounded px-2 py-1 text-sm w-full" placeholder="0" />
-                   </div>
-                   <div className="text-[10px] text-slate-400 mt-1">ترتيب الاحتساب حسب إعدادات النظام.</div>
-                 </div>
-               </div>
-              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="md:col-span-2">
-                  <label className="text-xs text-slate-500">ملاحظات</label>
-                  <textarea placeholder="ملاحظات" className="border p-2 rounded mt-1 w-full" value={notes} onChange={e=>setNotes(e.target.value)} />
+              {/* Sales Office Card */}
+              {salesDisplayMethod === 'sales_offices' && (
+                <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
+                  <h4 className="text-sm font-black text-slate-700 mb-3 flex items-center gap-2">
+                    <span className="w-7 h-7 bg-purple-100 text-purple-600 rounded-xl flex items-center justify-center text-xs font-black">م</span>
+                    مكتب المبيعات
+                  </h4>
+                  {isSalesOfficeScopeNone ? (
+                    <p className="text-xs text-slate-500 bg-slate-50 rounded-xl p-3">هذا المستخدم بدون مكاتب مبيعات — سيتم استخدام بيانات الشركة.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      <CustomSelect
+                        value={selectedSalesOfficeId ? String(selectedSalesOfficeId) : ''}
+                        onChange={v => setSelectedSalesOfficeId(v ? Number(v) : '')}
+                        options={[
+                          { value: '', label: 'اختيار مكتب' },
+                          ...((canChangeSalesOffice ? salesOffices : salesOffices.filter(o => Number(o.id) === Number(defaultSalesOfficeId))).map((o: any) => ({ value: String(o.id), label: o.name })))
+                        ]}
+                        disabled={!canChangeSalesOffice && defaultSalesOfficeId !== null && defaultSalesOfficeId !== undefined}
+                        className="w-full"
+                      />
+                      {selectedSalesOffice && (
+                        <p className="text-xs text-slate-500 px-1">{selectedSalesOffice.phones || ''}</p>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <div className="grid gap-2">
+              )}
+
+              {/* Customer Card */}
+              <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
+                <h4 className="text-sm font-black text-slate-700 mb-4 flex items-center gap-2">
+                  <User size={16} className="text-blue-500" />
+                  بيانات العميل
+                </h4>
+
+                {/* Customer Selector */}
+                <div className="mb-4">
+                  <label className="text-xs font-black text-slate-500 mb-1.5 block">اختر من العملاء الموجودين</label>
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <CustomSelect
+                        value={selectedCustomerId ? String(selectedCustomerId) : ''}
+                        onChange={v => setSelectedCustomerId(v ? Number(v) : '')}
+                        options={[{ value: '', label: '— عميل جديد —' }, ...customers.map((c: any) => ({ value: String(c.id), label: `${c.name} - ${c.phone1 || ''}` }))]}
+                        className="w-full"
+                      />
+                    </div>
+                    {selectedCustomerId !== '' && (
+                      <button
+                        className="flex-shrink-0 px-3 py-2 text-xs font-black text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
+                        onClick={() => { setSelectedCustomerId(''); setNewCustomer({ name: '', phone1: '', phone2: '', governorate: '', address: '' }); }}
+                      >
+                        إلغاء
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Customer Fields */}
+                <div className="space-y-3">
                   <div>
-                    <label className="text-xs text-slate-500">الموظف</label>
-                    <input placeholder="الموظف" className="border p-2 rounded mt-1 w-full" value={employee} onChange={e=>setEmployee(e.target.value)} />
+                    <label className="text-xs font-black text-slate-500 mb-1.5 block">اسم العميل</label>
+                    <input
+                      placeholder="الاسم الكامل"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                      value={selectedCustomerId ? (customers.find((c: any) => c.id === selectedCustomerId)?.name || '') : newCustomer.name}
+                      onChange={e => { if (!selectedCustomerId) setNewCustomer({ ...newCustomer, name: e.target.value }); }}
+                      disabled={!!selectedCustomerId}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-xs font-black text-slate-500 mb-1.5 flex items-center gap-1"><Phone size={11} /> هاتف 1</label>
+                      <input
+                        placeholder="01xxxxxxxxx"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                        value={selectedCustomerId ? (customers.find((c: any) => c.id === selectedCustomerId)?.phone1 || '') : newCustomer.phone1}
+                        onChange={e => { if (!selectedCustomerId) setNewCustomer({ ...newCustomer, phone1: e.target.value }); }}
+                        disabled={!!selectedCustomerId}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-black text-slate-500 mb-1.5 block">هاتف 2</label>
+                      <input
+                        placeholder="اختياري"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                        value={selectedCustomerId ? (customers.find((c: any) => c.id === selectedCustomerId)?.phone2 || '') : newCustomer.phone2}
+                        onChange={e => { if (!selectedCustomerId) setNewCustomer({ ...newCustomer, phone2: e.target.value }); }}
+                        disabled={!!selectedCustomerId}
+                      />
+                    </div>
                   </div>
                   <div>
-                    <label className="text-xs text-slate-500">البيدج</label>
-                    <input placeholder="البيدج" className="border p-2 rounded mt-1 w-full" value={page} onChange={e=>setPage(e.target.value)} />
+                    <label className="text-xs font-black text-slate-500 mb-1.5 flex items-center gap-1"><MapPin size={11} /> المحافظة</label>
+                    <input
+                      placeholder="المحافظة"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                      value={selectedCustomerId ? (customers.find((c: any) => c.id === selectedCustomerId)?.governorate || '') : newCustomer.governorate}
+                      onChange={e => { if (!selectedCustomerId) setNewCustomer({ ...newCustomer, governorate: e.target.value }); }}
+                      disabled={!!selectedCustomerId}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-black text-slate-500 mb-1.5 block">العنوان التفصيلي</label>
+                    <input
+                      placeholder="الشارع، المبنى..."
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                      value={selectedCustomerId ? (customers.find((c: any) => c.id === selectedCustomerId)?.address || '') : newCustomer.address}
+                      onChange={e => { if (!selectedCustomerId) setNewCustomer({ ...newCustomer, address: e.target.value }); }}
+                      disabled={!!selectedCustomerId}
+                    />
                   </div>
                 </div>
               </div>
-             </div>
+
+              {/* Notes & Meta Card */}
+              <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
+                <h4 className="text-sm font-black text-slate-700 mb-4 flex items-center gap-2">
+                  <FileText size={16} className="text-slate-400" />
+                  ملاحظات وبيانات إضافية
+                </h4>
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-black text-slate-500 mb-1.5 block">ملاحظات الاوردر</label>
+                    <textarea
+                      placeholder="ملاحظات خاصة بالاوردر..."
+                      rows={3}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all resize-none"
+                      value={notes}
+                      onChange={e => setNotes(e.target.value)}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-xs font-black text-slate-500 mb-1.5 block">الموظف</label>
+                      <input
+                        placeholder="اسم الموظف"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                        value={employee}
+                        onChange={e => setEmployee(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-black text-slate-500 mb-1.5 block">البيدج</label>
+                      <input
+                        placeholder="رقم البيدج"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                        value={page}
+                        onChange={e => setPage(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+            </div>{/* end LEFT COLUMN */}
+
+            {/* ── RIGHT COLUMN ── */}
+            <div className="lg:col-span-2 space-y-4">
+
+              {/* Order Items Card */}
+              <div className="bg-white rounded-3xl border border-slate-200 shadow-sm">
+                <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+                  <h4 className="text-sm font-black text-slate-700 flex items-center gap-2">
+                    <ShoppingCart size={16} className="text-blue-500" />
+                    عناصر الطلب
+                    <span className="bg-blue-100 text-blue-700 text-xs font-black px-2 py-0.5 rounded-full">{orderItems.length}</span>
+                  </h4>
+                  <button
+                    onClick={addOrderItem}
+                    className="flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-black px-3 py-2 rounded-xl transition-colors"
+                  >
+                    <PlusCircle size={14} /> إضافة منتج
+                  </button>
+                </div>
+
+                {/* Column Headers */}
+                <div className="hidden md:grid grid-cols-[2rem_1fr_7rem_7rem_4rem_6rem_4rem_2rem] gap-2 px-4 py-2 bg-slate-50 border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-wide">
+                  <div></div>
+                  <div>المنتج</div>
+                  <div className="text-center">اللون</div>
+                  <div className="text-center">المقاس</div>
+                  <div className="text-center">الكمية</div>
+                  <div className="text-center">السعر</div>
+                  <div className="text-center">الإجمالي</div>
+                  <div></div>
+                </div>
+
+                {/* Item Rows */}
+                <div className="divide-y divide-slate-100">
+                  {orderItems.map((it, _idx) => {
+                    const ia = it as any;
+                    const parentId = ia._parentId || '';
+                    const selColor = ia._color || '';
+                    const selSize  = ia._size  || '';
+
+                    const colorOptions: string[] = parentId
+                      ? [...new Set<string>(
+                          existingProducts
+                            .filter((ep: any) => String(ep.product_id || ep.id) === String(parentId) && ep.color)
+                            .map((ep: any) => ep.color as string)
+                        )]
+                      : [];
+
+                    const sizeOptions: string[] = parentId
+                      ? [...new Set<string>(
+                          existingProducts
+                            .filter((ep: any) =>
+                              String(ep.product_id || ep.id) === String(parentId) &&
+                              (selColor ? ep.color === selColor : true) &&
+                              ep.size
+                            )
+                            .map((ep: any) => ep.size as string)
+                        )]
+                      : [];
+
+                    return (
+                      <div key={it.id} className="grid grid-cols-[2rem_1fr_7rem_7rem_4rem_6rem_4rem_2rem] gap-2 px-4 py-2.5 items-center hover:bg-slate-50/60 transition-colors">
+
+                        {/* # */}
+                        <span className="w-6 h-6 rounded-full bg-slate-100 text-slate-400 text-[10px] font-black flex items-center justify-center">{_idx + 1}</span>
+
+                        {/* Product */}
+                        <CustomSelect
+                          value={parentId ? String(parentId) : ''}
+                          onChange={v => updateOrderItemField(it.id, '_parentId', v)}
+                          options={[{ value: '', label: '— منتج —' }, ...parentProductsMap.map(p => ({ value: String(p.id), label: p.name }))]}
+                          className="w-full text-xs"
+                        />
+
+                        {/* Color */}
+                        {colorOptions.length > 0 ? (
+                          <CustomSelect
+                            value={selColor}
+                            onChange={v => updateOrderItemField(it.id, '_color', v)}
+                            options={[{ value: '', label: '— لون —' }, ...colorOptions.map(c => ({ value: c, label: c }))]}
+                            className="w-full text-xs"
+                          />
+                        ) : (
+                          <div className="h-9 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-center text-[10px] text-slate-300">—</div>
+                        )}
+
+                        {/* Size */}
+                        {sizeOptions.length > 0 ? (
+                          <CustomSelect
+                            value={selSize}
+                            onChange={v => updateOrderItemField(it.id, '_size', v)}
+                            options={[{ value: '', label: '— مقاس —' }, ...sizeOptions.map(s => ({ value: s, label: s }))]}
+                            className="w-full text-xs"
+                          />
+                        ) : (
+                          <div className="h-9 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-center text-[10px] text-slate-300">—</div>
+                        )}
+
+                        {/* Qty */}
+                        <input
+                          type="number" min={1}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-1 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                          value={it.qty}
+                          onChange={e => updateOrderItemField(it.id, 'qty', Number(e.target.value || 0))}
+                        />
+
+                        {/* Price */}
+                        <div className="relative">
+                          <input
+                            type="number" min={0}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-1 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all pl-6"
+                            value={it.price}
+                            onChange={e => updateOrderItemField(it.id, 'price', Number(e.target.value || 0))}
+                          />
+                          <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[9px] text-slate-400 font-bold pointer-events-none">ج.م</span>
+                        </div>
+
+                        {/* Row total */}
+                        <div className="text-center">
+                          <span className="text-xs font-black text-slate-700 tabular-nums">{(it.qty * it.price).toLocaleString('ar-EG')}</span>
+                        </div>
+
+                        {/* Delete */}
+                        <button
+                          className="w-7 h-7 flex items-center justify-center rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-400 transition-colors mx-auto"
+                          onClick={() => removeOrderItem(it.id)}
+                          title="حذف"
+                        >
+                          <MinusCircle size={13} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                  {orderItems.length === 0 && (
+                    <div className="py-14 text-center">
+                      <ShoppingCart className="w-12 h-12 mx-auto text-slate-200 mb-3" />
+                      <p className="text-slate-400 text-sm font-bold">لا توجد عناصر.</p>
+                      <p className="text-slate-400 text-xs mt-1">اضغط «إضافة منتج» للبدء.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Pricing & Totals Card */}
+              <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
+                <h4 className="text-sm font-black text-slate-700 mb-4 flex items-center gap-2">
+                  <RefreshCcw size={15} className="text-slate-400" />
+                  التسعير والمجاميع
+                </h4>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
+                  {/* Discount */}
+                  <div className="bg-slate-50 rounded-2xl p-3.5">
+                    <label className="text-[11px] font-black text-slate-500 uppercase tracking-wide mb-2.5 block">الخصم</label>
+                    <div className="flex gap-2">
+                      <CustomSelect
+                        value={discountType}
+                        onChange={v => setDiscountType(v as RateType)}
+                        options={[{ value: 'amount', label: 'قيمة' }, { value: 'percent', label: '%' }]}
+                        className="text-sm"
+                      />
+                      <input
+                        type="number" min={0}
+                        value={discountValue}
+                        onChange={e => setDiscountValue(Number(e.target.value || 0))}
+                        className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                        placeholder="0"
+                      />
+                    </div>
+                  </div>
+                  {/* Tax */}
+                  <div className="bg-slate-50 rounded-2xl p-3.5">
+                    <label className="text-[11px] font-black text-slate-500 uppercase tracking-wide mb-2.5 block">الضريبة</label>
+                    <div className="flex gap-2">
+                      <CustomSelect
+                        value={taxType}
+                        onChange={v => setTaxType(v as RateType)}
+                        options={[{ value: 'percent', label: '%' }, { value: 'amount', label: 'قيمة' }]}
+                        className="text-sm"
+                      />
+                      <input
+                        type="number" min={0}
+                        value={taxValue}
+                        onChange={e => setTaxValue(Number(e.target.value || 0))}
+                        className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                        placeholder="0"
+                      />
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-1.5">الترتيب حسب إعدادات النظام.</p>
+                  </div>
+                  {/* Shipping */}
+                  <div className="bg-slate-50 rounded-2xl p-3.5">
+                    <label className="text-[11px] font-black text-slate-500 uppercase tracking-wide mb-2.5 block">مصاريف الشحن</label>
+                    <div className="relative">
+                      <input
+                        type="number" min={0}
+                        value={shippingValue}
+                        onChange={e => setShippingValue(Number(e.target.value || 0))}
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all pl-10"
+                        placeholder="0"
+                      />
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-slate-400 font-bold pointer-events-none">ج.م</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Live Totals Summary */}
+                {(() => {
+                  const _sub = orderItems.reduce((s, it) => s + (it.qty * it.price), 0);
+                  const _totals = calculateOrderTotals(_sub, shippingValue, discountType, discountValue, taxType, taxValue, salesCalcOrder);
+                  return (
+                    <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-5 text-white">
+                      <div className="space-y-2.5 text-sm">
+                        <div className="flex justify-between items-center">
+                          <span className="text-slate-400">المجموع الفرعي</span>
+                          <span className="font-bold tabular-nums">{_totals.subtotal.toLocaleString('ar-EG')} {currencySymbol}</span>
+                        </div>
+                        {_totals.discountAmount > 0 && (
+                          <div className="flex justify-between items-center text-rose-400">
+                            <span>الخصم</span>
+                            <span className="font-bold tabular-nums">− {_totals.discountAmount.toLocaleString('ar-EG')} {currencySymbol}</span>
+                          </div>
+                        )}
+                        {_totals.taxAmount > 0 && (
+                          <div className="flex justify-between items-center text-amber-300">
+                            <span>الضريبة</span>
+                            <span className="font-bold tabular-nums">+ {_totals.taxAmount.toLocaleString('ar-EG')} {currencySymbol}</span>
+                          </div>
+                        )}
+                        {shippingValue > 0 && (
+                          <div className="flex justify-between items-center text-sky-300">
+                            <span>الشحن</span>
+                            <span className="font-bold tabular-nums">+ {shippingValue.toLocaleString('ar-EG')} {currencySymbol}</span>
+                          </div>
+                        )}
+                        <div className="border-t border-slate-600/60 pt-3 flex justify-between items-center">
+                          <span className="text-base font-black">الإجمالي النهائي</span>
+                          <span className="text-xl font-black text-emerald-400 tabular-nums">{_totals.total.toLocaleString('ar-EG')} {currencySymbol}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Save Button */}
+                <div className="mt-5 flex justify-end">
+                  <button
+                    onClick={saveManualOrder}
+                    className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white px-8 py-3 rounded-2xl text-sm font-black shadow-lg shadow-emerald-200/60 transition-all"
+                  >
+                    <ShoppingCart size={18} />
+                    {editingOrderId ? 'حفظ التعديلات' : 'حفظ الاوردر'}
+                  </button>
+                </div>
+              </div>
+
+            </div>{/* end RIGHT COLUMN */}
+          </div>{/* end grid */}
         </div>
       )}
 
@@ -1723,7 +2256,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
               <Search className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
               <input 
                 type="text" 
-                placeholder="بحث برقم الطلبية، اسم العميل، الهاتف..." 
+                placeholder="بحث برقم الاوردر، اسم العميل، الهاتف..." 
                 value={searchTerm} 
                 onChange={e => setSearchTerm(e.target.value)} 
                 className="w-full pr-10 pl-4 py-3 bg-slate-50 border-none rounded-2xl text-sm focus:ring-2 focus:ring-blue-500 transition-all" 
@@ -1776,7 +2309,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
           {filteredOrders.length === 0 ? (
              <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-slate-300">
                 <FileText className="w-16 h-16 mx-auto text-slate-200 mb-4"/>
-                <p className="text-slate-400 font-bold">لا توجد طلبيات مطابقة للبحث</p>
+               <p className="text-slate-400 font-bold">لا توجد اوردرات مطابقة للبحث</p>
              </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-5">
@@ -1805,6 +2338,12 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                             </div>
                             <div className="flex flex-col items-end gap-1">
                               {getStatusChip(order.status)}
+                              <div className="mt-2 flex items-center gap-2">
+                                <button onClick={() => editOrder(order)} title="تعديل الطلب" className="flex items-center gap-2 bg-amber-500 text-white px-3 py-1 rounded-lg hover:bg-amber-600 text-sm font-bold shadow-sm transition-colors">
+                                  <Edit size={18} />
+                                  <span>تعديل الاوردر</span>
+                                </button>
+                              </div>
                               {order.status === 'with_rep' && (() => {
                                 const rn = getRepName(order);
                                 return rn ? <div className="text-[11px] text-slate-500">المندوب: <span className="font-bold text-slate-700">{rn}</span></div> : null;
@@ -1816,7 +2355,12 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                         <div className="space-y-2 mb-4">
                             <div className="flex items-center gap-2 text-xs text-slate-500">
                               <Phone size={14} className="text-blue-500"/>
-                              <span className="font-mono dir-ltr">{pickDisplayPhone(`${order.phone || ''}\n${order.phone1 || ''}\n${order.phone2 || ''}`, '')}</span>
+                              <div className="flex flex-col">
+                                <span className="font-mono dir-ltr">{pickDisplayPhone(`${order.phone || ''}\n${order.phone1 || ''}\n${order.phone2 || ''}`, '')}</span>
+                                {order.phone2 && String(order.phone2).trim() !== '' && (
+                                  <span className="text-[11px] text-slate-500 font-mono dir-ltr">{normalizeNumbers(order.phone2)}</span>
+                                )}
+                              </div>
                             </div>
                             <div className="flex items-start gap-2 text-xs text-slate-500">
                                 <MapPin size={14} className="text-rose-500 mt-0.5 shrink-0"/>
@@ -1840,15 +2384,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                             </div>
                         </div>
 
-                        {/* Employee & Page info */}
-                        {(order.employee || order.page) && (
-                          <div className="px-5 pb-4">
-                            <div className="text-xs text-slate-500">
-                              {order.employee ? <div>الموظف: <span className="font-bold text-slate-700">{order.employee}</span></div> : null}
-                              {order.page ? <div>البيدج: <span className="font-bold text-slate-700">{order.page}</span></div> : null}
-                            </div>
-                          </div>
-                        )}
+                        {/* Employee & Page info intentionally hidden */}
                       </div>
 
                     {/* Footer */}
@@ -1873,7 +2409,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                                <Edit size={18}/>
                              </button>
                              <button
-                               onClick={() => openOrderDetails(order)}
+                               onClick={() => openOrderAndEnsure(order)}
                                className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-slate-600 hover:text-emerald-600 hover:border-emerald-200 transition-colors shadow-sm"
                                title="تفاصيل"
                              >
@@ -1891,13 +2427,13 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       {view === 'import-orders' && (
         <div className="space-y-6">
           <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
-              <h3 className="text-xl font-black mb-2 text-slate-900 flex items-center gap-3"><ClipboardPaste size={24} className="text-blue-500"/> استيراد الطلبيات</h3>
+              <h3 className="text-xl font-black mb-2 text-slate-900 flex items-center gap-3"><ClipboardPaste size={24} className="text-blue-500"/> استيراد الاوردرات</h3>
 
               {salesDisplayMethod === 'sales_offices' && (
                 <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-2xl">
                   <div className="text-xs font-black text-slate-600 mb-2">مكتب المبيعات</div>
                   {isSalesOfficeScopeNone ? (
-                    <div className="text-xs text-slate-500">هذا المستخدم بدون مكاتب مبيعات (سيتم استخدام بيانات الشركة في رأس الطلبية).</div>
+                    <div className="text-xs text-slate-500">هذا المستخدم بدون مكاتب مبيعات (سيتم استخدام بيانات الشركة في رأس الاوردر).</div>
                   ) : (
                     <div className="flex flex-col md:flex-row gap-2 md:items-center">
                       <CustomSelect
@@ -1908,16 +2444,16 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                         disabled={!canChangeSalesOffice && defaultSalesOfficeId !== null && defaultSalesOfficeId !== undefined}
                       />
                       <div className="text-xs text-slate-500">
-                        {selectedSalesOffice ? (selectedSalesOffice.phones || '') : 'سيظهر اسم/هاتف المكتب في رأس الطلبية.'}
-                      </div>
+                              {selectedSalesOffice ? (selectedSalesOffice.phones || '') : 'سيظهر اسم/هاتف المكتب في رأس الاوردر.'}
+                            </div>
                     </div>
                   )}
                 </div>
               )}
 
               <div>
-                <label className="text-xs font-bold text-slate-600">نص الطلبيات</label>
-                <textarea value={scriptText} onChange={(e) => setScriptText(e.target.value)} rows={8} placeholder="انسخ نص الطلبيات هنا..." className="w-full bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl p-4 text-sm font-mono focus:border-blue-500 transition-all mt-1" />
+                <label className="text-xs font-bold text-slate-600">نص الاوردرات</label>
+                <textarea value={scriptText} onChange={(e) => setScriptText(normalizeNumbers(e.target.value))} rows={8} placeholder="انسخ نص الاوردرات هنا..." className="w-full bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl p-4 text-sm font-mono focus:border-blue-500 transition-all mt-1" />
               </div>
               
               <div className="mt-4 flex justify-end">
@@ -1942,7 +2478,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                         </div>
                         <button
                           onClick={async () => {
-                            const confirm = await Swal.fire({ title: 'تحويل الأرقام', text: 'هل تريد تحويل أرقام الطلبيات الظاهرة إلى أرقام إنجليزية وحفظها؟', icon: 'question', showCancelButton: true });
+                            const confirm = await Swal.fire({ title: 'تحويل الأرقام', text: 'هل تريد تحويل أرقام الاوردرات الظاهرة إلى أرقام إنجليزية وحفظها؟', icon: 'question', showCancelButton: true });
                             if (!confirm.isConfirmed) return;
                             const toUpdate = filteredOrders.filter(o => {
                               const phones = `${o.phone || ''}\n${o.phone1 || ''}\n${o.phone2 || ''}`;
@@ -2035,15 +2571,15 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
 
             <div className="space-y-1 text-slate-500">
               <p className="truncate">{order.governorate} - {order.address}</p>
-              <p className="font-mono">{order.phone1}</p>
+              <p className="font-mono">{order.phone1}{order.phone2 && String(order.phone2).trim() !== '' ? ` - ${order.phone2}` : ''}</p>
             </div>
 
             {hasMissing && (
               <div className="mt-2 mb-2 p-2 bg-rose-100 text-rose-800 rounded text-sm">
-                تحتوي هذه الطلبية على منتجات غير متطابقة. يمكنك اختيار المنتج المقابل لكل سطر، أو استخدام الأزرار أدناه.
+                تحتوي هذه الاوردر على منتجات غير متطابقة. يمكنك اختيار المنتج المقابل لكل سطر، أو استخدام الأزرار أدناه.
                 <div className="mt-2 flex gap-2">
-                  <button onClick={() => editParsedOrder(order)} className="bg-yellow-500 text-white px-3 py-1 rounded text-xs">تعديل الطلبية</button>
-                  <button onClick={() => removeParsedOrder(order.id)} className="bg-rose-600 text-white px-3 py-1 rounded text-xs">حذف الطلبية</button>
+                  <button onClick={() => editParsedOrder(order)} className="bg-yellow-500 text-white px-3 py-1 rounded text-xs">تعديل الاوردر</button>
+                  <button onClick={() => removeParsedOrder(order.id)} className="bg-rose-600 text-white px-3 py-1 rounded text-xs">حذف الاوردر</button>
                   <button onClick={() => recalcParsedOrder(order.id)} className="bg-emerald-600 text-white px-3 py-1 rounded text-xs">حساب قيمه الطلبيه</button>
                 </div>
               </div>
@@ -2051,9 +2587,9 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
 
             {((order.products || []).some((p: any) => p.missingSize || p.missingColor) && !hasMissing) && (
               <div className="mt-2 mb-2 p-2 bg-yellow-100 text-yellow-800 rounded text-sm">
-                تحتوي بعض الأسطر على مقاس أو لون غير مسجل. النظام لن يغيّر القيم تلقائياً. يمكنك تعديل الأسطر يدوياً أو حفظ الطلبية كما هي.
+                تحتوي بعض الأسطر على مقاس أو لون غير مسجل. النظام لن يغيّر القيم تلقائياً. يمكنك تعديل الأسطر يدوياً أو حفظ الاوردر كما هو.
                 <div className="mt-2 flex gap-2">
-                  <button onClick={() => editParsedOrder(order)} className="bg-yellow-500 text-white px-3 py-1 rounded text-xs">تعديل الطلبية</button>
+                  <button onClick={() => editParsedOrder(order)} className="bg-yellow-500 text-white px-3 py-1 rounded text-xs">تعديل الاوردر</button>
                   <button onClick={() => allowSaveParsedOrderAsIs(order.id)} className="bg-emerald-600 text-white px-3 py-1 rounded text-xs">حفظ كما هي</button>
                 </div>
               </div>
@@ -2061,10 +2597,10 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
 
             {hasTotalsMismatch && (
               <div className="mt-2 mb-2 p-2 bg-yellow-100 text-yellow-800 rounded text-sm">
-                إجمالي الأسطر ({Number(order.computedTotal || 0).toFixed(2)} ج.م) لا يتطابق مع الإجمالي المُدخل ({Number(order.parsedTotal || 0).toFixed(2)} ج.م). راجع الأسعار أو اضغط تعديل الطلبية.
+                إجمالي الأسطر ({Number(order.computedTotal || 0).toFixed(2)} ج.م) لا يتطابق مع الإجمالي المُدخل ({Number(order.parsedTotal || 0).toFixed(2)} ج.م). راجع الأسعار أو اضغط تعديل الاوردر.
                 <div className="mt-2 flex gap-2">
-                  <button onClick={() => editParsedOrder(order)} className="bg-yellow-500 text-white px-3 py-1 rounded text-xs">تعديل الطلبية</button>
-                  <button onClick={() => removeParsedOrder(order.id)} className="bg-rose-600 text-white px-3 py-1 rounded text-xs">حذف الطلبية</button>
+                  <button onClick={() => editParsedOrder(order)} className="bg-yellow-500 text-white px-3 py-1 rounded text-xs">تعديل الاوردر</button>
+                  <button onClick={() => removeParsedOrder(order.id)} className="bg-rose-600 text-white px-3 py-1 rounded text-xs">حذف الاوردر</button>
                   <button onClick={() => recalcParsedOrder(order.id)} className="bg-emerald-600 text-white px-3 py-1 rounded text-xs">حساب قيمه الطلبيه</button>
                 </div>
               </div>
@@ -2151,7 +2687,7 @@ const PrintableContent: React.FC<{ order: any, companyName: string, companyPhone
     const emptyRowsCount = 0; // no forced empty rows; let rows be dynamic based on products
     const salesDisplayMethod = (localStorage.getItem('Dragon_sales_display_method') || 'company').toString();
     const companyLogo = localStorage.getItem('Dragon_company_logo') || '';
-    const currentDate = new Date().toISOString().split('T')[0];
+    const currentDate = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Cairo' }); // Egypt local date (YYYY-MM-DD)
     const pageDisplay = order.page || order.pageName || order.page_name || order.page_number || order.page_no || order.source || '-';
 
     const getUserDisplayName = (emp: any) => {
@@ -2249,17 +2785,24 @@ const PrintableContent: React.FC<{ order: any, companyName: string, companyPhone
                         <span className="font-black text-base">{order.governorate || 'غير محدد'}</span>
                     </div>
                 </div>
-                <div className="flex justify-between items-center mb-1">
-                    <div className="text-right">
-                      <span className="font-bold text-base font-mono">{pickDisplayPhone(`${order.phone || ''}\n${order.phone1 || ''}\n${order.phone2 || ''}`, '')}</span>
-                    </div>
-                    <div className="text-left">
-                      <span className="font-bold text-base font-mono">{normalizeNumbers(order.phone2 || '')}</span>
-                    </div>
-                </div>
+                <div className="flex flex-col mb-1 text-right">
+    <div className="font-bold text-base font-mono">
+        {pickDisplayPhone(`${order.phone || ''}\n${order.phone1 || ''}\n${order.phone2 || ''}`, '')}
+    </div>
+    {order.phone2 && String(order.phone2).trim() !== '' && (
+        <div className="font-bold text-base font-mono">
+            {normalizeNumbers(order.phone2)}
+        </div>
+    )}
+</div>
                 <div className="text-right">
-                    <span className="font-bold text-base leading-tight">{order.address}</span>
+                  <span className="font-bold text-base leading-tight">{order.address}</span>
                 </div>
+
+                
+
+                {/* Notes removed from here and moved below totals */}
+                
             </div>
 
             {/* Product Table */}
@@ -2291,12 +2834,6 @@ const PrintableContent: React.FC<{ order: any, companyName: string, companyPhone
                 </table>
             </div>
 
-            {/* Employee & Page */}
-            <div className="flex justify-between mb-2 px-1" style={{ alignItems: 'center' }}>
-            <p style={{ fontSize: '30px', fontWeight: 800 }}><span style={{ fontWeight: 900 }}>الموظف:</span> &nbsp;{getUserDisplayName(order.employee_raw || order.employee)}</p>
-            <p style={{ fontSize: '30px', fontWeight: 800 }}><span style={{ fontWeight: 900 }}>البيدج:</span> &nbsp;{order.page_raw || pageDisplay}</p>
-            </div>
-
             {/* --- Totals: products, shipping, grand total --- */}
             <div className="border-2 border-black p-2 mb-2 bg-slate-50">
                 <div className="flex justify-between items-center mb-1 px-2">
@@ -2312,6 +2849,20 @@ const PrintableContent: React.FC<{ order: any, companyName: string, companyPhone
                   <div>الإجمالي المطلوب</div>
                   <div>{computedTotal.toLocaleString()} ج.م</div>
                 </div>
+            </div>
+
+            {/* Notes (ملاحظات) - show if present */}
+            {order.notes && String(order.notes).trim() !== '' && (
+              <div className="mt-2 border-2 border-black p-2 bg-white text-right" style={{ fontSize: '26px' }}>
+                <div className="font-bold mb-1">ملاحظات:</div>
+                <div>{order.notes}</div>
+              </div>
+            )}
+
+            {/* Employee & Page - below notes */}
+            <div className="flex justify-between items-center mt-2 mb-1 px-2 py-1 border-t border-dashed border-black">
+              <div className="text-right text-sm">الموظف: <span className="font-bold">{getUserDisplayName(order.employee || order.employee_raw || order.employeeName || order.employee_name)}</span></div>
+              <div className="text-left text-sm">البيدج: <span className="font-bold">{pageDisplay}</span></div>
             </div>
 
             {/* Policy */}

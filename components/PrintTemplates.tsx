@@ -27,8 +27,10 @@ export const PrintableContent: React.FC<{ order: any, companyName: string, compa
     const currentDate = new Date().toISOString().split('T')[0];
 
     // Prefer raw/script-supplied employee/page fields when available
-    const employeeDisplay = (order && (order.employee || order.employeeName || order.employee_name || order.employeeFullName || order.created_by_name || order.created_by || order.created_by_display || order.created_by_username)) || 'Admin';
-    const pageDisplay = (order && (order.page || order.pageName || order.page_name || order.page_number || order.page_no || order.source)) || '-';
+    /* const employeeDisplay = (order && (order.employee || order.employeeName || order.employee_name || order.employeeFullName || order.created_by_name || order.created_by || order.created_by_display || order.created_by_username)) || 'Admin';
+    const pageDisplay = (order && (order.page || order.pageName || order.page_name || order.page_number || order.page_no || order.source)) || '-'; */
+    const employeeDisplay = (order && (order.employee || order.employee_name || order.marketer || order.employeeName || order.created_by_name || order.created_by_username)) || 'غير محدد';
+    const pageDisplay = (order && (order.page || order.page_name || order.source_page || order.pageName || order.source)) || 'غير محدد';
 
     return (
       <div className="flex flex-col bg-white text-black font-sans box-border relative p-1" style={{ direction: 'rtl', fontSize: '28px', flex: 1, minHeight: 0 }}>
@@ -128,9 +130,18 @@ export const PrintableContent: React.FC<{ order: any, companyName: string, compa
                 </table>
             </div>
 
-            <div className="flex justify-between text-xs mb-2 px-1">
-              <p><span className="text-base font-bold">الموظف:</span> {employeeDisplay}</p>
-              <p><span className="text-base font-bold">البيدج:</span> {pageDisplay}</p>
+            {/* Notes (if any) - show before employee/page */}
+            {order.notes ? (
+              <div className="mb-2 p-2 border-2 border-black bg-white">
+                <div className="text-sm font-bold mb-1">ملاحظات</div>
+                <div className="text-base">{order.notes}</div>
+              </div>
+            ) : null}
+
+            {/* Move employee and page below notes as requested */}
+            <div className="flex flex-col text-sm mb-2 px-2 py-1 border-t border-b border-dashed border-black bg-slate-50 mt-1">
+              <div className="mb-1"><span className="text-base font-bold">الموظف:</span> <span className="font-bold text-gray-700">{employeeDisplay}</span></div>
+              <div><span className="text-base font-bold">البيدج:</span> <span className="font-bold text-gray-700">{pageDisplay}</span></div>
             </div>
 
             <div className="border-2 border-black p-2 mb-2 bg-slate-50">

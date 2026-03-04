@@ -502,15 +502,29 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
     return labels[type] || type;
   };
 
-  const getTransactionNotes = (details: string | null) => {
+    const getTransactionNotes = (details: string | null) => {
       if (!details) return '—';
       try {
-          const parsed = JSON.parse(details);
-          return parsed.notes || parsed.note || (typeof parsed === 'string' ? parsed : '—');
+        const parsed = JSON.parse(details);
+        return parsed.notes || parsed.note || (typeof parsed === 'string' ? parsed : '—');
       } catch (e) {
-          return details;
+        return details;
       }
-  };
+    };
+
+    const getTxDisplayLabel = (tx: any) => {
+    if (!tx) return '-';
+    if (tx.title && String(tx.title).trim()) return tx.title;
+    if (tx.memo && String(tx.memo).trim()) return tx.memo;
+    return getTransactionTypeLabel(tx.type, tx.details);
+    };
+
+    const getTxDisplayNotes = (tx: any) => {
+    if (!tx) return '—';
+    if (tx.memo && String(tx.memo).trim()) return tx.memo;
+    if (tx.title && String(tx.title).trim()) return tx.title;
+    return getTransactionNotes(tx.details);
+    };
 
   const printTreasuryReport = () => {
     if (!selectedTreasury) return;
@@ -523,12 +537,12 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
     let transactionsHtml = '';
     if (treasuryTransactions.length > 0) {
         transactionsHtml = treasuryTransactions.map(tx => `
-            <tr>
-                <td>${new Date(tx.transaction_date).toLocaleString('ar-EG')}</td>
-                <td>${getTransactionTypeLabel(tx.type, tx.details)}</td>
-                <td>${getTransactionNotes(tx.details)}</td>
-                <td style="color: ${tx.amount >= 0 ? 'green' : 'red'}; font-weight: bold; text-align: left; direction: ltr;">${parseFloat(tx.amount).toLocaleString()} ${currencySymbol}</td>
-            </tr>
+          <tr>
+            <td>${new Date(tx.transaction_date).toLocaleString('ar-EG')}</td>
+            <td>${(tx.title && String(tx.title).trim()) ? tx.title : ((tx.memo && String(tx.memo).trim()) ? tx.memo : getTransactionTypeLabel(tx.type, tx.details))}</td>
+            <td>${(tx.memo && String(tx.memo).trim()) ? tx.memo : getTransactionNotes(tx.details)}</td>
+            <td style="color: ${tx.amount >= 0 ? 'green' : 'red'}; font-weight: bold; text-align: left; direction: ltr;">${parseFloat(tx.amount).toLocaleString()} ${currencySymbol}</td>
+          </tr>
         `).join('');
     } else {
         transactionsHtml = '<tr><td colspan="4" style="text-align: center;">لا توجد معاملات مسجلة</td></tr>';
@@ -958,8 +972,8 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
                               {treasuryTransactions.map(tx => (
                                   <tr key={tx.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50">
                                       <td className="px-4 py-3 text-xs">{new Date(tx.transaction_date).toLocaleString('ar-EG')}</td>
-                                      <td className="px-4 py-3 font-bold">{getTransactionTypeLabel(tx.type, tx.details)}</td>
-                                      <td className="px-4 py-3 text-xs">{getTransactionNotes(tx.details)}</td>
+                                      <td className="px-4 py-3 font-bold">{getTxDisplayLabel(tx)}</td>
+                                      <td className="px-4 py-3 text-xs">{getTxDisplayNotes(tx)}</td>
                                       <td className={`px-4 py-3 font-black ${tx.amount >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{parseFloat(tx.amount).toLocaleString()} {currencySymbol}</td>
                                   </tr>
                               ))}

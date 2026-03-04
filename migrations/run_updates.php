@@ -53,6 +53,34 @@ if (file_exists($createFile)) {
     echo "Finished create-tables migration.\n";
 }
 
+// Second: new tables added in v1.1.x (rep_daily_journal, product_variants, stock, etc.)
+function run_sql_migration_file(PDO $pdo, string $path, string $label): void {
+    if (!file_exists($path)) {
+        echo "SKIP (file not found): $label\n";
+        return;
+    }
+    echo "Executing migration: $label\n";
+    $sql = file_get_contents($path);
+    $sql = preg_replace('/SET FOREIGN_KEY_CHECKS\s*=\s*[01];/i', "", $sql);
+    $sql = preg_replace('/--[^\n]*\n/u', "\n", $sql); // strip single-line comments
+    $parts = preg_split('/;\s*\n/', $sql);
+    $ok = 0; $warn = 0;
+    foreach ($parts as $part) {
+        $stmt = trim($part);
+        if (!$stmt || $stmt === ';') continue;
+        try {
+            $pdo->exec($stmt . ';');
+            $ok++;
+        } catch (Exception $e) {
+            $warn++;
+            echo "  WARN: " . $e->getMessage() . "\n";
+        }
+    }
+    echo "  Done: $ok OK, $warn warnings.\n";
+}
+
+run_sql_migration_file($pdo, __DIR__ . '/20260302_new_tables.sql', '20260302_new_tables (v1.1.x)');
+
 function columnExists($pdo, $table, $col) {
     $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?");
     $stmt->execute([$table, $col]);
@@ -80,6 +108,122 @@ function hasPrimaryKey($pdo, $table) {
 $errors = [];
 
 echo "Starting conditional schema updates...\n";
+
+// ===== هجرة بنية المنتجات إلى product_variants =====
+echo "\n=== فحص هجرة المنتجات إلى product_variants ===\n";
+try {
+    $variantsExist = (bool)$pdo->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='product_variants'")->fetchColumn();
+    $productsExist = (bool)$pdo->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='products'")->fetchColumn();
+
+    if ($variantsExist && $productsExist) {
+        // التحقق من أن products الجديد ليس به عمود color (البنية القديمة)
+        $hasColorInProducts = columnExists($pdo, 'products', 'color');
+        if (!$hasColorInProducts) {
+            echo "✅ هجرة المنتجات مكتملة مسبقاً، تخطي.\n";
+        } else {
+            // قد تكون product_variants أُنشئت فارغة من ملف SQL قبل تنفيذ هجرة البيانات
+            $variantRows  = (int)$pdo->query("SELECT COUNT(*) FROM product_variants")->fetchColumn();
+            $productsRows = (int)$pdo->query("SELECT COUNT(*) FROM products")->fetchColumn();
+            if ($variantRows === 0 && $productsRows > 0) {
+                echo "⚠️ product_variants فارغة (أُنشئت من ملف SQL) بينما products به $productsRows صف بالبنية القديمة.\n";
+                echo "⏳ حذف product_variants الفارغة وإعادة تشغيل هجرة البيانات...\n";
+                $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
+                $pdo->exec("DROP TABLE IF EXISTS stock");
+                $pdo->exec("DROP TABLE IF EXISTS product_variants");
+                $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
+                $variantsExist = false; // الانتقال لكتلة الهجرة أدناه
+            } else {
+                echo "⚠️ products به عمود color + product_variants موجود ($variantRows صف). حالة غير متوقعة، يرجى المراجعة.\n";
+            }
+        }
+    }
+
+    if ($variantsExist && !$productsExist) {
+        echo "⚠️ جدول products غير موجود، تخطي هجرة المنتجات.\n";
+    } elseif (!$variantsExist && !$productsExist) {
+        echo "⚠️ كلا الجدولين غير موجودَين، تخطي هجرة المنتجات.\n";
+    } elseif (!$variantsExist && $productsExist) {
+        // الهجرة مطلوبة
+        $oldCount = (int)$pdo->query("SELECT COUNT(*) FROM products")->fetchColumn();
+        echo "⏳ بدء هجرة المنتجات ($oldCount صف)...\n";
+
+        // 1. إعادة تسمية products → product_variants
+        $pdo->exec("RENAME TABLE products TO product_variants");
+        echo "  ✅ تمت إعادة التسمية products → product_variants\n";
+
+        // 2. إضافة عمود product_id
+        if (!columnExists($pdo, 'product_variants', 'product_id')) {
+            $pdo->exec("ALTER TABLE product_variants ADD COLUMN product_id INT(11) NOT NULL DEFAULT 0 AFTER id");
+            $pdo->exec("ALTER TABLE product_variants ADD KEY idx_pv_product_id (product_id)");
+        }
+
+        // 3. إنشاء جدول products الجديد (الآباء)
+        $pdo->exec("CREATE TABLE IF NOT EXISTS products (
+            id INT(11) NOT NULL AUTO_INCREMENT,
+            name VARCHAR(255) NOT NULL,
+            category VARCHAR(100) NULL DEFAULT NULL,
+            description TEXT NULL DEFAULT NULL,
+            is_archived TINYINT(1) NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY idx_products_name (name(191))
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        echo "  ✅ تم إنشاء جدول products الجديد\n";
+
+        // 4. ملء products من الأسماء الفريدة
+        $hasCategory    = columnExists($pdo, 'product_variants', 'category');
+        $hasDescription = columnExists($pdo, 'product_variants', 'description');
+        $hasIsArchived  = columnExists($pdo, 'product_variants', 'is_archived');
+        $categoryCol    = $hasCategory    ? "MAX(category)"    : "NULL";
+        $descCol        = $hasDescription ? "MAX(description)" : "NULL";
+        $archivedCol    = $hasIsArchived  ? "MIN(is_archived)" : "0";
+        $pdo->exec("INSERT INTO products (name, category, description, is_archived)
+            SELECT name, $categoryCol, $descCol, $archivedCol
+            FROM product_variants GROUP BY name ORDER BY MIN(id)");
+        $parentCount = (int)$pdo->query("SELECT COUNT(*) FROM products")->fetchColumn();
+        echo "  ✅ تم إنشاء $parentCount منتج أب\n";
+
+        // 5. ربط المتغيرات بالآباء
+        $pdo->exec("UPDATE product_variants pv JOIN products p ON p.name = pv.name SET pv.product_id = p.id");
+
+        // إصلاح الأيتام إن وجدوا
+        $orphans = (int)$pdo->query("SELECT COUNT(*) FROM product_variants WHERE product_id = 0")->fetchColumn();
+        if ($orphans > 0) {
+            $stmt = $pdo->query("SELECT DISTINCT name FROM product_variants WHERE product_id = 0");
+            foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $orphanName) {
+                $pdo->prepare("INSERT IGNORE INTO products (name) VALUES (?)")->execute([$orphanName]);
+                $newPid = $pdo->query("SELECT id FROM products WHERE name = " . $pdo->quote($orphanName) . " LIMIT 1")->fetchColumn();
+                $pdo->prepare("UPDATE product_variants SET product_id = ? WHERE name = ? AND product_id = 0")->execute([$newPid, $orphanName]);
+            }
+        }
+
+        $variantCount = (int)$pdo->query("SELECT COUNT(*) FROM product_variants")->fetchColumn();
+        echo "✅ اكتملت هجرة المنتجات: $parentCount أب ← $variantCount متغير\n";
+    }
+
+    // التأكد من وجود عمود is_archived في products و product_variants
+    if ((bool)$pdo->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='products'")->fetchColumn()) {
+        if (!columnExists($pdo, 'products', 'is_archived')) {
+            $pdo->exec("ALTER TABLE products ADD COLUMN is_archived TINYINT(1) NOT NULL DEFAULT 0");
+            echo "  ✅ تمت إضافة is_archived إلى products\n";
+        }
+    }
+    if ((bool)$pdo->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='product_variants'")->fetchColumn()) {
+        if (!columnExists($pdo, 'product_variants', 'is_archived')) {
+            $pdo->exec("ALTER TABLE product_variants ADD COLUMN is_archived TINYINT(1) NOT NULL DEFAULT 0");
+            echo "  ✅ تمت إضافة is_archived إلى product_variants\n";
+        }
+        if (!columnExists($pdo, 'product_variants', 'product_id')) {
+            $pdo->exec("ALTER TABLE product_variants ADD COLUMN product_id INT(11) NOT NULL DEFAULT 0 AFTER id");
+            $pdo->exec("ALTER TABLE product_variants ADD KEY idx_pv_product_id (product_id)");
+            echo "  ✅ تمت إضافة product_id إلى product_variants\n";
+        }
+    }
+} catch (Exception $e) {
+    $errors[] = "product_variants migration error: " . $e->getMessage();
+    echo "❌ خطأ في هجرة المنتجات: " . $e->getMessage() . "\n";
+}
+echo "=== انتهى فحص هجرة المنتجات ===\n\n";
 
 // ===== users =====
 echo "Processing table `users`...\n";

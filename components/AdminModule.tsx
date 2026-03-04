@@ -30,31 +30,31 @@ const AdminModule: React.FC<AdminModuleProps> = ({ initialView }) => {
     { slug: 'finance', label: 'المالية' },
   ];
 
+  const isRepresentative = (u: any) => {
+    const r = (u?.role || '').toString().toLowerCase();
+    return r === 'representative' || r.includes('مندوب');
+  };
+
+  const fetchUsers = async () => {
+    try {
+      const response = await fetch(`${API_BASE_PATH}/api.php?module=users&action=getAll`);
+      const result = await response.json();
+      if (result.success) {
+        const list = Array.isArray(result.data) ? result.data.filter((u:any) => !isRepresentative(u)) : [];
+        setUsers(list);
+        const defaults:any = {};
+        pages.forEach(p => defaults[p.slug] = false);
+        setPermissionsMap(defaults);
+      }
+    } catch (error) {
+      console.error('Failed to fetch users:', error);
+    }
+  };
+
   useEffect(() => {
     if (initialView) setActiveTab(initialView);
 
     // Fetch users from API
-    const isRepresentative = (u: any) => {
-      const r = (u?.role || '').toString().toLowerCase();
-      return r === 'representative' || r.includes('مندوب');
-    };
-
-    const fetchUsers = async () => {
-      try {
-        const response = await fetch(`${API_BASE_PATH}/api.php?module=users&action=getAll`);
-        const result = await response.json();
-        if (result.success) {
-          const list = Array.isArray(result.data) ? result.data.filter((u:any) => !isRepresentative(u)) : [];
-          setUsers(list);
-          const defaults:any = {};
-          pages.forEach(p => defaults[p.slug] = false);
-          setPermissionsMap(defaults);
-        }
-      } catch (error) {
-        console.error('Failed to fetch users:', error);
-      }
-    };
-
     fetchUsers();
   }, [initialView]);
 

@@ -32,9 +32,13 @@ try {
 $input = json_decode(file_get_contents('php://input'), true);
 
 try {
-    // Update or insert company settings
-    $stmt = $pdo->prepare("INSERT INTO settings (config_key, config_value) VALUES (?, ?) 
-                          ON DUPLICATE KEY UPDATE config_value = VALUES(config_value)");
+    // Update or insert company settings. Prefer `app_settings` table if it exists.
+    $useAppSettings = (bool) $pdo->query("SHOW TABLES LIKE 'app_settings'")->fetch();
+    if ($useAppSettings) {
+        $stmt = $pdo->prepare("INSERT INTO app_settings (`k`, `v`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `v` = VALUES(`v`)");
+    } else {
+        $stmt = $pdo->prepare("INSERT INTO settings (config_key, config_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE config_value = VALUES(config_value)");
+    }
 
     // Load current settings to detect changes
     $current = [];
@@ -80,7 +84,11 @@ try {
     ];
 
     foreach ($settings as $key => $value) {
-        $stmt->execute([$key, $value]);
+        if ($useAppSettings) {
+            $stmt->execute([$key, is_scalar($value) ? (string)$value : json_encode($value)]);
+        } else {
+            $stmt->execute([$key, is_scalar($value) ? (string)$value : json_encode($value)]);
+        }
     }
 
     echo json_encode(['success' => true, 'message' => 'Settings saved successfully.']);

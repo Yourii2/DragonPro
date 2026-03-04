@@ -63,16 +63,15 @@ export const MENU_ITEMS = [
   },
   {
     id: 'inventory',
-    label: 'المخزون و المستودعات',
+    label: 'المنتجات و المخازن',
     icon: <Package className="w-5 h-5" />,
     slug: 'inventory',
     subItems: [
-      { label: 'حاله المخزون', slug: 'stock' },
-      { label: 'المستودعات', slug: 'warehouses' },
+      { label: 'المنتجات', slug: 'stock' },
+      { label: 'المخازن', slug: 'warehouses' },
       { label: 'تحويل', slug: 'transfer' },
       { label: 'استلام', slug: 'receiving' },
-      { label: 'مرتجع', slug: 'returns' },
-      { label: 'جرد', slug: 'audit' }
+      { label: 'مرتجع', slug: 'returns' }
     ]
   },
   {
@@ -83,26 +82,32 @@ export const MENU_ITEMS = [
   },
   {
     id: 'orders',
-    label: 'الطلبيات',
+    label: 'الاوردرات',
     icon: <ShoppingCart className="w-5 h-5" />,
     slug: 'orders',
     subItems: [
-      { label: 'انشاء طلبيه', slug: 'new-order' },
-      { label: 'اداره الطلبيات', slug: 'manage-orders' },
-      { label: 'استيراد الطلبيات', slug: 'import-orders' }
+      { label: 'انشاء اوردر', slug: 'new-order' },
+      { label: 'اداره الاوردرات', slug: 'manage-orders' },
+      { label: 'استيراد الاوردرات', slug: 'import-orders' }
     ]
   },
   {
-    id: 'sales',
-    label: 'المبيعات',
+    id: 'sales-daily',
+    label: 'بدء اليومية',
     icon: <Briefcase className="w-5 h-5" />,
-    slug: 'sales',
-    subItems: [
-      { label: 'بدء اليومية', slug: 'sales-daily' },
-      { label: 'تسجيل المرتجعات', slug: 'sales-update-status' },
-      { label: 'اغلاق اليومية', slug: 'close-daily' },
-      { label: 'تقرير اليومية', slug: 'sales-report' }
-    ]
+    slug: 'sales-daily'
+  },
+  {
+    id: 'sales-update-status',
+    label: 'تسجيل المرتجعات',
+    icon: <Briefcase className="w-5 h-5" />,
+    slug: 'sales-update-status'
+  },
+  {
+    id: 'close-daily',
+    label: 'اغلاق اليومية',
+    icon: <Briefcase className="w-5 h-5" />,
+    slug: 'close-daily'
   },
   {
     id: 'crm',
@@ -133,7 +138,7 @@ export const MENU_ITEMS = [
       { label: 'قائمه المناديب', slug: 'list' },
       { label: 'عهده المندوب', slug: 'custody' },
       { label: 'معاملات المندوب', slug: 'transactions' },
-      { label: 'ماليات المندوب', slug: 'rep-cycle' },
+      { label: 'يوميات المندوب', slug: 'rep-cycle' },
       { label: 'أداء المناديب', slug: 'rep-performance' }
     ]
   },
@@ -181,6 +186,7 @@ export const MENU_ITEMS = [
       { label: 'تقرير المخزون', slug: 'inventory' },
       { label: 'تقرير الماليه', slug: 'finance' },
       { label: 'اليوميه', slug: 'daily' },
+      { label: 'تقرير اليومية', slug: 'sales-report' },
       { label: 'ملخص الفتره', slug: 'totals' },
       { label: 'تقارير العملاء', slug: 'crm-srm' },
       { label: 'تقارير الموظفين', slug: 'hrm' }

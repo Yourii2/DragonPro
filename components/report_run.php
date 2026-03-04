@@ -233,8 +233,8 @@ if ($reportDailyTreasury) {
         ['label' => 'إجمالي الإيداعات', 'value' => number_format($totalDeposits, 2, '.', ',')],
         ['label' => 'إجمالي الدفعات', 'value' => number_format($totalPayments, 2, '.', ',')],
         ['label' => 'رصيد النهاية', 'value' => number_format($endBalance, 2, '.', ',')],
-        ['label' => 'عدد الطلبيات المسلمة', 'value' => intval($deliveredRow['order_count'] ?? 0)],
-        ['label' => 'عدد الطلبيات المرتجعة', 'value' => intval($returnedRow['order_count'] ?? 0)],
+        ['label' => 'عدد الاوردرات المسلمة', 'value' => intval($deliveredRow['order_count'] ?? 0)],
+        ['label' => 'عدد الاوردرات المرتجعة', 'value' => intval($returnedRow['order_count'] ?? 0)],
         ['label' => 'إجمالي القطع المسلمة', 'value' => number_format($deliveredPieces, 0, '.', ',')],
         ['label' => 'إجمالي القطع المرتجعة', 'value' => number_format($returnedPieces, 0, '.', ',')],
         ['label' => 'إجمالي المبيعات (مبلغ)', 'value' => number_format(floatval($deliveredRow['amount'] ?? 0), 2, '.', ',')],
@@ -256,9 +256,9 @@ if ($reportDailySales) {
         $report1Html = '<p style="margin:0; color:#64748b;">لا توجد بيانات للمندوبين في هذا اليوم.</p>';
     } else {
         $report1Html = '<table class="table report1"><thead><tr>' .
-            '<th>اسم المندوب</th><th>المبلغ في بداية الفترة</th><th>عدد الطلبيات قبل الفترة</th><th>عدد القطع قبل الفترة</th>' .
-            '<th>عدد الطلبيات المستلمة في اليومية</th><th>عدد القطع المستلمة في اليومية</th><th>عدد الطلبيات المسلمة</th>' .
-            '<th>عدد القطع المسلمة</th><th>عدد الطلبيات المرتجعة</th><th>عدد القطع المرتجعة</th><th>المبلغ الحالي</th>' .
+            '<th>اسم المندوب</th><th>المبلغ في بداية الفترة</th><th>عدد الاوردرات قبل الفترة</th><th>عدد القطع قبل الفترة</th>' .
+            '<th>عدد الاوردرات المستلمة في اليومية</th><th>عدد القطع المستلمة في اليومية</th><th>عدد الاوردرات المسلمة</th>' .
+            '<th>عدد القطع المسلمة</th><th>عدد الاوردرات المرتجعة</th><th>عدد القطع المرتجعة</th><th>المبلغ الحالي</th>' .
             '<th>تم دفع</th><th>المتبقي (له/عليه)</th>' .
             '</tr></thead><tbody>';
         foreach ($report1Rows as $row) {

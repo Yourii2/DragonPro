@@ -28,9 +28,21 @@ try {
 }
 
 try {
-    // Get company settings from database
-    $stmt = $pdo->query("SELECT config_key, config_value FROM settings");
-    $settings = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+    // Prefer new `app_settings` table; fallback to legacy `settings` if not present
+    $table = 'app_settings';
+    $check = $pdo->query("SHOW TABLES LIKE 'app_settings'")->fetch();
+    if (!$check) {
+        $table = 'settings';
+    }
+
+    $stmt = $pdo->query("SELECT " . ($table === 'app_settings' ? 'k' : 'config_key') . ", " . ($table === 'app_settings' ? 'v' : 'config_value') . " FROM " . $table);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $settings = [];
+    foreach ($rows as $r) {
+        $key = $r[$table === 'app_settings' ? 'k' : 'config_key'];
+        $val = $r[$table === 'app_settings' ? 'v' : 'config_value'];
+        $settings[$key] = $val;
+    }
 
     echo json_encode(['success' => true, 'data' => $settings]);
 } catch (PDOException $e) {
