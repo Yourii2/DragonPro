@@ -799,6 +799,13 @@ ${rows.map(r => `<tr><td>${r.name}</td><td>${r.color}</td><td>${r.size}</td><td 
       const js = await res.json();
       if (js.success) {
         Swal.fire('تم', `تمت معالجة المرتجع الجزئي. المبلغ: ${Number(js.returnedValue||0).toLocaleString()} ${currencySymbol}`, 'success');
+        // تحديث rep_journal_orders (fire-and-forget)
+        try {
+          await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ rep_id: selectedRepId, order_ids: [partialReturnOrder.id], status: 'partial_return' })
+          });
+        } catch (jErr) { console.warn('updateJournalOrderStatus partial_return failed (non-critical)', jErr); }
         setIsPartialReturnOpen(false);
         setPartialReturnOrder(null);
         await refreshAssignedAndTx();

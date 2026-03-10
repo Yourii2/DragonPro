@@ -61,6 +61,7 @@ const SettingsModule: React.FC = () => {
     productSource: localStorage.getItem('Dragon_product_source') || 'both', // 'factory' | 'suppliers' | 'both'
     salePriceSource: localStorage.getItem('Dragon_default_sale_price_source') || 'product', // 'product' | 'order'
     deliveryMethod: (localStorage.getItem('Dragon_delivery_method') || 'reps').toString(), // 'reps' | 'direct' | 'shipping'
+    purchasePriceType: localStorage.getItem('Dragon_purchase_price_type') || 'full_cost', // 'full_cost' | 'vendor_price'
     currency: localStorage.getItem('Dragon_currency') || 'EGP',
     autoBackup: localStorage.getItem('Dragon_auto_backup') === 'true',
     backupFrequency: localStorage.getItem('Dragon_backup_freq') || 'daily',
@@ -155,6 +156,7 @@ const SettingsModule: React.FC = () => {
             productSource: settings.product_source || 'both',
             salePriceSource: settings.sale_price_source || 'product',
             deliveryMethod: settings.delivery_method || 'reps',
+            purchasePriceType: settings.purchase_price_type || 'full_cost',
             autoBackup: settings.auto_backup === 'true',
             backupFrequency: settings.backup_frequency || 'daily',
             backupEmail: settings.backup_email || '',
@@ -214,9 +216,9 @@ const SettingsModule: React.FC = () => {
         // new settings
         sales_display_method: config.salesDisplayMethod,
         product_source: config.productSource,
-        delivery_method: config.deliveryMethod
-        ,
-        sale_price_source: config.salePriceSource
+        delivery_method: config.deliveryMethod,
+        sale_price_source: config.salePriceSource,
+        purchase_price_type: config.purchasePriceType
       })
     });
 
@@ -243,6 +245,7 @@ const SettingsModule: React.FC = () => {
         localStorage.setItem('Dragon_sales_display_method', config.salesDisplayMethod);
         localStorage.setItem('Dragon_product_source', config.productSource);
         localStorage.setItem('Dragon_delivery_method', config.deliveryMethod);
+        localStorage.setItem('Dragon_purchase_price_type', config.purchasePriceType);
         localStorage.setItem('Dragon_auto_backup', config.autoBackup.toString());
         localStorage.setItem('Dragon_backup_freq', config.backupFrequency);
         localStorage.setItem('Dragon_backup_email', config.backupEmail);
@@ -819,6 +822,24 @@ const SettingsModule: React.FC = () => {
               />
             </div>
           </div>
+          {/* سعر الشراء المعتمد — يظهر فقط عند اختيار الموردين أو الاثنين */}
+          {config.productSource !== 'factory' && (
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
+            <h3 className="font-bold flex items-center gap-2 mb-4 text-slate-800 dark:text-slate-100">سعر الشراء في الاستلام والمرتجع</h3>
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-500 dark:text-slate-400">اختر نوع سعر الشراء المعتمد</label>
+              <CustomSelect
+                value={config.purchasePriceType}
+                onChange={(v) => setConfig({ ...config, purchasePriceType: v })}
+                options={[
+                  { value: 'full_cost', label: 'سعر التكلفة الكامل للمنتج' },
+                  { value: 'vendor_price', label: 'سعر المصنعية (سعر المورد فقط)' }
+                ]}
+              />
+              <p className="text-[11px] text-muted">يحدد هذا الخيار السعر الذي يظهر ويُستخدم في إذن الاستلام وإذن المرتجع. "سعر التكلفة الكامل" هو تكلفة المخزن، أما "سعر المصنعية" فهو سعر المورد/المصنع فقط.</p>
+            </div>
+          </div>
+          )}
           {/* سعر البيع الأساسي */}
           <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
             <h3 className="font-bold flex items-center gap-2 mb-4 text-slate-800 dark:text-slate-100">تحديد سعر البيع الأساسي</h3>

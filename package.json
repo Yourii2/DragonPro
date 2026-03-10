@@ -1,7 +1,7 @@
 {
-  "name": "DragonPro",
+  "name": "dragonpro",
   "private": true,
-  "version": "1.1.9",
+  "version": "1.2.7",
   "type": "module",
   "scripts": {
     "dev": "vite",

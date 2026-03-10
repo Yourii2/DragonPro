@@ -248,10 +248,25 @@ try {
         }
     }
 
-    echo "- Modifying balance/insurance columns...\n";
-    $pdo->exec("ALTER TABLE `users` MODIFY COLUMN `balance` decimal(15,2) NOT NULL DEFAULT '0.00'");
-    $pdo->exec("ALTER TABLE `users` MODIFY COLUMN `insurance_paid` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'هل دفع تأمين'");
-    $pdo->exec("ALTER TABLE `users` MODIFY COLUMN `insurance_amount` decimal(10,2) NOT NULL DEFAULT '0.00' COMMENT 'مبلغ التأمين المدفوع'");
+    echo "- Modifying balance/insurance columns (if they exist)...\n";
+    if (columnExists($pdo, 'users', 'balance')) {
+        $pdo->exec("ALTER TABLE `users` MODIFY COLUMN `balance` decimal(15,2) NOT NULL DEFAULT '0.00'");
+    } else {
+        $pdo->exec("ALTER TABLE `users` ADD COLUMN `balance` decimal(15,2) NOT NULL DEFAULT '0.00'");
+        echo "  - Added missing column balance to users\n";
+    }
+    if (columnExists($pdo, 'users', 'insurance_paid')) {
+        $pdo->exec("ALTER TABLE `users` MODIFY COLUMN `insurance_paid` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'هل دفع تأمين'");
+    } else {
+        $pdo->exec("ALTER TABLE `users` ADD COLUMN `insurance_paid` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'هل دفع تأمين'");
+        echo "  - Added missing column insurance_paid to users\n";
+    }
+    if (columnExists($pdo, 'users', 'insurance_amount')) {
+        $pdo->exec("ALTER TABLE `users` MODIFY COLUMN `insurance_amount` decimal(10,2) NOT NULL DEFAULT '0.00' COMMENT 'مبلغ التأمين المدفوع'");
+    } else {
+        $pdo->exec("ALTER TABLE `users` ADD COLUMN `insurance_amount` decimal(10,2) NOT NULL DEFAULT '0.00' COMMENT 'مبلغ التأمين المدفوع'");
+        echo "  - Added missing column insurance_amount to users\n";
+    }
 
     if (indexExists($pdo, 'users', 'username')) {
         echo "- username index exists\n";
@@ -324,6 +339,27 @@ try {
 } catch (Exception $e) {
     $errors[] = "orders update error: " . $e->getMessage();
     echo "orders update error: " . $e->getMessage() . "\n";
+}
+
+// ===== transactions.type ENUM (v1.2.5) =====
+echo "\nProcessing transactions.type ENUM (adding transfer_in, transfer_out, other)...\n";
+try {
+    $row = $pdo->query("SHOW COLUMNS FROM transactions LIKE 'type'")->fetch(PDO::FETCH_ASSOC);
+    if ($row && strpos($row['Type'], 'transfer_in') === false) {
+        // Collect all distinct type values currently in the table so we don't lose any
+        $existingValues = $pdo->query("SELECT DISTINCT `type` FROM `transactions` WHERE `type` IS NOT NULL AND `type` != ''")->fetchAll(PDO::FETCH_COLUMN);
+        $requiredValues = ['sale','purchase','return_in','return_out','payment_in','payment_out','transfer_in','transfer_out','other'];
+        // Merge: keep all existing values + required ones, deduplicated
+        $allValues = array_unique(array_merge($existingValues, $requiredValues));
+        $enumList = implode(',', array_map(fn($v) => "'" . addslashes($v) . "'", $allValues));
+        $pdo->exec("ALTER TABLE `transactions` MODIFY COLUMN `type` enum($enumList) COLLATE utf8mb4_unicode_ci NOT NULL");
+        echo "  ✅ تم توسيع ENUM في transactions.type (القيم: " . implode(', ', $allValues) . ")\n";
+    } else {
+        echo "  ✅ transactions.type ENUM محدّث مسبقاً، تخطي.\n";
+    }
+} catch (Exception $e) {
+    $errors[] = "transactions ENUM update error: " . $e->getMessage();
+    echo "  ❌ خطأ: " . $e->getMessage() . "\n";
 }
 
 echo "\nFinished.\n";

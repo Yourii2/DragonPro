@@ -21,6 +21,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
   const currencySymbol = 'ج.م';
   const productSource = (localStorage.getItem('Dragon_product_source') || 'both').toString();
   const salePriceSource = (localStorage.getItem('Dragon_default_sale_price_source') || 'product').toString();
+  const purchasePriceType = (localStorage.getItem('Dragon_purchase_price_type') || 'full_cost').toString();
   const defaultReceivingItemType = productSource === 'suppliers' ? 'product_new' : 'fabric_new';
   
   // --- Real Data State (Initialized Empty) ---
@@ -76,6 +77,8 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
   const [variantParentName, setVariantParentName] = useState('');
   const [editingVariant, setEditingVariant] = useState<any>(null);
   const [variantFormData, setVariantFormData] = useState({ color: '', size: '', barcode: '', cost: 0, price: 0, quantity: 0, reorderLevel: 5, warehouseId: '' });
+  const [colorInputMode, setColorInputMode] = useState<'select' | 'custom'>('select');
+  const [sizeInputMode, setSizeInputMode] = useState<'select' | 'custom'>('select');
 
   const [productFormData, setProductFormData] = useState({ 
     id: null, 
@@ -125,7 +128,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
   const [returnsData, setReturnsData] = useState({
     supplierId: '',
     warehouseId: '',
-    items: [{ id: Date.now(), productId: '', qty: 1, costPrice: 0, name: '', returnType: '', _parentId: '', _color: '', _size: '' }],
+    items: [{ id: Date.now(), productId: '', qty: 1, costPrice: 0, vendorPrice: 0, name: '', returnType: '', _parentId: '', _color: '', _size: '' }],
     receivedAmount: 0,
     treasuryId: '',
   });
@@ -133,16 +136,22 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
   const [receivingData, setReceivingData] = useState({
     supplierId: '',
     warehouseId: '',
-    items: [{ id: Date.now(), itemType: ((localStorage.getItem('Dragon_product_source') || 'both').toString() === 'suppliers') ? 'product_new' : 'fabric_new', isNew: true, name: '', color: '', size: '', costPrice: 0, sellingPrice: 0, qty: 1, barcode: '', productId: '', _parentId: '', _color: '', _size: '' }],
+    items: [{ id: Date.now(), itemType: ((localStorage.getItem('Dragon_product_source') || 'both').toString() === 'suppliers') ? 'product_new' : 'fabric_new', isNew: true, name: '', color: '', size: '', costPrice: 0, vendorPrice: 0, sellingPrice: 0, qty: 1, barcode: '', productId: '', _parentId: '', _color: '', _size: '' }],
     paidAmount: 0,
     treasuryId: '',
   });
 
   // Computed Values
   const currentSupplier = useMemo(() => suppliers.find(s => s.id === parseInt(receivingData.supplierId)) || null, [receivingData.supplierId, suppliers]);
-  const invoiceTotal = useMemo(() => receivingData.items.reduce((sum, item) => sum + (Number(item.costPrice) * Number(item.qty)), 0), [receivingData.items]);
+  const invoiceTotal = useMemo(() => receivingData.items.reduce((sum, item) => {
+    const ep = purchasePriceType === 'vendor_price' ? (Number((item as any).vendorPrice) || 0) : Number(item.costPrice);
+    return sum + (ep * Number(item.qty));
+  }, 0), [receivingData.items, purchasePriceType]);
   const currentSupplierForReturn = useMemo(() => suppliers.find(s => s.id === parseInt(returnsData.supplierId)) || null, [returnsData.supplierId, suppliers]);
-  const returnInvoiceTotal = useMemo(() => returnsData.items.reduce((sum, item) => sum + (Number(item.costPrice) * Number(item.qty)), 0), [returnsData.items]);
+  const returnInvoiceTotal = useMemo(() => returnsData.items.reduce((sum, item) => {
+    const ep = purchasePriceType === 'vendor_price' ? (Number((item as any).vendorPrice) || 0) : Number(item.costPrice);
+    return sum + (ep * Number(item.qty));
+  }, 0), [returnsData.items, purchasePriceType]);
 
   useEffect(() => {
     if (['stock', 'receiving', 'returns', 'warehouses', 'transfer', 'audit'].includes(initialView || '')) {
@@ -816,20 +825,39 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
     });
   };
 
+  // Derived lists of unique colors/sizes from all loaded variants
+  const availableColors = useMemo(() => {
+    const s = new Set<string>();
+    parentProducts.forEach((p: any) => (p.variants || []).forEach((v: any) => { if (v.color && v.color.trim()) s.add(v.color.trim()); }));
+    return Array.from(s).sort();
+  }, [parentProducts]);
+
+  const availableSizes = useMemo(() => {
+    const s = new Set<string>();
+    parentProducts.forEach((p: any) => (p.variants || []).forEach((v: any) => { if (v.size && v.size.trim()) s.add(v.size.trim()); }));
+    return Array.from(s).sort();
+  }, [parentProducts]);
+
   // --- Variant Handlers ---
   const handleOpenVariantModal = (parentId: number, parentName: string, variant: any = null) => {
     setVariantParentId(parentId);
     setVariantParentName(parentName);
     if (variant) {
       setEditingVariant(variant);
+      const vColor = variant.color || '';
+      const vSize  = variant.size  || '';
+      setColorInputMode(vColor && !availableColors.includes(vColor.trim()) ? 'custom' : 'select');
+      setSizeInputMode(vSize   && !availableSizes.includes(vSize.trim())   ? 'custom' : 'select');
       setVariantFormData({
-        color: variant.color || '', size: variant.size || '', barcode: variant.barcode || '',
+        color: vColor, size: vSize, barcode: variant.barcode || '',
         cost: variant.cost || variant.cost_price || 0, price: variant.price || variant.sale_price || 0,
         quantity: 0, reorderLevel: variant.reorderLevel || variant.reorder_level || 5,
         warehouseId: warehouses.length > 0 ? String(warehouses[0].id) : ''
       });
     } else {
       setEditingVariant(null);
+      setColorInputMode('select');
+      setSizeInputMode('select');
       setVariantFormData({
         color: '', size: '', barcode: '', cost: 0, price: 0, quantity: 0, reorderLevel: 5,
         warehouseId: warehouses.length > 0 ? String(warehouses[0].id) : ''
@@ -840,6 +868,24 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
 
   const handleVariantSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // ── منع تكرار اللون+المقاس داخل نفس المنتج ─────────────────────
+    const parent = parentProducts.find((p: any) => Number(p.id) === Number(variantParentId));
+    const existingVariants: any[] = parent?.variants || [];
+    const newColor = (variantFormData.color || '').trim().toLowerCase();
+    const newSize  = (variantFormData.size  || '').trim().toLowerCase();
+    const duplicate = existingVariants.find((v: any) => {
+      if (editingVariant && Number(v.id) === Number(editingVariant.id)) return false; // تجاهل نفس المتغير عند التعديل
+      const vColor = (v.color || '').trim().toLowerCase();
+      const vSize  = (v.size  || '').trim().toLowerCase();
+      return vColor === newColor && vSize === newSize;
+    });
+    if (duplicate) {
+      Swal.fire('تكرار', `يوجد متغير بنفس اللون "${variantFormData.color}" والمقاس "${variantFormData.size}" لهذا المنتج.`, 'warning');
+      return;
+    }
+    // ─────────────────────────────────────────────────────────────────
+
     const action = editingVariant ? 'updateVariant' : 'createVariant';
     const body = editingVariant
       ? JSON.stringify({ id: editingVariant.id, ...variantFormData })
@@ -1012,13 +1058,28 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
       }
       return item;
     });
-    setReceivingData({ ...receivingData, items: newItems });
+
+    // ── دمج الصفوف المكررة (نفس productId + color + size) ──────────────────
+    const merged: any[] = [];
+    for (const it of newItems) {
+      if (!it.productId) { merged.push(it); continue; }
+      const dup = merged.find(m =>
+        m.productId && String(m.productId) === String(it.productId) &&
+        (m.color || '').trim().toLowerCase() === (it.color || '').trim().toLowerCase() &&
+        (m.size  || '').trim().toLowerCase() === (it.size  || '').trim().toLowerCase()
+      );
+      if (dup) { dup.qty = Number(dup.qty || 1) + Number(it.qty || 1); }
+      else { merged.push(it); }
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
+    setReceivingData({ ...receivingData, items: merged });
   };
 
   const addReceivingItem = () => {
     setReceivingData(prev => ({
       ...prev,
-      items: [...prev.items, { id: Date.now(), itemType: defaultReceivingItemType, isNew: true, name: '', color: '', size: '', costPrice: 0, sellingPrice: 0, qty: 1, barcode: '', productId: '', _parentId: '', _color: '', _size: '' }]
+      items: [...prev.items, { id: Date.now(), itemType: defaultReceivingItemType, isNew: true, name: '', color: '', size: '', costPrice: 0, vendorPrice: 0, sellingPrice: 0, qty: 1, barcode: '', productId: '', _parentId: '', _color: '', _size: '' }]
     }));
   };
 
@@ -1074,6 +1135,27 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
     }
 
     if (!resolved) return;
+
+    // ── دمج الكمية إذا كان المنتج مكرراً (نفس productId + color + size) ────
+    const rColor = (resolved.color || '').trim().toLowerCase();
+    const rSize  = (resolved.size  || '').trim().toLowerCase();
+    const existingDup = receivingData.items.find(it =>
+      it.id !== itemId &&
+      String(it.productId) === String(resolved.productId) &&
+      (it.color || '').trim().toLowerCase() === rColor &&
+      (it.size  || '').trim().toLowerCase() === rSize
+    );
+    if (existingDup) {
+      // جمع الكمية في الصف الموجود وحذف الصف الحالي
+      const currentQty = Number(receivingData.items.find(it => it.id === itemId)?.qty || 1);
+      const mergedItems = receivingData.items
+        .filter(it => it.id !== itemId)
+        .map(it => it.id === existingDup.id ? { ...it, qty: Number(it.qty || 1) + currentQty } : it);
+      setReceivingData({ ...receivingData, items: mergedItems });
+      return;
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     const newItems = receivingData.items.map(it => {
       if (it.id === itemId) {
         return {
@@ -1089,6 +1171,23 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
 
   const handleReceiveSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    // Validate warehouse
+    if (!receivingData.warehouseId) {
+      Swal.fire('تنبيه', 'يجب اختيار المستودع أولاً قبل تنفيذ الاستلام.', 'warning');
+      return;
+    }
+    // Validate prices
+    const zeroPriceItem = receivingData.items.find(item => {
+      const price = purchasePriceType === 'vendor_price'
+        ? Number((item as any).vendorPrice || 0)
+        : Number(item.costPrice || 0);
+      return price <= 0;
+    });
+    if (zeroPriceItem) {
+      const label = purchasePriceType === 'vendor_price' ? 'سعر المصنعية' : 'سعر التكلفة';
+      Swal.fire('تنبيه', `يجب إدخال ${label} لجميع البنود. لا يمكن تنفيذ الاستلام بسعر صفر.`, 'warning');
+      return;
+    }
     (async () => {
       try {
         const response = await fetch(`${API_BASE_PATH}/api.php?module=receivings&action=create`, {
@@ -1164,7 +1263,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
             await refreshWarehouses();
           } catch(e) { console.error('Failed refresh warehouses', e); }
 
-          setReceivingData({ supplierId: '', warehouseId: '', items: [{ id: Date.now(), itemType: defaultReceivingItemType, isNew: true, name: '', color: '', size: '', costPrice: 0, sellingPrice: 0, qty: 1, barcode: '', productId: '' }], paidAmount: 0, treasuryId: '' });
+          setReceivingData({ supplierId: '', warehouseId: '', items: [{ id: Date.now(), itemType: defaultReceivingItemType, isNew: true, name: '', color: '', size: '', costPrice: 0, vendorPrice: 0, sellingPrice: 0, qty: 1, barcode: '', productId: '' }], paidAmount: 0, treasuryId: '' });
           Swal.fire('تم بنجاح', 'تم استلام البضاعة وتحديث الأرصدة.', 'success');
         } else {
           Swal.fire('فشل', result.message || 'فشل معالجة الاستلام', 'error');
@@ -1336,7 +1435,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
   const addReturnItem = () => {
     setReturnsData(prev => ({
       ...prev,
-      items: [...prev.items, { id: Date.now(), productId: '', qty: 1, costPrice: 0, name: '', returnType: '', _parentId: '', _color: '', _size: '' }]
+      items: [...prev.items, { id: Date.now(), productId: '', qty: 1, costPrice: 0, vendorPrice: 0, name: '', returnType: '', _parentId: '', _color: '', _size: '' }]
     }));
   };
 
@@ -1386,6 +1485,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
       } : null);
     }
     if (resolved) {
+      const costVal = Number((resolved as any).cost || 0);
       const newItems = returnsData.items.map(item => {
         if (item.id === itemId) {
           const qty = item.qty || 1;
@@ -1393,18 +1493,51 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
             ...item,
             productId,
             name: `${resolved.name} (${resolved.color || '-'}-${resolved.size || '-'})`,
-            costPrice: Number((resolved as any).cost || 0),
-            total: Number((resolved as any).cost || 0) * qty
+            costPrice: costVal,
+            vendorPrice: 0,
+            total: costVal * qty
           };
         }
         return item;
       });
       setReturnsData({ ...returnsData, items: newItems });
+      // Auto-fill vendorPrice from last purchase of this supplier
+      if (returnsData.supplierId) {
+        (async () => {
+          try {
+            const r = await fetch(`${API_BASE_PATH}/api.php?module=receivings&action=getLastVendorPrice&supplierId=${returnsData.supplierId}&productId=${productId}`, { credentials: 'include' });
+            const j = await r.json();
+            if (j.success && j.vendorPrice > 0) {
+              setReturnsData(prev => ({
+                ...prev,
+                items: prev.items.map(it => it.id === itemId ? { ...it, vendorPrice: j.vendorPrice } : it)
+              }));
+            }
+          } catch (e) { /* silent fail */ }
+        })();
+      }
     }
   };
 
   const handleReturnSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    // Validate warehouse
+    if (!returnsData.warehouseId) {
+      Swal.fire('تنبيه', 'يجب اختيار المستودع أولاً قبل تنفيذ المرتجع.', 'warning');
+      return;
+    }
+    // Validate prices
+    const zeroPriceReturnItem = returnsData.items.find(item => {
+      const price = purchasePriceType === 'vendor_price'
+        ? Number((item as any).vendorPrice || 0)
+        : Number(item.costPrice || 0);
+      return price <= 0;
+    });
+    if (zeroPriceReturnItem) {
+      const label = purchasePriceType === 'vendor_price' ? 'سعر المصنعية' : 'سعر التكلفة';
+      Swal.fire('تنبيه', `يجب إدخال ${label} لجميع البنود. لا يمكن تنفيذ المرتجع بسعر صفر.`, 'warning');
+      return;
+    }
     (async () => {
       try {
         const response = await fetch(`${API_BASE_PATH}/api.php?module=returns&action=create`, {
@@ -1468,7 +1601,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
             await refreshWarehouses();
           } catch(e) { console.error('Failed refresh warehouses', e); }
 
-          setReturnsData({ supplierId: '', warehouseId: '', items: [{ id: Date.now(), productId: '', qty: 1, costPrice: 0, name: '' }], receivedAmount: 0, treasuryId: '' });
+          setReturnsData({ supplierId: '', warehouseId: '', items: [{ id: Date.now(), productId: '', qty: 1, costPrice: 0, vendorPrice: 0, name: '' }], receivedAmount: 0, treasuryId: '' });
           Swal.fire('تم بنجاح', 'تم تسجيل المرتجع وتحديث الأرصدة.', 'success');
         } else {
           Swal.fire('فشل', result.message || 'فشل معالجة المرتجع', 'error');
@@ -2207,15 +2340,81 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                   <button onClick={() => setIsVariantModalOpen(false)} className="text-slate-400 hover:text-rose-500" aria-label="إغلاق"><X size={24} /></button>
                 </div>
                 <form onSubmit={handleVariantSubmit} className="p-6 grid grid-cols-2 gap-4">
+                  {/* ── اللون ── */}
                   <div>
                     <label className="block text-xs font-bold text-muted mb-1">اللون</label>
-                    <input value={variantFormData.color} onChange={e => setVariantFormData(p => ({...p, color: e.target.value}))}
-                      className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm" placeholder="أسود، أبيض..." />
+                    {colorInputMode === 'select' ? (
+                      <select
+                        value={variantFormData.color}
+                        onChange={e => {
+                          if (e.target.value === '__new__') {
+                            setColorInputMode('custom');
+                            setVariantFormData(p => ({...p, color: ''}));
+                          } else {
+                            setVariantFormData(p => ({...p, color: e.target.value}));
+                          }
+                        }}
+                        className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm"
+                      >
+                        <option value="">-- اختر لون --</option>
+                        {availableColors.map(c => <option key={c} value={c}>{c}</option>)}
+                        <option value="__new__">+ إضافة لون جديد</option>
+                      </select>
+                    ) : (
+                      <div className="flex gap-1">
+                        <input
+                          autoFocus
+                          value={variantFormData.color}
+                          onChange={e => setVariantFormData(p => ({...p, color: e.target.value}))}
+                          className="flex-1 bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm"
+                          placeholder="أدخل لون جديد..."
+                        />
+                        {availableColors.length > 0 && (
+                          <button type="button" onClick={() => { setColorInputMode('select'); setVariantFormData(p => ({...p, color: ''})); }}
+                            className="px-2 py-1 bg-slate-200 dark:bg-slate-700 rounded-xl text-xs font-bold hover:bg-slate-300 transition-colors">
+                            قائمة
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
+                  {/* ── المقاس ── */}
                   <div>
                     <label className="block text-xs font-bold text-muted mb-1">المقاس</label>
-                    <input value={variantFormData.size} onChange={e => setVariantFormData(p => ({...p, size: e.target.value}))}
-                      className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm" placeholder="S، M، L، XL..." />
+                    {sizeInputMode === 'select' ? (
+                      <select
+                        value={variantFormData.size}
+                        onChange={e => {
+                          if (e.target.value === '__new__') {
+                            setSizeInputMode('custom');
+                            setVariantFormData(p => ({...p, size: ''}));
+                          } else {
+                            setVariantFormData(p => ({...p, size: e.target.value}));
+                          }
+                        }}
+                        className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm"
+                      >
+                        <option value="">-- اختر مقاس --</option>
+                        {availableSizes.map(s => <option key={s} value={s}>{s}</option>)}
+                        <option value="__new__">+ إضافة مقاس جديد</option>
+                      </select>
+                    ) : (
+                      <div className="flex gap-1">
+                        <input
+                          autoFocus
+                          value={variantFormData.size}
+                          onChange={e => setVariantFormData(p => ({...p, size: e.target.value}))}
+                          className="flex-1 bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm"
+                          placeholder="أدخل مقاس جديد..."
+                        />
+                        {availableSizes.length > 0 && (
+                          <button type="button" onClick={() => { setSizeInputMode('select'); setVariantFormData(p => ({...p, size: ''})); }}
+                            className="px-2 py-1 bg-slate-200 dark:bg-slate-700 rounded-xl text-xs font-bold hover:bg-slate-300 transition-colors">
+                            قائمة
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className="col-span-2">
                     <label className="block text-xs font-bold text-muted mb-1">الباركود</label>
@@ -3029,14 +3228,19 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
 
                     {/* --- الصف الثالث: الأسعار، الكمية، الإجمالي --- */}
                     <div className="col-span-1 md:col-span-5">
-                      <span className="text-[11px] font-bold text-slate-500 block mb-1">الأسعار</span>
-                      <div className="flex gap-2">
-                        <div className="relative w-full">
-                           <input type="number" placeholder="التكلفة" value={item.costPrice} onChange={e => handleReceivingItemChange(item.id, 'costPrice', parseFloat(e.target.value))} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-2 pl-2 pr-3 text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500/20" />
-                        </div>
+                      <span className="text-[11px] font-bold text-slate-500 block mb-1">
+                        {purchasePriceType === 'vendor_price' ? 'سعر المصنعية' : 'سعر التكلفة'}
+                      </span>
+                      <div className="flex flex-col gap-1">
+                        {purchasePriceType === 'vendor_price' ? (
+                          <input type="number" placeholder="سعر المورد" value={(item as any).vendorPrice || ''} onChange={e => handleReceivingItemChange(item.id, 'vendorPrice', parseFloat(e.target.value) || 0)} className="w-full bg-white dark:bg-slate-900 border border-orange-200 dark:border-orange-800/50 rounded-xl py-2 pl-2 pr-3 text-sm font-bold outline-none focus:ring-2 focus:ring-orange-500/20" />
+                        ) : (
+                          <input type="number" placeholder="تكلفة المخزن" value={item.costPrice} onChange={e => handleReceivingItemChange(item.id, 'costPrice', parseFloat(e.target.value))} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-2 pl-2 pr-3 text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500/20" />
+                        )}
                         {item.itemType === 'product_new' && (
                           <div className="relative w-full">
-                             <input type="number" placeholder="سعر البيع" value={item.sellingPrice} onChange={e => handleReceivingItemChange(item.id, 'sellingPrice', parseFloat(e.target.value))} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-2 pl-2 pr-3 text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500/20" />
+                            <span className="text-[10px] text-slate-400 block mb-0.5">سعر البيع</span>
+                            <input type="number" placeholder="سعر البيع" value={item.sellingPrice} onChange={e => handleReceivingItemChange(item.id, 'sellingPrice', parseFloat(e.target.value))} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-2 pl-2 pr-3 text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500/20" />
                           </div>
                         )}
                       </div>
@@ -3048,7 +3252,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                     <div className="col-span-1 md:col-span-4 flex items-center justify-end bg-blue-50 dark:bg-blue-900/20 rounded-xl px-4 py-2 border border-blue-100 dark:border-blue-900/30">
                       <div className="text-left w-full">
                         <span className="text-[11px] font-bold text-blue-400 block mb-0.5">الإجمالي</span>
-                        <span className="font-black text-blue-700 dark:text-blue-400 text-lg">{(item.costPrice * item.qty).toLocaleString()} {currencySymbol}</span>
+                        <span className="font-black text-blue-700 dark:text-blue-400 text-lg">{((purchasePriceType === 'vendor_price' ? (Number((item as any).vendorPrice) || 0) : Number(item.costPrice)) * Number(item.qty)).toLocaleString()} {currencySymbol}</span>
                       </div>
                     </div>
 
@@ -3268,14 +3472,21 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                       <span className="text-[11px] font-bold text-slate-500 block mb-1">الكمية المرتجعة</span>
                       <input type="number" placeholder="الكمية" min="1" value={item.qty} onChange={e => handleReturnItemChange(item.id, 'qty', (String(item.returnType || '').trim() === 'fabric') ? parseFloat(e.target.value) : parseInt(e.target.value))} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-2 px-3 text-base font-black text-center text-rose-600 outline-none focus:ring-2 focus:ring-rose-500/20" />
                     </div>
-                    <div className="col-span-1 md:col-span-8 lg:col-span-9 flex justify-between items-center px-5 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm">
-                       <div className="text-center">
-                          <span className="text-[11px] font-bold text-slate-500 block">تكلفة الوحدة</span>
-                          <span className="font-bold text-slate-800 dark:text-slate-200 text-base">{item.costPrice.toLocaleString()} <span className="text-xs font-normal text-slate-400">{currencySymbol}</span></span>
-                       </div>
-                       <div className="text-center text-rose-600">
+                    <div className="col-span-1 md:col-span-8 lg:col-span-9 flex justify-between items-center px-5 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm gap-3">
+                       {purchasePriceType === 'vendor_price' ? (
+                         <div className="flex-1">
+                           <span className="text-[10px] font-bold text-orange-400 block mb-0.5 text-center">سعر المصنعية</span>
+                           <input type="number" placeholder="0" value={(item as any).vendorPrice || ''} onChange={e => handleReturnItemChange(item.id, 'vendorPrice', parseFloat(e.target.value) || 0)} className="w-full bg-white dark:bg-slate-900 border border-orange-200 dark:border-orange-800/50 rounded-xl py-1.5 px-2 text-sm font-bold text-center outline-none focus:ring-2 focus:ring-orange-500/20" />
+                         </div>
+                       ) : (
+                         <div className="text-center flex-1">
+                           <span className="text-[11px] font-bold text-slate-500 block">تكلفة المخزن</span>
+                           <span className="font-bold text-slate-800 dark:text-slate-200 text-base">{item.costPrice.toLocaleString()} <span className="text-xs font-normal text-slate-400">{currencySymbol}</span></span>
+                         </div>
+                       )}
+                       <div className="text-center text-rose-600 flex-1">
                           <span className="text-[11px] font-bold text-rose-400 block">إجمالي المرتجع</span>
-                          <span className="font-black text-xl">{(item.costPrice * item.qty).toLocaleString()} <span className="text-sm">{currencySymbol}</span></span>
+                          <span className="font-black text-xl">{((purchasePriceType === 'vendor_price' ? (Number((item as any).vendorPrice) || 0) : Number(item.costPrice)) * Number(item.qty)).toLocaleString()} <span className="text-sm">{currencySymbol}</span></span>
                        </div>
                     </div>
 

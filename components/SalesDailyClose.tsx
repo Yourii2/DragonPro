@@ -20,6 +20,36 @@ type RepStats = {
   returnedCount: number;
   returnedValue: number;
 };
+
+type JournalStatsState = {
+  oldOrdersCount: number;
+  todayOrdersCount: number;
+  deliveredCount: number;
+  deliveredTotal: number;
+  returnedCount: number;
+  postponedCount: number;
+  postponedTotal: number;
+};
+
+const emptyRepStats: RepStats = {
+  deliveredCount: 0,
+  deliveredValue: 0,
+  returnedCount: 0,
+  returnedValue: 0
+};
+
+const emptyRepExtras = { deliveredPieces: 0, returnedPieces: 0, deferredCount: 0, deferredPieces: 0, deferredValue: 0 };
+
+const emptyJournalStats: JournalStatsState = {
+  oldOrdersCount: 0,
+  todayOrdersCount: 0,
+  deliveredCount: 0,
+  deliveredTotal: 0,
+  returnedCount: 0,
+  postponedCount: 0,
+  postponedTotal: 0,
+};
+
 const SalesDailyClose: React.FC = () => {
   const currencySymbol = 'ج.م';
 
@@ -47,23 +77,10 @@ const SalesDailyClose: React.FC = () => {
   const [repTxReason, setRepTxReason] = useState<string>('');
   const [repTxLoading, setRepTxLoading] = useState<boolean>(false);
 
-  const [repStats, setRepStats] = useState<RepStats>({
-    deliveredCount: 0,
-    deliveredValue: 0,
-    returnedCount: 0,
-    returnedValue: 0
-  });
+  const [repStats, setRepStats] = useState<RepStats>(emptyRepStats);
 
-  const [repExtras, setRepExtras] = useState({ deliveredPieces: 0, returnedPieces: 0, deferredCount: 0, deferredPieces: 0, deferredValue: 0 });
-  const [journalStats, setJournalStats] = useState({
-    oldOrdersCount: 0,
-    todayOrdersCount: 0,
-    deliveredCount: 0,
-    deliveredTotal: 0,
-    returnedCount: 0,
-    postponedCount: 0, // أوردرات النزول (المتبقية)
-    postponedTotal: 0,
-  });
+  const [repExtras, setRepExtras] = useState(emptyRepExtras);
+  const [journalStats, setJournalStats] = useState<JournalStatsState>(emptyJournalStats);
 
   // Orders UI states for the new split box
   const [repOrders, setRepOrders] = useState<any[]>([]);
@@ -74,6 +91,7 @@ const SalesDailyClose: React.FC = () => {
   const [deliveredOrdersList, setDeliveredOrdersList] = useState<any[]>([]);
   const [returnedOrdersList, setReturnedOrdersList] = useState<any[]>([]);
   const [viewModal, setViewModal] = useState<'delivered' | 'returned' | 'deferred' | null>(null);
+  const [openDailyInfo, setOpenDailyInfo] = useState<{ daily_code: string; id: number } | null>(null);
 
   // Helpers reused across handlers
   /* const computePieces = (order:any) => {
@@ -158,6 +176,131 @@ const loadJournalLiveStats = async (journal: any) => {
     console.error("Error calculating live stats", err);
   }
 };
+
+  const resetDailyCloseState = () => {
+    setRepStats(emptyRepStats);
+    setRepExtras(emptyRepExtras);
+    setJournalStats(emptyJournalStats);
+    setRepOrders([]);
+    setDeferredOrders([]);
+    setDeliveredOrdersList([]);
+    setReturnedOrdersList([]);
+    setSelectedOrderIdsLocal([]);
+  };
+
+  const loadRepDailyCloseData = async (repId: string, from?: string, to?: string) => {
+    if (!repId) {
+      resetDailyCloseState();
+      return;
+    }
+
+    setStatsLoading(true);
+    try {
+      const dailyUrl = `${API_BASE_PATH}/api.php?module=sales&action=getRepDailyJournal&rep_id=${encodeURIComponent(repId)}`;
+      const openDailyUrl = `${API_BASE_PATH}/api.php?module=sales&action=getRepOpenDaily&rep_id=${encodeURIComponent(repId)}`;
+
+      const [dailyRes, openDailyRes] = await Promise.all([
+        fetch(dailyUrl).then(r => r.json()),
+        fetch(openDailyUrl).then(r => r.json())
+      ]);
+
+      if (!dailyRes || !dailyRes.success) throw new Error(dailyRes?.message || 'getRepDailyJournal failed');
+
+      const allDailyRows = Array.isArray(dailyRes.data) ? dailyRes.data : [];
+      const openDailyRow = openDailyRes?.success && openDailyRes.data ? openDailyRes.data : null;
+      const inRange = (journalDate: any) => {
+        const value = String(journalDate || '').slice(0, 10);
+        if (!value) return false;
+        if (from && value < from) return false;
+        if (to && value > to) return false;
+        return true;
+      };
+
+      const filteredRows = allDailyRows.filter((row: any) => inRange(row.journal_date));
+      const mergedRows = [...filteredRows];
+      const openDailyId = Number(openDailyRow?.id || 0);
+      if (openDailyId > 0 && !mergedRows.some((row: any) => Number(row.id) === openDailyId)) {
+        const existingOpenRow = allDailyRows.find((row: any) => Number(row.id) === openDailyId);
+        if (existingOpenRow) {
+          mergedRows.push(existingOpenRow);
+        } else {
+          mergedRows.push(openDailyRow);
+        }
+      }
+
+      const journalIds = Array.from(new Set(mergedRows.map((row: any) => Number(row.id)).filter((id: number) => Number.isFinite(id) && id > 0)));
+
+      setJournalStats({
+        oldOrdersCount: mergedRows.reduce((sum: number, row: any) => sum + toNum(row.opening_orders_count), 0),
+        todayOrdersCount: mergedRows.reduce((sum: number, row: any) => sum + toNum(row.orders_assigned_count), 0),
+        deliveredCount: 0,
+        deliveredTotal: 0,
+        returnedCount: 0,
+        postponedCount: 0,
+        postponedTotal: 0,
+      });
+
+      if (journalIds.length === 0) {
+        setRepStats(emptyRepStats);
+        setRepExtras(emptyRepExtras);
+        setRepOrders([]);
+        setDeferredOrders([]);
+        setDeliveredOrdersList([]);
+        setReturnedOrdersList([]);
+        setSelectedOrderIdsLocal([]);
+        return;
+      }
+
+      const ordersUrl = `${API_BASE_PATH}/api.php?module=sales&action=getJournalOrders&rep_id=${encodeURIComponent(repId)}&journal_ids=${encodeURIComponent(journalIds.join(','))}`;
+      const ordersRes = await fetch(ordersUrl).then(r => r.json());
+      if (!ordersRes || !ordersRes.success) throw new Error(ordersRes?.message || 'getJournalOrders failed');
+
+      const activeOrders = ordersRes.active || [];
+      const deliveredOrders = ordersRes.delivered || [];
+      const deferredOrders2 = ordersRes.deferred || [];
+      const returnedOrders = ordersRes.returned || [];
+
+      const deliveredValue = deliveredOrders.reduce((sum: number, order: any) => sum + computeOrderValue(order), 0);
+      const deliveredPieces = deliveredOrders.reduce((sum: number, order: any) => sum + computePieces(order), 0);
+      const returnedValue = returnedOrders.reduce((sum: number, order: any) => sum + computeOrderValue(order), 0);
+      const returnedPieces = returnedOrders.reduce((sum: number, order: any) => sum + computePieces(order), 0);
+      const deferredValue = deferredOrders2.reduce((sum: number, order: any) => sum + computeOrderValue(order), 0);
+      const deferredPieces = deferredOrders2.reduce((sum: number, order: any) => sum + computePieces(order), 0);
+
+      setRepStats({
+        deliveredCount: deliveredOrders.length,
+        deliveredValue,
+        returnedCount: returnedOrders.length,
+        returnedValue,
+      });
+      setRepExtras({
+        deliveredPieces,
+        returnedPieces,
+        deferredCount: deferredOrders2.length,
+        deferredPieces,
+        deferredValue,
+      });
+      setJournalStats(prev => ({
+        ...prev,
+        deliveredCount: deliveredOrders.length,
+        deliveredTotal: deliveredValue,
+        returnedCount: returnedOrders.length,
+        postponedCount: deferredOrders2.length,
+        postponedTotal: deferredValue,
+      }));
+
+      setRepOrders(activeOrders);
+      setDeferredOrders(deferredOrders2);
+      setDeliveredOrdersList(deliveredOrders);
+      setReturnedOrdersList(returnedOrders);
+      setSelectedOrderIdsLocal(activeOrders.map((o: any) => o.id));
+    } catch (e) {
+      console.error('Failed to load rep daily close data', e);
+      resetDailyCloseState();
+    } finally {
+      setStatsLoading(false);
+    }
+  };
   const recalcDeferredExtras = (deferredList:any[]) => {
     const deferredPieces = (deferredList||[]).reduce((s:number,o:any) => s + computePieces(o), 0);
     const deferredValue = (deferredList||[]).reduce((s:number,o:any) => s + computeOrderValue(o), 0);
@@ -222,73 +365,7 @@ const loadJournalLiveStats = async (journal: any) => {
   };
 
   const loadRepDailyStats = async (repId: string, from?: string, to?: string) => {
-    if (!repId) return;
-    setStatsLoading(true);
-    try {
-      // --- Primary source: rep_daily_journal aggregated stats ---
-      let journalUrl = `${API_BASE_PATH}/api.php?module=sales&action=getJournalStats&rep_id=${encodeURIComponent(repId)}`;
-      if (from) journalUrl += `&from=${encodeURIComponent(from)}`;
-      if (to)   journalUrl += `&to=${encodeURIComponent(to)}`;
-
-      const jr = await fetch(journalUrl);
-      const jj = await jr.json();
-
-      if (jj && jj.success && jj.has_journal) {
-        // Journal has records for this period — use them directly
-        const d = jj.data || {};
-        setRepStats({
-          deliveredCount: toNum(d.deliveredCount),
-          deliveredValue: toNum(d.deliveredValue),
-          returnedCount:  toNum(d.returnedCount),
-          returnedValue:  toNum(d.returnedValue),
-        });
-        setRepExtras(prev => ({
-          ...prev,
-          deliveredPieces: toNum(d.deliveredPieces),
-          returnedPieces:  toNum(d.returnedPieces),
-          deferredCount:   toNum(d.deferredCount),
-          deferredPieces:  toNum(d.deferredPieces),
-          deferredValue:   toNum(d.deferredValue),
-        }));
-        // If the journal row itself (with `orders_json`) is present, compute live stats
-        const journalRow = d.journal || d.row || d;
-        if (journalRow && (journalRow.orders_json || journalRow.orders)) {
-          try {
-            await loadJournalLiveStats(journalRow);
-          } catch (e) {
-            console.warn('loadJournalLiveStats failed', e);
-          }
-        }
-        return; // ✅ done — no need to hit the old endpoint
-      }
-
-      // --- Fallback: legacy getRepDailyStats (orders table scan) ---
-      let url = `${API_BASE_PATH}/api.php?module=sales&action=getRepDailyStats&rep_id=${encodeURIComponent(repId)}`;
-      if (from && to) {
-        url += `&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
-      } else if (from) {
-        url += `&date=${encodeURIComponent(from)}`;
-      }
-      const r = await fetch(url);
-      const j = await r.json();
-
-      if (j && j.success) {
-        const d = j.data || {};
-        setRepStats({
-          deliveredCount: toNum(d.deliveredCount ?? d.delivered_orders_count ?? 0),
-          deliveredValue: toNum(d.deliveredValue ?? d.delivered_orders_value ?? 0),
-          returnedCount:  toNum(d.returnedCount ?? d.returned_orders_count ?? 0),
-          returnedValue:  toNum(d.returnedValue ?? d.returned_orders_value ?? 0),
-        });
-      } else {
-        setRepStats({ deliveredCount: 0, deliveredValue: 0, returnedCount: 0, returnedValue: 0 });
-      }
-    } catch (e) {
-      console.error('Failed to load rep daily stats', e);
-      setRepStats({ deliveredCount: 0, deliveredValue: 0, returnedCount: 0, returnedValue: 0 });
-    } finally {
-      setStatsLoading(false);
-    }
+    await loadRepDailyCloseData(repId, from, to);
   };
 
   const refreshSelectedRepBalanceFromServer = async (repId: string) => {
@@ -326,12 +403,8 @@ const loadJournalLiveStats = async (journal: any) => {
     if (!selectedRepId) {
       setRepBalance(0);
       setPaidAmount(0);
-      setRepStats({ deliveredCount: 0, deliveredValue: 0, returnedCount: 0, returnedValue: 0 });
-      setRepOrders([]);
-      setDeferredOrders([]);
-      setDeliveredOrdersList([]);
-      setReturnedOrdersList([]);
-      setSelectedOrderIdsLocal([]);
+      resetDailyCloseState();
+      setOpenDailyInfo(null);
       return;
     }
 
@@ -339,109 +412,24 @@ const loadJournalLiveStats = async (journal: any) => {
     const bal = toNum(rep?.balance ?? 0);
     setRepBalance(bal);
     setPaidAmount(Math.max(0, -bal));
-    loadRepDailyStats(selectedRepId, statsFrom, statsTo);
-    
-    // load orders for this rep (client-side filter)
+    // Load orders and statistics from the rep_daily_journal table for the selected date range.
     (async () => {
       try {
-        const r = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll`);
-        const jr = await r.json();
-        const all = (jr && jr.success && Array.isArray(jr.data)) ? jr.data : [];
-        
-        // filter by rep
-        let mine = all.filter((o:any) => String(o.rep_id || o.repId || o.assigned_rep || '') === String(selectedRepId));
-        
-        // الأوردرات النشطة (مع المندوب حالياً - لا تتأثر بفلتر التاريخ)
-        const notDeliveredAll = mine.filter((o:any) => !['delivered','returned'].includes(String(o.status)));
-        const deferredAll = notDeliveredAll.filter((o:any) => ['pending','delayed','postponed'].includes(String(o.status)));
-        const activeAll = notDeliveredAll.filter(o => !deferredAll.includes(o));
+        await loadRepDailyCloseData(selectedRepId, statsFrom, statsTo);
 
-        // دالة مساعدة لفلترة التاريخ بدقة 
-        /* const isWithinRange = (rawDate: any, from: string, to: string) => {
-          if (!rawDate) return false;
-          try {
-            const datePart = String(rawDate).split(' ')[0]; // YYYY-MM-DD
-            const d = new Date(datePart);
-            if (isNaN(d.getTime())) return false;
-            const ds = d.toISOString().slice(0,10);
-            if (from && to) return ds >= from && ds <= to;
-            if (from) return ds === from;
-            return true;
-          } catch (e) { return false; }
-        }; */
-// دالة مساعدة لفلترة التاريخ بدقة (بدون ترحيل أيام بسبب فروق التوقيت)
-        const isWithinRange = (rawDate: any, from: string, to: string) => {
-          if (!rawDate) return false;
-          try {
-            // لو التاريخ راجع من الداتا بيز بالشكل ده YYYY-MM-DD HH:MM:SS
-            // بناخد أول 10 حروف اللي هما YYYY-MM-DD ونقارنهم مباشرة
-            let ds = String(rawDate).split(' ')[0];
-            
-            // لو التنسيق مش YYYY-MM-DD بنحوله بشكل آمن للوقت المحلي
-            if (!ds.match(/^\d{4}-\d{2}-\d{2}$/)) {
-              const d = new Date(rawDate);
-              if (isNaN(d.getTime())) return false;
-              const year = d.getFullYear();
-              const month = String(d.getMonth() + 1).padStart(2, '0');
-              const day = String(d.getDate()).padStart(2, '0');
-              ds = `${year}-${month}-${day}`;
-            }
-
-            if (from && to) return ds >= from && ds <= to;
-            if (from) return ds === from;
-            return true;
-          } catch (e) { return false; }
-        };
-        // الأوردرات التي سيتم احتساب إحصائياتها (نطبق فلتر التاريخ هنا)
-        let statsMine = mine;
-        if (statsFrom || statsTo) {
-          statsMine = mine.filter((o:any) => {
-            const rawDate = o.updated_at || o.updatedAt || o.created_at || o.createdAt || o.date || o.order_date || '';
-            return isWithinRange(rawDate, statsFrom, statsTo);
-          });
-        }
-
-        const notDeliveredStats = statsMine.filter((o:any) => !['delivered','returned'].includes(String(o.status)));
-        const deferredStats = notDeliveredStats.filter((o:any) => ['pending','delayed','postponed'].includes(String(o.status)));
-        
-        const delivered = statsMine.filter((o:any) => String(o.status) === 'delivered');
-        const returned = statsMine.filter((o:any) => String(o.status) === 'returned');
-        
-        const deliveredPieces = delivered.reduce((s:number,o:any) => s + computePieces(o), 0);
-        const returnedPieces = returned.reduce((s:number,o:any) => s + computePieces(o), 0);
-        const deferredPieces = deferredStats.reduce((s:number,o:any) => s + computePieces(o), 0);
-        const deferredValue = deferredStats.reduce((s:number,o:any) => s + computeOrderValue(o), 0);
-
-        // Client-side fallback: derive stats from loaded orders so UI shows values even if backend stats fail or are delayed.
+        // Fetch open daily session code
         try {
-          const deliveredCountLocal = delivered.length;
-          const deliveredValueLocal = delivered.reduce((s:number,o:any) => s + computeOrderValue(o), 0);
-          const returnedCountLocal = returned.length;
-          const returnedValueLocal = returned.reduce((s:number,o:any) => s + computeOrderValue(o), 0);
-          setRepStats({ deliveredCount: deliveredCountLocal, deliveredValue: deliveredValueLocal, returnedCount: returnedCountLocal, returnedValue: returnedValueLocal });
-        } catch (e) {
-          // ignore local aggregation errors
-        }
-
-        setRepOrders(activeAll); // الأوردرات النشطة غير مفلترة بالتاريخ
-        setDeferredOrders(deferredAll); // الأوردرات المؤجلة غير مفلترة بالتاريخ
-        
-        // قوائم النوافذ المنبثقة
-        setDeliveredOrdersList(delivered);
-        setReturnedOrdersList(returned);
-
-        setSelectedOrderIdsLocal(activeAll.map((o:any)=>o.id));
-        setRepExtras({ deliveredPieces, returnedPieces, deferredCount: deferredStats.length, deferredPieces, deferredValue });
+          const odResp = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getRepOpenDaily&rep_id=${selectedRepId}`);
+          const odJson = await odResp.json();
+          setOpenDailyInfo(odJson?.success && odJson.data ? { daily_code: odJson.data.daily_code || '', id: Number(odJson.data.id) } : null);
+        } catch { setOpenDailyInfo(null); }
       } catch (e) {
-        console.error('Failed to load orders for rep', e);
-        setRepOrders([]);
-        setDeferredOrders([]);
-        setSelectedOrderIdsLocal([]);
-        setDeliveredOrdersList([]);
-        setReturnedOrdersList([]);
+        console.error('Failed to load journal data for rep', e);
+        resetDailyCloseState();
+        setOpenDailyInfo(null);
       }
     })();
-    // reload when selectedRepId or stats range changes
+    // reload when selectedRepId or stats date range changes
   }, [selectedRepId, statsFrom, statsTo, reps]);
 
   const toggleSelectAllLocal = () => {
@@ -494,6 +482,13 @@ const loadJournalLiveStats = async (journal: any) => {
         deliveredPieces: newDelivered.reduce((s:number,o:any) => s + computePieces(o), 0) 
       }));
 
+      // تحديث rep_journal_orders
+      try {
+        await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: ids, status: 'delivered' })
+        });
+      } catch (jErr) { console.warn('updateJournalOrderStatus delivered failed (non-critical)', jErr); }
       await loadRepDailyStats(selectedRepId, statsFrom, statsTo);
       Swal.fire('تم', 'تم تحديث حالة الاوردرات المحددة إلى تم التسليم.', 'success');
     } catch (e) {
@@ -526,6 +521,13 @@ const loadJournalLiveStats = async (journal: any) => {
       setRepOrders(prev => prev.filter((o:any)=> !ids.includes(o.id)));
       recalcDeferredExtras(newDeferred);
       setSelectedOrderIdsLocal([]);
+      // تحديث rep_journal_orders
+      try {
+        await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: ids, status: 'deferred' })
+        });
+      } catch (jErr) { console.warn('updateJournalOrderStatus deferred failed (non-critical)', jErr); }
       Swal.fire('تم', 'تم نقل الاوردرات المحددة إلى المؤجلة.', 'success');
     } catch (e) { 
       console.error(e); 
@@ -548,6 +550,13 @@ const loadJournalLiveStats = async (journal: any) => {
       setRepOrders(prev => prev.filter((o:any)=> o.id !== order.id));
       setSelectedOrderIdsLocal(prev => prev.filter(x=> x !== order.id));
       recalcDeferredExtras(newDeferred);
+      // تحديث rep_journal_orders
+      try {
+        await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: [order.id], status: 'deferred' })
+        });
+      } catch (jErr) { console.warn('updateJournalOrderStatus single deferred failed (non-critical)', jErr); }
     } catch (e) { 
       console.error(e); 
       Swal.fire('خطأ','فشل نقل الاوردر.','error'); 
@@ -672,6 +681,17 @@ const loadJournalLiveStats = async (journal: any) => {
             })
           });
         } catch (logErr) { console.warn('logCloseDaily failed (non-critical)', logErr); }
+
+        // Mark daily journal as closed
+        if (openDailyInfo) {
+          try {
+            await fetch(`${API_BASE_PATH}/api.php?module=sales&action=closeRepDaily`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ rep_id: Number(selectedRepId), journal_id: openDailyInfo.id })
+            });
+            setOpenDailyInfo(null);
+          } catch (e) { console.warn('closeRepDaily failed (non-critical)', e); }
+        }
       }
       // Refresh canonical balance and stats after either operation
       await Promise.all([refreshSelectedRepBalanceFromServer(selectedRepId), loadRepDailyStats(selectedRepId, statsFrom, statsTo)]);
@@ -725,6 +745,21 @@ const loadJournalLiveStats = async (journal: any) => {
             placeholder="— اختر —"
             disabled={loading}
           />
+          {selectedRepId && (
+            <div className="mt-2">
+              {openDailyInfo ? (
+                <span className="inline-flex items-center gap-1.5 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 px-3 py-1 rounded-full text-xs font-bold border border-green-200 dark:border-green-800">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block" />
+                  يومية مفتوحة: {openDailyInfo.daily_code}
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 px-3 py-1 rounded-full text-xs border border-rose-200 dark:border-rose-800">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 inline-block" />
+                  لا يوجد يومية مفتوحة
+                </span>
+              )}
+            </div>
+          )}
         </div>
         <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
           <div className="text-xs text-slate-500 mb-2">اختر الخزينة</div>
@@ -771,7 +806,6 @@ const loadJournalLiveStats = async (journal: any) => {
                 const d = new Date();
                 const fmt = (x: Date) => `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
                 setStatsFrom(fmt(d)); setStatsTo(fmt(d));
-                if (selectedRepId) loadRepDailyStats(selectedRepId, fmt(d), fmt(d));
               }}
             >اليوم</button>
             <button
@@ -781,7 +815,6 @@ const loadJournalLiveStats = async (journal: any) => {
                 const fmt = (x: Date) => `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;
                 const to = new Date(); const from = new Date(); from.setDate(to.getDate() - 2);
                 setStatsFrom(fmt(from)); setStatsTo(fmt(to));
-                if (selectedRepId) loadRepDailyStats(selectedRepId, fmt(from), fmt(to));
               }}
             >منذ يومين</button>
           </div>

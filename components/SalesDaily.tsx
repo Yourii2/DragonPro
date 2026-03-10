@@ -127,6 +127,7 @@ const SalesDaily: React.FC = () => {
   // Today selection (new orders to assign now)
   const [selectedOrders, setSelectedOrders] = useState<any[]>([]);
   const [barcodeInput, setBarcodeInput] = useState('');
+  const [openDailyInfo, setOpenDailyInfo] = useState<{ daily_code: string; journal_id: number } | null>(null);
 
   // Accounting
   const [prevBalance, setPrevBalance] = useState<number>(0);
@@ -303,6 +304,13 @@ const SalesDaily: React.FC = () => {
       console.debug('Failed to load with_rep orders', e);
       setAssignedOrders([]);
     }
+
+    // Fetch open daily session code
+    try {
+      const odResp = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getRepOpenDaily&rep_id=${repId}`);
+      const odJson = await odResp.json();
+      setOpenDailyInfo(odJson?.success && odJson.data ? { daily_code: odJson.data.daily_code || '', journal_id: Number(odJson.data.id) } : null);
+    } catch { setOpenDailyInfo(null); }
   };
 
   const onSelectRep = async (repId: number | '') => {
@@ -313,6 +321,7 @@ const SalesDaily: React.FC = () => {
     setPaymentAdjustment(0);
     setPrevBalance(0);
     setAssignedOrders([]);
+    setOpenDailyInfo(null);
 
     if (!repId) return;
     await loadRepContext(Number(repId));
@@ -363,7 +372,10 @@ const SalesDaily: React.FC = () => {
       });
       const j = await r.json().catch(() => null);
       if (j && j.success) {
-        Swal.fire('تم', 'تم تسجيل بداية اليومية بنجاح.', 'success');
+        if (j.data?.daily_code) {
+          setOpenDailyInfo({ daily_code: String(j.data.daily_code), journal_id: Number(j.data.id || j.data.journal_id || 0) });
+        }
+        Swal.fire('تم', j.data?.daily_code ? `تم تسجيل بداية اليومية بنجاح.\nالكود: ${j.data.daily_code}` : 'تم تسجيل بداية اليومية بنجاح.', 'success');
         if (selectedRepId) await loadRepContext(Number(selectedRepId));
       } else {
         Swal.fire('فشل', j?.message || 'فشل بدء اليومية.', 'error');
@@ -396,6 +408,9 @@ const SalesDaily: React.FC = () => {
 
   // Validate order products against product catalog and stock for the selected warehouse
   const validateOrderProducts = async (order: any) : Promise<{ ok: boolean; message?: string }> => {
+    if (!selectedWarehouseId) {
+      return { ok: false, message: 'يرجى اختيار المستودع أولاً قبل إضافة الاوردرات.' };
+    }
     try {
       const prodsRes = await fetch(`${API_BASE_PATH}/api.php?module=products&action=getFlat`);
       const prodsJson = await prodsRes.json().catch(() => null);
@@ -450,7 +465,7 @@ const SalesDaily: React.FC = () => {
         const stockResp = await fetch(`${API_BASE_PATH}/api.php?module=stock&action=checkAvailability`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ warehouse_id: selectedWarehouseId || 0, items })
+          body: JSON.stringify({ warehouse_id: selectedWarehouseId, items })
         });
         const stockJr = await stockResp.json().catch(() => null);
         if (!stockJr || stockJr.success === false) {
@@ -488,6 +503,11 @@ const SalesDaily: React.FC = () => {
     const toAdd = pendingOrdersList.filter(p => selectedPendingIds.includes(Number(p.id)));
     if (toAdd.length === 0) {
       Swal.fire('تنبيه', 'اختر اوردرات أولاً.', 'info');
+      return;
+    }
+
+    if (!selectedWarehouseId) {
+      Swal.fire('تنبيه', 'يرجى اختيار المستودع أولاً قبل إضافة الاوردرات.', 'warning');
       return;
     }
 
@@ -538,6 +558,38 @@ const SalesDaily: React.FC = () => {
     const removed = selectedOrders.find(o => Number(o.id) === Number(id));
     setSelectedOrders(prev => prev.filter(o => Number(o.id) !== Number(id)));
     if (removed) setPendingOrdersList(prev => [removed, ...prev.filter(p => Number(p.id) !== Number(id))]);
+  };
+
+  const handleRecallOrder = async (order: any) => {
+    const repId = selectedRepId;
+    if (!repId) return;
+    const confirm = await Swal.fire({
+      title: 'سحب الأوردر من عهدة المندوب',
+      text: `سيتم سحب #${order.orderNumber ?? order.order_number ?? order.id} من عهدة المندوب وإعادته إلى قائمة الطلبيات المتاحة. هل أنت متأكد؟`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'نعم، سحب',
+      cancelButtonText: 'إلغاء'
+    });
+    if (!confirm.isConfirmed) return;
+    try {
+      const r = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=recallOrderFromRep`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rep_id: Number(repId), order_id: Number(order.id) })
+      });
+      const jr = await r.json();
+      if (jr && jr.success) {
+        setAssignedOrders(prev => prev.filter((o: any) => Number(o.id) !== Number(order.id)));
+        setPendingOrdersList(prev => [order, ...prev.filter((p: any) => Number(p.id) !== Number(order.id))]);
+        Swal.fire('تم', 'تم سحب الأوردر من عهدة المندوب.', 'success');
+      } else {
+        Swal.fire('خطأ', jr?.message || 'فشل سحب الأوردر.', 'error');
+      }
+    } catch (e) {
+      console.error('recallOrderFromRep failed', e);
+      Swal.fire('خطأ', 'فشل الاتصال بالخادم.', 'error');
+    }
   };
 
   /* const scanBarcodeAddOrder = async () => {
@@ -768,6 +820,11 @@ const SalesDaily: React.FC = () => {
     }
 
     // Check warehouse stock availability for this order before adding
+    if (!selectedWarehouseId) {
+      Swal.fire('تنبيه', 'يرجى اختيار المستودع أولاً.', 'warning');
+      setBarcodeInput('');
+      return;
+    }
     try {
       const prodMap: Record<string, { product_id: number; name: string; quantity: number }> = {};
       (Array.isArray(match.products) ? match.products : []).forEach((p: any) => {
@@ -783,7 +840,7 @@ const SalesDaily: React.FC = () => {
         const stockResp = await fetch(`${API_BASE_PATH}/api.php?module=stock&action=checkAvailability`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ warehouse_id: selectedWarehouseId || 0, items })
+          body: JSON.stringify({ warehouse_id: selectedWarehouseId, items })
         });
         const stockJr = await stockResp.json().catch(() => null);
         if (!stockJr || stockJr.success === false) {
@@ -1022,7 +1079,7 @@ const scanBarcodeAddOrder = async () => {
         const stockResp = await fetch(`${API_BASE_PATH}/api.php?module=stock&action=checkAvailability`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ warehouse_id: selectedWarehouseId || 0, items })
+          body: JSON.stringify({ warehouse_id: selectedWarehouseId, items })
         });
         const stockJr = await stockResp.json().catch(() => null);
         
@@ -1042,7 +1099,7 @@ const scanBarcodeAddOrder = async () => {
               const parts: string[] = [];
               
               if (typeof available === 'number' && available <= 0) {
-                parts.push('رصيده صفر في هذا المستودع');
+                parts.push('رصيده صفر في المخزون');
               } else if (typeof available === 'number' && typeof required === 'number' && available < required) {
                 parts.push(`مطلوب ${required}، المتاح ${available} فقط`);
               }
@@ -1701,6 +1758,21 @@ const scanBarcodeAddOrder = async () => {
             />
           </div>
         </div>
+        {selectedRepId && !isShippingMode && (
+          <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700 flex items-center gap-2">
+            {openDailyInfo ? (
+              <span className="inline-flex items-center gap-1.5 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 px-3 py-1.5 rounded-full text-xs font-bold border border-green-200 dark:border-green-800">
+                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse inline-block" />
+                يومية مفتوحة: {openDailyInfo.daily_code}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 text-slate-500 px-3 py-1.5 rounded-full text-xs border border-slate-200 dark:border-slate-700">
+                <span className="w-2 h-2 rounded-full bg-slate-400 inline-block" />
+                لا يوجد يومية مفتوحة
+              </span>
+            )}
+          </div>
+        )}
       </div>
       {/* Employee / Page inputs removed per request */}
 
@@ -2046,10 +2118,19 @@ const scanBarcodeAddOrder = async () => {
                         <div className="text-xs text-slate-500 mt-1">{o.governorate || ''} • {o.phone || o.phone1 || ''}</div>
                         <div className="text-xs text-slate-400 mt-1">{orderPieces(o).toLocaleString()} قطع</div>
                       </div>
-                      <div className="text-right text-xs">
-                        <div>المجموع: <span className="font-black">{sub.toLocaleString()}</span></div>
-                        <div>الشحن: <span className="font-black">{ship.toLocaleString()}</span></div>
-                        <div className="font-black text-lg">الإجمالي: {tot.toLocaleString()}</div>
+                      <div className="flex items-center gap-2">
+                        <div className="text-right text-xs">
+                          <div>المجموع: <span className="font-black">{sub.toLocaleString()}</span></div>
+                          <div>الشحن: <span className="font-black">{ship.toLocaleString()}</span></div>
+                          <div className="font-black text-lg">الإجمالي: {tot.toLocaleString()}</div>
+                        </div>
+                        <button
+                          onClick={() => handleRecallOrder(o)}
+                          className="text-rose-600 p-2 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-900/10 transition-colors"
+                          title="سحب من عهدة المندوب"
+                        >
+                          <Trash2 size={18} />
+                        </button>
                       </div>
                     </div>
                   );

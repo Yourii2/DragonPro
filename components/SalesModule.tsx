@@ -172,6 +172,8 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
   const [statusEditNote, setStatusEditNote] = useState('');
   const [returnFineMode, setReturnFineMode] = useState<'none' | 'fine'>('none');
   const [returnFineAmount, setReturnFineAmount] = useState('');
+  const [statusUpdateRepId, setStatusUpdateRepId] = useState<string>('');
+  const [statusEditRepId, setStatusEditRepId] = useState<string>('');
   // Full-order edit state (for manual edit form)
   const [editingOrderId, setEditingOrderId] = useState<number | null>(null);
 
@@ -1421,6 +1423,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
     setOrderDocuments([]);
     setStatusUpdate('');
     setStatusNote('');
+    setStatusUpdateRepId(order.rep_id ? String(order.rep_id) : '');
     try {
       const [tRes, dRes] = await Promise.all([
         fetch(`${API_BASE_PATH}/api.php?module=orders&action=getTimeline&id=${order.id}`),
@@ -1500,11 +1503,17 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
 
   const updateOrderStatus = async () => {
     if (!selectedOrder || !statusUpdate) return;
+    if (statusUpdate === 'with_rep' && !statusUpdateRepId) {
+      Swal.fire('تنبيه', 'يرجى اختيار المندوب عند تغيير الحالة إلى "مع المندوب".', 'warning');
+      return;
+    }
     try {
+      const payload: any = { id: selectedOrder.id, status: statusUpdate, status_note: statusNote };
+      if (statusUpdateRepId) payload.rep_id = Number(statusUpdateRepId);
       const res = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: selectedOrder.id, status: statusUpdate, status_note: statusNote })
+        body: JSON.stringify(payload)
       });
       const jr = await res.json();
       if (jr.success) {
@@ -1514,6 +1523,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
         if (tJson.success) setOrderTimeline(tJson.data || []);
         setStatusUpdate('');
         setStatusNote('');
+        setStatusUpdateRepId('');
         Swal.fire('تم التحديث', 'تم تحديث حالة الطلب.', 'success');
       } else {
         Swal.fire('فشل التحديث', jr.message || 'تعذر تحديث الحالة.', 'error');
@@ -1529,6 +1539,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
     setStatusEditNote('');
     setReturnFineMode('none');
     setReturnFineAmount('');
+    setStatusEditRepId(order.rep_id ? String(order.rep_id) : '');
     setIsStatusEditOpen(true);
   };
 
@@ -1544,28 +1555,34 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       Swal.fire('تنبيه', 'يرجى اختيار الحالة.', 'warning');
       return;
     }
+    if (statusEditValue === 'with_rep' && !statusEditRepId) {
+      Swal.fire('تنبيه', 'يرجى اختيار المندوب عند تغيير الحالة إلى "مع المندوب".', 'warning');
+      return;
+    }
     if (returnFineMode === 'fine') {
       const fine = Number(returnFineAmount || 0);
       if (!fine || isNaN(fine) || fine <= 0) {
         Swal.fire('تنبيه', 'يرجى إدخال مبلغ غرامة صحيح.', 'warning');
         return;
       }
-      if (!statusEditOrder.rep_id && !statusEditOrder.repId) {
+      if (!statusEditRepId && !statusEditOrder.rep_id && !statusEditOrder.repId) {
         Swal.fire('تنبيه', 'لا يوجد مندوب مرتبط بهذا الاوردر لتطبيق الغرامة.', 'warning');
         return;
       }
     }
     try {
+      const editPayload: any = {
+        id: statusEditOrder.id,
+        status: statusEditValue,
+        status_note: statusEditNote,
+        penalty_apply: returnFineMode === 'fine' ? 1 : 0,
+        penalty_amount: returnFineMode === 'fine' ? Number(returnFineAmount || 0) : 0
+      };
+      if (statusEditRepId) editPayload.rep_id = Number(statusEditRepId);
       const res = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: statusEditOrder.id,
-          status: statusEditValue,
-          status_note: statusEditNote,
-          penalty_apply: returnFineMode === 'fine' ? 1 : 0,
-          penalty_amount: returnFineMode === 'fine' ? Number(returnFineAmount || 0) : 0
-        })
+        body: JSON.stringify(editPayload)
       });
       const jr = await res.json();
       if (jr.success) {
@@ -1626,6 +1643,20 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                       className="text-sm"
                     />
                     <input value={statusNote} onChange={e => setStatusNote(e.target.value)} placeholder="ملاحظة التغيير" className="border rounded-lg px-3 py-2 text-sm md:col-span-2" />
+                  </div>
+                  <div className="mt-2">
+                    <label className="text-xs font-bold text-slate-500 block mb-1">
+                      المندوب {statusUpdate === 'with_rep' && <span className="text-rose-500">*</span>}
+                    </label>
+                    <CustomSelect
+                      value={statusUpdateRepId}
+                      onChange={v => setStatusUpdateRepId(v)}
+                      options={[
+                        { value: '', label: 'بدون مندوب' },
+                        ...reps.map((r: any) => ({ value: String(r.id), label: r.name || r.fullname || `مندوب #${r.id}` }))
+                      ]}
+                      className="text-sm"
+                    />
                   </div>
                   <button onClick={updateOrderStatus} className="mt-3 bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-bold">تحديث الحالة</button>
                 </div>
@@ -1731,6 +1762,21 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                     { value: 'in_delivery', label: 'قيد التسليم' },
                     { value: 'delivered', label: 'تم التسليم' },
                     { value: 'returned', label: 'مرتجع' }
+                  ]}
+                  className="w-full"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500">
+                  المندوب {statusEditValue === 'with_rep' && <span className="text-rose-500">*</span>}
+                </label>
+                <CustomSelect
+                  value={statusEditRepId}
+                  onChange={v => setStatusEditRepId(v)}
+                  options={[
+                    { value: '', label: 'بدون مندوب' },
+                    ...reps.map((r: any) => ({ value: String(r.id), label: r.name || r.fullname || `مندوب #${r.id}` }))
                   ]}
                   className="w-full"
                 />
@@ -2851,13 +2897,11 @@ const PrintableContent: React.FC<{ order: any, companyName: string, companyPhone
                 </div>
             </div>
 
-            {/* Notes (ملاحظات) - show if present */}
-            {order.notes && String(order.notes).trim() !== '' && (
-              <div className="mt-2 border-2 border-black p-2 bg-white text-right" style={{ fontSize: '26px' }}>
-                <div className="font-bold mb-1">ملاحظات:</div>
-                <div>{order.notes}</div>
-              </div>
-            )}
+            {/* Notes (ملاحظات) - always show */}
+            <div className="mt-2 border-2 border-black p-2 bg-white text-right" style={{ fontSize: '26px' }}>
+              <div className="font-bold mb-1">ملاحظات:</div>
+              <div style={{ minHeight: '32px' }}>{order.notes || ''}</div>
+            </div>
 
             {/* Employee & Page - below notes */}
             <div className="flex justify-between items-center mt-2 mb-1 px-2 py-1 border-t border-dashed border-black">

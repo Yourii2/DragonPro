@@ -10,7 +10,7 @@ interface FinanceModuleProps {
 }
 
 const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries' }) => {
-  const [activeTab, setActiveTab] = useState<'treasuries' | 'transactions' | 'accounts' | 'journal'>('treasuries');
+  const [activeTab, setActiveTab] = useState<'treasuries' | 'transactions'>('treasuries');
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isTransactionModalOpen, setIsTransactionModalOpen] = useState(false);
@@ -37,6 +37,10 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
   const [transactions, setTransactions] = useState<any[]>([]);
   const [treasuryTransactions, setTreasuryTransactions] = useState<any[]>([]);
   const [isTransactionsLoading, setIsTransactionsLoading] = useState(false);
+  const [isAllTxLoading, setIsAllTxLoading] = useState(false);
+  const [txFromDate, setTxFromDate] = useState<string>(() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10); });
+  const [txToDate, setTxToDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [txTreasuryId, setTxTreasuryId] = useState<string>('');
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [userDefaults, setUserDefaults] = useState<any>(null);
   const [accounts, setAccounts] = useState<any[]>([]);
@@ -82,20 +86,7 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
     };
 
     fetchTreasuries();
-
-    const fetchSuppliers = async () => {
-      try {
-        const response = await fetch(`${API_BASE_PATH}/api.php?module=suppliers&action=getAll`);
-        const result = await response.json();
-        if (result.success) {
-          setSuppliers(result.data || []);
-        }
-      } catch (error) {
-        console.error('Failed to fetch suppliers:', error);
-      }
-    };
-
-    fetchSuppliers();
+    fetchAllSuppliers();
     // fetch user defaults to prefill/lock treasury when applicable
     const fetchUserDefaults = async () => {
       try {
@@ -124,6 +115,16 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
     }
   }, [initialView]);
 
+  const fetchAllSuppliers = async () => {
+    try {
+      const response = await fetch(`${API_BASE_PATH}/api.php?module=suppliers&action=getAll`);
+      const result = await response.json();
+      if (result.success) setSuppliers(result.data || []);
+    } catch (error) {
+      console.error('Failed to fetch suppliers:', error);
+    }
+  };
+
   const fetchAllTreasuries = async () => {
     try {
       const [tRes, dRes] = await Promise.all([
@@ -140,6 +141,91 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
     } catch (error) {
       console.error('Failed to fetch treasuries:', error);
     }
+  };
+
+  const fetchAllTransactions = async (fromDate?: string, toDate?: string, treasuryId?: string) => {
+    setIsAllTxLoading(true);
+    try {
+      let url = `${API_BASE_PATH}/api.php?module=transactions&action=getAll`;
+      if (fromDate) url += `&start_date=${encodeURIComponent(fromDate)}`;
+      if (toDate) url += `&end_date=${encodeURIComponent(toDate)}`;
+      if (treasuryId) url += `&treasury_id=${encodeURIComponent(treasuryId)}`;
+      const res = await fetch(url);
+      const jr = await res.json();
+      if (jr.success) setTransactions(jr.data || []);
+    } catch (e) {
+      console.error('Failed to fetch transactions:', e);
+    } finally {
+      setIsAllTxLoading(false);
+    }
+  };
+
+  const isRepPaymentTx = (tx: any, details: any): boolean => {
+    // rep_payment_in/out may fall back to payment_in/out in DB enum; use details.rep_id or related_to_type to detect
+    const repTypes = ['rep_payment_in', 'rep_payment_out'];
+    const repRelTypes = ['rep', 'employee']; // employee is fallback for rel_to_type enum
+    return (
+      repTypes.includes(tx.type) ||
+      (repRelTypes.includes(tx.related_to_type) && (tx.type === 'payment_in' || tx.type === 'payment_out') && details.rep_id)
+    );
+  };
+
+  const getTxSource = (tx: any): string => {
+    const details = tx.details ? (() => { try { const p = JSON.parse(tx.details); return (p && typeof p === 'object') ? p : {}; } catch { return {}; } })() : {};
+    const subtype = details.subtype || '';
+    const amt = parseFloat(tx.amount);
+    if (subtype === 'transfer_in' || tx.type === 'transfer_in') {
+      const fromId = details.transfer_from;
+      const found = fromId ? treasuries.find((t: any) => String(t.id) === String(fromId)) : null;
+      return found ? found.name : (fromId ? `خزينة #${fromId}` : 'خزينة أخرى');
+    }
+    if (subtype === 'transfer_out' || tx.type === 'transfer_out') return tx.treasury_name || 'خزينة';
+    // Rep payment: collect from rep (positive) → source is rep; pay to rep (negative) → source is treasury
+    if (isRepPaymentTx(tx, details)) {
+      return amt >= 0
+        ? (tx.related_name || `مندوب #${tx.related_to_id || ''}`)
+        : (tx.treasury_name || 'خزينة');
+    }
+    if (amt >= 0) return tx.related_name || 'إيداع خارجي';
+    return tx.treasury_name || 'خزينة';
+  };
+
+  const getTxDest = (tx: any): string => {
+    const details = tx.details ? (() => { try { const p = JSON.parse(tx.details); return (p && typeof p === 'object') ? p : {}; } catch { return {}; } })() : {};
+    const subtype = details.subtype || '';
+    const amt = parseFloat(tx.amount);
+    if (subtype === 'transfer_out' || tx.type === 'transfer_out') {
+      const toId = details.transfer_to;
+      const found = toId ? treasuries.find((t: any) => String(t.id) === String(toId)) : null;
+      return found ? found.name : (toId ? `خزينة #${toId}` : 'خزينة أخرى');
+    }
+    if (subtype === 'transfer_in' || tx.type === 'transfer_in') return tx.treasury_name || 'خزينة';
+    // Rep payment: collect from rep (positive) → dest is treasury; pay to rep (negative) → dest is rep
+    if (isRepPaymentTx(tx, details)) {
+      return amt >= 0
+        ? (tx.treasury_name || 'خزينة')
+        : (tx.related_name || `مندوب #${tx.related_to_id || ''}`);
+    }
+    if (amt >= 0) return tx.treasury_name || 'خزينة';
+    return tx.related_name || 'مصروف';
+  };
+
+  const printTxReport = () => {
+    const rows = transactions.map(tx => `
+      <tr>
+        <td>${new Date(tx.transaction_date).toLocaleString('ar-EG')}</td>
+        <td>${getTxSource(tx)}</td>
+        <td>${getTxDisplayLabel(tx)}</td>
+        <td>${getTxDest(tx)}</td>
+        <td>${getTxDisplayNotes(tx)}</td>
+        <td style="direction:ltr;font-weight:bold;color:${parseFloat(tx.amount)>=0?'green':'red'}">${parseFloat(tx.amount).toLocaleString()} ${currencySymbol}</td>
+        <td>${tx.created_by_name || '—'}</td>
+      </tr>`).join('');
+    const win = window.open('', '_blank');
+    if (!win) { Swal.fire('تنبيه', 'يرجى السماح بفتح النوافذ المنبثقة.', 'warning'); return; }
+    const selectedTrName = txTreasuryId ? (treasuries.find((t:any)=>String(t.id)===txTreasuryId)?.name||'') : 'جميع الخزائن';
+    win.document.write(`<html><head><title>سجل المعاملات</title><style>body{font-family:'Cairo',sans-serif;direction:rtl;padding:20px}table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #ddd;padding:6px;text-align:right}th{background:#f2f2f2}h1,h2{text-align:center}@media print{body{-webkit-print-color-adjust:exact}}</style><link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap" rel="stylesheet"></head><body><h1>سجل الإيرادات والمصروفات</h1><h3 style="text-align:center">${selectedTrName} | من: ${txFromDate} إلى: ${txToDate}</h3><table><thead><tr><th>التاريخ</th><th>من</th><th>نوع المعاملة</th><th>إلى</th><th>البيان</th><th>المبلغ</th><th>الموظف</th></tr></thead><tbody>${rows}</tbody></table></body></html>`);
+    win.document.close(); win.focus(); setTimeout(() => { win.print(); win.close(); }, 500);
   };
 
   const fetchAccounts = async () => {
@@ -163,8 +249,7 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
   };
 
   useEffect(() => {
-    if (activeTab === 'accounts') fetchAccounts();
-    if (activeTab === 'journal') fetchJournalEntries();
+    if (activeTab === 'transactions') fetchAllTransactions(txFromDate, txToDate, txTreasuryId);
   }, [activeTab]);
 
   const openAccountModal = (account?: any) => {
@@ -474,7 +559,7 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
         transfer_in: 'تحويل وارد',
         salary: 'دفع راتب',
         advance: 'سلفة موظف',
-      rep_penalty: 'غرامة على مندوب',
+        rep_penalty: 'غرامة على مندوب',
         // Original type-based labels
         bonus: 'مكافأة',
         penalty: 'خصم',
@@ -485,8 +570,8 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
         return_in: 'مرتجع عميل',
         return_out: 'مرتجع لمورد',
         rep_assignment: 'تسليم عهدة لمندوب',
-        rep_payment_in: 'تحصيل من مندوب',
-        rep_payment_out: 'دفعة لمندوب',
+        rep_payment_in: 'بدء يومية',
+        rep_payment_out: 'بدء يومية',
         rep_settlement: 'تسوية مندوب',
     };
 
@@ -495,6 +580,9 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
             const details = JSON.parse(detailsJson);
             if (details.subtype && labels[details.subtype]) {
                 return labels[details.subtype];
+            }
+            if (details.context === 'close_daily' && (type === 'rep_payment_in' || type === 'rep_payment_out')) {
+                return 'إغلاق يومية';
             }
         } catch (e) {}
     }
@@ -516,11 +604,27 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
     if (!tx) return '-';
     if (tx.title && String(tx.title).trim()) return tx.title;
     if (tx.memo && String(tx.memo).trim()) return tx.memo;
+    // Detect rep payment even when type fell back to payment_in/out
+    try {
+      const d = tx.details ? JSON.parse(tx.details) : {};
+      if (d && isRepPaymentTx(tx, d)) {
+        return d.context === 'close_daily' ? 'إغلاق يومية' : 'بدء يومية';
+      }
+    } catch { /* fallthrough */ }
     return getTransactionTypeLabel(tx.type, tx.details);
     };
 
     const getTxDisplayNotes = (tx: any) => {
     if (!tx) return '—';
+    try {
+      const d = tx.details ? JSON.parse(tx.details) : {};
+      if (d && isRepPaymentTx(tx, d)) {
+        const isClose = d.context === 'close_daily';
+        const amt = parseFloat(tx.amount);
+        if (amt >= 0) return isClose ? 'تحصيل من المندوب في إغلاق اليومية' : 'تحصيل من المندوب في بدء اليومية';
+        return isClose ? 'دفع إلى المندوب في إغلاق اليومية' : 'دفع إلى المندوب في بدء اليومية';
+      }
+    } catch { /* fallthrough */ }
     if (tx.memo && String(tx.memo).trim()) return tx.memo;
     if (tx.title && String(tx.title).trim()) return tx.title;
     return getTransactionNotes(tx.details);
@@ -658,8 +762,11 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
       if (result.success) {
         Swal.fire('نجاح!', 'تم تسجيل العملية بنجاح.', 'success');
         closeTransactionModal();
-        await fetchAllTreasuries(); // Refresh balances
-        // Optionally, refresh transactions list if displayed
+        await Promise.all([
+          fetchAllTreasuries(),
+          fetchAllTransactions(txFromDate, txToDate, txTreasuryId),
+          fetchAllSuppliers(),
+        ]);
       } else {
         Swal.fire('فشل', result.message || 'فشلت العملية. تحقق من البيانات المدخلة.', 'error');
       }
@@ -699,18 +806,6 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
             className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${activeTab === 'transactions' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}
           >
             الإيرادات والمصروفات
-          </button>
-          <button 
-            onClick={() => setActiveTab('accounts')} 
-            className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${activeTab === 'accounts' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}
-          >
-            شجرة الحسابات
-          </button>
-          <button 
-            onClick={() => setActiveTab('journal')} 
-            className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${activeTab === 'journal' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}
-          >
-            قيود اليومية
           </button>
         </div>
       </div>
@@ -805,126 +900,61 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
               colorClass="bg-gradient-to-br from-blue-500 to-indigo-600 border-blue-600"
             />
           </div>
-        </div>
-      )}
 
-      {activeTab === 'accounts' && (
-        <div className="space-y-4 animate-in fade-in duration-300">
+          {/* Transactions List */}
           <div className="rounded-3xl border border-card shadow-sm overflow-hidden card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
-            <div className="p-4 border-b dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 flex flex-col md:flex-row items-center justify-between gap-4">
-              <div className="relative flex-1 w-full max-w-md">
-                <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-muted w-4 h-4" />
-                <input
-                  type="text"
-                  placeholder="بحث برمز أو اسم الحساب..."
-                  className="w-full pr-10 pl-4 py-2.5 bg-white dark:bg-slate-900 border-none rounded-2xl text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white text-right"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-              </div>
-              <button
-                onClick={() => openAccountModal()}
-                className="w-full md:w-auto flex items-center justify-center gap-2 bg-accent text-white px-5 py-2.5 rounded-2xl text-sm font-black shadow-lg shadow-blue-500/20 active:scale-95 transition-all"
-              >
-                <Plus size={18} /> إضافة حساب
-              </button>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-right text-sm">
-                <thead className="bg-slate-50 dark:bg-slate-900/50 text-muted">
-                  <tr>
-                    <th className="px-6 py-4 font-bold">الكود</th>
-                    <th className="px-6 py-4 font-bold">اسم الحساب</th>
-                    <th className="px-6 py-4 font-bold">النوع</th>
-                    <th className="px-6 py-4 font-bold">الأب</th>
-                    <th className="px-6 py-4 font-bold text-center">الإجراءات</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y dark:divide-slate-700 text-slate-700 dark:text-slate-300">
-                  {filteredAccounts.length > 0 ? filteredAccounts.map(a => (
-                    <tr key={a.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                      <td className="px-6 py-4 font-bold">{a.code}</td>
-                      <td className="px-6 py-4">{a.name}</td>
-                      <td className="px-6 py-4 text-xs font-bold text-slate-500">{getAccountTypeLabel(a.type)}</td>
-                      <td className="px-6 py-4 text-xs text-slate-500">{a.parent_name || '—'}</td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center justify-center gap-2">
-                          <button onClick={() => handleDeleteAccount(a.id)} className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-xl transition-all" title="حذف الحساب"><Trash2 size={16} /></button>
-                          <button onClick={() => openAccountModal(a)} className="p-2 text-slate-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded-xl transition-all" title="تعديل الحساب"><Edit size={16} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  )) : (
-                    <tr>
-                      <td colSpan={5} className="px-6 py-10 text-center text-slate-400 font-bold">لا توجد حسابات مطابقة</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {activeTab === 'journal' && (
-        <div className="space-y-4 animate-in fade-in duration-300">
-          <div className="rounded-3xl border border-card shadow-sm overflow-hidden card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
-            <div className="p-4 border-b dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 flex flex-col md:flex-row items-center justify-between gap-4">
-              <div className="text-sm text-slate-500 font-bold">إدارة قيود اليومية والترحيل</div>
-              <div className="flex gap-2">
-                <button
-                  onClick={async () => {
-                    if (accounts.length === 0) await fetchAccounts();
-                    setJournalForm({ entry_date: new Date().toISOString().slice(0, 10), memo: '', posted: true });
-                    setJournalLines([{ account_id: '', debit: '', credit: '', memo: '' }]);
-                    setIsJournalModalOpen(true);
-                  }}
-                  className="flex items-center gap-2 bg-accent text-white px-5 py-2.5 rounded-2xl text-sm font-black shadow-lg shadow-blue-500/20 active:scale-95 transition-all"
+            <div className="p-4 border-b dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 flex flex-wrap items-center justify-between gap-3">
+              <h3 className="text-sm font-black text-slate-700 dark:text-white">سجل المعاملات</h3>
+              <div className="flex items-center gap-2 flex-wrap">
+                <label className="text-xs font-bold text-slate-500">من</label>
+                <input type="date" value={txFromDate} onChange={e => setTxFromDate(e.target.value)} className="bg-white dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm" />
+                <label className="text-xs font-bold text-slate-500">إلى</label>
+                <input type="date" value={txToDate} onChange={e => setTxToDate(e.target.value)} className="bg-white dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm" />
+                <select
+                  value={txTreasuryId}
+                  onChange={e => setTxTreasuryId(e.target.value)}
+                  className="bg-white dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm text-slate-700 dark:text-white"
                 >
-                  <Plus size={18} /> قيد جديد
-                </button>
-                <button
-                  onClick={fetchJournalEntries}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-2xl text-sm font-black border border-card"
-                >
-                  تحديث
-                </button>
+                  <option value="">جميع الخزائن</option>
+                  {treasuries.map((t: any) => <option key={t.id} value={String(t.id)}>{t.name}</option>)}
+                </select>
+                <button onClick={() => fetchAllTransactions(txFromDate, txToDate, txTreasuryId)} className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-black">تحديث</button>
+                <button onClick={printTxReport} title="طباعة" className="px-3 py-2 bg-slate-700 text-white rounded-xl text-sm font-black flex items-center gap-1"><Printer size={15}/> طباعة</button>
               </div>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-right text-sm">
-                <thead className="bg-slate-50 dark:bg-slate-900/50 text-muted">
-                  <tr>
-                    <th className="px-6 py-4 font-bold">رقم</th>
-                    <th className="px-6 py-4 font-bold">التاريخ</th>
-                    <th className="px-6 py-4 font-bold">البيان</th>
-                    <th className="px-6 py-4 font-bold">الحالة</th>
-                    <th className="px-6 py-4 font-bold text-center">الإجراءات</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y dark:divide-slate-700 text-slate-700 dark:text-slate-300">
-                  {journalEntries.length > 0 ? journalEntries.map(j => (
-                    <tr key={j.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                      <td className="px-6 py-4 font-bold">{j.id}</td>
-                      <td className="px-6 py-4 text-xs">{j.entry_date}</td>
-                      <td className="px-6 py-4">{j.memo || '—'}</td>
-                      <td className="px-6 py-4 text-xs font-bold">{Number(j.posted) === 1 ? 'مرحّل' : 'غير مرحّل'}</td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center justify-center gap-2">
-                          <button onClick={() => handleViewJournal(j)} className="p-2 text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-all" title="عرض القيد"><Eye size={16} /></button>
-                          {Number(j.posted) !== 1 && (
-                            <button onClick={() => handlePostJournal(j.id)} className="p-2 text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-xl transition-all" title="ترحيل القيد"><Save size={16} /></button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )) : (
+              {isAllTxLoading ? (
+                <div className="p-10 text-center text-slate-400 font-bold">جاري تحميل المعاملات...</div>
+              ) : transactions.length > 0 ? (
+                <table className="w-full text-right text-sm">
+                  <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400">
                     <tr>
-                      <td colSpan={5} className="px-6 py-10 text-center text-slate-400 font-bold">لا توجد قيود يومية</td>
+                      <th className="px-4 py-3 font-bold whitespace-nowrap">التاريخ</th>
+                      <th className="px-4 py-3 font-bold whitespace-nowrap">من</th>
+                      <th className="px-4 py-3 font-bold whitespace-nowrap">نوع المعاملة</th>
+                      <th className="px-4 py-3 font-bold whitespace-nowrap">إلى</th>
+                      <th className="px-4 py-3 font-bold whitespace-nowrap">البيان</th>
+                      <th className="px-4 py-3 font-bold whitespace-nowrap">المبلغ</th>
+                      <th className="px-4 py-3 font-bold whitespace-nowrap">الموظف</th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y dark:divide-slate-700 text-slate-700 dark:text-slate-300">
+                    {transactions.map((tx: any) => (
+                      <tr key={tx.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                        <td className="px-4 py-3 text-xs whitespace-nowrap">{new Date(tx.transaction_date).toLocaleString('ar-EG')}</td>
+                        <td className="px-4 py-3 text-xs font-bold text-blue-600 dark:text-blue-400 whitespace-nowrap">{getTxSource(tx)}</td>
+                        <td className="px-4 py-3 font-bold whitespace-nowrap">{getTxDisplayLabel(tx)}</td>
+                        <td className="px-4 py-3 text-xs font-bold text-emerald-600 dark:text-emerald-400 whitespace-nowrap">{getTxDest(tx)}</td>
+                        <td className="px-4 py-3 text-xs text-slate-500 max-w-[150px] truncate" title={getTxDisplayNotes(tx)}>{getTxDisplayNotes(tx)}</td>
+                        <td className={`px-4 py-3 font-black whitespace-nowrap ${Number(tx.amount) >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{parseFloat(tx.amount).toLocaleString()} {currencySymbol}</td>
+                        <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">{tx.created_by_name || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="p-10 text-center text-slate-400 font-bold">لا توجد معاملات في هذه الفترة</div>
+              )}
             </div>
           </div>
         </div>
@@ -1030,8 +1060,8 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
       {/* Transaction Modal */}
       {isTransactionModalOpen && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-          <div className="w-full max-w-lg rounded-[2.5rem] shadow-2xl border border-card card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
-            <div className="p-6 border-b dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-900/50">
+          <div className="w-full max-w-lg rounded-[2.5rem] shadow-2xl border border-card card flex flex-col max-h-[90vh]" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+            <div className="p-6 border-b dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-900/50 flex-shrink-0">
               <h3 className="text-lg font-black text-slate-900 dark:text-white">
                 {modalType === 'deposit' && 'إضافة إيداع جديد'}
                 {modalType === 'expense' && 'إضافة مصروف جديد'}
@@ -1040,7 +1070,7 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
               </h3>
               <button onClick={closeTransactionModal} className="text-slate-400 hover:text-rose-500"><X size={24} /></button>
             </div>
-            <form onSubmit={handleTransactionSubmit} className="p-8 space-y-4 text-right">
+            <form onSubmit={handleTransactionSubmit} className="p-8 space-y-4 text-right overflow-y-auto flex-1">
               {/* Deposit Form */}
               {modalType === 'deposit' && (
                 <>
@@ -1106,27 +1136,25 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
               {modalType === 'transfer' && (
                 <>
                   <div><label className="text-xs font-bold text-slate-500">المبلغ المحول</label><input type="number" required value={transferData.amount} onChange={e => setTransferData({...transferData, amount: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1" /></div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-xs font-bold text-slate-500">من خزينة</label>
-                      <CustomSelect
-                        required
-                        value={transferData.from_treasury_id}
-                        onChange={v => setTransferData({...transferData, from_treasury_id: v})}
-                        options={[{ value: '', label: 'اختر المصدر' }, ...treasuries.map((t:any) => ({ value: String(t.id), label: `${t.name} (متاح: ${t.balance.toLocaleString()})` }))]}
-                        className="w-full"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs font-bold text-slate-500">إلى خزينة</label>
-                      <CustomSelect
-                        required
-                        value={transferData.to_treasury_id}
-                        onChange={v => setTransferData({...transferData, to_treasury_id: v})}
-                        options={[{ value: '', label: 'اختر الوجهة' }, ...treasuries.filter((t:any) => String(t.id) !== transferData.from_treasury_id).map((t:any) => ({ value: String(t.id), label: t.name }))]}
-                        className="w-full"
-                      />
-                    </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-500">من خزينة</label>
+                    <CustomSelect
+                      required
+                      value={transferData.from_treasury_id}
+                      onChange={v => setTransferData({...transferData, from_treasury_id: v})}
+                      options={[{ value: '', label: 'اختر المصدر' }, ...treasuries.map((t:any) => ({ value: String(t.id), label: `${t.name} (متاح: ${t.balance.toLocaleString()})` }))]}
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-500">إلى خزينة</label>
+                    <CustomSelect
+                      required
+                      value={transferData.to_treasury_id}
+                      onChange={v => setTransferData({...transferData, to_treasury_id: v})}
+                      options={[{ value: '', label: 'اختر الوجهة' }, ...treasuries.filter((t:any) => String(t.id) !== transferData.from_treasury_id).map((t:any) => ({ value: String(t.id), label: t.name }))]}
+                      className="w-full"
+                    />
                   </div>
                   <div><label className="text-xs font-bold text-slate-500">السبب/البيان</label><input type="text" required value={transferData.notes} onChange={e => setTransferData({...transferData, notes: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1" /></div>
                 </>
@@ -1139,211 +1167,6 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
         </div>
       )}
 
-      {isAccountModalOpen && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-white dark:bg-slate-800 w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden border dark:border-slate-700">
-            <div className="p-6 border-b dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-900/50">
-              <h3 className="text-lg font-black text-slate-900 dark:text-white">{editingAccount ? 'تعديل حساب' : 'إضافة حساب جديد'}</h3>
-              <button onClick={() => setIsAccountModalOpen(false)} className="text-slate-400 hover:text-rose-500 transition-colors"><X size={24} /></button>
-            </div>
-            <form onSubmit={handleSaveAccount} className="p-8 space-y-4 text-right">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs font-bold text-slate-500">الكود</label>
-                  <input
-                    type="text"
-                    required
-                    value={accountForm.code}
-                    onChange={e => setAccountForm({ ...accountForm, code: e.target.value })}
-                    className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-500">النوع</label>
-                  <CustomSelect
-                    value={accountForm.type}
-                    onChange={v => setAccountForm({ ...accountForm, type: v })}
-                    options={[{ value: 'asset', label: 'أصل' }, { value: 'liability', label: 'التزام' }, { value: 'equity', label: 'حقوق ملكية' }, { value: 'income', label: 'إيراد' }, { value: 'expense', label: 'مصروف' }]}
-                    className="w-full"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="text-xs font-bold text-slate-500">اسم الحساب</label>
-                <input
-                  type="text"
-                  required
-                  value={accountForm.name}
-                  onChange={e => setAccountForm({ ...accountForm, name: e.target.value })}
-                  className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-slate-500">الحساب الأب (اختياري)</label>
-                <CustomSelect
-                  value={accountForm.parent_id}
-                  onChange={v => setAccountForm({ ...accountForm, parent_id: v })}
-                  options={[{ value: '', label: 'بدون' }, ...accounts.filter((a:any) => !editingAccount || a.id !== editingAccount.id).map((a:any) => ({ value: String(a.id), label: `${a.code} - ${a.name}` }))]}
-                  className="w-full"
-                />
-              </div>
-              <button type="submit" className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black shadow-xl shadow-blue-500/30 hover:bg-blue-700 transition-all flex items-center justify-center gap-2">
-                <Save size={18} /> حفظ الحساب
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {isJournalModalOpen && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-          <div className="w-full max-w-3xl rounded-[2.5rem] shadow-2xl border border-card card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
-            <div className="p-6 border-b dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-900/50">
-              <h3 className="text-lg font-black text-slate-900 dark:text-white">إضافة قيد يومية</h3>
-              <button onClick={() => setIsJournalModalOpen(false)} className="text-slate-400 hover:text-rose-500"><X size={24} /></button>
-            </div>
-            <form onSubmit={handleCreateJournal} className="p-8 space-y-4 text-right">
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <label className="text-xs font-bold text-slate-500">تاريخ القيد</label>
-                  <input
-                    type="date"
-                    required
-                    value={journalForm.entry_date}
-                    onChange={e => setJournalForm({ ...journalForm, entry_date: e.target.value })}
-                    className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1"
-                  />
-                </div>
-                <div className="col-span-2">
-                  <label className="text-xs font-bold text-slate-500">البيان</label>
-                  <input
-                    type="text"
-                    value={journalForm.memo}
-                    onChange={e => setJournalForm({ ...journalForm, memo: e.target.value })}
-                    className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1"
-                  />
-                </div>
-              </div>
-              <label className="flex items-center gap-2 text-xs font-bold text-slate-500">
-                <input
-                  type="checkbox"
-                  checked={journalForm.posted}
-                  onChange={e => setJournalForm({ ...journalForm, posted: e.target.checked })}
-                />
-                ترحيل تلقائي بعد الحفظ
-              </label>
-
-              <div className="border rounded-2xl overflow-hidden dark:border-slate-700">
-                <table className="w-full text-right text-sm">
-                  <thead className="bg-slate-50 dark:bg-slate-900/50 text-muted">
-                    <tr>
-                      <th className="px-4 py-3 font-bold">الحساب</th>
-                      <th className="px-4 py-3 font-bold">مدين</th>
-                      <th className="px-4 py-3 font-bold">دائن</th>
-                      <th className="px-4 py-3 font-bold">ملاحظة</th>
-                      <th className="px-4 py-3 font-bold text-center">إزالة</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y dark:divide-slate-700">
-                    {journalLines.map((line, idx) => (
-                      <tr key={idx}>
-                        <td className="px-4 py-3">
-                          <CustomSelect
-                            value={line.account_id}
-                            onChange={v => updateJournalLine(idx, 'account_id', v)}
-                            options={[{ value: '', label: 'اختر الحساب' }, ...accounts.map((a:any) => ({ value: String(a.id), label: `${a.code} - ${a.name}` }))]}
-                            className="w-full"
-                          />
-                        </td>
-                        <td className="px-4 py-3">
-                          <input
-                            type="number"
-                            value={line.debit}
-                            onChange={e => updateJournalLine(idx, 'debit', e.target.value)}
-                            className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm"
-                          />
-                        </td>
-                        <td className="px-4 py-3">
-                          <input
-                            type="number"
-                            value={line.credit}
-                            onChange={e => updateJournalLine(idx, 'credit', e.target.value)}
-                            className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm"
-                          />
-                        </td>
-                        <td className="px-4 py-3">
-                          <input
-                            type="text"
-                            value={line.memo}
-                            onChange={e => updateJournalLine(idx, 'memo', e.target.value)}
-                            className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm"
-                          />
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <button type="button" onClick={() => removeJournalLine(idx)} className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-xl transition-all">
-                            <Trash2 size={16} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <div className="p-4 flex items-center justify-between">
-                  <button type="button" onClick={addJournalLine} className="flex items-center gap-2 px-4 py-2 rounded-2xl text-sm font-black border border-card">
-                    <Plus size={16} /> إضافة سطر
-                  </button>
-                  <div className="text-xs text-slate-500 font-bold">
-                    الإجمالي: مدين {journalTotals.debit.toLocaleString()} | دائن {journalTotals.credit.toLocaleString()}
-                  </div>
-                </div>
-              </div>
-              <button type="submit" className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black shadow-xl shadow-blue-500/30 hover:bg-blue-700 transition-all">
-                حفظ القيد
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {isJournalDetailOpen && selectedJournalEntry && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-          <div className="w-full max-w-3xl rounded-[2.5rem] shadow-2xl border border-card card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
-            <div className="p-6 border-b dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-900/50">
-              <h3 className="text-lg font-black text-slate-900 dark:text-white">تفاصيل القيد #{selectedJournalEntry.id}</h3>
-              <button onClick={() => setIsJournalDetailOpen(false)} className="text-slate-400 hover:text-rose-500"><X size={24} /></button>
-            </div>
-            <div className="p-8 space-y-4 text-right">
-              <div className="grid grid-cols-3 gap-4 text-xs text-slate-500 font-bold">
-                <div>التاريخ: <span className="text-slate-700 dark:text-slate-200">{selectedJournalEntry.entry_date}</span></div>
-                <div>الحالة: <span className="text-slate-700 dark:text-slate-200">{Number(selectedJournalEntry.posted) === 1 ? 'مرحّل' : 'غير مرحّل'}</span></div>
-                <div>البيان: <span className="text-slate-700 dark:text-slate-200">{selectedJournalEntry.memo || '—'}</span></div>
-              </div>
-              <div className="border rounded-2xl overflow-hidden dark:border-slate-700">
-                <table className="w-full text-right text-sm">
-                  <thead className="bg-slate-50 dark:bg-slate-900/50 text-muted">
-                    <tr>
-                      <th className="px-4 py-3 font-bold">الحساب</th>
-                      <th className="px-4 py-3 font-bold">مدين</th>
-                      <th className="px-4 py-3 font-bold">دائن</th>
-                      <th className="px-4 py-3 font-bold">ملاحظة</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y dark:divide-slate-700">
-                    {selectedJournalLines.map((line: any) => (
-                      <tr key={line.id}>
-                        <td className="px-4 py-3">{line.account_code ? `${line.account_code} - ${line.account_name}` : line.account_name}</td>
-                        <td className="px-4 py-3">{Number(line.debit || 0).toLocaleString()}</td>
-                        <td className="px-4 py-3">{Number(line.credit || 0).toLocaleString()}</td>
-                        <td className="px-4 py-3">{line.memo || '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

@@ -1253,6 +1253,262 @@ function log_order_history($pdo, $order_id, $status, $action, $notes = null, $re
     }
 }
 
+// ── Helper: ensure rep_journal_orders table exists ──
+function ensure_rep_journal_orders_table($pdo) {
+    execute_query($pdo, "CREATE TABLE IF NOT EXISTS rep_journal_orders (
+        id          INT AUTO_INCREMENT PRIMARY KEY,
+        journal_id  INT NULL,
+        rep_id      INT NOT NULL,
+        order_id    INT NOT NULL,
+        status      VARCHAR(32) NOT NULL DEFAULT 'with_rep',
+        event_date  DATE NOT NULL,
+        event_time  TIME NOT NULL,
+        employee    VARCHAR(255) NULL,
+        notes       TEXT NULL,
+        created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    // Add unique key if missing (best-effort)
+    try { $pdo->exec("ALTER TABLE rep_journal_orders ADD UNIQUE KEY uk_rep_order (rep_id, order_id)"); } catch (Exception $ex) {}
+}
+
+function ensure_rep_daily_journal_table($pdo) {
+    try { execute_query($pdo, "ALTER TABLE rep_daily_journal DROP INDEX rep_date_unique"); } catch (Exception $ex) {}
+    try { $pdo->exec("ALTER TABLE rep_daily_journal DROP INDEX rep_date_unique"); } catch (Exception $ex) {}
+    execute_query($pdo, "CREATE TABLE IF NOT EXISTS rep_daily_journal (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        rep_id INT NOT NULL,
+        session_seq INT DEFAULT 1,
+        journal_date DATE NOT NULL,
+        opening_amount DECIMAL(14,2) DEFAULT 0,
+        opening_orders_count INT DEFAULT 0,
+        opening_pieces_count INT DEFAULT 0,
+        orders_received_count INT DEFAULT 0,
+        pieces_received INT DEFAULT 0,
+        orders_delivered_count INT DEFAULT 0,
+        pieces_delivered INT DEFAULT 0,
+        delivered_value DECIMAL(14,2) DEFAULT 0,
+        orders_returned_count INT DEFAULT 0,
+        pieces_returned INT DEFAULT 0,
+        returned_value DECIMAL(14,2) DEFAULT 0,
+        orders_postponed_count INT DEFAULT 0,
+        pieces_postponed INT DEFAULT 0,
+        postponed_value DECIMAL(14,2) DEFAULT 0,
+        transactions TEXT NULL,
+        closing_amount DECIMAL(14,2) DEFAULT 0,
+        notes TEXT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    if (!column_exists($pdo, 'rep_daily_journal', 'session_seq'))            execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN session_seq INT DEFAULT 1");
+    if (!column_exists($pdo, 'rep_daily_journal', 'employee'))               execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN employee VARCHAR(255) NULL");
+    if (!column_exists($pdo, 'rep_daily_journal', 'page'))                   execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN page VARCHAR(255) NULL");
+    if (!column_exists($pdo, 'rep_daily_journal', 'treasury_id'))            execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN treasury_id INT NULL");
+    if (!column_exists($pdo, 'rep_daily_journal', 'warehouse_id'))           execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN warehouse_id INT NULL");
+    if (!column_exists($pdo, 'rep_daily_journal', 'prev_balance'))           execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN prev_balance DECIMAL(14,2) DEFAULT 0");
+    if (!column_exists($pdo, 'rep_daily_journal', 'old_orders_value'))       execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN old_orders_value DECIMAL(14,2) DEFAULT 0");
+    if (!column_exists($pdo, 'rep_daily_journal', 'orders_assigned_count'))  execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN orders_assigned_count INT DEFAULT 0");
+    if (!column_exists($pdo, 'rep_daily_journal', 'pieces_assigned_count'))  execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN pieces_assigned_count INT DEFAULT 0");
+    if (!column_exists($pdo, 'rep_daily_journal', 'assigned_value'))         execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN assigned_value DECIMAL(14,2) DEFAULT 0");
+    if (!column_exists($pdo, 'rep_daily_journal', 'total_orders_count'))     execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN total_orders_count INT DEFAULT 0");
+    if (!column_exists($pdo, 'rep_daily_journal', 'total_pieces_count'))     execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN total_pieces_count INT DEFAULT 0");
+    if (!column_exists($pdo, 'rep_daily_journal', 'total_orders_value'))     execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN total_orders_value DECIMAL(14,2) DEFAULT 0");
+    if (!column_exists($pdo, 'rep_daily_journal', 'final_before_payment'))   execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN final_before_payment DECIMAL(14,2) DEFAULT 0");
+    if (!column_exists($pdo, 'rep_daily_journal', 'payment_action'))         execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN payment_action VARCHAR(32) NULL");
+    if (!column_exists($pdo, 'rep_daily_journal', 'payment_amount'))         execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN payment_amount DECIMAL(14,2) DEFAULT 0");
+    if (!column_exists($pdo, 'rep_daily_journal', 'balance_after_payment'))  execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN balance_after_payment DECIMAL(14,2) DEFAULT 0");
+    if (!column_exists($pdo, 'rep_daily_journal', 'orders_json'))            execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN orders_json TEXT NULL");
+    if (!column_exists($pdo, 'rep_daily_journal', 'daily_code'))             execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN daily_code VARCHAR(20) NULL");
+    if (!column_exists($pdo, 'rep_daily_journal', 'is_closed'))              execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN is_closed TINYINT(1) NOT NULL DEFAULT 0");
+}
+
+function ensure_order_confirmation_assignments_table($pdo) {
+    execute_query($pdo, "CREATE TABLE IF NOT EXISTS order_confirmation_assignments (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        order_id INT NOT NULL,
+        rep_id INT NOT NULL,
+        assigned_by INT NULL,
+        notes TEXT NULL,
+        status VARCHAR(32) NOT NULL DEFAULT 'assigned',
+        assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_order_confirmation_order (order_id),
+        KEY idx_order_confirmation_rep_status (rep_id, status),
+        KEY idx_order_confirmation_status (status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    if (!column_exists($pdo, 'order_confirmation_assignments', 'assigned_by')) execute_query($pdo, "ALTER TABLE order_confirmation_assignments ADD COLUMN assigned_by INT NULL");
+    if (!column_exists($pdo, 'order_confirmation_assignments', 'notes')) execute_query($pdo, "ALTER TABLE order_confirmation_assignments ADD COLUMN notes TEXT NULL");
+    if (!column_exists($pdo, 'order_confirmation_assignments', 'status')) execute_query($pdo, "ALTER TABLE order_confirmation_assignments ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'assigned'");
+    if (!column_exists($pdo, 'order_confirmation_assignments', 'assigned_at')) execute_query($pdo, "ALTER TABLE order_confirmation_assignments ADD COLUMN assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+    if (!column_exists($pdo, 'order_confirmation_assignments', 'updated_at')) execute_query($pdo, "ALTER TABLE order_confirmation_assignments ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+    try { $pdo->exec("ALTER TABLE order_confirmation_assignments ADD UNIQUE KEY uk_order_confirmation_order (order_id)"); } catch (Exception $ex) {}
+}
+
+function confirmation_allowed_order_statuses() {
+    return ['pending', 'returned'];
+}
+
+function confirmation_is_allowed_order_status($status) {
+    $normalized = strtolower(trim((string)$status));
+    return in_array($normalized, confirmation_allowed_order_statuses(), true);
+}
+
+function confirmation_get_rep_name(PDO $pdo, $repId) {
+    $repId = intval($repId);
+    if ($repId <= 0) return '';
+    $repName = execute_query($pdo, "SELECT COALESCE(NULLIF(TRIM(name), ''), CONCAT('مندوب #', id)) AS rep_name FROM users WHERE id = ? LIMIT 1", [$repId])->fetchColumn();
+    return $repName ? trim((string)$repName) : ('مندوب #' . $repId);
+}
+
+function confirmation_describe_blocked_order_status(PDO $pdo, array $order) {
+    $orderStatus = strtolower(trim((string)($order['status'] ?? '')));
+    if ($orderStatus === 'with_rep') {
+        $orderId = intval($order['id'] ?? 0);
+        $repId = intval($order['rep_id'] ?? 0);
+        $repName = $repId > 0 ? confirmation_get_rep_name($pdo, $repId) : '';
+
+        $assignment = $orderId > 0 ? confirmation_fetch_assignment_row($pdo, $orderId) : null;
+        if ($assignment && ($assignment['status'] ?? '') === 'assigned') {
+            $assignmentRepName = trim((string)($assignment['rep_name'] ?? ''));
+            if ($assignmentRepName !== '') $repName = $assignmentRepName;
+            return 'الأوردر حالته مع المندوب' . ($repName !== '' ? ' ' . $repName : '') . ' وهو في انتظار تأكيد المندوب.';
+        }
+
+        if ($orderId > 0 && table_exists($pdo, 'rep_journal_orders')) {
+            $journalRow = execute_query(
+                $pdo,
+                "SELECT rjo.rep_id,
+                        COALESCE(NULLIF(TRIM(u.name), ''), CONCAT('مندوب #', rjo.rep_id)) AS rep_name,
+                        rdj.is_closed,
+                        rdj.daily_code
+                 FROM rep_journal_orders rjo
+                 LEFT JOIN users u ON u.id = rjo.rep_id
+                 LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                 WHERE rjo.order_id = ?
+                 ORDER BY rjo.id DESC
+                 LIMIT 1",
+                [$orderId]
+            )->fetch(PDO::FETCH_ASSOC);
+
+            if ($journalRow) {
+                $journalRepName = trim((string)($journalRow['rep_name'] ?? ''));
+                if ($journalRepName !== '') $repName = $journalRepName;
+                $isClosed = intval($journalRow['is_closed'] ?? 0) === 1;
+                if (!$isClosed) {
+                    return 'الأوردر حالته مع المندوب' . ($repName !== '' ? ' ' . $repName : '') . ' وهو موجود حالياً في يومية المندوب.';
+                }
+            }
+        }
+
+        return 'الأوردر حالته مع المندوب' . ($repName !== '' ? ' ' . $repName : '') . ' وهو في انتظار تأكيد المندوب.';
+    }
+
+    $statusMap = [
+        'pending' => 'قيد الانتظار',
+        'returned' => 'مرتجع',
+        'confirmed' => 'مؤكد',
+        'cancelled' => 'ملغي',
+        'postponed' => 'مؤجل',
+        'in_delivery' => 'قيد التسليم',
+        'delivered' => 'تم التسليم',
+        'partial' => 'مرتجع جزئي',
+    ];
+    $statusLabel = $statusMap[$orderStatus] ?? $orderStatus;
+    return 'لا يمكن تأكيد هذا الأوردر نظراً لحالته الحالية: ' . $statusLabel;
+}
+
+function confirmation_fetch_order_by_barcode(PDO $pdo, $barcode) {
+    $barcode = trim((string)$barcode);
+    if ($barcode === '') return null;
+
+    $order = null;
+    if (preg_match('/^\d+$/', $barcode)) {
+        $order = execute_query(
+            $pdo,
+            "SELECT id, order_number, status, rep_id, total_amount, shipping_fees, notes, created_at
+             FROM orders WHERE order_number = ? LIMIT 1",
+            [$barcode]
+        )->fetch(PDO::FETCH_ASSOC);
+        if (!$order) {
+            $order = execute_query(
+                $pdo,
+                "SELECT id, order_number, status, rep_id, total_amount, shipping_fees, notes, created_at
+                 FROM orders WHERE id = ? LIMIT 1",
+                [intval($barcode)]
+            )->fetch(PDO::FETCH_ASSOC);
+        }
+    }
+
+    if (!$order && table_exists($pdo, 'product_variants') && column_exists($pdo, 'product_variants', 'barcode')) {
+        $order = execute_query(
+            $pdo,
+            "SELECT DISTINCT o.id, o.order_number, o.status, o.rep_id, o.total_amount, o.shipping_fees, o.notes, o.created_at
+             FROM orders o
+             JOIN order_items oi ON oi.order_id = o.id
+             JOIN product_variants pv ON pv.id = oi.product_id
+             WHERE pv.barcode = ?
+             ORDER BY o.id DESC
+             LIMIT 1",
+            [$barcode]
+        )->fetch(PDO::FETCH_ASSOC);
+    }
+
+    return $order ?: null;
+}
+
+function confirmation_fetch_assignment_row(PDO $pdo, $orderId) {
+    ensure_order_confirmation_assignments_table($pdo);
+    return execute_query(
+        $pdo,
+        "SELECT oca.*, COALESCE(NULLIF(TRIM(u.name), ''), CONCAT('مندوب #', oca.rep_id)) AS rep_name
+         FROM order_confirmation_assignments oca
+         LEFT JOIN users u ON u.id = oca.rep_id
+         WHERE oca.order_id = ?
+         ORDER BY oca.id DESC
+         LIMIT 1",
+        [intval($orderId)]
+    )->fetch(PDO::FETCH_ASSOC) ?: null;
+}
+
+function confirmation_format_order_payload(PDO $pdo, $orderId) {
+    $rows = nexus_fetch_orders_by_ids($pdo, strval(intval($orderId)));
+    return !empty($rows) ? $rows[0] : ['id' => intval($orderId)];
+}
+
+function refresh_rep_daily_journal_status_counts($pdo, $journalId) {
+    $journalId = intval($journalId);
+    if ($journalId <= 0) return;
+    ensure_rep_daily_journal_table($pdo);
+    ensure_rep_journal_orders_table($pdo);
+
+    $rows = execute_query($pdo,
+        "SELECT status, COUNT(*) AS orders_count
+         FROM rep_journal_orders
+         WHERE journal_id = ?
+         GROUP BY status",
+        [$journalId]
+    )->fetchAll(PDO::FETCH_ASSOC);
+
+    $deliveredCount = 0;
+    $returnedCount = 0;
+    $deferredCount = 0;
+    foreach ($rows as $row) {
+        $status = trim(strval($row['status'] ?? ''));
+        $count = intval($row['orders_count'] ?? 0);
+        if ($status === 'delivered') $deliveredCount += $count;
+        elseif ($status === 'deferred') $deferredCount += $count;
+        elseif ($status === 'full_return' || $status === 'partial_return') $returnedCount += $count;
+    }
+
+    execute_query($pdo,
+        "UPDATE rep_daily_journal
+         SET orders_delivered_count = ?,
+             orders_postponed_count = ?,
+             orders_returned_count = ?
+         WHERE id = ?",
+        [$deliveredCount, $deferredCount, $returnedCount, $journalId]
+    );
+}
+
 function attendance_get_shift($pdo, $employee_id, $work_date) {
     $dow = intval(date('w', strtotime($work_date)));
     $stmt = execute_query(
@@ -6772,72 +7028,123 @@ switch ($module) {
                 $changePct = (($revenueRange - $revenuePrev) / $revenuePrev) * 100;
             }
 
+            $latestOrderDate = null;
+            try {
+                $latestOrderDateRaw = execute_query($pdo, "SELECT MAX(DATE(created_at)) FROM orders")->fetchColumn();
+                if ($latestOrderDateRaw) {
+                    $latestOrderDate = (new DateTime((string)$latestOrderDateRaw))->format('Y-m-d');
+                }
+            } catch (Exception $e) {
+                $latestOrderDate = null;
+            }
+
             // ── Top Representatives ────────────────────────────────────
             $topReps = [];
             try {
-                $trStmt = execute_query($pdo,
-                    "SELECT u.id, u.name,
-                            COUNT(o.id) as orders_count,
-                            COALESCE(SUM(o.total_amount),0) as total_sales
-                     FROM orders o
-                     JOIN users u ON u.id = o.representative_id
-                     WHERE DATE(o.created_at) BETWEEN ? AND ?
-                       AND u.role = 'representative'
-                     GROUP BY u.id, u.name
-                     ORDER BY total_sales DESC
-                     LIMIT 10",
-                    [$rangeStart, $rangeEnd]
-                );
+                $repNameExpr = "CONCAT('مندوب #', o.rep_id)";
+                $repJoins = [];
+                if (table_exists($pdo, 'representatives')) {
+                    $repJoins[] = 'LEFT JOIN representatives rep ON rep.id = o.rep_id';
+                    $repNameExpr = "COALESCE(NULLIF(TRIM(rep.name), ''), $repNameExpr)";
+                }
+                if (table_exists($pdo, 'users')) {
+                    $repJoins[] = 'LEFT JOIN users rep_user ON rep_user.id = o.rep_id';
+                    $repNameExpr = "COALESCE(NULLIF(TRIM(rep_user.name), ''), $repNameExpr)";
+                }
+
+                $repSql = "SELECT o.rep_id AS id,
+                                  $repNameExpr AS name,
+                                  COUNT(o.id) AS orders_count,
+                                  COALESCE(SUM(o.total_amount),0) AS total_sales
+                           FROM orders o
+                           " . implode("\n", $repJoins) . "
+                           WHERE DATE(o.created_at) BETWEEN ? AND ?
+                             AND o.rep_id IS NOT NULL AND o.rep_id > 0
+                           GROUP BY o.rep_id, name
+                           ORDER BY total_sales DESC, orders_count DESC
+                           LIMIT 10";
+
+                $trStmt = execute_query($pdo, $repSql, [$rangeStart, $rangeEnd]);
                 $topReps = $trStmt->fetchAll(PDO::FETCH_ASSOC);
                 foreach ($topReps as &$r) {
-                    $r['total_sales']   = floatval($r['total_sales']);
-                    $r['orders_count']  = intval($r['orders_count']);
+                    $r['id'] = intval($r['id'] ?? 0);
+                    $r['name'] = trim((string)($r['name'] ?? ''));
+                    $r['total_sales'] = floatval($r['total_sales'] ?? 0);
+                    $r['orders_count'] = intval($r['orders_count'] ?? 0);
                 }
                 unset($r);
             } catch (Exception $e) { $topReps = []; }
 
-            // ── Top Sales Offices ─────────────────────────────────────
+            // ── Top Pages (from orders.page) ───────────────────────────
             $topSalesOffices = [];
             try {
-                $toStmt = execute_query($pdo,
-                    "SELECT so.id, so.name,
-                            COUNT(o.id) as orders_count,
-                            COALESCE(SUM(o.total_amount),0) as total_sales
-                     FROM orders o
-                     JOIN sales_offices so ON so.id = o.sales_office_id
-                     WHERE DATE(o.created_at) BETWEEN ? AND ?
-                     GROUP BY so.id, so.name
-                     ORDER BY total_sales DESC
-                     LIMIT 10",
-                    [$rangeStart, $rangeEnd]
-                );
-                $topSalesOffices = $toStmt->fetchAll(PDO::FETCH_ASSOC);
+                if (column_exists($pdo, 'orders', 'page')) {
+                    $toStmt = execute_query($pdo,
+                        "SELECT TRIM(o.page) AS id,
+                                TRIM(o.page) AS name,
+                                COUNT(o.id) AS orders_count,
+                                COALESCE(SUM(o.total_amount),0) AS total_sales
+                         FROM orders o
+                         WHERE DATE(o.created_at) BETWEEN ? AND ?
+                           AND o.page IS NOT NULL
+                           AND TRIM(o.page) <> ''
+                         GROUP BY TRIM(o.page)
+                         ORDER BY total_sales DESC, orders_count DESC
+                         LIMIT 10",
+                        [$rangeStart, $rangeEnd]
+                    );
+                    $topSalesOffices = $toStmt->fetchAll(PDO::FETCH_ASSOC);
+                } elseif (table_exists($pdo, 'sales_offices') && column_exists($pdo, 'orders', 'sales_office_id')) {
+                    $toStmt = execute_query($pdo,
+                        "SELECT so.id, so.name,
+                                COUNT(o.id) as orders_count,
+                                COALESCE(SUM(o.total_amount),0) as total_sales
+                         FROM orders o
+                         JOIN sales_offices so ON so.id = o.sales_office_id
+                         WHERE DATE(o.created_at) BETWEEN ? AND ?
+                         GROUP BY so.id, so.name
+                         ORDER BY total_sales DESC, orders_count DESC
+                         LIMIT 10",
+                        [$rangeStart, $rangeEnd]
+                    );
+                    $topSalesOffices = $toStmt->fetchAll(PDO::FETCH_ASSOC);
+                }
+
                 foreach ($topSalesOffices as &$r) {
-                    $r['total_sales']  = floatval($r['total_sales']);
-                    $r['orders_count'] = intval($r['orders_count']);
+                    $r['id'] = (string)($r['id'] ?? $r['name'] ?? '');
+                    $r['name'] = trim((string)($r['name'] ?? ''));
+                    $r['total_sales'] = floatval($r['total_sales'] ?? 0);
+                    $r['orders_count'] = intval($r['orders_count'] ?? 0);
                 }
                 unset($r);
             } catch (Exception $e) { $topSalesOffices = []; }
 
-            // ── Top Employees (by orders created_by) ──────────────────
+            // ── Top Employees (from orders.employee) ──────────────────
             $topEmployees = [];
             try {
-                $teStmt = execute_query($pdo,
-                    "SELECT e.id, e.name,
-                            COUNT(o.id) as orders_count,
-                            COALESCE(SUM(o.total_amount),0) as total_sales
-                     FROM orders o
-                     JOIN employees e ON e.id = o.employee_id
-                     WHERE DATE(o.created_at) BETWEEN ? AND ?
-                     GROUP BY e.id, e.name
-                     ORDER BY orders_count DESC
-                     LIMIT 10",
-                    [$rangeStart, $rangeEnd]
-                );
-                $topEmployees = $teStmt->fetchAll(PDO::FETCH_ASSOC);
+                if (column_exists($pdo, 'orders', 'employee')) {
+                    $teStmt = execute_query($pdo,
+                        "SELECT TRIM(o.employee) AS id,
+                                TRIM(o.employee) AS name,
+                                COUNT(o.id) AS orders_count,
+                                COALESCE(SUM(o.total_amount),0) AS total_sales
+                         FROM orders o
+                         WHERE DATE(o.created_at) BETWEEN ? AND ?
+                           AND o.employee IS NOT NULL
+                           AND TRIM(o.employee) <> ''
+                         GROUP BY TRIM(o.employee)
+                         ORDER BY total_sales DESC, orders_count DESC
+                         LIMIT 10",
+                        [$rangeStart, $rangeEnd]
+                    );
+                    $topEmployees = $teStmt->fetchAll(PDO::FETCH_ASSOC);
+                }
+
                 foreach ($topEmployees as &$r) {
-                    $r['total_sales']  = floatval($r['total_sales']);
-                    $r['orders_count'] = intval($r['orders_count']);
+                    $r['id'] = (string)($r['id'] ?? $r['name'] ?? '');
+                    $r['name'] = trim((string)($r['name'] ?? ''));
+                    $r['total_sales'] = floatval($r['total_sales'] ?? 0);
+                    $r['orders_count'] = intval($r['orders_count'] ?? 0);
                 }
                 unset($r);
             } catch (Exception $e) { $topEmployees = []; }
@@ -6853,7 +7160,7 @@ switch ($module) {
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
                      JOIN product_variants pv ON pv.id = oi.product_id
-                     JOIN parent_products pp ON pp.id = pv.parent_id
+                     JOIN products pp ON pp.id = pv.product_id
                      WHERE DATE(o.created_at) BETWEEN ? AND ?
                      GROUP BY pp.id, pp.name, pv.color, pv.size
                      ORDER BY qty_sold DESC
@@ -6905,6 +7212,7 @@ switch ($module) {
                     'prev_profit'       => $profitPrev,
                     'range_start'       => $rangeStart,
                     'range_end'         => $rangeEnd,
+                    'latest_order_date' => $latestOrderDate,
                     'prev_range_start'  => $prevStart,
                     'prev_range_end'    => $prevEnd,
                     'top_reps'          => $topReps,
@@ -8156,28 +8464,102 @@ switch ($module) {
                         break;
                     }
 
-                    // Update rep_daily_journal aggregates for this rep/date so daily-close shows accurate totals.
-                    // Best-effort: only when the table exists in DB.
+                    // Update rep_daily_journal returned aggregates on the exact open journal tied to this order.
                     try {
-                        if (table_exists($pdo, 'rep_daily_journal')) {
-                            // Determine journal_date from the order timestamp (prefer created_at then updated_at)
-                            $journalDate = null;
-                            if (!empty($orderRow['created_at'])) $journalDate = date('Y-m-d', strtotime($orderRow['created_at']));
-                            else if (!empty($orderRow['updated_at'])) $journalDate = date('Y-m-d', strtotime($orderRow['updated_at']));
-                            else $journalDate = date('Y-m-d');
-
-                            // Insert-or-update: increment pieces_returned and returned_value
-                            $upd = $pdo->prepare("INSERT INTO rep_daily_journal (rep_id, journal_date, pieces_returned, returned_value) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE pieces_returned = COALESCE(pieces_returned,0) + VALUES(pieces_returned), returned_value = COALESCE(returned_value,0) + VALUES(returned_value)");
-                            $upd->execute([$relatedRepId, $journalDate, $returnedPieces, $returnedValue]);
+                        if (table_exists($pdo, 'rep_daily_journal') && table_exists($pdo, 'rep_journal_orders')) {
+                            $journalLookup = execute_query($pdo,
+                                "SELECT journal_id FROM rep_journal_orders WHERE rep_id = ? AND order_id = ? LIMIT 1",
+                                [$relatedRepId, $orderId]
+                            )->fetch(PDO::FETCH_ASSOC);
+                            $targetJournalId = intval($journalLookup['journal_id'] ?? 0);
+                            if ($targetJournalId > 0) {
+                                execute_query($pdo,
+                                    "UPDATE rep_daily_journal
+                                     SET pieces_returned = COALESCE(pieces_returned, 0) + ?,
+                                         returned_value = COALESCE(returned_value, 0) + ?
+                                     WHERE id = ?",
+                                    [$returnedPieces, $returnedValue, $targetJournalId]
+                                );
+                            }
                         }
                     } catch (Exception $e) {
-                        // Non-fatal: do not block the return if journal update fails; rollback will handle other failures.
-                        // Log quietly to debug file if writable.
                         try { @file_put_contents(__DIR__ . '/../logs/rep_journal_errors.log', "[".date('Y-m-d H:i:s')."] rep_daily_journal update failed: " . $e->getMessage() . "\n", FILE_APPEND); } catch (Exception $ignore) {}
                     }
                 }
 
                 $pdo->commit();
+
+                // After commit: if ALL items in this order now have quantity = 0, mark order as 'returned'
+                try {
+                    $remainingStmt = execute_query($pdo, "SELECT COALESCE(SUM(quantity), 0) AS total_remaining FROM order_items WHERE order_id = ?", [$orderId]);
+                    $remainingRow = $remainingStmt->fetch(PDO::FETCH_ASSOC);
+                    $remainingTotal = intval($remainingRow['total_remaining'] ?? 0);
+                    if ($remainingTotal === 0) {
+                        $returnedStatusVal = pick_allowed_enum($pdo, 'orders', 'status', 'returned', ['returned','with_rep','pending']);
+                        $updFields = "status = '$returnedStatusVal'";
+                        if (column_exists($pdo, 'orders', 'updated_at')) $updFields .= ", updated_at = NOW()";
+                        execute_query($pdo, "UPDATE orders SET $updFields WHERE id = ?", [$orderId]);
+                    }
+
+                    if (table_exists($pdo, 'rep_journal_orders')) {
+                        $journalRepId = $repId ? intval($repId) : intval($orderRow['rep_id'] ?? 0);
+                        $journalStatus = $remainingTotal === 0 ? 'full_return' : 'partial_return';
+                        $journalNow = date('Y-m-d');
+                        $journalNowTime = date('H:i:s');
+                        $journalEmployee = $_SESSION['user']['name'] ?? null;
+
+                        $journalRow = null;
+                        if ($journalRepId > 0) {
+                            $journalRow = execute_query($pdo,
+                                "SELECT id, journal_id, rep_id FROM rep_journal_orders WHERE rep_id = ? AND order_id = ? ORDER BY id DESC LIMIT 1",
+                                [$journalRepId, $orderId]
+                            )->fetch(PDO::FETCH_ASSOC);
+                        }
+                        if (!$journalRow) {
+                            $journalRow = execute_query($pdo,
+                                "SELECT id, journal_id, rep_id FROM rep_journal_orders WHERE order_id = ? ORDER BY id DESC LIMIT 1",
+                                [$orderId]
+                            )->fetch(PDO::FETCH_ASSOC);
+                        }
+
+                        $targetJournalId = intval($journalRow['journal_id'] ?? 0);
+                        if ($targetJournalId <= 0 && $journalRepId > 0 && table_exists($pdo, 'rep_daily_journal')) {
+                            $openJournalRow = execute_query($pdo,
+                                "SELECT id FROM rep_daily_journal WHERE rep_id = ? AND is_closed = 0 ORDER BY id DESC LIMIT 1",
+                                [$journalRepId]
+                            )->fetch(PDO::FETCH_ASSOC);
+                            $targetJournalId = intval($openJournalRow['id'] ?? 0);
+                        }
+
+                        if ($journalRow && intval($journalRow['id'] ?? 0) > 0) {
+                            if ($targetJournalId > 0) {
+                                execute_query($pdo,
+                                    "UPDATE rep_journal_orders
+                                     SET rep_id = ?, journal_id = ?, status = ?, event_date = ?, event_time = ?, employee = ?, notes = ?
+                                     WHERE id = ?",
+                                    [$journalRepId > 0 ? $journalRepId : intval($journalRow['rep_id'] ?? 0), $targetJournalId, $journalStatus, $journalNow, $journalNowTime, $journalEmployee, $notes, intval($journalRow['id'])]
+                                );
+                            } else {
+                                execute_query($pdo,
+                                    "UPDATE rep_journal_orders
+                                     SET rep_id = ?, status = ?, event_date = ?, event_time = ?, employee = ?, notes = ?
+                                     WHERE id = ?",
+                                    [$journalRepId > 0 ? $journalRepId : intval($journalRow['rep_id'] ?? 0), $journalStatus, $journalNow, $journalNowTime, $journalEmployee, $notes, intval($journalRow['id'])]
+                                );
+                            }
+                        } elseif ($journalRepId > 0) {
+                            execute_query($pdo,
+                                "INSERT INTO rep_journal_orders (journal_id, rep_id, order_id, status, event_date, event_time, employee, notes)
+                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                                [$targetJournalId > 0 ? $targetJournalId : null, $journalRepId, $orderId, $journalStatus, $journalNow, $journalNowTime, $journalEmployee, $notes]
+                            );
+                        }
+
+                        if ($targetJournalId > 0) {
+                            refresh_rep_daily_journal_status_counts($pdo, $targetJournalId);
+                        }
+                    }
+                } catch (Exception $e) {}
 
                 // Log lifecycle event for this return so the rep attribution is recorded in history
                 try {
@@ -9438,6 +9820,27 @@ switch ($module) {
                            execute_query($pdo, "UPDATE users SET balance = balance + ? WHERE id = ?", [$txAmount, $relatedId]);
                         }
                     }
+                    // Update supplier balance when a payment is made to a supplier
+                    // Supplier balance = total_credit - total_debit; payment increases total_credit
+                    if ($relatedId && $relAllowed === 'supplier') {
+                        if ($txAmount < 0) {
+                            // Outgoing payment to supplier → increases total_credit (reduces debt or adds credit)
+                            execute_query($pdo, "UPDATE suppliers SET total_credit = total_credit + ? WHERE id = ?", [abs($txAmount), $relatedId]);
+                        } elseif ($txAmount > 0) {
+                            // Incoming amount from supplier (rare, e.g. refund) → increases total_debit
+                            execute_query($pdo, "UPDATE suppliers SET total_debit = total_debit + ? WHERE id = ?", [$txAmount, $relatedId]);
+                        }
+                    }
+                    // Update customer balance when payment received/made
+                    if ($relatedId && $relAllowed === 'customer') {
+                        if ($txAmount > 0) {
+                            // Payment received from customer → increases total_credit
+                            execute_query($pdo, "UPDATE customers SET total_credit = total_credit + ? WHERE id = ?", [$txAmount, $relatedId]);
+                        } elseif ($txAmount < 0) {
+                            // Refund to customer → increases total_debit
+                            execute_query($pdo, "UPDATE customers SET total_debit = total_debit + ? WHERE id = ?", [abs($txAmount), $relatedId]);
+                        }
+                    }
 
                     // Commit only when a transaction is actually active.
                     // Some environments/drivers may return false from beginTransaction() without throwing,
@@ -9452,7 +9855,43 @@ switch ($module) {
                     echo json_encode(['success' => false, 'message' => 'Failed to create transaction: ' . $e->getMessage()]);
                 }
             } else {
-                $stmt = $pdo->query("SELECT * FROM transactions ORDER BY transaction_date DESC");
+                $start_date = isset($_GET['start_date']) && $_GET['start_date'] !== '' ? $_GET['start_date'] : null;
+                $end_date   = isset($_GET['end_date'])   && $_GET['end_date']   !== '' ? $_GET['end_date']   : null;
+                $filter_treasury = isset($_GET['treasury_id']) && $_GET['treasury_id'] !== '' ? intval($_GET['treasury_id']) : null;
+
+                $hasTreasuriesTable = true;
+                $hasAuditLogs = true;
+                try { $pdo->query("SELECT 1 FROM treasuries LIMIT 1"); } catch(Exception $e) { $hasTreasuriesTable = false; }
+                try { $pdo->query("SELECT 1 FROM audit_logs LIMIT 1"); } catch(Exception $e) { $hasAuditLogs = false; }
+
+                $hasRepresentatives = true;
+                try { $pdo->query("SELECT 1 FROM representatives LIMIT 1"); } catch(Exception $e) { $hasRepresentatives = false; }
+                $repLookup = $hasRepresentatives
+                    ? "COALESCE((SELECT r.name FROM representatives r WHERE r.id = t.related_to_id LIMIT 1),(SELECT u.name FROM users u WHERE u.id = t.related_to_id LIMIT 1))"
+                    : "(SELECT u.name FROM users u WHERE u.id = t.related_to_id LIMIT 1)";
+                $relatedNameExpr = "CASE t.related_to_type
+                    WHEN 'customer'  THEN (SELECT c.name FROM customers c WHERE c.id = t.related_to_id LIMIT 1)
+                    WHEN 'supplier'  THEN (SELECT s.name FROM suppliers s WHERE s.id = t.related_to_id LIMIT 1)
+                    WHEN 'employee'  THEN COALESCE((SELECT e.name FROM employees e WHERE e.id = t.related_to_id LIMIT 1),{$repLookup})
+                    WHEN 'rep'       THEN {$repLookup}
+                    ELSE NULL END";
+
+                $createdByExpr = $hasAuditLogs
+                    ? "(SELECT u2.name FROM audit_logs al JOIN users u2 ON u2.id = al.user_id WHERE al.module='transactions' AND al.action='create' AND al.record_id=t.id ORDER BY al.id ASC LIMIT 1)"
+                    : "NULL";
+
+                $sql = "SELECT t.*, tr.name AS treasury_name, ($relatedNameExpr) AS related_name, ($createdByExpr) AS created_by_name
+                    FROM transactions t
+                    LEFT JOIN treasuries tr ON tr.id = t.treasury_id";
+
+                $conditions = [];
+                $params = [];
+                if ($start_date) { $conditions[] = "DATE(t.transaction_date) >= ?"; $params[] = $start_date; }
+                if ($end_date)   { $conditions[] = "DATE(t.transaction_date) <= ?"; $params[] = $end_date; }
+                if ($filter_treasury) { $conditions[] = "t.treasury_id = ?"; $params[] = $filter_treasury; }
+                if ($conditions) $sql .= " WHERE " . implode(" AND ", $conditions);
+                $sql .= " ORDER BY t.transaction_date DESC LIMIT 500";
+                $stmt = $params ? execute_query($pdo, $sql, $params) : $pdo->query($sql);
                 echo json_encode(['success' => true, 'data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
             }
             break;
@@ -9592,12 +10031,461 @@ switch ($module) {
             break;
         }
 
-        if ($action === 'getRepDailyJournal') {
+        if ($action === 'getConfirmationAssignments') {
             try {
-                if (!table_exists($pdo, 'rep_daily_journal')) {
-                    echo json_encode(['success' => false, 'message' => 'rep_daily_journal table does not exist']);
+                ensure_order_confirmation_assignments_table($pdo);
+
+                $repId = intval($_GET['rep_id'] ?? 0);
+                $where = ["oca.status = 'assigned'", 'o.id IS NOT NULL'];
+                $params = [];
+                if ($repId > 0) {
+                    $where[] = 'oca.rep_id = ?';
+                    $params[] = $repId;
+                }
+                if (column_exists($pdo, 'orders', 'status')) {
+                    $where[] = "o.status IN ('pending','returned')";
+                }
+
+                $sql = "SELECT oca.*, COALESCE(NULLIF(TRIM(u.name), ''), CONCAT('مندوب #', oca.rep_id)) AS rep_name
+                        FROM order_confirmation_assignments oca
+                        LEFT JOIN users u ON u.id = oca.rep_id
+                        LEFT JOIN orders o ON o.id = oca.order_id
+                        WHERE " . implode(' AND ', $where) . "
+                        ORDER BY oca.assigned_at DESC, oca.id DESC";
+                $rows = execute_query($pdo, $sql, $params)->fetchAll(PDO::FETCH_ASSOC);
+
+                $orderIds = array_values(array_filter(array_map('intval', array_column($rows, 'order_id'))));
+                $ordersById = [];
+                if (!empty($orderIds)) {
+                    $orderRows = nexus_fetch_orders_by_ids($pdo, implode(',', $orderIds));
+                    foreach ($orderRows as $orderRow) {
+                        $ordersById[intval($orderRow['id'] ?? 0)] = $orderRow;
+                    }
+                }
+
+                $data = [];
+                foreach ($rows as $row) {
+                    $orderId = intval($row['order_id'] ?? 0);
+                    $data[] = [
+                        'id' => intval($row['id'] ?? 0),
+                        'order_id' => $orderId,
+                        'rep_id' => intval($row['rep_id'] ?? 0),
+                        'rep_name' => $row['rep_name'] ?? '',
+                        'notes' => $row['notes'] ?? '',
+                        'status' => $row['status'] ?? 'assigned',
+                        'assigned_at' => $row['assigned_at'] ?? null,
+                        'updated_at' => $row['updated_at'] ?? null,
+                        'order' => $ordersById[$orderId] ?? ['id' => $orderId]
+                    ];
+                }
+
+                echo json_encode(['success' => true, 'data' => $data]);
+            } catch (Exception $e) {
+                http_response_code(500);
+                echo json_encode(['success' => false, 'message' => 'Failed to load confirmation assignments: ' . $e->getMessage()]);
+            }
+            break;
+        }
+
+        if ($action === 'getConfirmationRepSummary') {
+            try {
+                ensure_order_confirmation_assignments_table($pdo);
+                $repRows = execute_query(
+                    $pdo,
+                    "SELECT id, name, phone, role
+                     FROM users
+                     WHERE role = 'representative'
+                     ORDER BY name ASC"
+                )->fetchAll(PDO::FETCH_ASSOC);
+
+                $counts = [];
+                $countRows = execute_query(
+                    $pdo,
+                    "SELECT oca.rep_id, COUNT(*) AS orders_count
+                     FROM order_confirmation_assignments oca
+                     JOIN orders o ON o.id = oca.order_id
+                     WHERE oca.status = 'assigned'
+                       AND o.status IN ('pending','returned')
+                     GROUP BY oca.rep_id"
+                )->fetchAll(PDO::FETCH_ASSOC);
+                foreach ($countRows as $countRow) {
+                    $counts[intval($countRow['rep_id'] ?? 0)] = intval($countRow['orders_count'] ?? 0);
+                }
+
+                $data = [];
+                foreach ($repRows as $repRow) {
+                    $repId = intval($repRow['id'] ?? 0);
+                    $data[] = [
+                        'id' => $repId,
+                        'name' => $repRow['name'] ?? '',
+                        'phone' => $repRow['phone'] ?? '',
+                        'role' => $repRow['role'] ?? '',
+                        'orders_count' => intval($counts[$repId] ?? 0),
+                    ];
+                }
+
+                echo json_encode(['success' => true, 'data' => $data]);
+            } catch (Exception $e) {
+                http_response_code(500);
+                echo json_encode(['success' => false, 'message' => 'Failed to load confirmation rep summary: ' . $e->getMessage()]);
+            }
+            break;
+        }
+
+        if ($action === 'resolveConfirmationBarcode') {
+            try {
+                ensure_order_confirmation_assignments_table($pdo);
+                $barcode = trim((string)($_GET['barcode'] ?? ''));
+                if ($barcode === '') {
+                    http_response_code(400);
+                    echo json_encode(['success' => false, 'message' => 'barcode is required']);
                     break;
                 }
+
+                $order = confirmation_fetch_order_by_barcode($pdo, $barcode);
+                if (!$order) {
+                    http_response_code(404);
+                    echo json_encode(['success' => false, 'message' => 'لم يتم العثور على أوردر بهذا الباركود.']);
+                    break;
+                }
+
+                $orderId = intval($order['id'] ?? 0);
+                $assignment = confirmation_fetch_assignment_row($pdo, $orderId);
+                $payload = confirmation_format_order_payload($pdo, $orderId);
+
+                echo json_encode([
+                    'success' => true,
+                    'data' => [
+                        'barcode' => $barcode,
+                        'order' => $payload,
+                        'raw_status' => $order['status'] ?? '',
+                        'is_assignable' => confirmation_is_allowed_order_status($order['status'] ?? ''),
+                        'assignment' => $assignment ? [
+                            'id' => intval($assignment['id'] ?? 0),
+                            'order_id' => intval($assignment['order_id'] ?? 0),
+                            'rep_id' => intval($assignment['rep_id'] ?? 0),
+                            'rep_name' => $assignment['rep_name'] ?? '',
+                            'status' => $assignment['status'] ?? '',
+                            'assigned_at' => $assignment['assigned_at'] ?? null,
+                        ] : null,
+                    ]
+                ]);
+            } catch (Exception $e) {
+                http_response_code(500);
+                echo json_encode(['success' => false, 'message' => 'Failed to resolve confirmation barcode: ' . $e->getMessage()]);
+            }
+            break;
+        }
+
+        if ($action === 'assignOrderConfirmations') {
+            try {
+                ensure_order_confirmation_assignments_table($pdo);
+
+                $repId = intval($input['rep_id'] ?? 0);
+                $notes = trim((string)($input['notes'] ?? ''));
+                $rawOrderIds = $input['order_ids'] ?? [];
+                $orderIds = [];
+                if (is_array($rawOrderIds)) {
+                    foreach ($rawOrderIds as $value) {
+                        $id = intval($value);
+                        if ($id > 0) $orderIds[] = $id;
+                    }
+                } else {
+                    foreach (preg_split('/\s*,\s*/', strval($rawOrderIds)) as $value) {
+                        $id = intval($value);
+                        if ($id > 0) $orderIds[] = $id;
+                    }
+                }
+                $orderIds = array_values(array_unique($orderIds));
+
+                if ($repId <= 0) {
+                    http_response_code(400);
+                    echo json_encode(['success' => false, 'message' => 'يجب تحديد المندوب أولاً.']);
+                    break;
+                }
+                if (empty($orderIds)) {
+                    http_response_code(400);
+                    echo json_encode(['success' => false, 'message' => 'يجب تحديد الأوردرات أولاً.']);
+                    break;
+                }
+
+                $repExists = execute_query($pdo, 'SELECT id FROM users WHERE id = ? LIMIT 1', [$repId])->fetch(PDO::FETCH_ASSOC);
+                if (!$repExists) {
+                    http_response_code(404);
+                    echo json_encode(['success' => false, 'message' => 'المندوب غير موجود.']);
+                    break;
+                }
+
+                $placeholders = implode(',', array_fill(0, count($orderIds), '?'));
+                $validRows = execute_query(
+                    $pdo,
+                    "SELECT id, status, rep_id FROM orders WHERE id IN ($placeholders)",
+                    $orderIds
+                )->fetchAll(PDO::FETCH_ASSOC);
+                if (empty($validRows)) {
+                    http_response_code(404);
+                    echo json_encode(['success' => false, 'message' => 'الأوردر غير موجود.']);
+                    break;
+                }
+
+                $validOrderIds = [];
+                foreach ($validRows as $validRow) {
+                    $orderId = intval($validRow['id'] ?? 0);
+                    $orderStatus = strtolower(trim((string)($validRow['status'] ?? '')));
+                    if (!confirmation_is_allowed_order_status($orderStatus)) {
+                        http_response_code(400);
+                        echo json_encode(['success' => false, 'message' => confirmation_describe_blocked_order_status($pdo, $validRow)]);
+                        break 2;
+                    }
+                    $existingAssignment = confirmation_fetch_assignment_row($pdo, $orderId);
+                    if ($existingAssignment && ($existingAssignment['status'] ?? '') === 'assigned' && intval($existingAssignment['rep_id'] ?? 0) !== $repId) {
+                        http_response_code(409);
+                        echo json_encode(['success' => false, 'message' => 'هذا الأوردر يتم تأكيده بواسطة مندوب آخر: ' . ($existingAssignment['rep_name'] ?? ('مندوب #' . intval($existingAssignment['rep_id'] ?? 0)))]);
+                        break 2;
+                    }
+                    $validOrderIds[] = $orderId;
+                }
+                if (empty($validOrderIds)) {
+                    http_response_code(400);
+                    echo json_encode(['success' => false, 'message' => 'لا توجد أوردرات صالحة للإسناد.']);
+                    break;
+                }
+
+                $assignedBy = isset($_SESSION['user_id']) ? intval($_SESSION['user_id']) : null;
+                $pdo->beginTransaction();
+                foreach ($validOrderIds as $orderId) {
+                    execute_query(
+                        $pdo,
+                        "INSERT INTO order_confirmation_assignments (order_id, rep_id, assigned_by, notes, status, assigned_at, updated_at)
+                         VALUES (?, ?, ?, ?, 'assigned', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                         ON DUPLICATE KEY UPDATE
+                            rep_id = VALUES(rep_id),
+                            assigned_by = VALUES(assigned_by),
+                            notes = VALUES(notes),
+                            status = 'assigned',
+                            assigned_at = CURRENT_TIMESTAMP,
+                            updated_at = CURRENT_TIMESTAMP",
+                        [$orderId, $repId, $assignedBy, $notes !== '' ? $notes : null]
+                    );
+                }
+                $pdo->commit();
+
+                echo json_encode([
+                    'success' => true,
+                    'assigned_count' => count($validOrderIds),
+                    'skipped_count' => max(0, count($orderIds) - count($validOrderIds)),
+                    'message' => 'تم إسناد الأوردرات للمندوب بنجاح.'
+                ]);
+            } catch (Exception $e) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+                http_response_code(500);
+                echo json_encode(['success' => false, 'message' => 'Failed to assign confirmation orders: ' . $e->getMessage()]);
+            }
+            break;
+        }
+
+        if ($action === 'assignOrderConfirmationByBarcode') {
+            try {
+                ensure_order_confirmation_assignments_table($pdo);
+                $repId = intval($input['rep_id'] ?? 0);
+                $barcode = trim((string)($input['barcode'] ?? ''));
+                if ($repId <= 0 || $barcode === '') {
+                    http_response_code(400);
+                    echo json_encode(['success' => false, 'message' => 'يجب تحديد المندوب وإدخال الباركود.']);
+                    break;
+                }
+
+                $order = confirmation_fetch_order_by_barcode($pdo, $barcode);
+                if (!$order) {
+                    http_response_code(404);
+                    echo json_encode(['success' => false, 'message' => 'لم يتم العثور على أوردر بهذا الباركود.']);
+                    break;
+                }
+
+                $orderId = intval($order['id'] ?? 0);
+                $orderStatus = strtolower(trim((string)($order['status'] ?? '')));
+                if (!confirmation_is_allowed_order_status($orderStatus)) {
+                    http_response_code(400);
+                    echo json_encode(['success' => false, 'message' => confirmation_describe_blocked_order_status($pdo, $order)]);
+                    break;
+                }
+
+                $existingAssignment = confirmation_fetch_assignment_row($pdo, $orderId);
+                if ($existingAssignment && ($existingAssignment['status'] ?? '') === 'assigned' && intval($existingAssignment['rep_id'] ?? 0) !== $repId) {
+                    http_response_code(409);
+                    echo json_encode(['success' => false, 'message' => 'هذا الأوردر يتم تأكيده بواسطة مندوب آخر: ' . ($existingAssignment['rep_name'] ?? ('مندوب #' . intval($existingAssignment['rep_id'] ?? 0)))]);
+                    break;
+                }
+
+                $_POST = [];
+                $input['order_ids'] = [$orderId];
+                $input['notes'] = trim((string)($input['notes'] ?? ''));
+
+                $assignedBy = isset($_SESSION['user_id']) ? intval($_SESSION['user_id']) : null;
+                execute_query(
+                    $pdo,
+                    "INSERT INTO order_confirmation_assignments (order_id, rep_id, assigned_by, notes, status, assigned_at, updated_at)
+                     VALUES (?, ?, ?, ?, 'assigned', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                     ON DUPLICATE KEY UPDATE
+                        rep_id = VALUES(rep_id),
+                        assigned_by = VALUES(assigned_by),
+                        notes = VALUES(notes),
+                        status = 'assigned',
+                        assigned_at = CURRENT_TIMESTAMP,
+                        updated_at = CURRENT_TIMESTAMP",
+                    [$orderId, $repId, $assignedBy, trim((string)($input['notes'] ?? '')) ?: null]
+                );
+
+                echo json_encode([
+                    'success' => true,
+                    'message' => 'تم إسناد الأوردر للمندوب بنجاح.',
+                    'data' => [
+                        'order' => confirmation_format_order_payload($pdo, $orderId),
+                        'assignment' => confirmation_fetch_assignment_row($pdo, $orderId)
+                    ]
+                ]);
+            } catch (Exception $e) {
+                http_response_code(500);
+                echo json_encode(['success' => false, 'message' => 'Failed to assign confirmation order by barcode: ' . $e->getMessage()]);
+            }
+            break;
+        }
+
+        if ($action === 'updateOrderConfirmationDecision') {
+            try {
+                ensure_order_confirmation_assignments_table($pdo);
+                $repId = intval($input['rep_id'] ?? 0);
+                $barcode = trim((string)($input['barcode'] ?? ''));
+                $decision = strtolower(trim((string)($input['decision'] ?? '')));
+                if ($repId <= 0 || $barcode === '' || !in_array($decision, ['confirm', 'postpone', 'cancel'], true)) {
+                    http_response_code(400);
+                    echo json_encode(['success' => false, 'message' => 'يجب تحديد المندوب وإدخال الباركود واختيار إجراء صحيح.']);
+                    break;
+                }
+
+                $order = confirmation_fetch_order_by_barcode($pdo, $barcode);
+                if (!$order) {
+                    http_response_code(404);
+                    echo json_encode(['success' => false, 'message' => 'لم يتم العثور على أوردر بهذا الباركود.']);
+                    break;
+                }
+
+                $orderId = intval($order['id'] ?? 0);
+                $assignment = confirmation_fetch_assignment_row($pdo, $orderId);
+                if (!$assignment || ($assignment['status'] ?? '') !== 'assigned') {
+                    http_response_code(404);
+                    echo json_encode(['success' => false, 'message' => 'هذا الأوردر غير موجود حالياً في قائمة التأكيد.']);
+                    break;
+                }
+                if (intval($assignment['rep_id'] ?? 0) !== $repId) {
+                    http_response_code(409);
+                    echo json_encode(['success' => false, 'message' => 'هذا الأوردر مسند إلى مندوب آخر: ' . ($assignment['rep_name'] ?? ('مندوب #' . intval($assignment['rep_id'] ?? 0)))]);
+                    break;
+                }
+
+                if ($decision === 'confirm') {
+                    $nextAssignmentStatus = 'confirmed';
+                    $nextOrderStatus = pick_allowed_enum($pdo, 'orders', 'status', 'confirmed', ['confirmed', 'pending', 'returned']);
+                    $historyAction = 'confirmation_confirmed';
+                    $successMessage = 'تم تأكيد الأوردر بنجاح.';
+                } elseif ($decision === 'postpone') {
+                    $nextAssignmentStatus = 'postponed';
+                    $nextOrderStatus = pick_allowed_enum($pdo, 'orders', 'status', 'postponed', ['postponed', 'pending', 'returned']);
+                    $historyAction = 'confirmation_postponed';
+                    $successMessage = 'تم تأجيل الأوردر بنجاح.';
+                } else {
+                    $nextAssignmentStatus = 'cancelled';
+                    $nextOrderStatus = pick_allowed_enum($pdo, 'orders', 'status', 'cancelled', ['cancelled', 'returned', 'pending']);
+                    $historyAction = 'confirmation_cancelled';
+                    $successMessage = 'تم إلغاء الأوردر بنجاح.';
+                }
+
+                $pdo->beginTransaction();
+                execute_query(
+                    $pdo,
+                    "UPDATE order_confirmation_assignments
+                     SET status = ?, updated_at = CURRENT_TIMESTAMP
+                     WHERE order_id = ? AND rep_id = ? AND status = 'assigned'",
+                    [$nextAssignmentStatus, $orderId, $repId]
+                );
+
+                $updateSql = "UPDATE orders SET status = ?";
+                $updateParams = [$nextOrderStatus];
+                if (column_exists($pdo, 'orders', 'updated_at')) {
+                    $updateSql .= ", updated_at = NOW()";
+                }
+                $updateSql .= " WHERE id = ?";
+                $updateParams[] = $orderId;
+                execute_query($pdo, $updateSql, $updateParams);
+
+                log_order_history($pdo, $orderId, $nextOrderStatus, $historyAction, 'confirmation workflow', $repId);
+                $pdo->commit();
+
+                echo json_encode([
+                    'success' => true,
+                    'message' => $successMessage,
+                    'data' => [
+                        'order_id' => $orderId,
+                        'order_status' => $nextOrderStatus,
+                        'assignment_status' => $nextAssignmentStatus,
+                    ]
+                ]);
+            } catch (Exception $e) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+                http_response_code(500);
+                echo json_encode(['success' => false, 'message' => 'Failed to update order confirmation decision: ' . $e->getMessage()]);
+            }
+            break;
+        }
+
+        if ($action === 'unassignOrderConfirmations') {
+            try {
+                ensure_order_confirmation_assignments_table($pdo);
+
+                $rawOrderIds = $input['order_ids'] ?? [];
+                $orderIds = [];
+                if (is_array($rawOrderIds)) {
+                    foreach ($rawOrderIds as $value) {
+                        $id = intval($value);
+                        if ($id > 0) $orderIds[] = $id;
+                    }
+                } else {
+                    foreach (preg_split('/\s*,\s*/', strval($rawOrderIds)) as $value) {
+                        $id = intval($value);
+                        if ($id > 0) $orderIds[] = $id;
+                    }
+                }
+                $orderIds = array_values(array_unique($orderIds));
+                if (empty($orderIds)) {
+                    http_response_code(400);
+                    echo json_encode(['success' => false, 'message' => 'order_ids are required']);
+                    break;
+                }
+
+                $placeholders = implode(',', array_fill(0, count($orderIds), '?'));
+                $stmt = execute_query(
+                    $pdo,
+                    "UPDATE order_confirmation_assignments
+                     SET status = 'unassigned', updated_at = CURRENT_TIMESTAMP
+                     WHERE order_id IN ($placeholders) AND status = 'assigned'",
+                    $orderIds
+                );
+
+                echo json_encode([
+                    'success' => true,
+                    'affected_rows' => $stmt->rowCount(),
+                    'message' => 'تم إلغاء إسناد الأوردرات المحددة.'
+                ]);
+            } catch (Exception $e) {
+                http_response_code(500);
+                echo json_encode(['success' => false, 'message' => 'Failed to unassign confirmation orders: ' . $e->getMessage()]);
+            }
+            break;
+        }
+
+        if ($action === 'getRepDailyJournal') {
+            try {
+                ensure_rep_daily_journal_table($pdo);
 
                 $repId = isset($_GET['rep_id']) && is_numeric($_GET['rep_id']) ? intval($_GET['rep_id']) : null;
                 $reqFrom = isset($_GET['from']) ? trim((string)$_GET['from']) : null;
@@ -9610,20 +10498,64 @@ switch ($module) {
                     $params[] = $repId;
                 }
                 if ($reqFrom && preg_match('/^\d{4}-\d{2}-\d{2}$/', $reqFrom)) {
-                    $where[] = 'journal_date >= ?';
+                    $where[] = 'DATE(journal_date) >= ?';
                     $params[] = $reqFrom;
                 }
                 if ($reqTo && preg_match('/^\d{4}-\d{2}-\d{2}$/', $reqTo)) {
-                    $where[] = 'journal_date <= ?';
+                    $where[] = 'DATE(journal_date) <= ?';
                     $params[] = $reqTo;
                 }
 
                 $sql = 'SELECT * FROM rep_daily_journal';
                 if (count($where) > 0) $sql .= ' WHERE ' . implode(' AND ', $where);
-                $sql .= ' ORDER BY journal_date ASC, rep_id ASC';
+                $sql .= ' ORDER BY DATE(journal_date) ASC, rep_id ASC';
 
                 $stmt = execute_query($pdo, $sql, $params);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+                $journalIds = array_values(array_filter(array_map('intval', array_column($rows, 'id'))));
+                $journalStatsMap = [];
+                if (!empty($journalIds) && table_exists($pdo, 'rep_journal_orders')) {
+                    $inJournalIds = implode(',', $journalIds);
+                    $statsRows = $pdo->query(
+                        "SELECT journal_id,
+                                COUNT(*) AS orders_count,
+                                COALESCE(SUM(CASE WHEN status = 'with_rep' THEN 1 ELSE 0 END), 0) AS active_count,
+                                COALESCE(SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END), 0) AS delivered_count,
+                                COALESCE(SUM(CASE WHEN status = 'deferred' THEN 1 ELSE 0 END), 0) AS deferred_count,
+                                COALESCE(SUM(CASE WHEN status IN ('full_return','partial_return') THEN 1 ELSE 0 END), 0) AS returned_count,
+                                COALESCE(SUM(oi.qty_sum), 0) AS pieces_count
+                         FROM rep_journal_orders rjo
+                         LEFT JOIN (
+                             SELECT order_id, COALESCE(SUM(quantity),0) AS qty_sum
+                             FROM order_items
+                             GROUP BY order_id
+                         ) oi ON oi.order_id = rjo.order_id
+                         WHERE journal_id IN ($inJournalIds)
+                         GROUP BY journal_id"
+                    )->fetchAll(PDO::FETCH_ASSOC);
+                    foreach ($statsRows as $statsRow) {
+                        $journalStatsMap[intval($statsRow['journal_id'])] = $statsRow;
+                    }
+                }
+
+                foreach ($rows as &$row) {
+                    $journalId = intval($row['id'] ?? 0);
+                    if (empty($row['daily_code']) && $journalId > 0) {
+                        $row['daily_code'] = 'DLY-' . str_pad($journalId, 5, '0', STR_PAD_LEFT);
+                    }
+                    $row['is_closed'] = intval($row['is_closed'] ?? 0);
+                    $row['status'] = $row['is_closed'] ? 'closed' : 'open';
+                    $row['status_label'] = $row['is_closed'] ? 'مغلقة' : 'مفتوحة';
+                    $statsRow = $journalStatsMap[$journalId] ?? null;
+                    $row['journal_orders_count'] = intval($statsRow['orders_count'] ?? 0);
+                    $row['journal_pieces_count'] = intval($statsRow['pieces_count'] ?? 0);
+                    $row['active_orders_count'] = intval($statsRow['active_count'] ?? 0);
+                    $row['delivered_orders_count'] = intval($statsRow['delivered_count'] ?? 0);
+                    $row['deferred_orders_count'] = intval($statsRow['deferred_count'] ?? 0);
+                    $row['returned_orders_count'] = intval($statsRow['returned_count'] ?? 0);
+                }
+                unset($row);
                 echo json_encode(['success' => true, 'data' => $rows]);
             } catch (Exception $e) {
                 http_response_code(500);
@@ -9635,10 +10567,7 @@ switch ($module) {
         // Aggregate stats from rep_daily_journal for a given rep + date range
         if ($action === 'getJournalStats') {
             try {
-                if (!table_exists($pdo, 'rep_daily_journal')) {
-                    echo json_encode(['success' => false, 'message' => 'rep_daily_journal table does not exist']);
-                    break;
-                }
+                ensure_rep_daily_journal_table($pdo);
 
                 $repId = isset($_GET['rep_id']) && is_numeric($_GET['rep_id']) ? intval($_GET['rep_id']) : null;
                 $reqFrom = isset($_GET['from']) ? trim((string)$_GET['from']) : null;
@@ -9652,11 +10581,11 @@ switch ($module) {
                 $where  = ['rep_id = ?'];
                 $params = [$repId];
                 if ($reqFrom && preg_match('/^\d{4}-\d{2}-\d{2}$/', $reqFrom)) {
-                    $where[] = 'journal_date >= ?';
+                    $where[] = 'DATE(journal_date) >= ?';
                     $params[] = $reqFrom;
                 }
                 if ($reqTo && preg_match('/^\d{4}-\d{2}-\d{2}$/', $reqTo)) {
-                    $where[] = 'journal_date <= ?';
+                    $where[] = 'DATE(journal_date) <= ?';
                     $params[] = $reqTo;
                 }
 
@@ -9664,18 +10593,10 @@ switch ($module) {
 
                 $sql = "SELECT
                     COUNT(*) AS session_count,
-                    COALESCE(SUM(orders_delivered_count), 0)  AS deliveredCount,
-                    COALESCE(SUM(delivered_value),         0) AS deliveredValue,
-                    COALESCE(SUM(pieces_delivered),        0) AS deliveredPieces,
-                    COALESCE(SUM(orders_returned_count),   0) AS returnedCount,
-                    COALESCE(SUM(returned_value),          0) AS returnedValue,
-                    COALESCE(SUM(pieces_returned),         0) AS returnedPieces,
-                    COALESCE(SUM(orders_postponed_count),  0) AS deferredCount,
-                    COALESCE(SUM(postponed_value),         0) AS deferredValue,
-                    COALESCE(SUM(pieces_postponed),        0) AS deferredPieces,
                     COALESCE(SUM(orders_assigned_count),   0) AS assignedCount,
                     COALESCE(SUM(assigned_value),          0) AS assignedValue,
-                    COALESCE(SUM(pieces_assigned_count),   0) AS assignedPieces
+                    COALESCE(SUM(pieces_assigned_count),   0) AS assignedPieces,
+                    GROUP_CONCAT(id) AS journalIdsCsv
                 FROM rep_daily_journal
                 WHERE $whereClause";
 
@@ -9683,20 +10604,84 @@ switch ($module) {
                 $row  = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
 
                 $sessionCount = intval($row['session_count'] ?? 0);
+                $deliveredCount = 0;
+                $deliveredValue = 0.0;
+                $deliveredPieces = 0;
+                $returnedCount = 0;
+                $returnedValue = 0.0;
+                $returnedPieces = 0;
+                $deferredCount = 0;
+                $deferredValue = 0.0;
+                $deferredPieces = 0;
+                $activeCount = 0;
+                $activeValue = 0.0;
+                $activePieces = 0;
+
+                $journalIdsCsv = trim((string)($row['journalIdsCsv'] ?? ''));
+                $journalIds = array_values(array_filter(array_map('intval', preg_split('/\s*,\s*/', $journalIdsCsv)), function($id) {
+                    return intval($id) > 0;
+                }));
+
+                if (!empty($journalIds) && table_exists($pdo, 'rep_journal_orders')) {
+                    $journalIn = implode(',', $journalIds);
+                    $statusRows = $pdo->query(
+                        "SELECT rjo.status,
+                                COUNT(DISTINCT rjo.order_id) AS orders_count,
+                                COALESCE(SUM(oi.qty_sum), 0) AS pieces_count,
+                                COALESCE(SUM(o.total_amount), 0) AS total_value
+                         FROM rep_journal_orders rjo
+                         LEFT JOIN orders o ON o.id = rjo.order_id
+                         LEFT JOIN (
+                             SELECT order_id, COALESCE(SUM(quantity), 0) AS qty_sum
+                             FROM order_items
+                             GROUP BY order_id
+                         ) oi ON oi.order_id = rjo.order_id
+                         WHERE rjo.rep_id = " . intval($repId) . "
+                           AND rjo.journal_id IN ($journalIn)
+                         GROUP BY rjo.status"
+                    )->fetchAll(PDO::FETCH_ASSOC);
+
+                    foreach ($statusRows as $statusRow) {
+                        $status = trim(strval($statusRow['status'] ?? ''));
+                        $ordersCount = intval($statusRow['orders_count'] ?? 0);
+                        $piecesCount = intval($statusRow['pieces_count'] ?? 0);
+                        $totalValue = floatval($statusRow['total_value'] ?? 0);
+                        if ($status === 'delivered') {
+                            $deliveredCount += $ordersCount;
+                            $deliveredPieces += $piecesCount;
+                            $deliveredValue += $totalValue;
+                        } elseif ($status === 'deferred') {
+                            $deferredCount += $ordersCount;
+                            $deferredPieces += $piecesCount;
+                            $deferredValue += $totalValue;
+                        } elseif ($status === 'full_return' || $status === 'partial_return') {
+                            $returnedCount += $ordersCount;
+                            $returnedPieces += $piecesCount;
+                            $returnedValue += $totalValue;
+                        } elseif ($status === 'with_rep') {
+                            $activeCount += $ordersCount;
+                            $activePieces += $piecesCount;
+                            $activeValue += $totalValue;
+                        }
+                    }
+                }
 
                 echo json_encode([
                     'success' => true,
                     'has_journal' => $sessionCount > 0,
                     'data' => [
-                        'deliveredCount'  => intval($row['deliveredCount']  ?? 0),
-                        'deliveredValue'  => floatval($row['deliveredValue']  ?? 0),
-                        'deliveredPieces' => intval($row['deliveredPieces'] ?? 0),
-                        'returnedCount'   => intval($row['returnedCount']   ?? 0),
-                        'returnedValue'   => floatval($row['returnedValue']   ?? 0),
-                        'returnedPieces'  => intval($row['returnedPieces']  ?? 0),
-                        'deferredCount'   => intval($row['deferredCount']   ?? 0),
-                        'deferredValue'   => floatval($row['deferredValue']   ?? 0),
-                        'deferredPieces'  => intval($row['deferredPieces']  ?? 0),
+                        'deliveredCount'  => $deliveredCount,
+                        'deliveredValue'  => $deliveredValue,
+                        'deliveredPieces' => $deliveredPieces,
+                        'returnedCount'   => $returnedCount,
+                        'returnedValue'   => $returnedValue,
+                        'returnedPieces'  => $returnedPieces,
+                        'deferredCount'   => $deferredCount,
+                        'deferredValue'   => $deferredValue,
+                        'deferredPieces'  => $deferredPieces,
+                        'activeCount'     => $activeCount,
+                        'activeValue'     => $activeValue,
+                        'activePieces'    => $activePieces,
                         'assignedCount'   => intval($row['assignedCount']   ?? 0),
                         'assignedValue'   => floatval($row['assignedValue']   ?? 0),
                         'assignedPieces'  => intval($row['assignedPieces']  ?? 0),
@@ -9705,6 +10690,46 @@ switch ($module) {
             } catch (Exception $e) {
                 http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Failed to load journal stats: ' . $e->getMessage()]);
+            }
+            break;
+        }
+
+        if ($action === 'getRepOpenDaily') {
+            $repId = intval($_GET['rep_id'] ?? 0);
+            if (!$repId) { echo json_encode(['success' => false, 'message' => 'rep_id required']); break; }
+            try {
+                ensure_rep_daily_journal_table($pdo);
+                $row = execute_query($pdo,
+                    "SELECT id, daily_code, journal_date, session_seq, is_closed, COALESCE(orders_assigned_count,0) as assigned_count FROM rep_daily_journal WHERE rep_id = ? AND is_closed = 0 ORDER BY id DESC LIMIT 1",
+                    [$repId]
+                )->fetch(PDO::FETCH_ASSOC);
+                // Fallback: if daily_code is NULL (created before this feature), generate it on-the-fly
+                if ($row && empty($row['daily_code'])) {
+                    $row['daily_code'] = 'DLY-' . str_pad($row['id'], 5, '0', STR_PAD_LEFT);
+                }
+                echo json_encode(['success' => true, 'data' => $row ?: null]);
+            } catch (Exception $e) {
+                echo json_encode(['success' => true, 'data' => null]);
+            }
+            break;
+        }
+
+        if ($action === 'closeRepDaily') {
+            $repId    = intval($input['rep_id']    ?? 0);
+            $jId      = intval($input['journal_id'] ?? 0);
+            if (!$repId) { echo json_encode(['success' => false, 'message' => 'rep_id required']); break; }
+            try {
+                ensure_rep_daily_journal_table($pdo);
+                if ($jId > 0) {
+                    execute_query($pdo, "UPDATE rep_daily_journal SET is_closed = 1 WHERE id = ? AND rep_id = ?", [$jId, $repId]);
+                } else {
+                    execute_query($pdo, "UPDATE rep_daily_journal SET is_closed = 1 WHERE rep_id = ? AND is_closed = 0", [$repId]);
+                }
+                audit_log($pdo, 'sales', 'close_rep_daily', $repId, json_encode(['journal_id' => $jId]));
+                echo json_encode(['success' => true]);
+            } catch (Exception $e) {
+                http_response_code(500);
+                echo json_encode(['success' => false, 'message' => $e->getMessage()]);
             }
             break;
         }
@@ -9726,31 +10751,22 @@ switch ($module) {
             }
 
             try {
-                // Ensure table exists (safe to run repeatedly) and allow multiple rows per rep/date
-                try { execute_query($pdo, "ALTER TABLE rep_daily_journal DROP INDEX rep_date_unique"); } catch (Exception $ex) {}
-                execute_query($pdo, "CREATE TABLE IF NOT EXISTS rep_daily_journal (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    rep_id INT NOT NULL,
-                    journal_date DATE NOT NULL,
-                    opening_amount DECIMAL(14,2) DEFAULT 0,
-                    opening_orders_count INT DEFAULT 0,
-                    opening_pieces_count INT DEFAULT 0,
-                    orders_received_count INT DEFAULT 0,
-                    pieces_received INT DEFAULT 0,
-                    orders_delivered_count INT DEFAULT 0,
-                    pieces_delivered INT DEFAULT 0,
-                    delivered_value DECIMAL(14,2) DEFAULT 0,
-                    orders_returned_count INT DEFAULT 0,
-                    pieces_returned INT DEFAULT 0,
-                    returned_value DECIMAL(14,2) DEFAULT 0,
-                    orders_postponed_count INT DEFAULT 0,
-                    pieces_postponed INT DEFAULT 0,
-                    postponed_value DECIMAL(14,2) DEFAULT 0,
-                    transactions TEXT NULL,
-                    closing_amount DECIMAL(14,2) DEFAULT 0,
-                    notes TEXT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                ensure_rep_daily_journal_table($pdo);
+
+                $existingOpen = execute_query($pdo,
+                    "SELECT * FROM rep_daily_journal WHERE rep_id = ? AND is_closed = 0 ORDER BY id DESC LIMIT 1",
+                    [$repId]
+                )->fetch(PDO::FETCH_ASSOC);
+                if ($existingOpen) {
+                    if (empty($existingOpen['daily_code'])) {
+                        $existingOpen['daily_code'] = 'DLY-' . str_pad(intval($existingOpen['id']), 5, '0', STR_PAD_LEFT);
+                        try { execute_query($pdo, "UPDATE rep_daily_journal SET daily_code = ? WHERE id = ?", [$existingOpen['daily_code'], intval($existingOpen['id'])]); } catch (Exception $ex) {}
+                    }
+                    $existingOpen['is_closed'] = intval($existingOpen['is_closed'] ?? 0);
+                    $existingOpen['status'] = $existingOpen['is_closed'] ? 'closed' : 'open';
+                    echo json_encode(['success' => true, 'data' => $existingOpen]);
+                    break;
+                }
 
                 // detect orders date column
                 $dateCol = null;
@@ -9774,8 +10790,9 @@ switch ($module) {
                     }
                 }
 
-                // compute opening orders/pieces carried forward
-                $openingOrdersCount = 0; $openingPieces = 0;
+                // compute opening orders/pieces/value carried forward
+                $openingOrdersCount = 0; $openingPieces = 0; $openingOldOrdersValue = 0;
+                $openingOrdersList = [];
                 if ($dateCol) {
                     $statusList = "'with_rep','partial','postponed'";
                     $stmt = execute_query($pdo, "SELECT id FROM orders WHERE rep_id = ? AND status IN ($statusList) AND DATE(`$dateCol`) < ?", [$repId, $journalDate]);
@@ -9789,6 +10806,15 @@ switch ($module) {
                                 $pstmt = $pdo->query("SELECT COALESCE(SUM(quantity),0) FROM order_items WHERE order_id IN ($in)");
                                 $openingPieces = intval($pstmt->fetchColumn() ?? 0);
                             }
+                            if (column_exists($pdo, 'order_items', 'total_price')) {
+                                $openingOldOrdersValue = floatval($pdo->query("SELECT COALESCE(SUM(total_price),0) FROM order_items WHERE order_id IN ($in)")->fetchColumn() ?? 0);
+                            } else {
+                                $openingOldOrdersValue = floatval($pdo->query("SELECT COALESCE(SUM(quantity * price_per_unit),0) FROM order_items WHERE order_id IN ($in)")->fetchColumn() ?? 0);
+                            }
+                            $r = $pdo->query("SELECT id, COALESCE(order_number, id) AS order_number FROM orders WHERE id IN ($in)");
+                            while ($rowo = $r->fetch(PDO::FETCH_ASSOC)) {
+                                $openingOrdersList[] = ['id' => intval($rowo['id']), 'order_number' => $rowo['order_number'], 'source' => 'old'];
+                            }
                         }
                     }
                 }
@@ -9800,11 +10826,20 @@ switch ($module) {
                 // insert a new opening row (allow multiple rows per day)
                 $sessionUserName = $_SESSION['user']['name'] ?? null;
                 $employeeToSave  = $employeeInput ?? $sessionUserName; // prefer user-supplied value
-                execute_query($pdo, "INSERT INTO rep_daily_journal (rep_id, session_seq, journal_date, opening_amount, opening_orders_count, opening_pieces_count, notes, employee, page, treasury_id, warehouse_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [$repId, $seq, $journalDate, $opening, $openingOrdersCount, $openingPieces, $notes, $employeeToSave, $pageInput, $treasuryId ?: null, $warehouseId ?: null]);
+                $ordersJson = !empty($openingOrdersList) ? json_encode($openingOrdersList, JSON_UNESCAPED_UNICODE) : null;
+                execute_query($pdo, "INSERT INTO rep_daily_journal (rep_id, session_seq, journal_date, opening_amount, opening_orders_count, opening_pieces_count, notes, employee, page, treasury_id, warehouse_id, prev_balance, old_orders_value, orders_json, is_closed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)", [$repId, $seq, $journalDate, $opening, $openingOrdersCount, $openingPieces, $notes, $employeeToSave, $pageInput, $treasuryId ?: null, $warehouseId ?: null, $opening, $openingOldOrdersValue, $ordersJson]);
                 $insId = $pdo->lastInsertId();
+
+                $dailyCode = 'DLY-' . str_pad(intval($insId), 5, '0', STR_PAD_LEFT);
+                try { execute_query($pdo, "UPDATE rep_daily_journal SET daily_code = ?, is_closed = 0 WHERE id = ?", [$dailyCode, $insId]); } catch (Exception $ex) {}
 
                 // fetch the inserted row back
                 $row = execute_query($pdo, 'SELECT * FROM rep_daily_journal WHERE id = ? LIMIT 1', [$insId])->fetch(PDO::FETCH_ASSOC);
+                if ($row) {
+                    $row['daily_code'] = $row['daily_code'] ?: $dailyCode;
+                    $row['is_closed'] = intval($row['is_closed'] ?? 0);
+                    $row['status'] = $row['is_closed'] ? 'closed' : 'open';
+                }
 
                 audit_log($pdo, 'sales', 'start_daily', $repId, json_encode(['journal_date' => $journalDate, 'treasury' => $treasuryId, 'warehouse' => $warehouseId, 'notes' => $notes]));
 
@@ -10072,6 +11107,342 @@ switch ($module) {
             exit;
         }
 
+        // ── Get journal orders for a rep (from rep_journal_orders table) ──
+        if ($action === 'getJournalOrders') {
+            $repId = intval($_GET['rep_id'] ?? 0);
+            $journalId = intval($_GET['journal_id'] ?? 0);
+            $journalIdsRaw = isset($_GET['journal_ids']) ? trim((string)$_GET['journal_ids']) : '';
+            $from  = isset($_GET['from']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['from']) ? $_GET['from'] : null;
+            $to    = isset($_GET['to'])   && preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['to'])   ? $_GET['to']   : null;
+            if (!$repId) { http_response_code(400); echo json_encode(['success' => false, 'message' => 'rep_id required']); exit; }
+            try {
+                ensure_rep_journal_orders_table($pdo);
+                // Detect order_items schema
+                $hasVariants = table_exists($pdo, 'product_variants');
+                // Fetch all journal rows for rep
+                $where = ['rjo.rep_id = ?'];
+                $params = [$repId];
+                $journalIds = [];
+                if ($journalIdsRaw !== '') {
+                    $journalIds = array_values(array_filter(array_map('intval', preg_split('/\s*,\s*/', $journalIdsRaw)), function($id) {
+                        return intval($id) > 0;
+                    }));
+                }
+
+                $selectedJournalIds = !empty($journalIds) ? $journalIds : ($journalId > 0 ? [$journalId] : []);
+                if (!empty($selectedJournalIds) && table_exists($pdo, 'rep_daily_journal')) {
+                    $selectedJournalIdsIn = implode(',', array_map('intval', $selectedJournalIds));
+                    $repairRows = $pdo->query(
+                        "SELECT id, rep_id, journal_date, is_closed, orders_json
+                         FROM rep_daily_journal
+                         WHERE rep_id = " . intval($repId) . " AND id IN ($selectedJournalIdsIn)"
+                    )->fetchAll(PDO::FETCH_ASSOC);
+
+                    foreach ($repairRows as $repairRow) {
+                        $repairJournalId = intval($repairRow['id'] ?? 0);
+                        if ($repairJournalId <= 0) continue;
+                        $ordersJsonRaw = trim((string)($repairRow['orders_json'] ?? ''));
+                        if ($ordersJsonRaw === '') continue;
+                        $decodedOrders = json_decode($ordersJsonRaw, true);
+                        if (!is_array($decodedOrders)) continue;
+
+                        foreach ($decodedOrders as $decodedOrder) {
+                            $decodedOrderId = intval(is_array($decodedOrder) ? ($decodedOrder['id'] ?? 0) : $decodedOrder);
+                            if ($decodedOrderId <= 0) continue;
+
+                            $orderStateRow = execute_query($pdo,
+                                "SELECT rep_id, status FROM orders WHERE id = ? LIMIT 1",
+                                [$decodedOrderId]
+                            )->fetch(PDO::FETCH_ASSOC);
+                            if (!$orderStateRow) continue;
+
+                            $orderStatus = trim(strval($orderStateRow['status'] ?? ''));
+                            $mappedStatus = 'with_rep';
+                            if ($orderStatus === 'returned') {
+                                $mappedStatus = 'full_return';
+                            } elseif ($orderStatus === 'delivered') {
+                                $mappedStatus = 'delivered';
+                            } elseif ($orderStatus === 'deferred' || $orderStatus === 'postponed' || $orderStatus === 'pending') {
+                                $mappedStatus = 'deferred';
+                            }
+
+                            $existingRepairRow = execute_query($pdo,
+                                "SELECT id, journal_id, status FROM rep_journal_orders WHERE rep_id = ? AND order_id = ? ORDER BY id DESC LIMIT 1",
+                                [$repId, $decodedOrderId]
+                            )->fetch(PDO::FETCH_ASSOC);
+
+                            if ($existingRepairRow) {
+                                $repairId = intval($existingRepairRow['id'] ?? 0);
+                                $existingStatus = trim(strval($existingRepairRow['status'] ?? ''));
+                                $finalStatus = $existingStatus;
+                                if ($existingStatus === '' || $existingStatus === 'with_rep' || intval($existingRepairRow['journal_id'] ?? 0) <= 0) {
+                                    $finalStatus = $mappedStatus;
+                                }
+                                execute_query($pdo,
+                                    "UPDATE rep_journal_orders
+                                     SET journal_id = ?, status = ?, event_date = COALESCE(event_date, ?)
+                                     WHERE id = ?",
+                                    [$repairJournalId, $finalStatus, ($repairRow['journal_date'] ?? date('Y-m-d')), $repairId]
+                                );
+                            } else {
+                                execute_query($pdo,
+                                    "INSERT INTO rep_journal_orders (journal_id, rep_id, order_id, status, event_date, event_time, employee)
+                                     VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                    [$repairJournalId, $repId, $decodedOrderId, $mappedStatus, ($repairRow['journal_date'] ?? date('Y-m-d')), date('H:i:s'), $_SESSION['user']['name'] ?? null]
+                                );
+                            }
+                        }
+
+                        refresh_rep_daily_journal_status_counts($pdo, $repairJournalId);
+                    }
+                }
+
+                if (!empty($journalIds)) {
+                    $where[] = 'rjo.journal_id IN (' . implode(',', $journalIds) . ')';
+                } elseif ($journalId > 0) {
+                    $where[] = 'rjo.journal_id = ?';
+                    $params[] = $journalId;
+                }
+                $rows = execute_query($pdo,
+                    "SELECT rjo.id AS jro_id, rjo.journal_id, rjo.rep_id, rjo.order_id,
+                            rjo.status AS journal_status, rjo.event_date, rjo.event_time, rjo.employee,
+                            o.order_number, o.total_amount, o.status AS order_status,
+                            o.notes AS order_notes, o.created_at,
+                            c.name AS customer_name, c.phone1, c.address, c.governorate
+                     FROM rep_journal_orders rjo
+                     LEFT JOIN orders o ON o.id = rjo.order_id
+                     LEFT JOIN customers c ON c.id = o.customer_id
+                     WHERE " . implode(' AND ', $where) . "
+                     ORDER BY rjo.updated_at DESC",
+                    $params)->fetchAll(PDO::FETCH_ASSOC);
+
+                // Fetch order items for all orders
+                $orderIds = array_unique(array_filter(array_column($rows, 'order_id'), 'intval'));
+                $itemsMap = [];
+                if (!empty($orderIds)) {
+                    $inStr = implode(',', array_map('intval', $orderIds));
+                    if ($hasVariants) {
+                        $iRows = $pdo->query(
+                            "SELECT oi.order_id, oi.product_id, oi.quantity, oi.price_per_unit,
+                                    COALESCE(pv.name, '') AS name,
+                                    COALESCE(pv.color, '') AS color, COALESCE(pv.size, '') AS size
+                             FROM order_items oi
+                             LEFT JOIN product_variants pv ON pv.id = oi.product_id
+                             WHERE oi.order_id IN ($inStr)"
+                        )->fetchAll(PDO::FETCH_ASSOC);
+                    } else {
+                        $iRows = $pdo->query(
+                            "SELECT oi.order_id, oi.product_id, oi.quantity, oi.price_per_unit,
+                                    COALESCE(p.name, '') AS name, '' AS color, '' AS size
+                             FROM order_items oi
+                             LEFT JOIN products p ON p.id = oi.product_id
+                             WHERE oi.order_id IN ($inStr)"
+                        )->fetchAll(PDO::FETCH_ASSOC);
+                    }
+                    foreach ($iRows as $it) {
+                        $itemsMap[intval($it['order_id'])][] = [
+                            'productId' => intval($it['product_id']),
+                            'name'      => $it['name'],
+                            'color'     => $it['color'],
+                            'size'      => $it['size'],
+                            'quantity'  => intval($it['quantity']),
+                            'qty'       => intval($it['quantity']),
+                            'price'     => floatval($it['price_per_unit']),
+                        ];
+                    }
+                }
+
+                $active = []; $delivered = []; $deferred = []; $returned = [];
+                $allVisible = [];
+                foreach ($rows as $r) {
+                    $oid = intval($r['order_id']);
+                    $order = [
+                        'id'           => $oid,
+                        'rep_id'       => intval($r['rep_id']),
+                        'order_number' => $r['order_number'],
+                        'status'       => $r['journal_status'],
+                        'order_status' => $r['order_status'],
+                        'total_amount' => floatval($r['total_amount'] ?? 0),
+                        'total'        => floatval($r['total_amount'] ?? 0),
+                        'customer_name'=> $r['customer_name'],
+                        'phone'        => $r['phone1'],
+                        'address'      => $r['address'],
+                        'governorate'  => $r['governorate'],
+                        'created_at'   => $r['created_at'],
+                        'event_date'   => $r['event_date'],
+                        'event_time'   => $r['event_time'],
+                        'employee'     => $r['employee'],
+                        'journal_id'   => $r['journal_id'],
+                        'products'     => $itemsMap[$oid] ?? [],
+                    ];
+                    $allVisible[] = $order;
+                    $st = $r['journal_status'];
+                    if ($st === 'with_rep') {
+                        $active[] = $order;
+                    } elseif ($st === 'delivered') {
+                        if ($from && $to) { $ed = $r['event_date']; if ($ed >= $from && $ed <= $to) $delivered[] = $order; }
+                        else $delivered[] = $order;
+                    } elseif ($st === 'deferred') {
+                        $deferred[] = $order;
+                    } elseif ($st === 'full_return' || $st === 'partial_return') {
+                        if ($from && $to) { $ed = $r['event_date']; if ($ed >= $from && $ed <= $to) $returned[] = $order; }
+                        else $returned[] = $order;
+                    }
+                }
+
+                $shouldIncludeCurrentCustody = false;
+                if (!empty($selectedJournalIds) && table_exists($pdo, 'rep_daily_journal')) {
+                    $selectedIdsIn = implode(',', array_map('intval', $selectedJournalIds));
+                    $openCount = intval($pdo->query("SELECT COUNT(*) FROM rep_daily_journal WHERE id IN ($selectedIdsIn) AND is_closed = 0")->fetchColumn() ?? 0);
+                    $shouldIncludeCurrentCustody = $openCount > 0;
+                }
+
+                if ($shouldIncludeCurrentCustody) {
+                    $currentOrdersRows = execute_query($pdo,
+                        "SELECT o.id, o.rep_id, o.order_number, o.status, o.total_amount, o.created_at,
+                                c.name AS customer_name, c.phone1, c.address, c.governorate
+                         FROM orders o
+                         LEFT JOIN customers c ON c.id = o.customer_id
+                         WHERE o.rep_id = ? AND o.status IN ('with_rep', 'partial', 'postponed')
+                         ORDER BY o.created_at DESC",
+                        [$repId]
+                    )->fetchAll(PDO::FETCH_ASSOC);
+
+                    $activeSeen = [];
+                    foreach ($active as $activeOrder) {
+                        $activeSeen[intval($activeOrder['id'] ?? 0)] = true;
+                    }
+
+                    foreach ($currentOrdersRows as $currentOrderRow) {
+                        $currentOrderId = intval($currentOrderRow['id'] ?? 0);
+                        if ($currentOrderId <= 0 || isset($activeSeen[$currentOrderId])) continue;
+                        $active[] = [
+                            'id' => $currentOrderId,
+                            'rep_id' => intval($currentOrderRow['rep_id'] ?? 0),
+                            'order_number' => $currentOrderRow['order_number'],
+                            'status' => 'with_rep',
+                            'order_status' => $currentOrderRow['status'],
+                            'total_amount' => floatval($currentOrderRow['total_amount'] ?? 0),
+                            'total' => floatval($currentOrderRow['total_amount'] ?? 0),
+                            'customer_name' => $currentOrderRow['customer_name'],
+                            'phone' => $currentOrderRow['phone1'],
+                            'address' => $currentOrderRow['address'],
+                            'governorate' => $currentOrderRow['governorate'],
+                            'created_at' => $currentOrderRow['created_at'],
+                            'event_date' => null,
+                            'event_time' => null,
+                            'employee' => null,
+                            'journal_id' => null,
+                            'products' => $itemsMap[$currentOrderId] ?? [],
+                        ];
+                        $activeSeen[$currentOrderId] = true;
+                    }
+                }
+
+                $summaryOrders = array_merge($active, $delivered, $deferred, $returned);
+                $summaryPieces = 0;
+                foreach ($summaryOrders as $summaryOrder) {
+                    foreach (($summaryOrder['products'] ?? []) as $product) {
+                        $summaryPieces += intval($product['quantity'] ?? $product['qty'] ?? 0);
+                    }
+                }
+                echo json_encode([
+                    'success' => true,
+                    'journal_id' => $journalId > 0 ? $journalId : null,
+                    'journal_ids' => !empty($journalIds) ? $journalIds : ($journalId > 0 ? [$journalId] : []),
+                    'active' => $active,
+                    'delivered' => $delivered,
+                    'deferred' => $deferred,
+                    'returned' => $returned,
+                    'summary' => [
+                        'orders_count' => count($summaryOrders),
+                        'pieces_count' => $summaryPieces,
+                        'active_count' => count($active),
+                        'delivered_count' => count($delivered),
+                        'deferred_count' => count($deferred),
+                        'returned_count' => count($returned),
+                    ],
+                ]);
+            } catch (Exception $e) {
+                http_response_code(500);
+                echo json_encode(['success' => false, 'message' => 'getJournalOrders failed: ' . $e->getMessage()]);
+            }
+            exit;
+        }
+
+        // ── Update order status in rep_journal_orders ──
+        if ($action === 'updateJournalOrderStatus') {
+            $repId    = intval($input['rep_id'] ?? 0);
+            $orderIds = $input['order_ids'] ?? [];
+            $status   = trim(strval($input['status'] ?? ''));
+            $notes    = isset($input['notes']) ? trim($input['notes']) : null;
+            $allowed  = ['with_rep', 'delivered', 'deferred', 'full_return', 'partial_return'];
+            if (!$repId || !$status || !in_array($status, $allowed, true) || !is_array($orderIds) || count($orderIds) === 0) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'rep_id, order_ids[], and valid status required']);
+                exit;
+            }
+            try {
+                ensure_rep_journal_orders_table($pdo);
+                $now      = date('Y-m-d');
+                $nowTime  = date('H:i:s');
+                $employee = $_SESSION['user']['name'] ?? null;
+                $updated  = 0;
+                $affectedJournalIds = [];
+                foreach ($orderIds as $oid) {
+                    $oid = intval($oid);
+                    if ($oid <= 0) continue;
+                    $journalRow = execute_query($pdo,
+                        "SELECT journal_id FROM rep_journal_orders WHERE rep_id = ? AND order_id = ? LIMIT 1",
+                        [$repId, $oid]
+                    )->fetch(PDO::FETCH_ASSOC);
+                    $journalId = intval($journalRow['journal_id'] ?? 0);
+                    $res = execute_query($pdo,
+                        "UPDATE rep_journal_orders SET status=?, event_date=?, event_time=?, employee=?, notes=? WHERE rep_id=? AND order_id=?",
+                        [$status, $now, $nowTime, $employee, $notes, $repId, $oid]);
+                    $updated += $res->rowCount();
+                    if ($journalId > 0) $affectedJournalIds[$journalId] = true;
+                }
+                foreach (array_keys($affectedJournalIds) as $affectedJournalId) {
+                    refresh_rep_daily_journal_status_counts($pdo, intval($affectedJournalId));
+                }
+                echo json_encode(['success' => true, 'updated' => $updated]);
+            } catch (Exception $e) {
+                http_response_code(500);
+                echo json_encode(['success' => false, 'message' => 'updateJournalOrderStatus failed: ' . $e->getMessage()]);
+            }
+            exit;
+        }
+
+        // حذف أوردر من عهدة المندوب (recall/unassign)
+        if ($action === 'recallOrderFromRep') {
+            $repId   = intval($input['rep_id']   ?? 0);
+            $orderId = intval($input['order_id'] ?? 0);
+            if (!$repId || !$orderId) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'rep_id and order_id are required.']);
+                exit;
+            }
+            try {
+                ensure_rep_journal_orders_table($pdo);
+                // حذف سجل اليومية
+                execute_query($pdo, "DELETE FROM rep_journal_orders WHERE rep_id = ? AND order_id = ?", [$repId, $orderId]);
+                // إعادة الأوردر إلى حالة متاح (confirmed) وإزالة ارتباطه بالمندوب
+                $confirmedStatus = pick_allowed_enum($pdo, 'orders', 'status', 'confirmed', ['confirmed', 'new', 'pending']);
+                if (column_exists($pdo, 'orders', 'updated_at')) {
+                    execute_query($pdo, "UPDATE orders SET rep_id = NULL, status = ?, updated_at = NOW() WHERE id = ? AND rep_id = ?", [$confirmedStatus, $orderId, $repId]);
+                } else {
+                    execute_query($pdo, "UPDATE orders SET rep_id = NULL, status = ? WHERE id = ? AND rep_id = ?", [$confirmedStatus, $orderId, $repId]);
+                }
+                try { log_order_history($pdo, $orderId, $confirmedStatus, 'rep_recall', 'recalled_from_rep', $repId); } catch (Exception $hEx) {}
+                echo json_encode(['success' => true]);
+            } catch (Exception $e) {
+                http_response_code(500);
+                echo json_encode(['success' => false, 'message' => 'recallOrderFromRep failed: ' . $e->getMessage()]);
+            }
+            exit;
+        }
+
         if ($action === 'completeDaily') {
             $repId = intval($input['repId'] ?? 0);
             $orders = $input['orders'] ?? [];
@@ -10112,49 +11483,7 @@ switch ($module) {
 
             // ── DDL guards: ensure rep_daily_journal exists with all required columns ──
             // Must run OUTSIDE the transaction (MySQL DDL causes implicit commit).
-            try { execute_query($pdo, "ALTER TABLE rep_daily_journal DROP INDEX rep_date_unique"); } catch (Exception $ex) {}
-            try { $pdo->exec("ALTER TABLE rep_daily_journal DROP INDEX rep_date_unique"); } catch (Exception $ex) {}
-            execute_query($pdo, "CREATE TABLE IF NOT EXISTS rep_daily_journal (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                rep_id INT NOT NULL,
-                session_seq INT DEFAULT 1,
-                journal_date DATE NOT NULL,
-                opening_amount DECIMAL(14,2) DEFAULT 0,
-                opening_orders_count INT DEFAULT 0,
-                opening_pieces_count INT DEFAULT 0,
-                orders_received_count INT DEFAULT 0,
-                pieces_received INT DEFAULT 0,
-                orders_delivered_count INT DEFAULT 0,
-                pieces_delivered INT DEFAULT 0,
-                delivered_value DECIMAL(14,2) DEFAULT 0,
-                orders_returned_count INT DEFAULT 0,
-                pieces_returned INT DEFAULT 0,
-                returned_value DECIMAL(14,2) DEFAULT 0,
-                orders_postponed_count INT DEFAULT 0,
-                pieces_postponed INT DEFAULT 0,
-                postponed_value DECIMAL(14,2) DEFAULT 0,
-                transactions TEXT NULL,
-                closing_amount DECIMAL(14,2) DEFAULT 0,
-                notes TEXT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-            if (!column_exists($pdo, 'rep_daily_journal', 'session_seq'))        execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN session_seq INT DEFAULT 1");
-            if (!column_exists($pdo, 'rep_daily_journal', 'employee'))           execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN employee VARCHAR(255) NULL");
-            if (!column_exists($pdo, 'rep_daily_journal', 'treasury_id'))        execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN treasury_id INT NULL");
-            if (!column_exists($pdo, 'rep_daily_journal', 'warehouse_id'))       execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN warehouse_id INT NULL");
-            if (!column_exists($pdo, 'rep_daily_journal', 'prev_balance'))       execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN prev_balance DECIMAL(14,2) DEFAULT 0");
-            if (!column_exists($pdo, 'rep_daily_journal', 'old_orders_value'))   execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN old_orders_value DECIMAL(14,2) DEFAULT 0");
-            if (!column_exists($pdo, 'rep_daily_journal', 'orders_assigned_count'))  execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN orders_assigned_count INT DEFAULT 0");
-            if (!column_exists($pdo, 'rep_daily_journal', 'pieces_assigned_count'))  execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN pieces_assigned_count INT DEFAULT 0");
-            if (!column_exists($pdo, 'rep_daily_journal', 'assigned_value'))     execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN assigned_value DECIMAL(14,2) DEFAULT 0");
-            if (!column_exists($pdo, 'rep_daily_journal', 'total_orders_count')) execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN total_orders_count INT DEFAULT 0");
-            if (!column_exists($pdo, 'rep_daily_journal', 'total_pieces_count')) execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN total_pieces_count INT DEFAULT 0");
-            if (!column_exists($pdo, 'rep_daily_journal', 'total_orders_value')) execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN total_orders_value DECIMAL(14,2) DEFAULT 0");
-            if (!column_exists($pdo, 'rep_daily_journal', 'final_before_payment'))   execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN final_before_payment DECIMAL(14,2) DEFAULT 0");
-            if (!column_exists($pdo, 'rep_daily_journal', 'payment_action'))     execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN payment_action VARCHAR(32) NULL");
-            if (!column_exists($pdo, 'rep_daily_journal', 'payment_amount'))     execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN payment_amount DECIMAL(14,2) DEFAULT 0");
-            if (!column_exists($pdo, 'rep_daily_journal', 'balance_after_payment')) execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN balance_after_payment DECIMAL(14,2) DEFAULT 0");
-            if (!column_exists($pdo, 'rep_daily_journal', 'orders_json'))        execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN orders_json TEXT NULL");
+            ensure_rep_daily_journal_table($pdo);
 
             try {
                 $pdo->beginTransaction();
@@ -10165,23 +11494,65 @@ switch ($module) {
 
                 // compute previous balance (sum of transactions related to rep)
                 $repRel = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
-                $prevBalance = floatval(execute_query($pdo, 'SELECT COALESCE(SUM(amount),0) as bal FROM transactions WHERE related_to_type = ? AND related_to_id = ?', [$repRel, $repId])->fetchColumn() ?? 0);
+                $currentBalanceSnapshot = floatval(execute_query($pdo, 'SELECT COALESCE(SUM(amount),0) as bal FROM transactions WHERE related_to_type = ? AND related_to_id = ?', [$repRel, $repId])->fetchColumn() ?? 0);
 
-                // old custody orders (orders already assigned to rep BEFORE this operation)
-                $statusList = "'with_rep','partial','postponed'";
-                $oldStmt = execute_query($pdo, "SELECT id FROM orders WHERE rep_id = ? AND status IN ($statusList)", [$repId]);
-                $oldIds = $oldStmt->fetchAll(PDO::FETCH_COLUMN);
-                $oldOrdersCount = count($oldIds);
-                $oldPieces = 0; $oldOrdersValue = 0;
-                if ($oldOrdersCount > 0) {
-                    $inOld = implode(',', array_map('intval', $oldIds));
-                    $q = column_exists($pdo, 'order_items', 'quantity') ? "SELECT COALESCE(SUM(quantity),0) FROM order_items WHERE order_id IN ($inOld)" : "SELECT 0";
-                    $oldPieces = intval($pdo->query($q)->fetchColumn() ?? 0);
-                    // compute old orders value from order_items (quantity * price_per_unit or total_price)
-                    if (column_exists($pdo, 'order_items', 'total_price')) {
-                        $oldOrdersValue = floatval($pdo->query("SELECT COALESCE(SUM(total_price),0) FROM order_items WHERE order_id IN ($inOld)")->fetchColumn() ?? 0);
-                    } else {
-                        $oldOrdersValue = floatval($pdo->query("SELECT COALESCE(SUM(quantity * price_per_unit),0) FROM order_items WHERE order_id IN ($inOld)")->fetchColumn() ?? 0);
+                $openJournalRow = execute_query($pdo,
+                    "SELECT * FROM rep_daily_journal WHERE rep_id = ? AND is_closed = 0 ORDER BY id DESC LIMIT 1",
+                    [$repId]
+                )->fetch(PDO::FETCH_ASSOC) ?: null;
+
+                $oldIds = [];
+                $existingOrdersList = [];
+                $existingAssignedCount = 0;
+                $existingAssignedPieces = 0;
+                $existingAssignedValue = 0.0;
+                $existingPaidSigned = 0.0;
+                $pageToSave = isset($input['page']) ? trim((string)$input['page']) : null;
+                $notesToSave = isset($input['reason']) ? trim((string)$input['reason']) : (isset($input['notes']) ? trim((string)$input['notes']) : null);
+
+                if ($openJournalRow) {
+                    $journalId = intval($openJournalRow['id']);
+                    $journalDate = !empty($openJournalRow['journal_date']) ? $openJournalRow['journal_date'] : $journalDate;
+                    $dailyCode = !empty($openJournalRow['daily_code']) ? $openJournalRow['daily_code'] : ('DLY-' . str_pad($journalId, 5, '0', STR_PAD_LEFT));
+                    $prevBalance = floatval($openJournalRow['prev_balance'] ?? $currentBalanceSnapshot);
+                    $oldOrdersCount = intval($openJournalRow['opening_orders_count'] ?? 0);
+                    $oldPieces = intval($openJournalRow['opening_pieces_count'] ?? 0);
+                    $oldOrdersValue = floatval($openJournalRow['old_orders_value'] ?? 0);
+                    $existingAssignedCount = intval($openJournalRow['orders_assigned_count'] ?? 0);
+                    $existingAssignedPieces = intval($openJournalRow['pieces_assigned_count'] ?? 0);
+                    $existingAssignedValue = floatval($openJournalRow['assigned_value'] ?? 0);
+                    $existingPaidSigned = abs(floatval($openJournalRow['payment_amount'] ?? 0)) * ((($openJournalRow['payment_action'] ?? 'collect') === 'pay') ? -1 : 1);
+                    $employeeName = trim((string)($openJournalRow['employee'] ?? '')) !== '' ? $openJournalRow['employee'] : $employeeName;
+                    $pageToSave = trim((string)($openJournalRow['page'] ?? '')) !== '' ? $openJournalRow['page'] : $pageToSave;
+                    $treasuryId = intval($openJournalRow['treasury_id'] ?? 0) ?: $treasuryId;
+                    $warehouseId = intval($openJournalRow['warehouse_id'] ?? 0) ?: $warehouseId;
+                    $notesToSave = trim((string)($openJournalRow['notes'] ?? '')) !== '' ? $openJournalRow['notes'] : $notesToSave;
+                    $existingOrdersRaw = $openJournalRow['orders_json'] ?? null;
+                    if (!empty($existingOrdersRaw)) {
+                        $decoded = json_decode($existingOrdersRaw, true);
+                        if (is_array($decoded)) $existingOrdersList = $decoded;
+                    }
+                } else {
+                    // old custody orders (orders already assigned to rep BEFORE this operation)
+                    $statusList = "'with_rep','partial','postponed'";
+                    $oldStmt = execute_query($pdo, "SELECT id FROM orders WHERE rep_id = ? AND status IN ($statusList)", [$repId]);
+                    $oldIds = $oldStmt->fetchAll(PDO::FETCH_COLUMN);
+                    $oldOrdersCount = count($oldIds);
+                    $oldPieces = 0; $oldOrdersValue = 0;
+                    $prevBalance = $currentBalanceSnapshot;
+                    if ($oldOrdersCount > 0) {
+                        $inOld = implode(',', array_map('intval', $oldIds));
+                        $q = column_exists($pdo, 'order_items', 'quantity') ? "SELECT COALESCE(SUM(quantity),0) FROM order_items WHERE order_id IN ($inOld)" : "SELECT 0";
+                        $oldPieces = intval($pdo->query($q)->fetchColumn() ?? 0);
+                        if (column_exists($pdo, 'order_items', 'total_price')) {
+                            $oldOrdersValue = floatval($pdo->query("SELECT COALESCE(SUM(total_price),0) FROM order_items WHERE order_id IN ($inOld)")->fetchColumn() ?? 0);
+                        } else {
+                            $oldOrdersValue = floatval($pdo->query("SELECT COALESCE(SUM(quantity * price_per_unit),0) FROM order_items WHERE order_id IN ($inOld)")->fetchColumn() ?? 0);
+                        }
+                        $r = $pdo->query("SELECT id, COALESCE(order_number, id) AS order_number FROM orders WHERE id IN ($inOld)");
+                        while ($rowo = $r->fetch(PDO::FETCH_ASSOC)) {
+                            $existingOrdersList[] = ['id' => intval($rowo['id']), 'order_number' => $rowo['order_number'], 'source' => 'old'];
+                        }
                     }
                 }
 
@@ -10200,42 +11571,53 @@ switch ($module) {
                     }
                 }
 
-                $totalOrdersCount = $oldOrdersCount + $todayOrdersCount;
-                $totalPiecesCount = $oldPieces + $todayPieces;
-                $totalOrdersValue = $oldOrdersValue + $todayOrdersValue;
+                $assignedOrdersCountTotal = $existingAssignedCount + $todayOrdersCount;
+                $assignedPiecesTotal = $existingAssignedPieces + $todayPieces;
+                $assignedValueTotal = $existingAssignedValue + $todayOrdersValue;
+
+                $totalOrdersCount = $oldOrdersCount + $assignedOrdersCountTotal;
+                $totalPiecesCount = $oldPieces + $assignedPiecesTotal;
+                $totalOrdersValue = $oldOrdersValue + $assignedValueTotal;
 
                 // compute final balance before/after payment
-                $finalBeforePayment = $prevBalance - $todayOrdersValue;
+                $finalBeforePayment = $prevBalance - $assignedValueTotal;
                 $paymentAction = isset($input['paymentAction']) ? trim(strval($input['paymentAction'])) : 'collect';
                 $paymentAmt = abs(floatval($paymentAdjustment));
                 $paidNowSigned = $paymentAmt * ($paymentAction === 'collect' ? 1 : -1);
-                $balanceAfterPayment = $finalBeforePayment + $paidNowSigned;
+                $netPaidSigned = $existingPaidSigned + $paidNowSigned;
+                $paymentActionNet = $netPaidSigned < 0 ? 'pay' : 'collect';
+                $paymentAmtNet = abs($netPaidSigned);
+                $balanceAfterPayment = $finalBeforePayment + $netPaidSigned;
 
                 // build orders JSON with source (old/today)
-                $ordersList = [];
-                if ($oldOrdersCount > 0) {
-                    $r = $pdo->query("SELECT id, COALESCE(order_number, id) AS order_number FROM orders WHERE id IN (" . implode(',', array_map('intval',$oldIds)) . ")");
-                    while ($rowo = $r->fetch(PDO::FETCH_ASSOC)) {
-                        $ordersList[] = ['id' => intval($rowo['id']), 'order_number' => $rowo['order_number'], 'source' => 'old'];
-                    }
+                $ordersListMap = [];
+                foreach ($existingOrdersList as $existingOrder) {
+                    $existingId = intval($existingOrder['id'] ?? 0);
+                    if ($existingId > 0) $ordersListMap[$existingId] = $existingOrder;
                 }
                 if ($todayOrdersCount > 0) {
                     $r2 = $pdo->query("SELECT id, COALESCE(order_number, id) AS order_number FROM orders WHERE id IN ($in)");
                     while ($rowt = $r2->fetch(PDO::FETCH_ASSOC)) {
-                        $ordersList[] = ['id' => intval($rowt['id']), 'order_number' => $rowt['order_number'], 'source' => 'today'];
+                        $ordersListMap[intval($rowt['id'])] = ['id' => intval($rowt['id']), 'order_number' => $rowt['order_number'], 'source' => 'today'];
                     }
                 }
 
+                $ordersList = array_values($ordersListMap);
                 $ordersJson = json_encode($ordersList, JSON_UNESCAPED_UNICODE);
 
-                // compute session sequence (max+1) for this rep/date to assign a separate serial per session
-                try {
-                    $seqRow2 = execute_query($pdo, 'SELECT COALESCE(MAX(session_seq),0) as mx FROM rep_daily_journal WHERE rep_id = ? AND journal_date = ?', [$repId, $journalDate])->fetch(PDO::FETCH_ASSOC);
-                    $seq2 = intval($seqRow2['mx'] ?? 0) + 1;
-                } catch (Exception $ex) { $seq2 = 1; }
+                if ($openJournalRow) {
+                    execute_query($pdo, "UPDATE rep_daily_journal SET employee = ?, page = ?, treasury_id = ?, warehouse_id = ?, prev_balance = ?, opening_orders_count = ?, opening_pieces_count = ?, old_orders_value = ?, orders_assigned_count = ?, pieces_assigned_count = ?, assigned_value = ?, total_orders_count = ?, total_pieces_count = ?, total_orders_value = ?, final_before_payment = ?, payment_action = ?, payment_amount = ?, balance_after_payment = ?, orders_json = ?, notes = ?, daily_code = ?, is_closed = 0 WHERE id = ?", [$employeeName, $pageToSave ?: null, $treasuryId ?: null, $warehouseId ?: null, $prevBalance, $oldOrdersCount, $oldPieces, $oldOrdersValue, $assignedOrdersCountTotal, $assignedPiecesTotal, $assignedValueTotal, $totalOrdersCount, $totalPiecesCount, $totalOrdersValue, $finalBeforePayment, $paymentActionNet, $paymentAmtNet, $balanceAfterPayment, $ordersJson, $notesToSave, $dailyCode, $journalId]);
+                } else {
+                    try {
+                        $seqRow2 = execute_query($pdo, 'SELECT COALESCE(MAX(session_seq),0) as mx FROM rep_daily_journal WHERE rep_id = ? AND journal_date = ?', [$repId, $journalDate])->fetch(PDO::FETCH_ASSOC);
+                        $seq2 = intval($seqRow2['mx'] ?? 0) + 1;
+                    } catch (Exception $ex) { $seq2 = 1; }
 
-                // Insert journal row for this rep/date (allow multiple entries per day)
-                $insJournal = execute_query($pdo, "INSERT INTO rep_daily_journal (rep_id, session_seq, journal_date, employee, treasury_id, warehouse_id, prev_balance, opening_orders_count, opening_pieces_count, old_orders_value, orders_assigned_count, pieces_assigned_count, assigned_value, total_orders_count, total_pieces_count, total_orders_value, final_before_payment, payment_action, payment_amount, balance_after_payment, orders_json, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [$repId, $seq2, $journalDate, $employeeName, $treasuryId ?: null, $warehouseId ?: null, $prevBalance, $oldOrdersCount, $oldPieces, $oldOrdersValue, $todayOrdersCount, $todayPieces, $todayOrdersValue, $totalOrdersCount, $totalPiecesCount, $totalOrdersValue, $finalBeforePayment, $paymentAction, $paymentAmt, $balanceAfterPayment, $ordersJson, isset($input['reason']) ? trim($input['reason']) : (isset($input['notes']) ? trim($input['notes']) : null)]);
+                    execute_query($pdo, "INSERT INTO rep_daily_journal (rep_id, session_seq, journal_date, employee, page, treasury_id, warehouse_id, prev_balance, opening_orders_count, opening_pieces_count, old_orders_value, orders_assigned_count, pieces_assigned_count, assigned_value, total_orders_count, total_pieces_count, total_orders_value, final_before_payment, payment_action, payment_amount, balance_after_payment, orders_json, notes, daily_code, is_closed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)", [$repId, $seq2, $journalDate, $employeeName, $pageToSave ?: null, $treasuryId ?: null, $warehouseId ?: null, $prevBalance, $oldOrdersCount, $oldPieces, $oldOrdersValue, $assignedOrdersCountTotal, $assignedPiecesTotal, $assignedValueTotal, $totalOrdersCount, $totalPiecesCount, $totalOrdersValue, $finalBeforePayment, $paymentActionNet, $paymentAmtNet, $balanceAfterPayment, $ordersJson, $notesToSave, '']);
+                    $journalId = intval($pdo->lastInsertId());
+                    $dailyCode = 'DLY-' . str_pad($journalId, 5, '0', STR_PAD_LEFT);
+                    try { execute_query($pdo, "UPDATE rep_daily_journal SET daily_code = ? WHERE id = ?", [$dailyCode, $journalId]); } catch (Exception $ex) {}
+                }
 
                 // determine reason for this stock movement
                 $daily_reason = isset($input['reason']) ? trim($input['reason']) : (isset($input['notes']) ? trim($input['notes']) : '');
@@ -10306,14 +11688,14 @@ switch ($module) {
                         // Rep pays company: credit treasury, reduce rep debt (positive amount)
                         $txType3 = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_payment_in', ['rep_payment_in','payment_in','payment','rep_settlement']);
                         $rel_local3 = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
-                        execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txType3, $warehouseId ?: null, $treasuryId, $rel_local3, $repId, $amt, json_encode(['direction'=>'in','orders'=>$orders,'rep_id'=>$repId,'assignment_tx_id'=>$assignmentTxId,'model'=>'consignment'])]);
+                        execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txType3, $warehouseId ?: null, $treasuryId, $rel_local3, $repId, $amt, json_encode(['direction'=>'in','context'=>'close_daily','orders'=>$orders,'rep_id'=>$repId,'assignment_tx_id'=>$assignmentTxId,'model'=>'consignment'])]);
                         if ($treasuryId) execute_query($pdo, "UPDATE treasuries SET current_balance = current_balance + ? WHERE id = ?", [$amt, $treasuryId]);
                     } else {
                         // Company pays rep: decrease treasury and increase rep debt (record as negative amount)
                         $txType3 = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_payment_out', ['rep_payment_out','payment_out','payment','rep_settlement']);
                         $rel_local3 = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
                         // Use negative amount to reflect increased debt (consistent with assignment insertion using negative amounts)
-                        execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txType3, $warehouseId ?: null, $treasuryId, $rel_local3, $repId, -1 * $amt, json_encode(['direction'=>'out','orders'=>$orders,'rep_id'=>$repId,'assignment_tx_id'=>$assignmentTxId,'model'=>'consignment'])]);
+                        execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txType3, $warehouseId ?: null, $treasuryId, $rel_local3, $repId, -1 * $amt, json_encode(['direction'=>'out','context'=>'close_daily','orders'=>$orders,'rep_id'=>$repId,'assignment_tx_id'=>$assignmentTxId,'model'=>'consignment'])]);
                         if ($treasuryId) execute_query($pdo, "UPDATE treasuries SET current_balance = current_balance - ? WHERE id = ?", [$amt, $treasuryId]);
                     }
                 }
@@ -10324,10 +11706,12 @@ switch ($module) {
                 if (!empty($orders)) {
                     $inIds = implode(',', array_map('intval', $orders));
                     $withRepAllowed = pick_allowed_enum($pdo, 'orders', 'status', 'with_rep', ['with_rep','in_delivery','pending']);
+                    // Also allow reassigning returned/pending orders even if they still carry an old rep_id
+                    // from a previous assignment (e.g. the order was returned but rep_id was not cleared).
                     if (column_exists($pdo, 'orders', 'updated_at')) {
-                        $pdo->exec("UPDATE orders SET rep_id = $repId, status = '$withRepAllowed', updated_at = NOW() WHERE id IN ($inIds) AND (rep_id IS NULL OR rep_id = $repId)");
+                        $pdo->exec("UPDATE orders SET rep_id = $repId, status = '$withRepAllowed', updated_at = NOW() WHERE id IN ($inIds) AND (rep_id IS NULL OR rep_id = $repId OR status IN ('returned', 'pending'))");
                     } else {
-                        $pdo->exec("UPDATE orders SET rep_id = $repId, status = '$withRepAllowed' WHERE id IN ($inIds) AND (rep_id IS NULL OR rep_id = $repId)");
+                        $pdo->exec("UPDATE orders SET rep_id = $repId, status = '$withRepAllowed' WHERE id IN ($inIds) AND (rep_id IS NULL OR rep_id = $repId OR status IN ('returned', 'pending'))");
                     }
                     // Log history for each newly assigned order
                     foreach ($orders as $oid) {
@@ -10336,6 +11720,30 @@ switch ($module) {
                 }
 
                 $pdo->commit();
+
+                // ── Insert/update rep_journal_orders so SalesDailyClose can query from this table ──
+                try {
+                    ensure_rep_journal_orders_table($pdo);
+                    $jNow     = date('Y-m-d');
+                    $jNowTime = date('H:i:s');
+                    $jEmployee = $_SESSION['user']['name'] ?? null;
+                    foreach ($orders as $jOid) {
+                        $jOid = intval($jOid);
+                        if ($jOid <= 0) continue;
+                        $pdo->prepare(
+                            "INSERT INTO rep_journal_orders (journal_id, rep_id, order_id, status, event_date, event_time, employee)
+                             VALUES (?, ?, ?, 'with_rep', ?, ?, ?)
+                             ON DUPLICATE KEY UPDATE
+                               journal_id = VALUES(journal_id),
+                               status     = IF(status IN ('delivered','full_return','partial_return'), status, 'with_rep'),
+                               event_date = IF(status IN ('delivered','full_return','partial_return'), event_date, VALUES(event_date)),
+                               event_time = IF(status IN ('delivered','full_return','partial_return'), event_time, VALUES(event_time)),
+                               employee   = IF(status IN ('delivered','full_return','partial_return'), employee,   VALUES(employee))"
+                        )->execute([$journalId, $repId, $jOid, $jNow, $jNowTime, $jEmployee]);
+                    }
+                } catch (Exception $jEx) {
+                    error_log('rep_journal_orders insert failed (non-critical): ' . $jEx->getMessage());
+                }
 
                 audit_log($pdo, 'sales', 'complete_daily', $repId, json_encode(['orders' => $orders, 'total' => $totalAmount]));
 
@@ -10354,7 +11762,7 @@ switch ($module) {
                 $balRow = $balStmt->fetch(PDO::FETCH_ASSOC);
                 $prevBalance = floatval($balRow['bal'] ?? 0);
 
-                echo json_encode(['success' => true, 'printData' => ['repName' => $repData['name'] ?? '', 'employee' => $_SESSION['user']['name'] ?? null, 'prevBalance' => $prevBalance], 'reportData' => ['prevBalance' => $prevBalance]]);
+                echo json_encode(['success' => true, 'daily_code' => $dailyCode ?? '', 'journal_id' => $journalId ?? 0, 'printData' => ['repName' => $repData['name'] ?? '', 'employee' => $_SESSION['user']['name'] ?? null, 'prevBalance' => $prevBalance], 'reportData' => ['prevBalance' => $prevBalance]]);
             } catch (Exception $e) {
                 try { if ($pdo instanceof PDO && $pdo->inTransaction()) $pdo->rollBack(); } catch (Exception $ex) {}
                 http_response_code(500);
@@ -11011,7 +12419,8 @@ switch ($module) {
                     if (!in_array($baseType_local, ['product','fabric','accessory'], true)) { $baseType_local = 'product'; }
                     $qty = ($baseType_local === 'fabric') ? floatval($it['qty'] ?? 0) : intval($it['qty'] ?? 0);
                     $cost = isset($it['costPrice']) ? floatval($it['costPrice']) : 0;
-                    $invoiceTotal += $qty * $cost;
+                    $vendorPriceForTotal = isset($it['vendorPrice']) ? floatval($it['vendorPrice']) : 0;
+                    $invoiceTotal += $qty * ($vendorPriceForTotal > 0 ? $vendorPriceForTotal : $cost);
                 }
                 $txType_local = pick_allowed_enum($pdo, 'transactions', 'type', 'purchase', ['purchase','sale','transfer']);
                 $rel_local = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'supplier', ['supplier','rep','customer','none']);
@@ -11168,6 +12577,33 @@ switch ($module) {
                 http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Receiving failed: ' . $e->getMessage()]);
             }
+        } elseif ($action === 'getLastVendorPrice') {
+            $supplierId = intval($_GET['supplierId'] ?? 0);
+            $productId  = intval($_GET['productId']  ?? 0);
+            if (!$supplierId || !$productId) {
+                echo json_encode(['success' => false, 'vendorPrice' => 0]);
+            } else {
+                try {
+                    $stmt = execute_query($pdo,
+                        "SELECT details FROM transactions WHERE type = 'purchase' AND related_to_type = 'supplier' AND related_to_id = ? ORDER BY id DESC LIMIT 30",
+                        [$supplierId]
+                    );
+                    $vendorPrice = 0.0;
+                    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                        $details = json_decode($row['details'] ?? '[]', true);
+                        $itemsList = (is_array($details) && isset($details['items'])) ? $details['items'] : (is_array($details) ? $details : []);
+                        foreach ($itemsList as $it) {
+                            if (intval($it['productId'] ?? 0) === $productId && floatval($it['vendorPrice'] ?? 0) > 0) {
+                                $vendorPrice = floatval($it['vendorPrice']);
+                                break 2;
+                            }
+                        }
+                    }
+                    echo json_encode(['success' => true, 'vendorPrice' => $vendorPrice]);
+                } catch (Exception $e) {
+                    echo json_encode(['success' => false, 'vendorPrice' => 0]);
+                }
+            }
         }
         break;
 
@@ -11225,7 +12661,8 @@ switch ($module) {
                     if (!in_array($t, ['product','fabric','accessory'], true)) $t = 'product';
                     $qty = ($t === 'fabric') ? floatval($it['qty'] ?? 0) : intval($it['qty'] ?? 0);
                     $cost = isset($it['costPrice']) ? floatval($it['costPrice']) : (isset($it['cost']) ? floatval($it['cost']) : 0);
-                    $returnTotal += $qty * $cost;
+                    $vendorPriceForTotal = isset($it['vendorPrice']) ? floatval($it['vendorPrice']) : 0;
+                    $returnTotal += $qty * ($vendorPriceForTotal > 0 ? $vendorPriceForTotal : $cost);
                 }
 
                 $txType = pick_allowed_enum($pdo, 'transactions', 'type', 'return_out', ['return_out','return_in','purchase','sale','transfer','payment_in','payment_out']);

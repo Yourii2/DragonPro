@@ -2042,7 +2042,7 @@ DROP TABLE IF EXISTS `transactions`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `transactions` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `type` enum('sale','purchase','return_in','return_out','payment_in','payment_out') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `type` enum('sale','purchase','return_in','return_out','payment_in','payment_out','transfer_in','transfer_out','other') COLLATE utf8mb4_unicode_ci NOT NULL,
   `warehouse_id` int(11) DEFAULT NULL,
   `treasury_id` int(11) DEFAULT NULL,
   `related_to_type` enum('customer','supplier','employee','none') COLLATE utf8mb4_unicode_ci DEFAULT NULL,

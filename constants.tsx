@@ -1,7 +1,7 @@
 
 import React from 'react';
 
-import { LayoutDashboard, Users, ShoppingCart, Package, Truck, Briefcase, Settings, ShieldCheck, Wallet, BarChart3, Fingerprint, QrCode } from 'lucide-react';
+import { LayoutDashboard, Users, ShoppingCart, Package, Truck, Briefcase, Settings, ShieldCheck, Wallet, BarChart3, Fingerprint, QrCode, PhoneCall } from 'lucide-react';
 
 export const MENU_ITEMS = [
   {
@@ -92,6 +92,12 @@ export const MENU_ITEMS = [
     ]
   },
   {
+    id: 'order-confirmations',
+    label: 'تأكيد الاوردرات',
+    icon: <PhoneCall className="w-5 h-5" />,
+    slug: 'order-confirmations'
+  },
+  {
     id: 'sales-daily',
     label: 'بدء اليومية',
     icon: <Briefcase className="w-5 h-5" />,
@@ -113,21 +119,13 @@ export const MENU_ITEMS = [
     id: 'crm',
     label: 'اداره العملاء',
     icon: <Users className="w-5 h-5" />,
-    slug: 'crm',
-    subItems: [
-      { label: 'قائمه العملاء', slug: 'list' },
-      { label: 'كشف حساب عميل', slug: 'ledger' }
-    ]
+    slug: 'crm'
   },
   {
     id: 'srm',
     label: 'اداره الموردين',
     icon: <Truck className="w-5 h-5" />,
-    slug: 'srm',
-    subItems: [
-      { label: 'قائمه الموردين', slug: 'list' },
-      { label: 'كشف حساب مورد', slug: 'ledger' }
-    ]
+    slug: 'srm'
   },
   {
     id: 'reps',

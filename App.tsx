@@ -18,6 +18,7 @@ import SalesDaily from './components/SalesDaily.tsx';
 import SalesUpdateStatus from './components/SalesUpdateStatus';
 import SalesReport from './components/SalesReport';
 import SalesDailyClose from './components/SalesDailyClose';
+import OrderConfirmations from './components/OrderConfirmations';
 import AttendanceModule from './components/AttendanceModule';
 import SalesOffices from './components/SalesOffices';
 import { API_BASE_PATH, testConnection } from './services/apiConfig';
@@ -79,6 +80,7 @@ const App: React.FC = () => {
   const [activeSlug, setActiveSlug] = useState('dashboard');
   const [activeSubSlug, setActiveSubSlug] = useState('');
   const [isDark, setIsDark] = useState(false);
+  const lastRouteStorageKey = 'Dragon_last_route';
 
   const formatActivationStatus = (type: string, accountStatus: string, isExpired: string | boolean) => {
     const expired = isExpired === true || isExpired === 'true';
@@ -225,7 +227,16 @@ const App: React.FC = () => {
     const applyHash = () => {
       try {
         const hash = window.location.hash || '';
-        if (!hash) return;
+        if (!hash) {
+          const storedRouteRaw = localStorage.getItem(lastRouteStorageKey);
+          if (!storedRouteRaw) return;
+          const storedRoute = JSON.parse(storedRouteRaw || '{}');
+          const slug = typeof storedRoute.slug === 'string' && storedRoute.slug ? storedRoute.slug : 'dashboard';
+          const sub = typeof storedRoute.subSlug === 'string' ? storedRoute.subSlug : '';
+          setActiveSlug(slug);
+          setActiveSubSlug(sub);
+          return;
+        }
         // remove leading '#' and optional leading '/'
         const cleaned = hash.replace(/^#\/?/, '');
         // strip query string if present
@@ -252,12 +263,30 @@ const App: React.FC = () => {
     console.debug('App: setActiveView ->', slug, subSlug);
     setActiveSlug(slug);
     setActiveSubSlug(subSlug);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(lastRouteStorageKey, JSON.stringify({ slug, subSlug }));
+      } catch (e) {
+        // ignore storage failures
+      }
+    }
+    if (typeof window !== 'undefined') {
+      const nextHash = subSlug ? `#/${slug}/${subSlug}` : `#/${slug}`;
+      if (window.location.hash !== nextHash) {
+        window.location.hash = nextHash;
+      }
+    }
   };
 
   const handleLogout = () => {
     localStorage.removeItem('Dragon_user');
+    localStorage.removeItem(lastRouteStorageKey);
     setIsLoggedIn(false);
     setActiveSlug('dashboard');
+    setActiveSubSlug('');
+    if (typeof window !== 'undefined' && window.location.hash !== '#/dashboard') {
+      window.location.hash = '#/dashboard';
+    }
   };
 
   if (appStatus === 'loading') {
@@ -318,6 +347,8 @@ const App: React.FC = () => {
         return <InventoryModule initialView={activeSubSlug} />;
       case 'orders':
         return <OrdersModule initialView={activeSubSlug} />;
+      case 'order-confirmations':
+        return <OrderConfirmations />;
       case 'print_waybill':
         return <PrintWaybill />;
       case 'reps':

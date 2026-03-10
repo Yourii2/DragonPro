@@ -292,6 +292,13 @@ const SalesUpdateStatus: React.FC = () => {
           })
         });
       } catch (logErr) { console.warn('logReturnEvent failed (non-critical)', logErr); }
+      // تحديث rep_journal_orders (fire-and-forget)
+      try {
+        await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ rep_id: repIdLocal, order_ids: ids, status: 'full_return' })
+        });
+      } catch (jErr) { console.warn('updateJournalOrderStatus full_return failed (non-critical)', jErr); }
       // Build and show a concise confirmation message: number of orders, total products, warehouse name
       try {
         const successfulCount = results.filter((r:any) => r && r.success).length;
@@ -453,10 +460,13 @@ const SalesUpdateStatus: React.FC = () => {
       Swal.fire('مطلوب', 'اختر على الأقل منتجاً واحداً للمرتجع.', 'warning');
       return;
     }
+    // Save these before any async ops or state changes so they remain stable
+    const savedOrderId = openPartialOrder.id;
+    const savedJournalRepId = openRepOrders?.repId ?? (openPartialOrder as any).rep_id ?? null;
     try {
       // Build payload compatible with server partialReturn handler
       const itemsPayload = (returnItems || []).map(r => ({ lineId: r.lineId, productId: r.productId, quantity: Number(r.quantity || 0) }));
-      const payload:any = { order_id: openPartialOrder.id, rep_id: openRepOrders?.repId ?? openPartialOrder.rep_id ?? null, items: itemsPayload, warehouse_id: partialWarehouse, notes: '' };
+      const payload:any = { order_id: savedOrderId, rep_id: savedJournalRepId, items: itemsPayload, warehouse_id: partialWarehouse, notes: '' };
       const res = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=partialReturn`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
       const j = await res.json();
       if (j.success) {
@@ -493,6 +503,16 @@ const SalesUpdateStatus: React.FC = () => {
           }));
           setOpenRepOrders((prev:any) => prev ? ({ ...prev, balance: Number((prev.balance || 0)) - rv }) : prev);
         }
+
+        // تحديث rep_journal_orders قبل إغلاق النافذة
+        try {
+          if (savedJournalRepId && savedOrderId) {
+            await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
+              method: 'POST', headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({ rep_id: savedJournalRepId, order_ids: [savedOrderId], status: 'partial_return' })
+            });
+          }
+        } catch (jErr) { console.warn('updateJournalOrderStatus partial_return failed (non-critical)', jErr); }
 
         // Show concise confirmation with counts and warehouse name
         try {

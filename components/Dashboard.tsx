@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTheme } from './ThemeContext';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -22,6 +22,7 @@ const PIE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b
 const STATUS_LABELS: Record<string, string> = {
   pending: 'معلق', confirmed: 'مؤكد', processing: 'قيد التنفيذ',
   shipped: 'مشحون', delivered: 'مُسلَّم', cancelled: 'ملغي',
+  returned: 'مرتجع', with_rep: 'مع المندوب', in_delivery: 'قيد التسليم',
 };
 const STATUS_COLORS: Record<string, string> = {
   pending: 'bg-amber-100 text-amber-700', confirmed: 'bg-blue-100 text-blue-700',
@@ -108,21 +109,55 @@ const Dashboard: React.FC = () => {
   const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
   const [startDate, setStartDate] = useState(firstDay.toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(today.toISOString().split('T')[0]);
+  const didAutoShiftInitialRange = useRef(false);
 
   const companyLogo = localStorage.getItem('Dragon_company_logo') || assetUrl('Dragon.png');
   const companyName = localStorage.getItem('Dragon_company_name') || 'Dragon Pro';
   const userName = (() => {
-    try { return JSON.parse(localStorage.getItem('Dragon_user') || '{}')?.name || 'System'; }
-    catch { return 'System'; }
+    try { return JSON.parse(localStorage.getItem('Dragon_user') || '{}')?.name || 'النظام'; }
+    catch { return 'النظام'; }
   })();
+
+  const fetchOverview = async (rangeStart: string, rangeEnd: string) => {
+    const qs = `&start_date=${encodeURIComponent(rangeStart)}&end_date=${encodeURIComponent(rangeEnd)}`;
+    const res = await fetch(`${API_BASE_PATH}/api.php?module=dashboard&action=overview${qs}`);
+    return res.json();
+  };
 
   const load = async () => {
     setLoading(true);
     try {
-      const qs = `&start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`;
-      const res = await fetch(`${API_BASE_PATH}/api.php?module=dashboard&action=overview${qs}`);
-      const data = await res.json();
-      if (data.success) setOverview(data.data);
+      const data = await fetchOverview(startDate, endDate);
+      if (data.success) {
+        const overviewData = data.data;
+        const latestOrderDate = String(overviewData?.latest_order_date || '').slice(0, 10);
+        const hasLeaderboardData =
+          Number(overviewData?.orders_month || 0) > 0 ||
+          (overviewData?.top_reps || []).length > 0 ||
+          (overviewData?.top_sales_offices || []).length > 0 ||
+          (overviewData?.top_employees || []).length > 0 ||
+          (overviewData?.top_products || []).length > 0;
+
+        if (!didAutoShiftInitialRange.current && !hasLeaderboardData && latestOrderDate) {
+          const latestDateObj = new Date(latestOrderDate);
+          if (!Number.isNaN(latestDateObj.getTime())) {
+            const nextStart = new Date(latestDateObj.getFullYear(), latestDateObj.getMonth(), 1).toISOString().split('T')[0];
+            const nextEnd = latestOrderDate;
+            if (nextStart !== startDate || nextEnd !== endDate) {
+              didAutoShiftInitialRange.current = true;
+              const shiftedData = await fetchOverview(nextStart, nextEnd);
+              setStartDate(nextStart);
+              setEndDate(nextEnd);
+              if (shiftedData?.success) {
+                setOverview(shiftedData.data);
+                return;
+              }
+            }
+          }
+        }
+
+        setOverview(overviewData);
+      }
     } catch { /* keep placeholders */ }
     finally { setLoading(false); }
   };
@@ -358,7 +393,7 @@ const Dashboard: React.FC = () => {
         <LeaderCard title="أفضل المناديب" icon={Award} color="bg-gradient-to-br from-amber-500 to-orange-600"
           data={topReps} labelKey="name" valueKey="total_sales"
           formatValue={(r: any) => fmtCur(r.total_sales, currencySymbol)} emptyText="لا توجد بيانات للمناديب." />
-        <LeaderCard title="أفضل الصفحات/الفروع" icon={Building2} color="bg-gradient-to-br from-blue-500 to-blue-700"
+        <LeaderCard title="أفضل الصفحات" icon={Building2} color="bg-gradient-to-br from-blue-500 to-blue-700"
           data={topOffices} labelKey="name" valueKey="total_sales"
           formatValue={(r: any) => fmtCur(r.total_sales, currencySymbol)} emptyText="لا توجد بيانات للصفحات." />
         <LeaderCard title="أفضل الموظفين" icon={UserCheck} color="bg-gradient-to-br from-emerald-500 to-teal-600"
@@ -511,7 +546,7 @@ const Dashboard: React.FC = () => {
         <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
           <div className="flex items-center gap-2 mb-5">
             <Building2 size={16} className="text-blue-500" />
-            <h3 className="font-black text-slate-800 dark:text-slate-100">أفضل الفروع</h3>
+            <h3 className="font-black text-slate-800 dark:text-slate-100">أفضل الصفحات</h3>
           </div>
           {topOffices.length === 0 ? (
             <div className="text-center text-sm text-slate-400 py-8">لا توجد بيانات.</div>

@@ -640,7 +640,6 @@ const SRMModule: React.FC = () => {
                         </div>
                         <button onClick={exportLedgerCsv} className="bg-slate-700 text-white px-3 py-2 rounded-lg text-sm font-bold">تصدير CSV</button>
                         <button onClick={printLedger} className="bg-slate-800 text-white px-3 py-2 rounded-lg text-sm font-bold">طباعة / PDF</button>
-                        <button onClick={() => setIsPaymentModalOpen(true)} className="bg-emerald-600 text-white px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-1"><Wallet size={16}/> سداد</button>
                         <button onClick={() => setIsLedgerModalOpen(false)} className="bg-white p-2 rounded-full shadow-sm hover:bg-rose-50 hover:text-rose-500 transition-all"><X size={20}/></button>
                     </div>
                 </div>
