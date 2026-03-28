@@ -235,10 +235,16 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
 
   const computePerfFromOrders = (orders: any[]) => {
     const safeOrders = Array.isArray(orders) ? orders : [];
-    const getStatus = (o: any) => o?.status || o?.order_status || o?.state || '';
-    const delivered = safeOrders.filter(o => getStatus(o) === 'delivered');
-    const returned = safeOrders.filter(o => getStatus(o) === 'returned');
-    const withRep = safeOrders.filter(o => getStatus(o) === 'with_rep');
+    const normalizeStatus = (raw: any) => String(raw || '').trim().toLowerCase();
+    const getStatus = (o: any) => normalizeStatus(o?.status || o?.order_status || o?.state || o?.delivery_status || '');
+
+    const deliveredStatuses = new Set(['delivered', 'completed', 'done', 'delivered_final', 'تم التسليم']);
+    const returnedStatuses = new Set(['returned', 'return', 'returned_final', 'مرتجع', 'تم الارجاع', 'تم الإرجاع']);
+    const withRepStatuses = new Set(['with_rep', 'in_delivery', 'out_for_delivery', 'assigned_to_rep', 'withrep', 'قيد التوصيل']);
+
+    const delivered = safeOrders.filter(o => deliveredStatuses.has(getStatus(o)));
+    const returned = safeOrders.filter(o => returnedStatuses.has(getStatus(o)));
+    const withRep = safeOrders.filter(o => withRepStatuses.has(getStatus(o)));
     const total = safeOrders.length;
     const totalHandled = delivered.length + returned.length;
     const returnRate = totalHandled > 0 ? Math.round((returned.length / totalHandled) * 100) : 0;
@@ -255,6 +261,69 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
     };
   };
 
+  const toNum = (v: any) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const pickFinalJournalRowsPerDay = (rows: any[]) => {
+    const byDate: Record<string, any> = {};
+    (Array.isArray(rows) ? rows : []).forEach((row: any) => {
+      const dateKey = String(row?.journal_date || '').slice(0, 10);
+      if (!dateKey) return;
+      const prev = byDate[dateKey];
+      if (!prev) {
+        byDate[dateKey] = row;
+        return;
+      }
+
+      const prevSeq = toNum(prev?.session_seq);
+      const currSeq = toNum(row?.session_seq);
+      if (currSeq > prevSeq) {
+        byDate[dateKey] = row;
+        return;
+      }
+      if (currSeq < prevSeq) return;
+
+      const prevTs = new Date(prev?.opened_at || prev?.created_at || prev?.start_time || 0).getTime() || 0;
+      const currTs = new Date(row?.opened_at || row?.created_at || row?.start_time || 0).getTime() || 0;
+      if (currTs >= prevTs) byDate[dateKey] = row;
+    });
+    return Object.values(byDate);
+  };
+
+  const computePerfFromJournalRows = (rows: any[]) => {
+    const finalRows = pickFinalJournalRowsPerDay(rows);
+
+    const totals = finalRows.reduce((acc: any, row: any) => {
+      const totalAssigned = toNum(row?.total_orders_count ?? row?.orders_count ?? 0);
+      const delivered = toNum(row?.delivered_orders_count ?? row?.deliveredCount ?? 0);
+      const returned = toNum(row?.returned_orders_count ?? row?.returnedCount ?? 0);
+      const withRep = toNum(row?.deferred_orders_count ?? row?.deferredCount ?? 0);
+
+      acc.total += totalAssigned;
+      acc.delivered += delivered;
+      acc.returned += returned;
+      acc.withRep += withRep;
+      return acc;
+    }, { total: 0, delivered: 0, returned: 0, withRep: 0 });
+
+    const totalHandled = totals.delivered + totals.returned;
+    const returnRate = totalHandled > 0 ? Math.round((totals.returned / totalHandled) * 100) : 0;
+    const pct = (n: number) => (totals.total > 0 ? Math.round((n / totals.total) * 100) : 0);
+
+    return {
+      total: totals.total,
+      delivered: totals.delivered,
+      returned: totals.returned,
+      withRep: totals.withRep,
+      deliveredPct: pct(totals.delivered),
+      returnedPct: pct(totals.returned),
+      withRepPct: pct(totals.withRep),
+      returnRate,
+    };
+  };
+
   const fetchPerformanceReport = async () => {
     if (!Array.isArray(representatives) || representatives.length === 0) {
       setPerfRows([]);
@@ -263,6 +332,42 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
     }
 
     const { startDate, endDate } = getPerfDateRange();
+    const isInRange = (order: any) => {
+      const raw = order?.created_at || order?.createdAt || order?.date || order?.order_date || null;
+      if (!raw) return false;
+      const d = new Date(raw);
+      if (isNaN(d.getTime())) return false;
+      const from = new Date(`${startDate}T00:00:00`);
+      const to = new Date(`${endDate}T23:59:59`);
+      return d >= from && d <= to;
+    };
+
+    const buildRepOrdersUrl = (repId: number) => {
+      const params = new URLSearchParams({
+        module: 'orders',
+        action: 'getByRep',
+        rep_id: String(repId),
+        start_date: startDate,
+        end_date: endDate,
+        from: startDate,
+        to: endDate,
+        date_from: startDate,
+        date_to: endDate,
+      });
+      return `${API_BASE_PATH}/api.php?${params.toString()}`;
+    };
+
+    const buildRepJournalUrl = (repId: number) => {
+      const params = new URLSearchParams({
+        module: 'sales',
+        action: 'getRepDailyJournal',
+        rep_id: String(repId),
+        from: startDate,
+        to: endDate,
+      });
+      return `${API_BASE_PATH}/api.php?${params.toString()}`;
+    };
+
     setPerfLoading(true);
     try {
       const reps = representatives.slice();
@@ -270,11 +375,33 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
         reps.map(async (rep: any) => {
           const repId = Number(rep.id);
           if (!repId) return { repId: rep.id, repName: rep.name || '-', ...computePerfFromOrders([]) };
-          const url = `${API_BASE_PATH}/api.php?module=orders&action=getByRep&rep_id=${repId}&start_date=${startDate}&end_date=${endDate}`;
+
           try {
-            const r = await fetch(url);
-            const jr = await r.json();
-            const perf = (jr && jr.success) ? computePerfFromOrders(jr.data || []) : computePerfFromOrders([]);
+            const journalRes = await fetch(buildRepJournalUrl(repId));
+            const journalJs = await journalRes.json();
+            const journalRows = (journalJs && journalJs.success && Array.isArray(journalJs.data)) ? journalJs.data : [];
+
+            let perf: any;
+            const hasJournalData = journalRows.some((row: any) =>
+              toNum(row?.total_orders_count ?? row?.orders_count ?? 0) > 0 ||
+              toNum(row?.delivered_orders_count ?? row?.deliveredCount ?? 0) > 0 ||
+              toNum(row?.returned_orders_count ?? row?.returnedCount ?? 0) > 0 ||
+              toNum(row?.deferred_orders_count ?? row?.deferredCount ?? 0) > 0
+            );
+
+            if (hasJournalData) {
+              perf = computePerfFromJournalRows(journalRows);
+            } else {
+              const ordersRes = await fetch(buildRepOrdersUrl(repId));
+              const ordersJs = await ordersRes.json();
+              const serverOrders = (ordersJs && ordersJs.success && Array.isArray(ordersJs.data)) ? ordersJs.data : [];
+              const strictRangeOrders = serverOrders.filter(isInRange);
+              const ordersForPerf = strictRangeOrders.length > 0 || serverOrders.length === 0
+                ? strictRangeOrders
+                : serverOrders;
+              perf = computePerfFromOrders(ordersForPerf);
+            }
+
             return { repId, repName: rep.name || `مندوب ${repId}`, ...perf };
           } catch (e) {
             console.error('Failed to fetch rep performance row', repId, e);
@@ -402,31 +529,231 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
     });
   };
 
-  const handleViewDetails = (repId: number) => {
-    setSelectedRepId(repId);
-    setView('transactions');
-  };
-
-  // Quick action helpers: open finance form for collect, fine, or settlement
-  const openCollect = (rep: any) => {
+  const openSettle = async (rep: any) => {
     if (!rep) return;
-    setSelectedRepId(Number(rep.id));
-    setView('rep-cycle');
-    setPaymentForm(prev => ({ ...prev, type: 'payment', direction: 'in', amount: '', note: '' }));
-  };
 
-  const openFine = (rep: any) => {
-    if (!rep) return;
-    setSelectedRepId(Number(rep.id));
-    setView('rep-cycle');
-    setPaymentForm(prev => ({ ...prev, type: 'fine', direction: 'out', amount: '', note: '' }));
-  };
+    const repId = Number(rep.id);
+    const repName = rep.name || `مندوب ${repId}`;
+    const insuranceAmount = Math.max(0, Number(rep.insurance_amount || 0));
 
-  const openSettle = (rep: any) => {
-    if (!rep) return;
-    setSelectedRepId(Number(rep.id));
-    setView('rep-cycle');
-    setPaymentForm(prev => ({ ...prev, type: 'settlement', amount: '', note: '' }));
+    let liveBalance = Number(rep.balance || 0);
+    try {
+      const txRes = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=getByRelated&related_to_type=rep&related_to_id=${repId}`);
+      const txJs = await txRes.json();
+      if (txJs && txJs.success && Array.isArray(txJs.data)) {
+        liveBalance = txJs.data.reduce((sum: number, tx: any) => sum + Number(tx.amount || 0), 0);
+      }
+    } catch (e) {
+      console.error('Failed to load live rep balance for settlement', e);
+    }
+
+    const netAfterInsurance = liveBalance + insuranceAmount;
+    const beforeSettlementLabel = liveBalance === 0
+      ? `0 ${currencySymbol}`
+      : `${Math.abs(liveBalance).toLocaleString()} ${currencySymbol} ${liveBalance > 0 ? 'له قبل التصفية' : 'عليه قبل التصفية'}`;
+    const netLabel = netAfterInsurance === 0
+      ? `0 ${currencySymbol}`
+      : `${Math.abs(netAfterInsurance).toLocaleString()} ${currencySymbol} ${netAfterInsurance > 0 ? 'له بعد احتساب التأمين' : 'عليه بعد احتساب التأمين'}`;
+
+    const treasuryOptions = treasuries
+      .map((t: any) => `<option value="${String(t.id)}">${String(t.name || t.title || `خزينة ${t.id}`)}</option>`)
+      .join('');
+    const fallbackTreasuryId = String(paymentForm.treasuryId || userDefaults?.default_treasury_id || treasuries?.[0]?.id || '');
+
+    const setupResult = await Swal.fire({
+      title: 'تسوية / تصفية حساب المندوب',
+      width: 720,
+      html: `
+        <div style="text-align:right;line-height:1.9;font-size:14px">
+          <div><b>اسم المندوب:</b> ${repName}</div>
+          <div><b>مبلغ التأمين:</b> ${insuranceAmount.toLocaleString()} ${currencySymbol}</div>
+          <div><b>حساب المندوب:</b> ${Math.abs(liveBalance).toLocaleString()} ${currencySymbol} ${liveBalance > 0 ? 'له' : liveBalance < 0 ? 'عليه' : ''}</div>
+          <div><b>الحساب الحالي بعد احتساب التأمين:</b> ${Math.abs(netAfterInsurance).toLocaleString()} ${currencySymbol} ${netAfterInsurance > 0 ? 'له' : netAfterInsurance < 0 ? 'عليه' : ''}</div>
+          <div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:#f8fafc"><b>قبل التصفية:</b> ${beforeSettlementLabel}</div>
+          <div style="margin-top:6px;padding:8px 10px;border-radius:8px;background:#f1f5f9"><b>الصافي النهائي:</b> ${netLabel}</div>
+          <div style="margin-top:12px">
+            <label for="rep_settle_treasury" style="display:block;margin-bottom:6px"><b>اختر الخزينة</b></label>
+            <select id="rep_settle_treasury" class="swal2-select" style="width:100%">
+              <option value="">-- اختر الخزينة --</option>
+              ${treasuryOptions}
+            </select>
+          </div>
+        </div>
+      `,
+      showCancelButton: true,
+      confirmButtonText: 'تنفيذ التسوية',
+      cancelButtonText: 'إلغاء',
+      didOpen: () => {
+        const select = document.getElementById('rep_settle_treasury') as HTMLSelectElement | null;
+        if (select && fallbackTreasuryId) select.value = fallbackTreasuryId;
+      },
+      preConfirm: () => {
+        const select = document.getElementById('rep_settle_treasury') as HTMLSelectElement | null;
+        const treasuryId = select?.value || '';
+        const hasCashMovement = netAfterInsurance !== 0;
+        if (hasCashMovement && !treasuryId) {
+          Swal.showValidationMessage('يرجى اختيار الخزينة أولاً');
+          return false;
+        }
+        return { treasuryId };
+      }
+    });
+
+    if (!setupResult.isConfirmed) return;
+
+    const treasuryIdRaw = String(setupResult.value?.treasuryId || '');
+    const treasuryId = treasuryIdRaw ? Number(treasuryIdRaw) : null;
+    const selectedTreasury = treasuries.find((t: any) => Number(t.id) === Number(treasuryId));
+
+    const debt = liveBalance < 0 ? Math.abs(liveBalance) : 0;
+    const appliedFromInsurance = debt > 0 ? Math.min(insuranceAmount, debt) : 0;
+    const remainingDebt = debt - appliedFromInsurance;
+    const remainingInsurance = insuranceAmount - appliedFromInsurance;
+    const payoutFromTreasury = (liveBalance > 0 ? Math.abs(liveBalance) : 0) + (remainingInsurance > 0 ? remainingInsurance : 0);
+
+    if ((payoutFromTreasury > 0 || remainingDebt > 0) && !selectedTreasury) {
+      return Swal.fire('اختر الخزينة', 'تعذر تحديد الخزينة المختارة لتنفيذ التسوية.', 'warning');
+    }
+
+    const treasuryBalanceRaw = selectedTreasury?.current_balance
+      ?? selectedTreasury?.balance
+      ?? selectedTreasury?.amount
+      ?? selectedTreasury?.cash
+      ?? null;
+    const treasuryBalance = treasuryBalanceRaw === null ? null : Number(treasuryBalanceRaw);
+
+    if (payoutFromTreasury > 0 && treasuryBalance !== null && Number.isFinite(treasuryBalance) && treasuryBalance < payoutFromTreasury) {
+      return Swal.fire(
+        'رصيد الخزينة غير كافٍ',
+        `الرصيد المتاح في الخزينة (${treasuryBalance.toLocaleString()} ${currencySymbol}) أقل من المطلوب للدفع (${payoutFromTreasury.toLocaleString()} ${currencySymbol}).`,
+        'error'
+      );
+    }
+
+    if (liveBalance === 0 && insuranceAmount === 0) {
+      return Swal.fire('لا توجد تسوية', 'حساب المندوب والتأمين بالفعل صفر.', 'info');
+    }
+
+    try {
+      const createTx = async (payload: any, failMsg: string) => {
+        if (!payload.title && payload.type) payload.title = getTxLabelEnhanced(payload.type, payload.details || {});
+        if (!payload.memo) payload.memo = payload.details?.notes || '';
+        const res = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=create`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const raw = await res.text();
+        let js: any = null;
+        try { js = JSON.parse(raw); } catch (e) { js = { success: false, message: raw }; }
+        if (!js.success) throw new Error(js.message || failMsg);
+      };
+
+      if (appliedFromInsurance > 0) {
+        await createTx(
+          {
+            type: 'rep_payment_in',
+            related_to_type: 'rep',
+            related_to_id: repId,
+            amount: appliedFromInsurance,
+            treasuryId: null,
+            direction: 'in',
+            details: { notes: 'خصم من التأمين لتسوية دين المندوب', subtype: 'rep_insurance_apply' }
+          },
+          'فشل خصم مبلغ من التأمين'
+        );
+      }
+
+      if (liveBalance > 0) {
+        await createTx(
+          {
+            type: 'rep_settlement',
+            related_to_type: 'rep',
+            related_to_id: repId,
+            amount: Math.abs(liveBalance),
+            treasuryId,
+            direction: 'out',
+            details: { notes: 'تسوية ودفع مستحقات المندوب', subtype: 'rep_settlement', insurance_amount: insuranceAmount }
+          },
+          'فشل صرف مستحقات المندوب'
+        );
+      } else if (remainingDebt > 0) {
+        await createTx(
+          {
+            type: 'rep_settlement',
+            related_to_type: 'rep',
+            related_to_id: repId,
+            amount: remainingDebt,
+            treasuryId,
+            direction: 'in',
+            details: { notes: 'تحصيل مديونية المندوب بعد خصم التأمين', subtype: 'rep_settlement', insurance_amount: insuranceAmount }
+          },
+          'فشل تحصيل مديونية المندوب'
+        );
+      }
+
+      if (remainingInsurance > 0) {
+        await createTx(
+          {
+            type: 'payment_out',
+            related_to_type: 'none',
+            related_to_id: null,
+            amount: remainingInsurance,
+            treasuryId,
+            direction: 'out',
+            details: { notes: 'رد المتبقي من تأمين المندوب', subtype: 'rep_insurance_return', rep_id: repId }
+          },
+          'فشل رد المتبقي من التأمين'
+        );
+      }
+
+      if (insuranceAmount > 0) {
+        const updRes = await fetch(`${API_BASE_PATH}/api.php?module=users&action=update`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: repId, insurance_paid: 0, insurance_amount: 0 })
+        });
+        const updRaw = await updRes.text();
+        let updJs: any = null;
+        try { updJs = JSON.parse(updRaw); } catch (e) { updJs = { success: false, message: updRaw }; }
+        if (!updJs.success) throw new Error(updJs.message || 'فشل تحديث التأمين بعد التسوية');
+      }
+
+      await fetchReps();
+      if (selectedRepId && Number(selectedRepId) === repId) {
+        await fetchRepTransactions();
+      }
+
+      const deletePrompt = await Swal.fire({
+        icon: 'success',
+        title: 'تمت التسوية بنجاح',
+        text: 'هل تريد حذف المندوب من النظام الآن؟',
+        showCancelButton: true,
+        confirmButtonText: 'نعم، احذف المندوب',
+        cancelButtonText: 'لا، إبقاء المندوب'
+      });
+
+      if (deletePrompt.isConfirmed) {
+        const delRes = await fetch(`${API_BASE_PATH}/api.php?module=users&action=delete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: repId })
+        });
+        const delJs = await delRes.json();
+        if (delJs.success) {
+          setRepresentatives(prev => prev.filter((r: any) => Number(r.id) !== repId));
+          if (selectedRepId && Number(selectedRepId) === repId) {
+            setSelectedRepId(null);
+          }
+          await Swal.fire('تم الحذف', `تم حذف المندوب "${repName}" بنجاح.`, 'success');
+        } else {
+          await Swal.fire('تعذر الحذف', delJs.message || 'فشل حذف المندوب بعد التسوية.', 'error');
+        }
+      }
+    } catch (err: any) {
+      console.error('Settle rep popup flow error', err);
+      Swal.fire('فشل التسوية', err?.message || 'حدث خطأ أثناء تسوية حساب المندوب.', 'error');
+    }
   };
 
   // ─── يوميات المندوب: تحميل و طباعة ───
@@ -1272,9 +1599,8 @@ ${rows.map(r => `<tr><td>${r.name}</td><td>${r.color}</td><td>${r.size}</td><td 
         <div className="flex gap-1 p-1.5 rounded-2xl border border-card shadow-sm card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
           <button onClick={() => handleOpenModal(null)} className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black bg-green-600 text-white hover:opacity-90"><PlusCircle size={16}/> إضافة مندوب</button>
           <button onClick={() => setView('list')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${view === 'list' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Users size={16}/> قائمة المناديب</button>
-          <button onClick={() => setView('custody')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${view === 'custody' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Box size={16}/> عهدة المندوب</button>
           <button onClick={() => setView('rep-cycle')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${view === 'rep-cycle' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Wallet size={16}/> يوميات المندوب</button>
-          <button onClick={() => setView('transactions')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${view === 'transactions' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><FileText size={16}/> معاملات المندوب</button>
+          <button onClick={() => setView('rep-performance')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${view === 'rep-performance' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><ShoppingCart size={16}/> أداء المناديب</button>
         </div>
       </div>
 
@@ -1301,7 +1627,6 @@ ${rows.map(r => `<tr><td>${r.name}</td><td>${r.color}</td><td>${r.size}</td><td 
                   <th className="px-6 py-4 font-bold">رقم الهاتف</th>
                   <th className="px-6 py-4 font-bold">مبلغ التأمين</th>
                   <th className="px-6 py-4 font-bold">الرصيد</th>
-                  <th className="px-6 py-4 font-bold">الحالة</th>
                   <th className="px-6 py-4 font-bold text-center">الإجراءات</th>
                 </tr>
               </thead>
@@ -1326,11 +1651,6 @@ ${rows.map(r => `<tr><td>${r.name}</td><td>${r.color}</td><td>${r.size}</td><td 
                         <span className="text-sm font-bold" style={{color: (rep.balance>0? 'green': (rep.balance<0? 'red':'#666'))}}>{rep.balance>0? 'له' : (rep.balance<0? 'عليه' : '')}</span>
                       </td>
                       <td className="px-6 py-4">
-                        <span className={`px-3 py-1 rounded-lg text-[10px] font-black ${rep.status === 'نشط' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400'}`}>
-                          {rep.status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
                         <div className="flex items-center justify-center gap-2">
                           <button
                             onClick={() => handleDelete(rep.id)}
@@ -1340,11 +1660,8 @@ ${rows.map(r => `<tr><td>${r.name}</td><td>${r.color}</td><td>${r.size}</td><td 
                           >
                             <Trash2 size={16} />
                           </button>
-                          <button onClick={() => openCollect(rep)} className="p-2 text-muted hover:text-green-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-xl transition-all" title="تحصيل"><PlusCircle size={16} /></button>
-                          <button onClick={() => openFine(rep)} className="p-2 text-muted hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-xl transition-all" title="غرامة"><MinusCircle size={16} /></button>
                           <button onClick={() => openSettle(rep)} className="p-2 text-muted hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-xl transition-all" title="تسوية"><Wallet size={16} /></button>
                           <button onClick={() => handleOpenModal(rep)} className="p-2 text-muted hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded-xl transition-all" title="تعديل"><Edit size={16} /></button>
-                          <button onClick={() => handleViewDetails(rep.id)} className="p-2 text-muted hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-all" title="عرض التفاصيل"><Eye size={16} /></button>
                         </div>
                       </td>
                     </tr>
@@ -1431,6 +1748,11 @@ ${rows.map(r => `<tr><td>${r.name}</td><td>${r.color}</td><td>${r.size}</td><td 
                             <div>
                               <div className="font-medium text-sm">#{order.orderNumber} - {order.customerName}</div>
                               <div className="text-xs text-muted">{order.phone1}</div>
+                              <div className="text-xs text-slate-600 dark:text-slate-300 mt-1 flex flex-wrap gap-2">
+                                <span>المبلغ: {Number(order.total || order.total_amount || 0).toLocaleString()} {currencySymbol}</span>
+                                <span>القطع: {order.products?.reduce((s:any,p:any)=>s+(Number(p.quantity||0)),0) || 0}</span>
+                                <span>المتبقي: {Number(order.remainingPieces || order.remaining_pieces || order.remaining_qty || (order.products?.reduce((s:any,p:any)=>s+(Number(p.quantity||0)),0) || 0)).toLocaleString()}</span>
+                              </div>
                             </div>
                             <div className="flex items-center gap-2">
                               <div className="font-bold text-sm">{order.products?.reduce((s:any,p:any)=>s+(Number(p.quantity||0)),0)} قطعة</div>
@@ -1749,227 +2071,71 @@ ${rows.map(r => `<tr><td>${r.name}</td><td>${r.color}</td><td>${r.size}</td><td 
           {/* ─── قائمة اليوميات ─── */}
           {!repJournalLoading && repJournalRows.length > 0 && (
             <div className="space-y-3">
-              {repJournalRows.map((row: any) => (
+              {repJournalRows.map((row: any) => {
+                const isClosed = Number(row.is_closed ?? row.closed ?? 0) === 1;
+                const startDateTime = row.opened_at || row.start_time || row.opening_time || row.created_at || row.journal_date || '—';
+                const closedDateTime = row.closed_at || row.end_time || row.closing_time || row.closed_time || row.updated_at || '—';
+
+                return (
                 <div key={row.id} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm hover:shadow-md transition-shadow">
-                  <div className="flex flex-wrap items-center gap-4">
-
-                    {/* معلومات اليومية */}
+                  <div className="flex flex-wrap items-start gap-4">
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-3 flex-wrap">
-                        <div className="w-2.5 h-2.5 rounded-full bg-blue-500 flex-shrink-0" />
-                        <span className="font-black text-slate-800 dark:text-white">{row.journal_date}</span>
-                        {row.employee && (
-                          <span className="text-xs text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-lg">👤 {row.employee}</span>
-                        )}
-                        {(row.page || row.page_number || row.page_no || row.pageName || row.page_name || row.source) && (
-                          <span className="text-xs text-blue-600 bg-blue-50 dark:bg-blue-900/20 px-2 py-0.5 rounded-lg font-bold">بيدج: {row.page || row.page_number || row.page_no || row.pageName || row.page_name || row.source}</span>
-                        )}
-                        {row.session_seq && Number(row.session_seq) > 1 && (
-                          <span className="text-xs text-amber-600 bg-amber-50 dark:bg-amber-900/20 px-2 py-0.5 rounded-lg font-bold">جلسة {row.session_seq}</span>
-                        )}
-                        {row.notes && (
-                          <span className="text-xs text-slate-500 italic truncate max-w-[200px]">{row.notes}</span>
-                        )}
-                      </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                        <div className="text-center bg-slate-50 dark:bg-slate-800 rounded-xl p-2">
-                          <div className="text-[10px] text-slate-500 font-bold mb-0.5">الأوردرات</div>
-                          <div className="text-sm font-black text-slate-700 dark:text-slate-200">{row.total_orders_count || _parseJournalOrders(row).length || 0}</div>
-                        </div>
-                        <div className="text-center bg-slate-50 dark:bg-slate-800 rounded-xl p-2">
-                          <div className="text-[10px] text-slate-500 font-bold mb-0.5">القطع</div>
-                          <div className="text-sm font-black text-slate-700 dark:text-slate-200">{row.total_pieces_count || 0}</div>
-                        </div>
-                        <div className="text-center bg-emerald-50 dark:bg-emerald-900/20 rounded-xl p-2">
-                          <div className="text-[10px] text-emerald-600 font-bold mb-0.5">قيمة اليومية</div>
-                          <div className="text-sm font-black text-emerald-700 dark:text-emerald-400">{Number(row.total_orders_value||0).toLocaleString()} {currencySymbol}</div>
-                        </div>
-                        <div className="text-center bg-blue-50 dark:bg-blue-900/20 rounded-xl p-2">
-                          <div className="text-[10px] text-blue-600 font-bold mb-0.5">الرصيد بعد دفع</div>
-                          <div className="text-sm font-black text-blue-700 dark:text-blue-400">{Number(row.balance_after_payment||0).toLocaleString()} {currencySymbol}</div>
-                        </div>
-                      </div>
-
-                      {/* ─── تفاصيل إضافية لليومية (مطابقة طلب المستخدم) ─── */}
-                      <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
-                        <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-3 text-sm">
-                          <div className="text-xs text-slate-500 font-bold mb-1">بداية اليومية</div>
-                          <div>الموظف: <b>{row.employee || row.opened_by || row.started_by || '—'}</b></div>
-                          <div>تاريخ/وقت البدء: <b>{row.opened_at || row.start_time || row.opening_time || row.created_at || row.journal_date || '—'}</b></div>
-                          <div>المخزن: <b>{row.opening_warehouse_name || row.start_warehouse || row.warehouse_name || '—'}</b></div>
-                          <div>الخزينة: <b>{row.opening_treasury_name || row.start_treasury || row.treasury_name || '—'}</b></div>
-                          <div>تم دفع مبلغ بالبداية: <b>{Number(row.opening_payment_amount || row.payment_amount || row.initial_payment || 0).toLocaleString()} {currencySymbol}</b></div>
-                        </div>
-
-                        <div className="bg-white dark:bg-slate-900 rounded-xl p-3 text-sm border dark:border-slate-700">
-                          <div className="text-xs text-slate-500 font-bold mb-1">حالة الحساب</div>
-                          <div>الحساب القديم: <b>{Number(row.prev_balance || row.opening_balance || 0).toLocaleString()} {currencySymbol}</b></div>
-                          <div>الحساب بعد مبلغ البداية: <b>{Number(row.balance_after_opening || row.balance_after_payment || 0).toLocaleString()} {currencySymbol}</b></div>
-                          <div>الحساب النهائى (بعد الإغلاق): <b>{Number(row.final_balance || row.closing_balance || row.balance_after_close || row.balance_after_payment || 0).toLocaleString()} {currencySymbol}</b></div>
-                          <div>نوع التسويه: <b>{row.settlement_type || row.payment_action || row.settlement_subtype || '—'}</b></div>
-                          <div>جهة التسوية: <b>{(row.payment_action === 'collect' || row.settlement_direction === 'in') ? 'تحصيل من المندوب' : (row.payment_action === 'pay' || row.settlement_direction === 'out' ? 'دفع إلى المندوب' : '—')}</b></div>
-                        </div>
-                      </div>
-
-                      <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
-                        <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-2 text-center">
-                          <div className="text-[10px] text-slate-500 font-bold">أوردرات قديمة</div>
-                          <div className="text-sm font-black">{_parseJournalOrders(row).filter((o:any)=>o.source==='old').length || (row.opening_orders_count || 0)}</div>
-                        </div>
-                        <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-2 text-center">
-                          <div className="text-[10px] text-slate-500 font-bold">قطع قديمة</div>
-                          <div className="text-sm font-black">{(row.opening_pieces_count || 0)}</div>
-                        </div>
-                        <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl p-2 text-center">
-                          <div className="text-[10px] text-emerald-600 font-bold">تسليم - أوردرات</div>
-                          <div className="text-sm font-black">{row.delivered_orders_count ?? row.deliveredCount ?? journalLiveStats[row.id]?.deliveredCount ?? 0}</div>
-                        </div>
-                        <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl p-2 text-center">
-                          <div className="text-[10px] text-emerald-600 font-bold">تسليم - قطع</div>
-                          <div className="text-sm font-black">{row.delivered_pieces_count ?? row.deliveredPieces ?? 0}</div>
-                        </div>
-                      </div>
-
-                      <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
-                        <div className="bg-rose-50 dark:bg-rose-900/20 rounded-xl p-2 text-center">
-                          <div className="text-[10px] text-rose-600 font-bold">مرتجع - أوردرات</div>
-                          <div className="text-sm font-black">{row.returned_orders_count ?? row.returnedCount ?? 0}</div>
-                        </div>
-                        <div className="bg-rose-50 dark:bg-rose-900/20 rounded-xl p-2 text-center">
-                          <div className="text-[10px] text-rose-600 font-bold">مرتجع - قطع</div>
-                          <div className="text-sm font-black">{row.returned_pieces_count ?? row.returnedPieces ?? 0}</div>
-                        </div>
-                        <div className="bg-rose-50 dark:bg-rose-900/20 rounded-xl p-2 text-center">
-                          <div className="text-[10px] text-rose-600 font-bold">مرتجع - مبلغ</div>
-                          <div className="text-sm font-black">{Number(row.returned_value ?? row.returnedValue ?? 0).toLocaleString()} {currencySymbol}</div>
-                        </div>
-                        <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-2 text-center">
-                          <div className="text-[10px] text-blue-600 font-bold">نزول (أوردرات)</div>
-                          <div className="text-sm font-black">{row.deferred_orders_count ?? row.deferredCount ?? 0}</div>
-                        </div>
-                      </div>
-
-                      <div className="mt-2 flex items-center gap-2">
-                        <button type="button" onClick={async()=>{
-                          const amt = await Swal.fire({ title: 'مبلغ الحافز', input: 'number', inputAttributes: { min: '0' }, showCancelButton:true });
-                          if (!amt.value) return; const noteRes = await Swal.fire({ title:'البيان', input:'text', showCancelButton:true });
-                          if (noteRes.isDismissed) return; const payload = { type: 'rep_payment_in', related_to_type: 'rep', related_to_id: row.rep_id || selectedRepId, amount: Number(amt.value||0), treasuryId: paymentForm.treasuryId || null, direction: 'in', details: { notes: noteRes.value || 'حافز مندوب', subtype: 'rep_bonus', journal_date: row.journal_date } };
-                          try { await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=create`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) }); Swal.fire('تم','تم إضافة الحافز','success'); } catch(e){ Swal.fire('فشل','تعذر إضافة الحافز','error'); }
-                        }} className="px-3 py-2 bg-emerald-600 text-white rounded-xl text-xs font-black">إضافة حافز</button>
-
-                        <button type="button" onClick={async()=>{
-                          const amt = await Swal.fire({ title: 'مبلغ الغرامة', input: 'number', inputAttributes: { min: '0' }, showCancelButton:true });
-                          if (!amt.value) return; const noteRes = await Swal.fire({ title:'البيان', input:'text', showCancelButton:true });
-                          if (noteRes.isDismissed) return; const payload = { type: 'rep_payment_out', related_to_type: 'rep', related_to_id: row.rep_id || selectedRepId, amount: Number(amt.value||0), treasuryId: paymentForm.treasuryId || null, direction: 'out', details: { notes: noteRes.value || 'غرامة مندوب', subtype: 'rep_penalty', journal_date: row.journal_date } };
-                          try { await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=create`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) }); Swal.fire('تم','تم تطبيق الغرامة','success'); } catch(e){ Swal.fire('فشل','تعذر تطبيق الغرامة','error'); }
-                        }} className="px-3 py-2 bg-rose-600 text-white rounded-xl text-xs font-black">تطبيق غرامة</button>
-
-                        <div className="text-xs text-muted">الخزنـة الآن: <b>{row.closing_treasury_name || row.closed_treasury || '' || '—'}</b></div>
-                      </div>
-
-                      {/* ─── قائمة الطلبيات المطوية ─── */}
-                      {(() => {
-                        const jOrders = _parseJournalOrders(row);
-                        if (jOrders.length === 0) return null;
-                        const isExp = expandedJournalIds.has(row.id);
-                        const oldList   = jOrders.filter(x => x.source === 'old');
-                        const todayList = jOrders.filter(x => x.source === 'today');
-                        return (
-                          <div className="mt-2">
-                            <button
-                              type="button"
-                              onClick={() => toggleJournalExpand(row.id)}
-                              className="flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-800 transition-colors"
-                            >
-                              <span className={`inline-block transition-transform ${isExp ? 'rotate-90' : ''}`}>▶</span>
-                              {isExp ? 'إخفاء الطلبيات' : `عرض الطلبيات (${jOrders.length})`}
-                            </button>
-                            {isExp && (
-                              <div className="mt-2 space-y-2">
-                                {todayList.length > 0 && (
-                                  <div>
-                                    <div className="text-[10px] font-bold text-emerald-600 mb-1">طلبيات اليوم ({todayList.length})</div>
-                                    <div className="flex flex-wrap gap-1.5">
-                                      {todayList.map(o => (
-                                        <span key={o.id} className="bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 text-[11px] font-bold px-2 py-0.5 rounded-lg border border-emerald-200 dark:border-emerald-700">
-                                          #{o.order_number || o.id}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-                                {oldList.length > 0 && (
-                                  <div>
-                                    <div className="text-[10px] font-bold text-slate-500 mb-1">طلبيات قديمة / نزول ({oldList.length})</div>
-                                    <div className="flex flex-wrap gap-1.5">
-                                      {oldList.map(o => (
-                                        <span key={o.id} className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px] font-bold px-2 py-0.5 rounded-lg border border-slate-200 dark:border-slate-600">
-                                          #{o.order_number || o.id}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            )}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-3">
+                          <div className="text-xs text-slate-500 font-bold mb-1">كود اليومية</div>
+                          <div className="text-sm font-black text-slate-800 dark:text-white">
+                            {row.daily_code || `DLY-${String(row.id || '').padStart(5, '0')}`}
                           </div>
-                        );
-                      })()}
+                          <div className="mt-2 text-xs font-bold">
+                            حالة اليومية:{' '}
+                            <span className={isClosed ? 'text-rose-600' : 'text-emerald-600'}>
+                              {isClosed ? 'مغلقة' : 'مفتوحة'}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-3">
+                          <div className="text-xs text-slate-500 font-bold mb-1">تاريخ ووقت بدء اليومية</div>
+                          <div className="text-sm font-black text-slate-800 dark:text-white">
+                            {startDateTime}
+                          </div>
+                          {isClosed && (
+                            <>
+                              <div className="text-xs text-slate-500 font-bold mt-2 mb-1">تاريخ الإغلاق</div>
+                              <div className="text-sm font-black text-slate-800 dark:text-white">
+                                {closedDateTime}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
                     </div>
 
-                    {/* أزرار الطباعة */}
-                    <div className="flex flex-col gap-2 shrink-0">
+                    <div className="flex flex-col gap-2 shrink-0 w-full md:w-auto">
                       <button
                         type="button"
                         onClick={() => printDailyJournalRow(row)}
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black transition-colors whitespace-nowrap"
+                        className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black transition-colors whitespace-nowrap"
                       >
                         <Eye className="w-3.5 h-3.5" /> عرض و طباعة يومية المندوب
                       </button>
                       <button
                         type="button"
                         onClick={() => printDeliveryPermit(row)}
-                        className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black transition-colors whitespace-nowrap"
+                        className="flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black transition-colors whitespace-nowrap"
                       >
                         <FileText className="w-3.5 h-3.5" /> عرض و طباعة إذن التسليم
                       </button>
                       <button
                         type="button"
                         onClick={() => printWaybills(row)}
-                        className="flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-black transition-colors whitespace-nowrap"
+                        className="flex items-center justify-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-black transition-colors whitespace-nowrap"
                       >
                         <Box className="w-3.5 h-3.5" /> عرض و طباعة بوالص التسليم
                       </button>
                     </div>
-
-                    {/* Live stats button & display */}
-                    <div className="flex flex-col gap-2 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => computeJournalLiveStats(row)}
-                        className="flex items-center gap-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-black transition-colors whitespace-nowrap"
-                      >
-                        حساب مباشر
-                      </button>
-                      {journalLiveStats[row.id] && (
-                        <div className="text-xs p-2 bg-white rounded-lg border">
-                          {journalLiveStats[row.id].loading ? (
-                            <div>جاري الحساب…</div>
-                          ) : (
-                            <div className="space-y-1">
-                              <div>تم التسليم: <b>{journalLiveStats[row.id].deliveredCount || 0}</b> — <span className="text-emerald-600">{(journalLiveStats[row.id].deliveredTotal||0).toLocaleString()} ج.م</span></div>
-                              <div>مرتجع كلي: <b>{journalLiveStats[row.id].returnedCount || 0}</b></div>
-                              <div>أوردرات النزول: <b>{journalLiveStats[row.id].postponedCount || 0}</b> — <span className="text-amber-600">{(journalLiveStats[row.id].postponedTotal||0).toLocaleString()} ج.م</span></div>
-                              <div className="text-muted">({journalLiveStats[row.id].todayOrdersCount || 0} جديد + {journalLiveStats[row.id].oldOrdersCount || 0} قديم)</div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
                   </div>
                 </div>
-              ))}
+              )})}
             </div>
           )}
 

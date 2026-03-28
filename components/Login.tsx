@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { Lock, User, Code, LogIn, ShieldCheck } from 'lucide-react';
+import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { assetUrl } from '../services/assetUrl';
 
@@ -43,6 +44,60 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleForgot = async () => {
+    const { value: formValues } = await Swal.fire({
+      title: 'اعادة تعيين كلمة المرور',
+      html:
+        `<input id="swal-username" class="swal2-input" placeholder="اسم المستخدم">` +
+        `<input id="swal-new" type="password" class="swal2-input" placeholder="كلمة المرور الجديدة">` +
+        `<input id="swal-confirm" type="password" class="swal2-input" placeholder="تأكيد كلمة المرور">`,
+      focusConfirm: false,
+      showCancelButton: true,
+      preConfirm: () => {
+        const username = (document.getElementById('swal-username') as HTMLInputElement).value;
+        const np = (document.getElementById('swal-new') as HTMLInputElement).value;
+        const cp = (document.getElementById('swal-confirm') as HTMLInputElement).value;
+        if (!username || !np) {
+          Swal.showValidationMessage('الرجاء إدخال اسم المستخدم وكلمة مرور جديدة');
+          return null;
+        }
+        if (np !== cp) {
+          Swal.showValidationMessage('كلمتا المرور غير متطابقتين');
+          return null;
+        }
+        return { username, new_password: np };
+      }
+    });
+
+    if (!formValues) return;
+    // Ask for Dragon password
+    const { value: dragon } = await Swal.fire({
+      title: 'مطلوب: كلمة مرور دراجون',
+      input: 'password',
+      inputPlaceholder: 'أدخل كلمة مرور دراجون',
+      showCancelButton: true,
+      inputAttributes: { autocapitalize: 'off' }
+    });
+    if (!dragon) return;
+
+    // Call reset endpoint
+    try {
+      const resp = await fetch(`${API_BASE_PATH}/../scripts/reset_user_password.php`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: formValues.username, new_password: formValues.new_password, dragon_password: dragon })
+      });
+      const j = await resp.json();
+      if (!resp.ok || !j.success) {
+        Swal.fire('فشل', j.message || 'تعذر إعادة التعيين', 'error');
+        return;
+      }
+      Swal.fire('تم', 'تم تغيير كلمة المرور بنجاح', 'success');
+    } catch (e:any) {
+      Swal.fire('خطأ', e?.message || 'خطأ في الاتصال', 'error');
     }
   };
 
@@ -108,7 +163,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
               <input type="checkbox" className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300 dark:border-slate-600 cursor-pointer" />
               <span className="text-xs text-slate-600 dark:text-slate-400 font-medium group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">تذكرني</span>
             </label>
-            <button type="button" className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline transition-colors">نسيت كلمة المرور؟</button>
+            <button type="button" onClick={handleForgot} className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline transition-colors">نسيت كلمة المرور؟</button>
           </div>
 
           <button 

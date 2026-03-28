@@ -67,6 +67,10 @@ try {
     
     // --- 4. Execute SQL Schema ---
     $sql_schema = $input['sql_schema'];
+    // Remove UTF-8 BOM if present (prevents syntax errors like "﻿SET NAMES ...").
+    if (substr($sql_schema, 0, 3) === "\xEF\xBB\xBF") {
+        $sql_schema = substr($sql_schema, 3);
+    }
     // Normalize escaped backticks coming from JSON/TS template strings.
     $sql_schema = str_replace('\`', '`', $sql_schema);
     $pdo->exec($sql_schema);

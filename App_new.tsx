@@ -22,6 +22,7 @@ import OrderConfirmations from './components/OrderConfirmations';
 import AttendanceModule from './components/AttendanceModule';
 import Profile from './components/Profile';
 import { ThemeProvider } from './components/ThemeContext';
+import ErrorBoundary from './components/ErrorBoundary';
 import { API_BASE_PATH, testConnection } from './services/apiConfig';
 // Manufacturing pages
 import FabricsPage from './components/manufacturing/FabricsPage';
@@ -40,6 +41,7 @@ import SalesOffices from './components/SalesOffices';
 import BrandedWelcome from './components/BrandedWelcome';
 import PointOfSale from './components/PointOfSale';
 import ShippingCompaniesModule from './components/ShippingCompaniesModule.tsx';
+import CreateAdminUser from './components/CreateAdminUser';
 
 const migrateStorageKeys = () => {
   if (typeof window === 'undefined') return;
@@ -170,24 +172,18 @@ const App_new: React.FC = () => {
     verifyInstallation();
 
     try {
-      const hash = window.location.hash || '';
-      if (hash) {
-        const cleaned = hash.replace(/^#\/?/, '');
-        const pathOnly = cleaned.split('?')[0] || '';
-        const parts = pathOnly.split('/');
-        const slug = parts[0] || 'dashboard';
-        const sub = parts[1] || '';
+      const storedRouteRaw = localStorage.getItem(lastRouteStorageKey);
+      if (storedRouteRaw) {
+        const storedRoute = JSON.parse(storedRouteRaw || '{}');
+        const slug = typeof storedRoute.slug === 'string' && storedRoute.slug ? storedRoute.slug : 'dashboard';
+        const sub = typeof storedRoute.subSlug === 'string' ? storedRoute.subSlug : '';
         setActiveSlug(slug);
         setActiveSubSlug(sub);
-      } else {
-        const storedRouteRaw = localStorage.getItem(lastRouteStorageKey);
-        if (storedRouteRaw) {
-          const storedRoute = JSON.parse(storedRouteRaw || '{}');
-          const slug = typeof storedRoute.slug === 'string' && storedRoute.slug ? storedRoute.slug : 'dashboard';
-          const sub = typeof storedRoute.subSlug === 'string' ? storedRoute.subSlug : '';
-          setActiveSlug(slug);
-          setActiveSubSlug(sub);
-        }
+      }
+
+      const cleanUrl = `${window.location.pathname}${window.location.search}`;
+      if (window.location.hash) {
+        window.history.replaceState(null, '', cleanUrl);
       }
     } catch (e) { /* ignore */ }
   }, [verifyInstallation]);
@@ -228,9 +224,9 @@ const App_new: React.FC = () => {
       } catch (e) {
         // ignore storage failures
       }
-      const nextHash = subSlug ? `#/${slug}/${subSlug}` : `#/${slug}`;
-      if (window.location.hash !== nextHash) {
-        window.location.hash = nextHash;
+      if (window.location.hash) {
+        const cleanUrl = `${window.location.pathname}${window.location.search}`;
+        window.history.replaceState(null, '', cleanUrl);
       }
     }
   };
@@ -392,6 +388,8 @@ const App_new: React.FC = () => {
         return <FinanceModule initialView={activeSubSlug} />;
       case 'admin':
         return <AdminModule initialView={activeSubSlug} />;
+      case 'create-admin':
+        return <CreateAdminUser />;
       case 'settings':
         return <SettingsModule />;
       case 'reports':
@@ -441,7 +439,9 @@ const App_new: React.FC = () => {
         setActiveView={setActiveView}
         onLogout={handleLogout}
       >
-        {renderContent()}
+        <ErrorBoundary>
+          {renderContent()}
+        </ErrorBoundary>
       </Layout>
     </ThemeProvider>
   );

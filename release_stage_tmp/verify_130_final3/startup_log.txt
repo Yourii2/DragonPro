@@ -1,0 +1,19 @@
+==================================== 
+Dragon Pro - Startup Log 
+Date: Fri 03/13/2026 20:46:58.80 
+==================================== 
+[20:46:58.86] ==================================== 
+[20:46:58.87]    Dragon Pro - Starting Project 
+[20:46:58.88] ==================================== 
+[20:46:58.89] [1/4] Checking XAMPP status... 
+[20:46:59.03] [OK] Apache is already running. 
+[20:46:59.16] [OK] MySQL is already running. 
+[20:46:59.85] [OK] Node is available: v24.12.0 
+[20:47:00.44] [OK] npm.cmd is available: v11.9.0 
+[20:47:00.45] [3/4] Checking for packages... 
+[20:47:00.45] [OK] Packages are already installed. 
+[20:47:00.46] [4/4] Starting development server... 
+[20:47:03.19] Opening browser... 
+[20:47:03.55] ==================================== 
+[20:47:03.55]   Dragon started (development mode) 
+[20:47:03.56] ==================================== 

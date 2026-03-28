@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { Plus, Edit, Trash2, X, Save, Eye, History, Printer, Layers, QrCode } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../../services/apiConfig';
+import { ensurePermissionsLoaded, hasPermission } from '../../services/permissions';
 import { openPrintWindow } from '../../services/printUtils';
 import CustomSelect from '../CustomSelect';
 
@@ -86,6 +87,7 @@ const ProductsPage = () => {
 	const [barcodesAllowedSizeIds, setBarcodesAllowedSizeIds] = useState<number[] | null>(null);
 
 	const [isAssembleOpen, setIsAssembleOpen] = useState(false);
+	const [canViewFactory, setCanViewFactory] = useState(false);
 	const [assembleWarehouseId, setAssembleWarehouseId] = useState<number>(0);
 	const [assembleCompositeId, setAssembleCompositeId] = useState<number>(0);
 	const [assembleSizeId, setAssembleSizeId] = useState<number>(0);
@@ -179,6 +181,10 @@ const ProductsPage = () => {
 			setProducts(rows);
 		});
 		fetchMeta();
+		// load permissions and cache whether user can view factory products
+		ensurePermissionsLoaded().then(() => {
+			try { setCanViewFactory(hasPermission('factory_products', 'view')); } catch { setCanViewFactory(false); }
+		}).catch(() => setCanViewFactory(false));
 	}, []);
 
 	useEffect(() => {
@@ -805,13 +811,13 @@ const ProductsPage = () => {
 					<button onClick={() => openModal()} className="flex items-center gap-2 bg-accent text-white px-4 py-2 rounded-xl text-xs font-black hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20">
 						<Plus size={16} /> إضافة منتج
 					</button>
-					{(allProducts || []).some(p => p.type === 'composite') && (
+					{((allProducts || []).some(p => p.type === 'composite') || canViewFactory) && (
 						<button
 							onClick={openAssembleModal}
 							className="flex items-center gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white px-4 py-2 rounded-xl text-xs font-black hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-all"
-							title="تجميع المنتج المجمع من مكوناته"
+							title="تجميع منتج"
 						>
-							<Layers size={16} /> تجميع المنتجات
+							<Layers size={16} /> تجميع منتج
 						</button>
 					)}
 				</div>
@@ -1371,7 +1377,7 @@ const ProductsPage = () => {
 										</button>
 										<button
 											onClick={handleAssemble}
-											disabled={assembleLoading || !assembleInfo || Number(assembleInfo.max_quantity || 0) <= 0}
+											disabled={assembleLoading || !assembleInfo || Number(assembleInfo.max_quantity || 0) <= 0 || ((assembleInfo?.components || []).some(c => Number(c.available_quantity || 0) < Number(c.per_unit || 0) * Math.max(1, Math.floor(Number(assembleQty || 1))))) }
 											className="bg-accent text-white px-5 py-3 rounded-2xl text-xs font-black hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20 disabled:opacity-60"
 											title={assembleInfo && Number(assembleInfo.max_quantity || 0) <= 0 ? 'لا توجد مكونات كافية للتجميع' : ''}
 										>
@@ -1382,6 +1388,28 @@ const ProductsPage = () => {
 							</div>
 
 							<div className="mt-4 overflow-x-auto rounded-3xl border border-card shadow-sm card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+							{/* Shortage warning banner (client-side check) */}
+							{assembleInfo && (assembleInfo.components || []).length > 0 && (() => {
+								const shortages = (assembleInfo.components || []).map(c => {
+									const per = Number(c.per_unit || 0);
+									const avail = Number(c.available_quantity || 0);
+									const need = per * Math.max(1, Math.floor(Number(assembleQty || 1)));
+									return { product_id: c.product_id, name: c.name || String(c.product_id), per, avail, need };
+								}).filter(s => s.avail < s.need);
+								if (shortages.length > 0) {
+									return (
+										<div className="mb-4 p-3 rounded-xl bg-rose-50 dark:bg-rose-900/10 border border-rose-200 dark:border-rose-800 text-rose-700">
+											<div className="font-bold">تنبيه: بعض المكونات غير كافية للتجميع الحالي</div>
+											<ul className="mt-2 text-xs list-disc list-inside">
+												{shortages.map(s => (
+													<li key={s.product_id}>{s.name} — مطلوب: {s.need}, متوفر: {s.avail}</li>
+												))}
+											</ul>
+										</div>
+									);
+								}
+								return null;
+							})()}
 								<table className="w-full text-right text-sm">
 									<thead className="text-muted border-b dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/20">
 										<tr>

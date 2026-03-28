@@ -1,0 +1,245 @@
+{
+  "tables_only_in_current": [
+    "accessories",
+    "accessory_movements",
+    "accessory_stock",
+    "accounts",
+    "attendance_daily_summary",
+    "attendance_device_users",
+    "attendance_device_workers",
+    "attendance_devices",
+    "attendance_holidays",
+    "attendance_logs",
+    "attendance_schedules",
+    "attendance_shifts",
+    "attendance_worker_daily_summary",
+    "audit_logs",
+    "colors",
+    "composite_product_items",
+    "customer_interactions",
+    "cutting_orders",
+    "dispatch_order_items",
+    "dispatch_orders",
+    "dispatches",
+    "fabric_movements",
+    "fabric_stock",
+    "fabrics",
+    "factory_product_movements",
+    "factory_product_sizes",
+    "factory_product_stage_accessories",
+    "factory_product_stages",
+    "factory_products",
+    "factory_receiving",
+    "factory_stock",
+    "inventory_audit_items",
+    "inventory_audits",
+    "journal_entries",
+    "journal_lines",
+    "manufacturing_order_stages",
+    "manufacturing_orders",
+    "order_documents",
+    "order_status_history",
+    "product_tracking",
+    "production_stages",
+    "report_archives",
+    "report_email_otps",
+    "sales_offices",
+    "shipping_companies",
+    "sizes",
+    "user_notifications",
+    "worker_salaries",
+    "worker_transactions",
+    "workers"
+  ],
+  "tables_only_in_base": [],
+  "diffs": {
+    "customers": {
+      "missing_columns": [],
+      "extra_columns": [
+        {
+          "column": "is_archived",
+          "definition": {
+            "type": "tinyint(1)",
+            "nullable": true,
+            "default": "'0'",
+            "raw": "tinyint(1) DEFAULT '0'"
+          }
+        },
+        {
+          "column": "archived_at",
+          "definition": {
+            "type": "datetime",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "datetime DEFAULT NULL"
+          }
+        }
+      ],
+      "changed_columns": [],
+      "missing_indexes": [],
+      "extra_indexes": [],
+      "pk_diff": false,
+      "fk_diff": []
+    },
+    "employee_transactions": {
+      "missing_columns": [],
+      "extra_columns": [],
+      "changed_columns": [
+        {
+          "column": "type",
+          "base": {
+            "type": "enum('advance','bonus','penalty')",
+            "nullable": false,
+            "default": null,
+            "raw": "enum('advance','bonus','penalty') COLLATE utf8mb4_unicode_ci NOT NULL"
+          },
+          "current": {
+            "type": "enum('advance','bonus','penalty','salary')",
+            "nullable": false,
+            "default": null,
+            "raw": "enum('advance','bonus','penalty','salary') COLLATE utf8mb4_unicode_ci NOT NULL"
+          }
+        }
+      ],
+      "missing_indexes": [],
+      "extra_indexes": [],
+      "pk_diff": false,
+      "fk_diff": []
+    },
+    "employees": {
+      "missing_columns": [],
+      "extra_columns": [
+        {
+          "column": "attendance_enabled",
+          "definition": {
+            "type": "tinyint(1)",
+            "nullable": true,
+            "default": "'1'",
+            "raw": "tinyint(1) DEFAULT '1'"
+          }
+        },
+        {
+          "column": "default_shift_id",
+          "definition": {
+            "type": "int(11)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "int(11) DEFAULT NULL"
+          }
+        }
+      ],
+      "changed_columns": [],
+      "missing_indexes": [],
+      "extra_indexes": [],
+      "pk_diff": false,
+      "fk_diff": []
+    },
+    "orders": {
+      "missing_columns": [],
+      "extra_columns": [
+        {
+          "column": "sales_office_id",
+          "definition": {
+            "type": "int(11)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "int(11) DEFAULT NULL"
+          }
+        }
+      ],
+      "changed_columns": [],
+      "missing_indexes": [],
+      "extra_indexes": [
+        {
+          "name": "idx_orders_sales_office_id",
+          "cols": [
+            "sales_office_id"
+          ]
+        }
+      ],
+      "pk_diff": false,
+      "fk_diff": []
+    },
+    "permission_modules": {
+      "missing_columns": [],
+      "extra_columns": [],
+      "changed_columns": [],
+      "missing_indexes": [],
+      "extra_indexes": [
+        {
+          "name": "ux_permission_modules_name",
+          "cols": [
+            "name"
+          ]
+        }
+      ],
+      "pk_diff": false,
+      "fk_diff": []
+    },
+    "user_defaults": {
+      "missing_columns": [],
+      "extra_columns": [
+        {
+          "column": "default_sales_office_id",
+          "definition": {
+            "type": "int(11)",
+            "nullable": true,
+            "default": "NULL",
+            "raw": "int(11) DEFAULT NULL"
+          }
+        },
+        {
+          "column": "can_change_sales_office",
+          "definition": {
+            "type": "tinyint(1)",
+            "nullable": true,
+            "default": "'0'",
+            "raw": "tinyint(1) DEFAULT '0'"
+          }
+        }
+      ],
+      "changed_columns": [],
+      "missing_indexes": [],
+      "extra_indexes": [],
+      "pk_diff": false,
+      "fk_diff": []
+    },
+    "users": {
+      "missing_columns": [],
+      "extra_columns": [
+        {
+          "column": "balance",
+          "definition": {
+            "type": "decimal(15,2)",
+            "nullable": false,
+            "default": "'0.00'",
+            "raw": "decimal(15,2) NOT NULL DEFAULT '0.00'"
+          }
+        },
+        {
+          "column": "insurance_paid",
+          "definition": {
+            "type": "tinyint(1)",
+            "nullable": false,
+            "default": "'0'",
+            "raw": "tinyint(1) NOT NULL DEFAULT '0' COMMENT 'هل دفع تأمين'"
+          }
+        },
+        {
+          "column": "insurance_amount",
+          "definition": {
+            "type": "decimal(10,2)",
+            "nullable": false,
+            "default": "'0.00'",
+            "raw": "decimal(10,2) NOT NULL DEFAULT '0.00' COMMENT 'مبلغ التأمين المدفوع'"
+          }
+        }
+      ],
+      "changed_columns": [],
+      "missing_indexes": [],
+      "extra_indexes": [],
+      "pk_diff": false,
+      "fk_diff": []
+    }
+  }
+}

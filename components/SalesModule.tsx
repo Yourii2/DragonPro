@@ -160,6 +160,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
   const [isOrderDetailsOpen, setIsOrderDetailsOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
   const [orderTimeline, setOrderTimeline] = useState<any[]>([]);
+  const [statusEditTimeline, setStatusEditTimeline] = useState<any[]>([]);
   const [orderDocuments, setOrderDocuments] = useState<any[]>([]);
   const [docType, setDocType] = useState('delivery_note');
   const [docUrl, setDocUrl] = useState('');
@@ -177,15 +178,44 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
   // Full-order edit state (for manual edit form)
   const [editingOrderId, setEditingOrderId] = useState<number | null>(null);
 
-  // Derived: unique parent products for the cascade dropdown
+  const normalizeProductGroupName = (v: any) => String(v || '').trim().toLowerCase();
+
+  const parentGroupNameById = React.useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of existingProducts) {
+      const pid = String((p as any).product_id || (p as any).id || '');
+      if (!pid) continue;
+      const groupName = normalizeProductGroupName((p as any).parent_name || (p as any).name || '');
+      if (groupName) map.set(pid, groupName);
+    }
+    return map;
+  }, [existingProducts]);
+
+  // Derived: unique parent products for the cascade dropdown (deduped by product name)
   const parentProductsMap = React.useMemo(() => {
     const seen = new Map<string, { id: any; name: string }>();
     for (const p of existingProducts) {
-      const pid = String(p.product_id || p.id);
-      if (!seen.has(pid)) seen.set(pid, { id: p.product_id || p.id, name: (p as any).parent_name || p.name || '' });
+      const pid = String((p as any).product_id || (p as any).id || '');
+      if (!pid) continue;
+      const displayName = String((p as any).parent_name || (p as any).name || '').trim();
+      const groupName = normalizeProductGroupName(displayName);
+      if (!groupName) continue;
+      if (!seen.has(groupName)) seen.set(groupName, { id: pid, name: displayName });
     }
     return Array.from(seen.values());
   }, [existingProducts]);
+
+  const getVariantsForSelectedParent = (selectedParentId: any) => {
+    const key = String(selectedParentId || '').trim();
+    if (!key) return [] as any[];
+    const selectedGroup = parentGroupNameById.get(key);
+    if (selectedGroup) {
+      return existingProducts.filter((ep: any) =>
+        normalizeProductGroupName((ep as any).parent_name || (ep as any).name || '') === selectedGroup
+      );
+    }
+    return existingProducts.filter((ep: any) => String((ep as any).product_id || (ep as any).id) === key);
+  };
 
   const filteredOrders = orders.filter(o => {
     const matchesStatus = statusFilter === 'all' || (o.status || '') === statusFilter;
@@ -232,6 +262,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       case 'in_delivery': return <span className="bg-indigo-100 text-indigo-700 px-2 py-1 rounded-lg text-[10px] font-bold">قيد التسليم</span>;
       case 'delivered': return <span className="bg-emerald-100 text-emerald-700 px-2 py-1 rounded-lg text-[10px] font-bold">تم التسليم</span>;
       case 'returned': return <span className="bg-rose-100 text-rose-700 px-2 py-1 rounded-lg text-[10px] font-bold">مرتجع</span>;
+      case 'cancelled': return <span className="bg-rose-200 text-rose-800 px-2 py-1 rounded-lg text-[10px] font-bold">ملغي</span>;
       default: return <span className="bg-slate-100 text-slate-700 px-2 py-1 rounded-lg text-[10px] font-bold">{status}</span>;
     }
   };
@@ -246,6 +277,30 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       if (r) return r.name || (r.full_name || r.name_ar || r.display_name || null);
     }
     return null;
+  };
+
+  const normalizeRepIdValue = (value: any): string => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric > 0 ? String(numeric) : '';
+  };
+
+  const getLastRepIdFromTimeline = (timeline: any[]): string => {
+    if (!Array.isArray(timeline)) return '';
+    for (const entry of timeline) {
+      const repId = normalizeRepIdValue(entry?.rep_id ?? entry?.repId);
+      if (repId) return repId;
+    }
+    return '';
+  };
+
+  const getPreferredRepIdForStatusChange = (order: any, timeline: any[] = []): string => {
+    return normalizeRepIdValue(order?.rep_id ?? order?.repId) || getLastRepIdFromTimeline(timeline);
+  };
+
+  const shouldAutofillRepForDeliveredReturnedSwitch = (currentStatus: any, nextStatus: any): boolean => {
+    const current = String(currentStatus || '').trim().toLowerCase();
+    const next = String(nextStatus || '').trim().toLowerCase();
+    return (current === 'delivered' && next === 'returned') || (current === 'returned' && next === 'delivered');
   };
 
   useEffect(() => {
@@ -389,7 +444,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       // ── Cascade: parent product selected ──
       if (field === '_parentId') {
         // Check if this parent has any color variants
-        const siblings = existingProducts.filter(ep => String(ep.product_id || ep.id) === String(value));
+        const siblings = getVariantsForSelectedParent(value);
         const hasColors = siblings.some(ep => ep.color);
         const hasSizes = siblings.some(ep => ep.size);
         // If no colors and no sizes → resolve immediately to the first variant
@@ -401,33 +456,32 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
         return { ...it, _parentId: value, _color: '', _size: '', productId: '' as any, name: '', price: 0, color: '', size: '' };
       }
 
-      // ── Cascade: color selected ──
-      if (field === '_color') {
-        const parentId = ia._parentId;
-        const siblings = existingProducts.filter(ep => String(ep.product_id || ep.id) === String(parentId) && ep.color === value);
-        const hasSizes = siblings.some(ep => ep.size);
-        if (!hasSizes && siblings.length > 0) {
-          const m = siblings[0];
-          _sendBridge(m, ia.qty || 1);
-          return { ...it, _color: value, _size: '', productId: m.id, name: m.name || '', price: Number(m.sale_price || m.price || 0), color: value, size: '' };
-        }
-        return { ...it, _color: value, _size: '', productId: '' as any, name: '', color: value, size: '' };
-      }
-
       // ── Cascade: size selected ──
       if (field === '_size') {
         const parentId = ia._parentId;
-        const color = ia._color;
-        const m = existingProducts.find(ep =>
-          String(ep.product_id || ep.id) === String(parentId) &&
-          (color ? ep.color === color : true) &&
-          ep.size === value
+        const siblings = getVariantsForSelectedParent(parentId).filter((ep: any) => ep.size === value);
+        const hasColors = siblings.some(ep => ep.color);
+        if (!hasColors && siblings.length > 0) {
+          const m = siblings[0];
+          _sendBridge(m, ia.qty || 1);
+          return { ...it, _size: value, _color: '', productId: m.id, name: m.name || '', price: Number(m.sale_price || m.price || 0), color: '', size: value };
+        }
+        return { ...it, _size: value, _color: '', productId: '' as any, name: '', color: '', size: value };
+      }
+
+      // ── Cascade: color selected ──
+      if (field === '_color') {
+        const parentId = ia._parentId;
+        const size = ia._size;
+        const m = getVariantsForSelectedParent(parentId).find((ep: any) =>
+          (size ? ep.size === size : true) &&
+          ep.color === value
         );
         if (m) {
           _sendBridge(m, ia.qty || 1);
-          return { ...it, _size: value, productId: m.id, name: m.name || '', price: Number(m.sale_price || m.price || 0), color: m.color || '', size: value };
+          return { ...it, _color: value, productId: m.id, name: m.name || '', price: Number(m.sale_price || m.price || 0), color: value, size: m.size || size || '' };
         }
-        return { ...it, _size: value, size: value };
+        return { ...it, _color: value, color: value };
       }
 
       // ── Legacy: direct productId set (used by editOrder to pre-populate) ──
@@ -1423,7 +1477,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
     setOrderDocuments([]);
     setStatusUpdate('');
     setStatusNote('');
-    setStatusUpdateRepId(order.rep_id ? String(order.rep_id) : '');
+    setStatusUpdateRepId(getPreferredRepIdForStatusChange(order));
     try {
       const [tRes, dRes] = await Promise.all([
         fetch(`${API_BASE_PATH}/api.php?module=orders&action=getTimeline&id=${order.id}`),
@@ -1535,13 +1589,36 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
 
   const openStatusEdit = (order: any) => {
     setStatusEditOrder(order);
+    setStatusEditTimeline([]);
     setStatusEditValue(order.status || '');
     setStatusEditNote('');
     setReturnFineMode('none');
     setReturnFineAmount('');
-    setStatusEditRepId(order.rep_id ? String(order.rep_id) : '');
+    setStatusEditRepId(getPreferredRepIdForStatusChange(order));
     setIsStatusEditOpen(true);
+    fetch(`${API_BASE_PATH}/api.php?module=orders&action=getTimeline&id=${order.id}`)
+      .then(r => r.json())
+      .then(jr => {
+        if (jr?.success) setStatusEditTimeline(jr.data || []);
+      })
+      .catch(err => {
+        console.error('Failed to load status edit timeline', err);
+      });
   };
+
+  useEffect(() => {
+    if (!selectedOrder || statusUpdateRepId) return;
+    if (!shouldAutofillRepForDeliveredReturnedSwitch(selectedOrder.status, statusUpdate)) return;
+    const preferredRepId = getPreferredRepIdForStatusChange(selectedOrder, orderTimeline);
+    if (preferredRepId) setStatusUpdateRepId(preferredRepId);
+  }, [selectedOrder, statusUpdate, statusUpdateRepId, orderTimeline]);
+
+  useEffect(() => {
+    if (!statusEditOrder || statusEditRepId) return;
+    if (!shouldAutofillRepForDeliveredReturnedSwitch(statusEditOrder.status, statusEditValue)) return;
+    const preferredRepId = getPreferredRepIdForStatusChange(statusEditOrder, statusEditTimeline);
+    if (preferredRepId) setStatusEditRepId(preferredRepId);
+  }, [statusEditOrder, statusEditValue, statusEditRepId, statusEditTimeline]);
 
   // when opening details, also ensure warehouses available for potential edits
   const openOrderAndEnsure = async (order: any) => {
@@ -1631,7 +1708,13 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
                     <CustomSelect
                       value={statusUpdate}
-                      onChange={v => setStatusUpdate(v)}
+                      onChange={v => {
+                        setStatusUpdate(v);
+                        if (selectedOrder && shouldAutofillRepForDeliveredReturnedSwitch(selectedOrder.status, v)) {
+                          const preferredRepId = getPreferredRepIdForStatusChange(selectedOrder, orderTimeline);
+                          if (preferredRepId) setStatusUpdateRepId(preferredRepId);
+                        }
+                      }}
                       options={[
                         { value: '', label: 'اختر حالة' },
                         { value: 'pending', label: 'قيد الانتظار' },
@@ -1754,7 +1837,13 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                 <label className="text-xs font-bold text-slate-500">الحالة</label>
                 <CustomSelect
                   value={statusEditValue}
-                  onChange={v => setStatusEditValue(v)}
+                  onChange={v => {
+                    setStatusEditValue(v);
+                    if (statusEditOrder && shouldAutofillRepForDeliveredReturnedSwitch(statusEditOrder.status, v)) {
+                      const preferredRepId = getPreferredRepIdForStatusChange(statusEditOrder, statusEditTimeline);
+                      if (preferredRepId) setStatusEditRepId(preferredRepId);
+                    }
+                  }}
                   options={[
                     { value: '', label: 'اختر حالة' },
                     { value: 'pending', label: 'قيد الانتظار' },
@@ -2057,8 +2146,8 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                 <div className="hidden md:grid grid-cols-[2rem_1fr_7rem_7rem_4rem_6rem_4rem_2rem] gap-2 px-4 py-2 bg-slate-50 border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-wide">
                   <div></div>
                   <div>المنتج</div>
-                  <div className="text-center">اللون</div>
                   <div className="text-center">المقاس</div>
+                  <div className="text-center">اللون</div>
                   <div className="text-center">الكمية</div>
                   <div className="text-center">السعر</div>
                   <div className="text-center">الإجمالي</div>
@@ -2073,23 +2162,24 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                     const selColor = ia._color || '';
                     const selSize  = ia._size  || '';
 
-                    const colorOptions: string[] = parentId
-                      ? [...new Set<string>(
-                          existingProducts
-                            .filter((ep: any) => String(ep.product_id || ep.id) === String(parentId) && ep.color)
-                            .map((ep: any) => ep.color as string)
-                        )]
-                      : [];
+                    const selectedVariants = getVariantsForSelectedParent(parentId);
 
                     const sizeOptions: string[] = parentId
                       ? [...new Set<string>(
-                          existingProducts
-                            .filter((ep: any) =>
-                              String(ep.product_id || ep.id) === String(parentId) &&
-                              (selColor ? ep.color === selColor : true) &&
-                              ep.size
-                            )
+                          selectedVariants
+                            .filter((ep: any) => ep.size)
                             .map((ep: any) => ep.size as string)
+                        )]
+                      : [];
+
+                    const colorOptions: string[] = parentId
+                      ? [...new Set<string>(
+                          selectedVariants
+                            .filter((ep: any) =>
+                              (selSize ? ep.size === selSize : true) &&
+                              ep.color
+                            )
+                            .map((ep: any) => ep.color as string)
                         )]
                       : [];
 
@@ -2107,24 +2197,24 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                           className="w-full text-xs"
                         />
 
-                        {/* Color */}
-                        {colorOptions.length > 0 ? (
-                          <CustomSelect
-                            value={selColor}
-                            onChange={v => updateOrderItemField(it.id, '_color', v)}
-                            options={[{ value: '', label: '— لون —' }, ...colorOptions.map(c => ({ value: c, label: c }))]}
-                            className="w-full text-xs"
-                          />
-                        ) : (
-                          <div className="h-9 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-center text-[10px] text-slate-300">—</div>
-                        )}
-
                         {/* Size */}
                         {sizeOptions.length > 0 ? (
                           <CustomSelect
                             value={selSize}
                             onChange={v => updateOrderItemField(it.id, '_size', v)}
                             options={[{ value: '', label: '— مقاس —' }, ...sizeOptions.map(s => ({ value: s, label: s }))]}
+                            className="w-full text-xs"
+                          />
+                        ) : (
+                          <div className="h-9 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-center text-[10px] text-slate-300">—</div>
+                        )}
+
+                        {/* Color */}
+                        {colorOptions.length > 0 ? (
+                          <CustomSelect
+                            value={selColor}
+                            onChange={v => updateOrderItemField(it.id, '_color', v)}
+                            options={[{ value: '', label: '— لون —' }, ...colorOptions.map(c => ({ value: c, label: c }))]}
                             className="w-full text-xs"
                           />
                         ) : (
@@ -2319,9 +2409,10 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                     { value: 'with_rep', label: 'مع المندوب' },
                     { value: 'in_delivery', label: 'قيد التسليم' },
                     { value: 'delivered', label: 'تم التسليم' },
-                    { value: 'returned', label: 'مرتجع' }
+                    { value: 'returned', label: 'مرتجع' },
+                    { value: 'cancelled', label: 'ملغي' }
                   ]}
-                  className="text-xs font-bold"
+                  className="text-sm font-bold min-w-[180px]"
                 />
                 <div className="flex items-center gap-2">
                   <label className="text-xs text-slate-500 mr-1">تاريخ</label>

@@ -90,6 +90,37 @@ const orderDistinctProducts = (o: any) => {
 
 const balanceLabel = (bal: number) => (bal > 0 ? 'له' : bal < 0 ? 'عليه' : '');
 const balanceClass = (bal: number) => (bal > 0 ? 'text-emerald-600' : bal < 0 ? 'text-rose-600' : 'text-slate-500');
+const getOrderStatusLabelAr = (statusRaw: any) => {
+  const status = String(statusRaw || '').toLowerCase();
+  switch (status) {
+    case 'pending':
+      return 'قيد الانتظار';
+    case 'returned':
+      return 'مرتجع';
+    case 'partial_return':
+      return 'مرتجع جزئي';
+    case 'full_return':
+      return 'مرتجع كلي';
+    case 'cancelled':
+    case 'canceled':
+      return 'ملغي';
+    case 'postponed':
+    case 'deferred':
+      return 'مؤجل';
+    case 'with_rep':
+      return 'مع المندوب';
+    case 'in_delivery':
+      return 'مع شركة الشحن';
+    case 'delivered':
+      return 'تم التسليم';
+    case 'delivered_to_customer':
+      return 'تم التسليم للعميل';
+    case 'closed':
+      return 'مغلق';
+    default:
+      return status ? status : 'غير محدد';
+  }
+};
 
 const StatCard: React.FC<{ label: string; value: React.ReactNode; hint?: string; className?: string }> = ({
   label,
@@ -243,8 +274,18 @@ const SalesDaily: React.FC = () => {
         const jrReturned = await prReturned.json().catch(() => ({ success: false }));
         const listReturned = jrReturned.success ? (jrReturned.data || []) : [];
 
+        // سحب المؤجل
+        const prPostponed = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=postponed`);
+        const jrPostponed = await prPostponed.json().catch(() => ({ success: false }));
+        const listPostponed = jrPostponed.success ? (jrPostponed.data || []) : [];
+
+        // سحب الملغي
+        const prCancelled = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=cancelled`);
+        const jrCancelled = await prCancelled.json().catch(() => ({ success: false }));
+        const listCancelled = jrCancelled.success ? (jrCancelled.data || []) : [];
+
         // دمجهم مع بعض
-        setPendingOrdersList([...listPending, ...listReturned]);
+        setPendingOrdersList([...listPending, ...listReturned, ...listPostponed, ...listCancelled]);
       } catch (e) {
         console.debug('Failed to load orders lists', e);
       }
@@ -254,14 +295,6 @@ const SalesDaily: React.FC = () => {
 
   // Auto-select sensible defaults: if only one rep/shipping company, or user defaults provide treasury/warehouse
   useEffect(() => {
-    if (!repChosen) {
-      if (isShippingMode) {
-        if (shippingCompanies.length === 1) onSelectShippingCompany(Number(shippingCompanies[0].id));
-      } else {
-        if (reps.length === 1) onSelectRep(Number(reps[0].id));
-      }
-    }
-
     if (!selectedTreasuryId && userDefaults && userDefaults.default_treasury_id) {
       setSelectedTreasuryId(Number(userDefaults.default_treasury_id));
     }
@@ -270,7 +303,7 @@ const SalesDaily: React.FC = () => {
       setSelectedWarehouseId(Number(userDefaults.default_warehouse_id));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reps, shippingCompanies, userDefaults]);
+  }, [userDefaults]);
 
   const loadRepContext = async (repId: number) => {
     // Accurate prev balance
@@ -390,13 +423,15 @@ const SalesDaily: React.FC = () => {
   // Called after completeDaily so newly-assigned orders (now with_rep) disappear immediately.
   const refreshPendingOrdersList = async () => {
     try {
-      const [rPending, rReturned] = await Promise.all([
+      const [rPending, rReturned, rCancelled] = await Promise.all([
         fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=pending`).then(r => r.json()).catch(() => ({ success: false })),
-        fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=returned`).then(r => r.json()).catch(() => ({ success: false }))
+        fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=returned`).then(r => r.json()).catch(() => ({ success: false })),
+        fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=cancelled`).then(r => r.json()).catch(() => ({ success: false }))
       ]);
       const listPending  = rPending.success  ? (rPending.data  || []) : [];
       const listReturned = rReturned.success ? (rReturned.data || []) : [];
-      setPendingOrdersList([...listPending, ...listReturned]);
+      const listCancelled = rCancelled.success ? (rCancelled.data || []) : [];
+      setPendingOrdersList([...listPending, ...listReturned, ...listCancelled]);
     } catch (e) {
       console.debug('refreshPendingOrdersList failed', e);
     }
@@ -404,6 +439,64 @@ const SalesDaily: React.FC = () => {
 
   const togglePending = (id: number) => {
     setSelectedPendingIds(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
+  };
+
+  const buildShortagesHtml = (shortages: any[], intro?: string) => {
+    const rows = Array.isArray(shortages) ? shortages : [];
+    const list = rows.map((row: any) => {
+      const product = row.product_name || row.name || `منتج #${row.product_id ?? ''}`;
+      const color = String(row.color || '').trim();
+      const size = String(row.size || '').trim();
+      const required = toNum(row.required_qty ?? row.required ?? row.requested_qty ?? 0);
+      const available = toNum(row.available_qty ?? row.available ?? 0);
+      const shortage = Math.max(0, required - available);
+      const variant = `${color ? ` / ${color}` : ''}${size ? ` / ${size}` : ''}`;
+      return `<li style="margin-bottom:8px;"><strong>${product}${variant}</strong>: مطلوب <b>${required}</b>، متاح <b>${available}</b>${shortage > 0 ? `، عجز <b style=\"color:#e11d48\">${shortage}</b>` : ''}</li>`;
+    }).join('');
+
+    return `
+      <div style="text-align:right; font-size:14px; line-height:1.9;">
+        ${intro ? `<div style="margin-bottom:8px;">${intro}</div>` : ''}
+        <ul style="padding-right:20px; list-style-type: disc; margin:0;">${list}</ul>
+      </div>
+    `;
+  };
+
+  const checkCumulativeStockForOrderIds = async (
+    orderIds: number[]
+  ): Promise<{ ok: boolean; message?: string; shortages?: any[] }> => {
+    if (!selectedWarehouseId) {
+      return { ok: false, message: 'يرجى اختيار المستودع أولاً قبل التحقق من المخزون.' };
+    }
+
+    const ids = Array.from(new Set((orderIds || []).map((id) => Number(id)).filter((id) => id > 0)));
+    if (ids.length === 0) return { ok: true };
+
+    try {
+      const response = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getConfirmationStockSummary`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ warehouse_id: Number(selectedWarehouseId), order_ids: ids })
+      });
+      const result = await response.json().catch(() => null);
+      if (!result || result.success === false) {
+        return { ok: false, message: result?.message || 'فشل التحقق من المخزون.' };
+      }
+
+      const shortages = Array.isArray(result?.data?.shortages) ? result.data.shortages : [];
+      if (shortages.length > 0) {
+        return {
+          ok: false,
+          message: 'المخزون غير كافٍ لبعض المنتجات في المستودع المحدد.',
+          shortages
+        };
+      }
+
+      return { ok: true };
+    } catch (error) {
+      console.debug('Cumulative stock check failed', error);
+      return { ok: false, message: 'فشل الاتصال بالخادم أثناء التحقق من المخزون.' };
+    }
   };
 
   // Validate order products against product catalog and stock for the selected warehouse
@@ -460,38 +553,6 @@ const SalesDaily: React.FC = () => {
         return { ok: false, message: html };
       }
 
-      const items = Object.values(prodMap);
-      if (items.length > 0) {
-        const stockResp = await fetch(`${API_BASE_PATH}/api.php?module=stock&action=checkAvailability`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ warehouse_id: selectedWarehouseId, items })
-        });
-        const stockJr = await stockResp.json().catch(() => null);
-        if (!stockJr || stockJr.success === false) {
-          const unavailable = (stockJr && stockJr.unavailable_items) || [];
-          if (unavailable.length > 0) {
-            let msg = `الاوردر يحتوي على منتجات غير متاحة أو كمياتها لا تكفي للمستودع المحدد:\n\n`;
-            unavailable.forEach((it: any) => {
-              const name = it.name || it.product_name || 'منتج غير معروف';
-              const required = typeof it.required !== 'undefined' ? it.required : it.requested_qty ?? '';
-              const available = typeof it.available !== 'undefined' ? it.available : it.available_qty ?? 0;
-              if (typeof available === 'number' && available <= 0) {
-                msg += `- ${name}: غير موجود في المخزن\n`;
-              } else if (typeof available === 'number' && typeof required === 'number' && available < required) {
-                msg += `- ${name}: الكمية لا تكفي (مطلوب ${required}، متوفر ${available})\n`;
-              } else if (it.reason) {
-                msg += `- ${name}: ${String(it.reason)}\n`;
-              } else {
-                msg += `- ${name}: غير متاح\n`;
-              }
-            });
-            return { ok: false, message: msg };
-          }
-          if (!stockJr) return { ok: false, message: 'فشل التحقق من المخزون. حاول مرة أخرى.' };
-        }
-      }
-
       return { ok: true };
     } catch (e) {
       console.debug('Validation failed', e);
@@ -511,7 +572,7 @@ const SalesDaily: React.FC = () => {
       return;
     }
 
-    const allowedStatuses = ['pending', 'returned'];
+    const allowedStatuses = ['pending', 'returned', 'cancelled', 'canceled'];
     const accepted = toAdd.filter(t => allowedStatuses.includes(String(t.status || 'pending')));
     const rejected = toAdd.filter(t => !allowedStatuses.includes(String(t.status || '')));
 
@@ -525,12 +586,24 @@ const SalesDaily: React.FC = () => {
 
     const finallyAccepted: any[] = [];
     const stockRejected: Array<{ order: any; message: string }> = [];
+    const workingOrderIds = todayOrdersUnique.map((o: any) => Number(o.id)).filter((id: number) => id > 0);
 
     for (const ord of newOnes) {
       const v = await validateOrderProducts(ord);
       if (!v.ok) {
         stockRejected.push({ order: ord, message: v.message || 'مشكلة في التحقق من المنتجات' });
       } else {
+        const candidateOrderIds = Array.from(new Set([...workingOrderIds, Number(ord.id)]));
+        const stockCheck = await checkCumulativeStockForOrderIds(candidateOrderIds);
+        if (!stockCheck.ok) {
+          const message = stockCheck.shortages && stockCheck.shortages.length > 0
+            ? buildShortagesHtml(stockCheck.shortages, `لا يمكن إضافة الأوردر #${ord.orderNumber ?? ord.order_number ?? ord.id} بسبب نقص تراكمي في المخزون:`)
+            : (stockCheck.message || 'مشكلة في التحقق من المخزون');
+          stockRejected.push({ order: ord, message });
+          continue;
+        }
+
+        workingOrderIds.push(Number(ord.id));
         finallyAccepted.push(ord);
       }
     }
@@ -542,7 +615,7 @@ const SalesDaily: React.FC = () => {
     }
 
     let successMsg = `تم إضافة ${finallyAccepted.length} اوردرات لليومية.`;
-    if (rejected.length > 0) successMsg += ` ${rejected.length} اوردرات لم تُضاف لأن حالتها ليست 'قيد الانتظار' أو 'مرتجع'.`;
+    if (rejected.length > 0) successMsg += ` ${rejected.length} اوردرات لم تُضاف لأن حالتها ليست 'قيد الانتظار' أو 'مرتجع' أو 'ملغي'.`;
     if (stockRejected.length > 0) successMsg += ` ${stockRejected.length} اوردرات لم تُضاف لمشاكل في المنتج/المخزون.`;
     Swal.fire('انتهاء', successMsg, 'success');
 
@@ -781,9 +854,9 @@ const SalesDaily: React.FC = () => {
       console.debug('Failed to validate selected product against order', e);
     }
 
-    const allowedStatuses = ['pending', 'returned'];
+    const allowedStatuses = ['pending', 'returned', 'cancelled', 'canceled'];
     if (!allowedStatuses.includes(String(match.status || 'pending'))) {
-      Swal.fire('غير مسموح', 'لا يمكن إضافة اوردر ليست حالتها قيد الانتظار/مرتجع.', 'warning');
+      Swal.fire('غير مسموح', 'لا يمكن إضافة اوردر ليست حالتها قيد الانتظار/مرتجع/ملغي.', 'warning');
       setBarcodeInput('');
       return;
     }
@@ -954,7 +1027,7 @@ const scanBarcodeAddOrder = async () => {
 
     // --- 5. فحص حالة الاوردر والبحث عن اسم المندوب ---
     const status = String(match.status || 'pending');
-    const allowedStatuses = ['pending', 'returned'];
+    const allowedStatuses = ['pending', 'returned', 'cancelled', 'canceled'];
     
     if (!allowedStatuses.includes(status)) {
       
@@ -986,17 +1059,9 @@ const scanBarcodeAddOrder = async () => {
       }
 
       // 3. لو الاوردر حالته حاجة تانية (تم التسليم مثلاً)
-      let statusAr = status;
-      switch(status) {
-        case 'delivered': statusAr = 'تم التسليم بنجاح'; break;
-        case 'delivered_to_customer': statusAr = 'تم التسليم للعميل'; break;
-        case 'closed': statusAr = 'مغلقة'; break;
-        case 'canceled': statusAr = 'ملغاة'; break;
-        case 'postponed': statusAr = 'مؤجلة'; break;
-        case 'partial_return': statusAr = 'مرتجع جزئي'; break;
-      }
+      const statusAr = getOrderStatusLabelAr(status);
       
-      Swal.fire('عفواً، غير مسموح', `لا يمكن إضافة الاوردر لأن حالته: "${statusAr}".\nمسموح فقط بإضافة الاوردرات "قيد الانتظار" أو "المرتجعة".`, 'warning');
+      Swal.fire('عفواً، غير مسموح', `لا يمكن إضافة الاوردر لأن حالته: "${statusAr}".\nمسموح فقط بإضافة الاوردرات "قيد الانتظار" أو "المرتجعة" أو "الملغية".`, 'warning');
       setBarcodeInput('');
       return;
     }
@@ -1074,54 +1139,25 @@ const scanBarcodeAddOrder = async () => {
       }
 
       const items = Object.values(prodMap);
-
       if (items.length > 0) {
-        const stockResp = await fetch(`${API_BASE_PATH}/api.php?module=stock&action=checkAvailability`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ warehouse_id: selectedWarehouseId, items })
-        });
-        const stockJr = await stockResp.json().catch(() => null);
-        
-        if (!stockJr || stockJr.success === false) {
-          const unavailable = (stockJr && stockJr.unavailable_items) || [];
-          if (unavailable.length > 0) {
-            let msgHTML = `
-              <div style="text-align: right; font-size: 14px;">
-                لا يمكن إضافة الاوردر بسبب نقص في المخزون للمستودع المحدد:<br/><br/>
-                <ul style="padding-right: 20px; list-style-type: disc;">
-            `;
-            
-            unavailable.forEach((it: any) => {
-              const name = it.name || it.product_name || 'منتج غير معروف';
-              const required = typeof it.required !== 'undefined' ? it.required : it.requested_qty ?? '';
-              const available = typeof it.available !== 'undefined' ? it.available : it.available_qty ?? 0;
-              const parts: string[] = [];
-              
-              if (typeof available === 'number' && available <= 0) {
-                parts.push('رصيده صفر في المخزون');
-              } else if (typeof available === 'number' && typeof required === 'number' && available < required) {
-                parts.push(`مطلوب ${required}، المتاح ${available} فقط`);
-              }
-              
-              if (parts.length === 0 && it.reason) parts.push(String(it.reason));
-              if (parts.length === 0) parts.push('نقص في التوفر');
-              
-              msgHTML += `<li style="margin-bottom: 8px;"><strong>${name}:</strong> <span style="color: #e11d48;">${parts.join(' | ')}</span></li>`;
+        const candidateOrderIds = Array.from(new Set([
+          ...todayOrdersUnique.map((o: any) => Number(o.id)).filter((id: number) => id > 0),
+          Number(match.id)
+        ]));
+        const stockCheck = await checkCumulativeStockForOrderIds(candidateOrderIds);
+        if (!stockCheck.ok) {
+          if (stockCheck.shortages && stockCheck.shortages.length > 0) {
+            Swal.fire({
+              title: 'نقص في المخزون',
+              html: buildShortagesHtml(stockCheck.shortages, 'لا يمكن إضافة الأوردر بسبب نقص تراكمي في المخزون للمستودع المحدد:'),
+              icon: 'warning',
+              confirmButtonText: 'حسناً'
             });
-            
-            msgHTML += `</ul></div>`;
-            
-            Swal.fire({ title: 'نقص في المخزون', html: msgHTML, icon: 'warning', confirmButtonText: 'حسناً' });
-            setBarcodeInput('');
-            return;
+          } else {
+            Swal.fire('خطأ', stockCheck.message || 'فشل التحقق من المخزون. حاول مرة أخرى.', 'error');
           }
-          
-          if (!stockJr) {
-            Swal.fire('خطأ', 'فشل التحقق من المخزون. حاول مرة أخرى.', 'error');
-            setBarcodeInput('');
-            return;
-          }
+          setBarcodeInput('');
+          return;
         }
       }
     } catch (e) {
@@ -1155,15 +1191,15 @@ const scanBarcodeAddOrder = async () => {
 
     const html =
       `<!doctype html><html><head><meta charset="utf-8"><title>أذن تسليم</title>` +
-      `<style>body{font-family: Arial, Helvetica, "Noto Naskh Arabic", sans-serif; direction:rtl; width:340px; padding:6px;} h2{text-align:center;} table{width:100%; border-collapse:collapse;} th,td{font-size:12px; padding:4px; border-bottom:1px solid #ddd;} th{font-weight:700; text-align:right;} .totals{margin-top:8px; font-weight:700;} </style>` +
+      `<style>@page{size:80mm auto; margin:2mm;}body{font-family: Arial, Helvetica, "Noto Naskh Arabic", sans-serif; direction:rtl; width:80mm; padding:4px; margin:0; font-size:12px; color:#000;} h2{text-align:center; font-size:16px; margin:4px 0;} table{width:100%; border-collapse:collapse; font-size:12px;} th,td{font-size:12px; padding:3px 2px; border-bottom:1px solid #ddd; text-align:right;} th{font-weight:700;} .totals{margin-top:6px; font-weight:700; font-size:13px;} .center{text-align:center;} .small{font-size:11px;}</style>` +
       `</head><body>` +
       `<h2>أذن تسليم</h2>` +
-      `<div>التاريخ: ${dateStr}</div>` +
-      `<div>استلام بضاعه للمندوب"${whoName}"</div>` +
+      `<div class="small">التاريخ: ${dateStr}</div>` +
+      `<div class="small">استلام بضاعه للمندوب: ${whoName}</div>` +
       `<br/>` +
-      `<table><thead><tr><th>المنتج</th><th>اللون</th><th>المقاس</th><th>الكمية</th></tr></thead><tbody>` +
+      `<table><thead><tr><th style="width:45%">المنتج</th><th style="width:20%">اللون</th><th style="width:15%">المقاس</th><th style="width:20%">الكمية</th></tr></thead><tbody>` +
       rows
-        .map(r => `<tr><td>${r.name}</td><td>${r.color}</td><td>${r.size}</td><td style="text-align:left">${r.qty}</td></tr>`)
+        .map(r => `<tr><td style="word-break:break-word">${r.name}</td><td>${r.color}</td><td>${r.size}</td><td style="text-align:left">${r.qty}</td></tr>`)
         .join('') +
       `</tbody></table>` +
       `<div class="totals">اجمالى المنتجات: ${totalProducts}</div>` +
@@ -1545,6 +1581,20 @@ const scanBarcodeAddOrder = async () => {
       return;
     }
 
+    const completeStockCheck = await checkCumulativeStockForOrderIds(ordersToAssign.map((o: any) => Number(o.id)));
+    if (!completeStockCheck.ok) {
+      if (completeStockCheck.shortages && completeStockCheck.shortages.length > 0) {
+        Swal.fire({
+          title: 'نقص في المخزون',
+          html: buildShortagesHtml(completeStockCheck.shortages, 'لا يمكن إتمام اليومية لأن المخزون غير كافٍ لهذه الأوردرات:'),
+          icon: 'warning'
+        });
+      } else {
+        Swal.fire('خطأ', completeStockCheck.message || 'فشل التحقق من المخزون.', 'error');
+      }
+      return;
+    }
+
     if (Math.abs(paymentAdjustment) > 0 && !selectedTreasuryId) {
       Swal.fire('اختر الخزينة', 'هناك مبلغ مدفوع الآن ويجب اختيار الخزينة الخاصة به.', 'warning');
       return;
@@ -1664,6 +1714,18 @@ const scanBarcodeAddOrder = async () => {
       if (!ordersToAssign || ordersToAssign.length === 0) return;
       if (Math.abs(paymentAdjustment) > 0 && !selectedTreasuryId) return;
 
+      const completeStockCheck = await checkCumulativeStockForOrderIds(ordersToAssign.map((o: any) => Number(o.id)));
+      if (!completeStockCheck.ok) {
+        if (completeStockCheck.shortages && completeStockCheck.shortages.length > 0) {
+          await Swal.fire({
+            title: 'نقص في المخزون',
+            html: buildShortagesHtml(completeStockCheck.shortages, 'لا يمكن إتمام اليومية لأن المخزون غير كافٍ لهذه الأوردرات:'),
+            icon: 'warning'
+          });
+        }
+        return;
+      }
+
       let dailyReason = '';
       if (selectedWarehouseId && todayPiecesCount > 0) dailyReason = 'بدء اليومية';
 
@@ -1765,12 +1827,7 @@ const scanBarcodeAddOrder = async () => {
                 <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse inline-block" />
                 يومية مفتوحة: {openDailyInfo.daily_code}
               </span>
-            ) : (
-              <span className="inline-flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 text-slate-500 px-3 py-1.5 rounded-full text-xs border border-slate-200 dark:border-slate-700">
-                <span className="w-2 h-2 rounded-full bg-slate-400 inline-block" />
-                لا يوجد يومية مفتوحة
-              </span>
-            )}
+            ) : null}
           </div>
         )}
       </div>
@@ -1996,6 +2053,7 @@ const scanBarcodeAddOrder = async () => {
                           #{p.orderNumber ?? p.order_number ?? p.id} - {p.customerName ?? p.customer_name ?? ''}
                         </div>
                         <div className="text-xs text-slate-500 mt-1">{p.governorate || ''}</div>
+                        <div className="text-xs text-slate-500 mt-1">الحالة: {getOrderStatusLabelAr(p.status || p.order_status)}</div>
                         <div className="text-xs text-slate-400 mt-1">{orderPieces(p).toLocaleString()} قطع</div>
                       </div>
                     </label>
@@ -2039,6 +2097,7 @@ const scanBarcodeAddOrder = async () => {
                       <div className="text-xs text-slate-500 mt-1">
                         {o.governorate || ''} • {o.phone || o.phone1 || ''}
                       </div>
+                      <div className="text-xs text-slate-500 mt-1">الحالة: {getOrderStatusLabelAr(o.status || o.order_status)}</div>
                       <div className="text-xs text-slate-400 mt-1">{orderPieces(o).toLocaleString()} قطع</div>
                     </div>
                     <div className="flex items-center gap-3">

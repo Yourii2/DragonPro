@@ -15,6 +15,7 @@ const DailyReport: React.FC = () => {
   const [ordersMap, setOrdersMap] = useState<Record<number, any>>({});
   const [archives, setArchives] = useState<any[]>([]);
   const [archivesLoading, setArchivesLoading] = useState(false);
+  const [assignedToRepsStats, setAssignedToRepsStats] = useState<{ orders: number; pieces: number }>({ orders: 0, pieces: 0 });
 
   useEffect(() => { load(); }, [date]);
   useEffect(() => { loadArchives(); }, [date]);
@@ -36,6 +37,23 @@ const DailyReport: React.FC = () => {
       const url = `${API_BASE_PATH}/api.php?module=reports&action=finance&start_date=${date}&end_date=${date}`;
       const r = await fetch(url);
       const j = await r.json();
+
+      // Daily assigned-to-reps summary from rep_daily_journal
+      try {
+        const jUrl = `${API_BASE_PATH}/api.php?module=sales&action=getRepDailyJournal&from=${date}&to=${date}`;
+        const jr = await fetch(jUrl);
+        const jj = await jr.json();
+        if (jj && jj.success && Array.isArray(jj.data)) {
+          const orders = jj.data.reduce((sum: number, row: any) => sum + Number(row?.orders_assigned_count || 0), 0);
+          const pieces = jj.data.reduce((sum: number, row: any) => sum + Number(row?.pieces_assigned_count || 0), 0);
+          setAssignedToRepsStats({ orders, pieces });
+        } else {
+          setAssignedToRepsStats({ orders: 0, pieces: 0 });
+        }
+      } catch (e) {
+        setAssignedToRepsStats({ orders: 0, pieces: 0 });
+      }
+
       if (j && j.success) {
         setStartingBalance(typeof j.data.starting_balance !== 'undefined' ? Number(j.data.starting_balance) : null);
         setTreasuryHistory(j.data.treasuryBalanceHistory || []);
@@ -43,10 +61,12 @@ const DailyReport: React.FC = () => {
       } else {
         setTreasuryHistory([]);
         setRecords([]);
+        setAssignedToRepsStats({ orders: 0, pieces: 0 });
         Swal.fire('تنبيه', 'لا توجد بيانات لليوم المحدد.', 'info');
       }
     } catch (e) {
       console.error('Failed to load daily report', e);
+      setAssignedToRepsStats({ orders: 0, pieces: 0 });
       Swal.fire('خطأ', 'فشل تحميل تقرير اليومية. راجع الكونسول.', 'error');
     } finally { setLoading(false); }
   };
@@ -218,9 +238,11 @@ const DailyReport: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 mt-2">
+      <div className="grid grid-cols-2 lg:grid-cols-8 gap-3 mt-2">
         <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>عدد الاوردرات المسلمة<br/><div className="font-black">{orderMetrics.deliveredOrders}</div></div>
         <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>عدد الاوردرات المرتجعة<br/><div className="font-black">{orderMetrics.returnedOrders}</div></div>
+        <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>إجمالي الاوردرات المضافة للمناديب<br/><div className="font-black">{Number(assignedToRepsStats.orders || 0).toLocaleString()}</div></div>
+        <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>عدد المنتجات المضافة للمناديب<br/><div className="font-black">{Number(assignedToRepsStats.pieces || 0).toLocaleString()}</div></div>
         <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>إجمالي القطع المسلمة<br/><div className="font-black">{orderMetrics.deliveredPieces}</div></div>
         <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>إجمالي القطع المرتجعة<br/><div className="font-black">{orderMetrics.returnedPieces}</div></div>
         <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>إجمالي المبيعات (مبلغ)<br/><div className="font-black">{Number(orderMetrics.salesAmount||0).toLocaleString()}</div></div>

@@ -136,7 +136,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
   const [receivingData, setReceivingData] = useState({
     supplierId: '',
     warehouseId: '',
-    items: [{ id: Date.now(), itemType: ((localStorage.getItem('Dragon_product_source') || 'both').toString() === 'suppliers') ? 'product_new' : 'fabric_new', isNew: true, name: '', color: '', size: '', costPrice: 0, vendorPrice: 0, sellingPrice: 0, qty: 1, barcode: '', productId: '', _parentId: '', _color: '', _size: '' }],
+    items: [{ id: Date.now(), itemType: ((localStorage.getItem('Dragon_product_source') || 'both').toString() === 'suppliers') ? 'product_new' : 'fabric_new', isNew: true, name: '', color: '', size: '', costPrice: 0, newCostPrice: 0, vendorPrice: 0, sellingPrice: 0, qty: 1, barcode: '', productId: '', _parentId: '', _color: '', _size: '' }],
     paidAmount: 0,
     treasuryId: '',
   });
@@ -148,6 +148,10 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
     return sum + (ep * Number(item.qty));
   }, 0), [receivingData.items, purchasePriceType]);
   const currentSupplierForReturn = useMemo(() => suppliers.find(s => s.id === parseInt(returnsData.supplierId)) || null, [returnsData.supplierId, suppliers]);
+  const toSupplierDebt = (balance: any) => {
+    const n = Number(balance ?? 0);
+    return Number.isFinite(n) ? -n : 0;
+  };
   const returnInvoiceTotal = useMemo(() => returnsData.items.reduce((sum, item) => {
     const ep = purchasePriceType === 'vendor_price' ? (Number((item as any).vendorPrice) || 0) : Number(item.costPrice);
     return sum + (ep * Number(item.qty));
@@ -434,6 +438,14 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
       return { success: false, message: text };
     }
   };
+
+  useEffect(() => {
+    if (receivingData.warehouseId) {
+      fetchWarehouseStock(String(receivingData.warehouseId));
+      fetchWarehouseFabrics(String(receivingData.warehouseId));
+      fetchWarehouseAccessories(String(receivingData.warehouseId));
+    }
+  }, [receivingData.warehouseId]);
 
   useEffect(() => {
     if (returnsData.warehouseId) {
@@ -965,6 +977,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
             updatedItem.color = '';
             updatedItem.size = '';
             updatedItem.costPrice = 0;
+            updatedItem.newCostPrice = 0;
             updatedItem.sellingPrice = 0;
             updatedItem.qty = 1;
             updatedItem._parentId = '';
@@ -976,6 +989,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
             updatedItem.isNew = false;
             updatedItem.name = '';
             updatedItem.costPrice = 0;
+            updatedItem.newCostPrice = 0;
             updatedItem.sellingPrice = 0;
             updatedItem.color = '';
             updatedItem.size = '';
@@ -994,6 +1008,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
           } else {
             updatedItem.name = '';
             updatedItem.costPrice = 0;
+            updatedItem.newCostPrice = 0;
             updatedItem.sellingPrice = 0;
             updatedItem.barcode = '';
           }
@@ -1019,6 +1034,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
               updatedItem.size = v.size;
               updatedItem.barcode = v.barcode || '';
               updatedItem.costPrice = Number(v.cost_price || 0);
+              updatedItem.newCostPrice = Number(v.cost_price || 0);
               updatedItem.sellingPrice = Number(v.sale_price || v.price || 0);
             }
             return updatedItem;
@@ -1037,6 +1053,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
               updatedItem.size = v.size;
               updatedItem.barcode = v.barcode || '';
               updatedItem.costPrice = Number(v.cost_price || 0);
+              updatedItem.newCostPrice = Number(v.cost_price || 0);
               updatedItem.sellingPrice = Number(v.sale_price || v.price || 0);
             }
             return updatedItem;
@@ -1049,6 +1066,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
               updatedItem.size = value;
               updatedItem.barcode = variant.barcode || '';
               updatedItem.costPrice = Number(variant.cost_price || 0);
+              updatedItem.newCostPrice = Number(variant.cost_price || 0);
               updatedItem.sellingPrice = Number(variant.sale_price || variant.price || 0);
             }
             return updatedItem;
@@ -1079,7 +1097,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
   const addReceivingItem = () => {
     setReceivingData(prev => ({
       ...prev,
-      items: [...prev.items, { id: Date.now(), itemType: defaultReceivingItemType, isNew: true, name: '', color: '', size: '', costPrice: 0, vendorPrice: 0, sellingPrice: 0, qty: 1, barcode: '', productId: '', _parentId: '', _color: '', _size: '' }]
+      items: [...prev.items, { id: Date.now(), itemType: defaultReceivingItemType, isNew: true, name: '', color: '', size: '', costPrice: 0, newCostPrice: 0, vendorPrice: 0, sellingPrice: 0, qty: 1, barcode: '', productId: '', _parentId: '', _color: '', _size: '' }]
     }));
   };
 
@@ -1100,6 +1118,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
           productId,
           name: f.name,
           costPrice: Number(f.cost_price ?? f.costPrice ?? 0),
+          newCostPrice: Number(f.cost_price ?? f.costPrice ?? 0),
           sellingPrice: 0,
           color: f.color || '',
           size: f.size || '',
@@ -1113,6 +1132,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
           productId,
           name: a.name,
           costPrice: Number(a.cost_price ?? a.costPrice ?? 0),
+          newCostPrice: Number(a.cost_price ?? a.costPrice ?? 0),
           sellingPrice: 0,
           color: a.color || '',
           size: a.size || '',
@@ -1126,6 +1146,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
           productId,
           name: p.name,
           costPrice: Number(p.cost ?? 0),
+          newCostPrice: Number(p.cost ?? 0),
           sellingPrice: Number(p.price ?? 0),
           color: p.color || '',
           size: p.size || '',
@@ -1180,7 +1201,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
     const zeroPriceItem = receivingData.items.find(item => {
       const price = purchasePriceType === 'vendor_price'
         ? Number((item as any).vendorPrice || 0)
-        : Number(item.costPrice || 0);
+        : Number((item as any).newCostPrice ?? item.costPrice ?? 0);
       return price <= 0;
     });
     if (zeroPriceItem) {
@@ -1194,7 +1215,13 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify(receivingData)
+          body: JSON.stringify({
+            ...receivingData,
+            items: (receivingData.items || []).map((item: any) => ({
+              ...item,
+              costPrice: Number(item.newCostPrice ?? item.costPrice ?? 0)
+            }))
+          })
         });
         const result = await readJsonSafely(response);
         if (result.success) {
@@ -1222,7 +1249,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                   return s + (isFabric ? Number(it.qty || 0) : 0);
                 }, 0);
                 const totalProductsCount = totalItemsCount - totalFabricsCount;
-                const supplierPrev = Number(currentSupplier?.balance ?? 0);
+                const supplierPrev = toSupplierDebt(currentSupplier?.balance);
                 const paidAmountVal = Number(receivingData.paidAmount || 0);
                 const txAmountVal = Number(tx.amount || 0);
                 const treasuryName = (treasuries.find(t => String(t.id) === String(receivingData.treasuryId)) || { name: '' }).name;
@@ -1564,7 +1591,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                   return { ...it, qty, costPrice, price };
                 });
                 const totalItemsCount = items.reduce((s:any,it:any) => s + Number(it.qty || 0), 0);
-                const supplierPrev = Number(currentSupplierForReturn?.balance ?? 0);
+                const supplierPrev = toSupplierDebt(currentSupplierForReturn?.balance);
                 setReceivedInvoice({
                   id: tx.id,
                   number: tx.reference_id || `INV-${tx.id}`,
@@ -1579,7 +1606,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                   supplierPreviousBalance: supplierPrev,
                   paidAmount: 0,
                   treasuryName: '',
-                  newSupplierBalance: supplierPrev + Number(tx.amount || 0),
+                  newSupplierBalance: supplierPrev - Number(tx.amount || 0),
                   totalItemsReceived: totalItemsCount,
                   totalFabricsReceived: 0,
                   totalProductsReceived: totalItemsCount
@@ -1798,6 +1825,55 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
     }
     newItems[index] = next;
     setTransferData({ ...transferData, items: newItems });
+  };
+
+  const getReceivingCostPreview = (item: any) => {
+    const type = String(item?.itemType || '').trim();
+    const productId = Number(item?.productId || 0);
+    const receivedQty = Number(item?.qty || 0);
+    const newCost = Number(item?.newCostPrice ?? item?.costPrice ?? 0);
+    const warehouseId = String(receivingData.warehouseId || '').trim();
+
+    let currentCost = Number(item?.costPrice || 0);
+    let currentQty = 0;
+
+    if (warehouseId && productId > 0) {
+      if (type === 'fabric_existing') {
+        const row = getWarehouseFabrics(warehouseId).find((r: any) => Number(r.id ?? r.fabric_id) === productId);
+        if (row) {
+          currentCost = Number(row.cost_price ?? row.costPrice ?? currentCost ?? 0);
+          currentQty = Number(row.quantity ?? row.stock ?? 0);
+        }
+      } else if (type === 'accessory_existing') {
+        const row = getWarehouseAccessories(warehouseId).find((r: any) => Number(r.id ?? r.accessory_id) === productId);
+        if (row) {
+          currentCost = Number(row.cost_price ?? row.costPrice ?? currentCost ?? 0);
+          currentQty = Number(row.quantity ?? row.stock ?? 0);
+        }
+      } else if (type === 'product_existing') {
+        const row = getWarehouseStock(warehouseId).find((r: any) => Number(r.product_id ?? r.id) === productId);
+        if (row) {
+          currentCost = Number(row.cost ?? row.cost_price ?? currentCost ?? 0);
+          currentQty = Number(row.quantity ?? row.stock ?? 0);
+        }
+      }
+    }
+
+    if (!Number.isFinite(currentCost) || currentCost < 0) currentCost = 0;
+    if (!Number.isFinite(currentQty) || currentQty < 0) currentQty = 0;
+
+    const totalQty = currentQty + receivedQty;
+    const expectedAvg = totalQty > 0
+      ? ((currentCost * currentQty) + (newCost * receivedQty)) / totalQty
+      : newCost;
+
+    return {
+      currentCost,
+      currentQty,
+      newCost,
+      expectedAvg: Number.isFinite(expectedAvg) ? expectedAvg : 0,
+      hasBase: currentQty > 0
+    };
   };
 
   const addTransferItem = () => {
@@ -3107,7 +3183,9 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
            {/* بداية تصميم الاستلام الجديد بنظام الكروت */}
             <div className="space-y-4 mb-6">
               <label className="text-xs font-bold text-slate-500 dark:text-slate-400 mr-2">أصناف فاتورة الاستلام</label>
-              {receivingData.items.map((item) => (
+              {receivingData.items.map((item) => {
+                const costPreview = getReceivingCostPreview(item);
+                return (
                 <div key={item.id} className="p-5 bg-slate-50 dark:bg-slate-900/40 rounded-2xl border border-slate-200 dark:border-slate-700 relative group transition-all hover:shadow-md">
                   
                   {/* زر الحذف */}
@@ -3195,9 +3273,9 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                           value={item.productId ? String(item.productId) : ''}
                           onChange={v => handleSelectExistingProduct(item.id, v)}
                           options={(() => {
-                            if (item.itemType === 'fabric_existing') return [{ value: '', label: 'اختر صنف موجود...' }, ...fabrics.map((f:any) => ({ value: String(f.id), label: `${f.name} (${f.color || '-'}-${f.size || '-'}) ${f.code || f.barcode || ''}` }))];
-                            if (item.itemType === 'accessory_existing') return [{ value: '', label: 'اختر صنف موجود...' }, ...accessories.map((a:any) => ({ value: String(a.id), label: `${a.name} (${a.color || '-'}-${a.size || '-'}) ${a.code || a.barcode || ''}` }))];
-                            return [{ value: '', label: 'اختر صنف موجود...' }, ...products.map(p => ({ value: String(p.id), label: `${p.name} (${p.color || '-'}-${p.size || '-'}) ${p.barcode || ''}` }))];
+                            if (item.itemType === 'fabric_existing') return [{ value: '', label: 'اختر صنف موجود...' }, ...fabrics.map((f:any) => ({ value: String(f.id), label: `${f.name} (${f.color || '-'}-${f.size || '-'}) ${f.code || f.barcode || ''} — تكلفة: ${Number(f.cost_price ?? f.costPrice ?? 0).toLocaleString()} ${currencySymbol}` }))];
+                            if (item.itemType === 'accessory_existing') return [{ value: '', label: 'اختر صنف موجود...' }, ...accessories.map((a:any) => ({ value: String(a.id), label: `${a.name} (${a.color || '-'}-${a.size || '-'}) ${a.code || a.barcode || ''} — تكلفة: ${Number(a.cost_price ?? a.costPrice ?? 0).toLocaleString()} ${currencySymbol}` }))];
+                            return [{ value: '', label: 'اختر صنف موجود...' }, ...products.map(p => ({ value: String(p.id), label: `${p.name} (${p.color || '-'}-${p.size || '-'}) ${p.barcode || ''} — تكلفة: ${Number(p.cost ?? 0).toLocaleString()} ${currencySymbol}` }))];
                           })()}
                           className="w-full text-sm font-bold"
                         />
@@ -3235,8 +3313,27 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                         {purchasePriceType === 'vendor_price' ? (
                           <input type="number" placeholder="سعر المورد" value={(item as any).vendorPrice || ''} onChange={e => handleReceivingItemChange(item.id, 'vendorPrice', parseFloat(e.target.value) || 0)} className="w-full bg-white dark:bg-slate-900 border border-orange-200 dark:border-orange-800/50 rounded-xl py-2 pl-2 pr-3 text-sm font-bold outline-none focus:ring-2 focus:ring-orange-500/20" />
                         ) : (
-                          <input type="number" placeholder="تكلفة المخزن" value={item.costPrice} onChange={e => handleReceivingItemChange(item.id, 'costPrice', parseFloat(e.target.value))} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-2 pl-2 pr-3 text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500/20" />
+                          <div className="w-full">
+                            <span className="text-[10px] text-slate-500 block mb-0.5">سعر التكلفة الجديد</span>
+                            <input type="number" placeholder="سعر التكلفة الجديد" value={(item as any).newCostPrice ?? item.costPrice ?? ''} onChange={e => handleReceivingItemChange(item.id, 'newCostPrice', parseFloat(e.target.value) || 0)} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-2 pl-2 pr-3 text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500/20" />
+                          </div>
                         )}
+                        {purchasePriceType === 'vendor_price' && (
+                          <div className="w-full">
+                            <span className="text-[10px] text-blue-600 dark:text-blue-400 block mb-0.5">سعر التكلفة الجديد</span>
+                            <input type="number" placeholder="سعر التكلفة الجديد" value={(item as any).newCostPrice ?? item.costPrice ?? ''} onChange={e => handleReceivingItemChange(item.id, 'newCostPrice', parseFloat(e.target.value) || 0)} className="w-full bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-800/50 rounded-xl py-2 pl-2 pr-3 text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500/20" />
+                          </div>
+                        )}
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="w-full bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl py-2 px-3 text-sm">
+                            <span className="text-[10px] text-slate-500 block mb-0.5">تكلفة المنتج الحالية</span>
+                            <span className="font-bold text-slate-800 dark:text-slate-200">{Number(costPreview.currentCost || 0).toLocaleString()} {currencySymbol}</span>
+                          </div>
+                          <div className="w-full bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-900/40 rounded-xl py-2 px-3 text-sm">
+                            <span className="text-[10px] text-emerald-600 dark:text-emerald-400 block mb-0.5">متوسط التكلفة المتوقع</span>
+                            <span className="font-bold text-emerald-700 dark:text-emerald-300">{Number(costPreview.expectedAvg || 0).toLocaleString()} {currencySymbol}</span>
+                          </div>
+                        </div>
                         {item.itemType === 'product_new' && (
                           <div className="relative w-full">
                             <span className="text-[10px] text-slate-400 block mb-0.5">سعر البيع</span>
@@ -3252,13 +3349,13 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                     <div className="col-span-1 md:col-span-4 flex items-center justify-end bg-blue-50 dark:bg-blue-900/20 rounded-xl px-4 py-2 border border-blue-100 dark:border-blue-900/30">
                       <div className="text-left w-full">
                         <span className="text-[11px] font-bold text-blue-400 block mb-0.5">الإجمالي</span>
-                        <span className="font-black text-blue-700 dark:text-blue-400 text-lg">{((purchasePriceType === 'vendor_price' ? (Number((item as any).vendorPrice) || 0) : Number(item.costPrice)) * Number(item.qty)).toLocaleString()} {currencySymbol}</span>
+                        <span className="font-black text-blue-700 dark:text-blue-400 text-lg">{((purchasePriceType === 'vendor_price' ? (Number((item as any).vendorPrice) || 0) : Number((item as any).newCostPrice ?? item.costPrice ?? 0)) * Number(item.qty)).toLocaleString()} {currencySymbol}</span>
                       </div>
                     </div>
 
                   </div>
                 </div>
-              ))}
+              )})}
             </div>
             {/* نهاية تصميم الاستلام الجديد */}
             <button type="button" onClick={addReceivingItem} className="mt-4 text-sm font-bold text-blue-600 flex items-center gap-2"><PlusCircle size={16} /> إضافة بند جديد للفاتورة</button>
@@ -3267,7 +3364,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
               <div className="md:col-span-2 grid grid-cols-2 lg:grid-cols-4 gap-4 text-center">
                 <div className="bg-slate-50 dark:bg-slate-900 p-3 rounded-xl">
                   <p className="text-[10px] font-bold text-slate-400">حساب المورد الحالي</p>
-                  <p className="font-bold text-sm text-slate-700 dark:text-slate-200">{currentSupplier?.balance?.toLocaleString() || 0} {currencySymbol}</p>
+                  <p className="font-bold text-sm text-slate-700 dark:text-slate-200">{toSupplierDebt(currentSupplier?.balance).toLocaleString()} {currencySymbol}</p>
                 </div>
                 <div className="bg-slate-50 dark:bg-slate-900 p-3 rounded-xl">
                   <p className="text-[10px] font-bold text-slate-400">حساب الفاتورة</p>
@@ -3458,8 +3555,8 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                           onChange={v => handleSelectProductForReturn(item.id, v)}
                           options={(() => {
                             const t = String(item.returnType || '').trim();
-                            if (t === 'fabric') return [{ value: '', label: `اختر اسم القماش...` }, ...getWarehouseFabrics(String(returnsData.warehouseId || '')).map((r: any) => ({ value: String(r.id ?? r.fabric_id), label: `${r.name} (${r.color || '-'}-${r.size || '-'}) — متوفر: ${Number(r.quantity || 0)}` }))];
-                            if (t === 'accessory') return [{ value: '', label: `اختر اسم الاكسسوار...` }, ...getWarehouseAccessories(String(returnsData.warehouseId || '')).map((r: any) => ({ value: String(r.id ?? r.accessory_id), label: `${r.name} (${r.color || '-'}-${r.size || '-'}) — متوفر: ${Number(r.quantity || 0)}` }))];
+                            if (t === 'fabric') return [{ value: '', label: `اختر اسم القماش...` }, ...getWarehouseFabrics(String(returnsData.warehouseId || '')).map((r: any) => ({ value: String(r.id ?? r.fabric_id), label: `${r.name} (${r.color || '-'}-${r.size || '-'}) — متوفر: ${Number(r.quantity || 0)} — تكلفة: ${Number(r.cost_price ?? r.costPrice ?? 0).toLocaleString()} ${currencySymbol}` }))];
+                            if (t === 'accessory') return [{ value: '', label: `اختر اسم الاكسسوار...` }, ...getWarehouseAccessories(String(returnsData.warehouseId || '')).map((r: any) => ({ value: String(r.id ?? r.accessory_id), label: `${r.name} (${r.color || '-'}-${r.size || '-'}) — متوفر: ${Number(r.quantity || 0)} — تكلفة: ${Number(r.cost_price ?? r.costPrice ?? 0).toLocaleString()} ${currencySymbol}` }))];
                             return [{ value: '', label: `اختر الصنف...` }];
                           })()}
                           className="w-full text-sm font-bold"
@@ -3477,6 +3574,10 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                          <div className="flex-1">
                            <span className="text-[10px] font-bold text-orange-400 block mb-0.5 text-center">سعر المصنعية</span>
                            <input type="number" placeholder="0" value={(item as any).vendorPrice || ''} onChange={e => handleReturnItemChange(item.id, 'vendorPrice', parseFloat(e.target.value) || 0)} className="w-full bg-white dark:bg-slate-900 border border-orange-200 dark:border-orange-800/50 rounded-xl py-1.5 px-2 text-sm font-bold text-center outline-none focus:ring-2 focus:ring-orange-500/20" />
+                          <div className="mt-1 text-center">
+                            <span className="text-[10px] text-slate-500 block">تكلفة المنتج الحالية</span>
+                            <span className="font-bold text-slate-800 dark:text-slate-200 text-sm">{Number(item.costPrice || 0).toLocaleString()} <span className="text-xs font-normal text-slate-400">{currencySymbol}</span></span>
+                          </div>
                          </div>
                        ) : (
                          <div className="text-center flex-1">
@@ -3501,7 +3602,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
               <div className="md:col-span-2 grid grid-cols-2 lg:grid-cols-4 gap-4 text-center">
                 <div className="bg-slate-50 dark:bg-slate-900 p-3 rounded-xl">
                   <p className="text-[10px] font-bold text-slate-400">حساب المورد الحالي</p>
-                  <p className="font-bold text-sm text-slate-700 dark:text-slate-200">{currentSupplierForReturn?.balance?.toLocaleString() || 0} {currencySymbol}</p>
+                  <p className="font-bold text-sm text-slate-700 dark:text-slate-200">{toSupplierDebt(currentSupplierForReturn?.balance).toLocaleString()} {currencySymbol}</p>
                 </div>
                 <div className="bg-slate-50 dark:bg-slate-900 p-3 rounded-xl">
                   <p className="text-[10px] font-bold text-slate-400">قيمة المرتجع</p>

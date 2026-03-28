@@ -134,8 +134,6 @@ export const MENU_ITEMS = [
     slug: 'reps',
     subItems: [
       { label: 'قائمه المناديب', slug: 'list' },
-      { label: 'عهده المندوب', slug: 'custody' },
-      { label: 'معاملات المندوب', slug: 'transactions' },
       { label: 'يوميات المندوب', slug: 'rep-cycle' },
       { label: 'أداء المناديب', slug: 'rep-performance' }
     ]
@@ -181,13 +179,7 @@ export const MENU_ITEMS = [
     slug: 'reports',
     subItems: [
       { label: 'تقرير المبيعات', slug: 'sales' },
-      { label: 'تقرير المخزون', slug: 'inventory' },
-      { label: 'تقرير الماليه', slug: 'finance' },
-      { label: 'اليوميه', slug: 'daily' },
-      { label: 'تقرير اليومية', slug: 'sales-report' },
       { label: 'ملخص الفتره', slug: 'totals' },
-      { label: 'تقارير العملاء', slug: 'crm-srm' },
-      { label: 'تقارير الموظفين', slug: 'hrm' }
     ]
   },
   {

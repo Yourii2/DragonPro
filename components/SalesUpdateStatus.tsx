@@ -163,6 +163,23 @@ const SalesUpdateStatus: React.FC = () => {
     return Number(o.total_amount || o.total || 0);
   };
 
+  const normalizeOrdersForReturnsView = (orders: any[]) => {
+    const list = Array.isArray(orders) ? orders : [];
+    return list
+      .map((o: any) => {
+        const products = Array.isArray(o?.products)
+          ? o.products.filter((p: any) => Number(p?.quantity || p?.qty || 0) > 0)
+          : [];
+        const remainingPieces = products.reduce((s: number, p: any) => s + Number(p?.quantity || p?.qty || 0), 0);
+        return { ...o, products, remainingPieces };
+      })
+      .filter((o: any) => {
+        const status = String(o?.status || '').toLowerCase();
+        if (status === 'returned') return false;
+        return Number(o?.remainingPieces || 0) > 0;
+      });
+  };
+
   // Prompt user to choose a warehouse from available `warehouses` (or choose empty).
   // Returns: undefined => cancelled, null => no warehouse chosen, number => warehouse id
   const promptWarehouseForReturn = async (): Promise<number|null|undefined> => {
@@ -218,8 +235,9 @@ const SalesUpdateStatus: React.FC = () => {
       // build payloads first so we can compute product counts for the confirmation message
       const payloads = ids.map((id) => {
         const ord = (openRepOrders?.orders||[]).find((o:any)=> o.id === id);
+        const orderRepId = ord?.rep_id ?? ord?.repId ?? repIdLocal;
         const items = (ord?.products||[]).map((p:any)=> ({ productId: p.productId || p.product_id, quantity: Number(p.quantity || p.qty || 0) }));
-        return { order_id: id, rep_id: repIdLocal, items, warehouse_id: warehouseId, notes: '' };
+        return { order_id: id, rep_id: orderRepId, items, warehouse_id: warehouseId, notes: '' };
       });
 
       const promises = payloads.map(async (payload) => {
@@ -294,10 +312,21 @@ const SalesUpdateStatus: React.FC = () => {
       } catch (logErr) { console.warn('logReturnEvent failed (non-critical)', logErr); }
       // تحديث rep_journal_orders (fire-and-forget)
       try {
-        await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ rep_id: repIdLocal, order_ids: ids, status: 'full_return' })
-        });
+        const updatesByRep = (payloads || []).reduce((acc:any, p:any) => {
+          const rid = Number(p?.rep_id || 0);
+          if (!rid) return acc;
+          if (!acc[rid]) acc[rid] = [];
+          acc[rid].push(Number(p.order_id));
+          return acc;
+        }, {} as Record<number, number[]>);
+
+        const updateReqs = Object.entries(updatesByRep).map(([rid, orderIds]) =>
+          fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ rep_id: Number(rid), order_ids: orderIds, status: 'full_return' })
+          })
+        );
+        if (updateReqs.length > 0) await Promise.all(updateReqs);
       } catch (jErr) { console.warn('updateJournalOrderStatus full_return failed (non-critical)', jErr); }
       // Build and show a concise confirmation message: number of orders, total products, warehouse name
       try {
@@ -357,9 +386,10 @@ const SalesUpdateStatus: React.FC = () => {
         const list = jr && jr.success ? jr.data || [] : [];
         return list.filter((o:any) => Number(o.shipping_company_id ?? o.shippingCompanyId) === Number(repId));
       }
-      const r = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getByRep&rep_id=${repId}`);
+      const r = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getByRep&rep_id=${repId}&status=with_rep`);
       const jr = await r.json();
-      return jr && jr.success ? jr.data || [] : [];
+      const list = jr && jr.success ? jr.data || [] : [];
+      return normalizeOrdersForReturnsView(list);
     } catch (e) {
       console.error('fetchOrdersForRep failed', e);
       return [];
@@ -462,11 +492,11 @@ const SalesUpdateStatus: React.FC = () => {
     }
     // Save these before any async ops or state changes so they remain stable
     const savedOrderId = openPartialOrder.id;
-    const savedJournalRepId = openRepOrders?.repId ?? (openPartialOrder as any).rep_id ?? null;
+    const savedOrderRepId = (openPartialOrder as any).rep_id ?? (openPartialOrder as any).repId ?? openRepOrders?.repId ?? null;
     try {
       // Build payload compatible with server partialReturn handler
       const itemsPayload = (returnItems || []).map(r => ({ lineId: r.lineId, productId: r.productId, quantity: Number(r.quantity || 0) }));
-      const payload:any = { order_id: savedOrderId, rep_id: savedJournalRepId, items: itemsPayload, warehouse_id: partialWarehouse, notes: '' };
+      const payload:any = { order_id: savedOrderId, rep_id: savedOrderRepId, items: itemsPayload, warehouse_id: partialWarehouse, notes: '' };
       const res = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=partialReturn`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
       const j = await res.json();
       if (j.success) {
@@ -506,10 +536,10 @@ const SalesUpdateStatus: React.FC = () => {
 
         // تحديث rep_journal_orders قبل إغلاق النافذة
         try {
-          if (savedJournalRepId && savedOrderId) {
+          if (savedOrderRepId && savedOrderId) {
             await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
               method: 'POST', headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({ rep_id: savedJournalRepId, order_ids: [savedOrderId], status: 'partial_return' })
+              body: JSON.stringify({ rep_id: savedOrderRepId, order_ids: [savedOrderId], status: 'partial_return' })
             });
           }
         } catch (jErr) { console.warn('updateJournalOrderStatus partial_return failed (non-critical)', jErr); }
@@ -987,7 +1017,8 @@ const SalesUpdateStatus: React.FC = () => {
                           <div className="font-bold text-blue-600">{computeOrderSubtotal(o).toLocaleString()} ج.م</div>
                       </div>
                       <div className="text-xs text-slate-500 mt-1 flex gap-4">
-                          <span>عدد القطع: {(o.products||[]).reduce((s:number,p:any)=> s + Number(p.quantity||p.qty||0),0)}</span>
+                          <span>عدد القطع المتبقية: {(o.products||[]).reduce((s:number,p:any)=> s + Number(p.quantity||p.qty||0),0)}</span>
+                          <span>المتبقي: {Number(o.remainingPieces || 0)}</span>
                           <span>المحافظة: {o.governorate}</span>
                           <span>الحالة: {translateStatus(o.status)}</span>
                       </div>
@@ -1074,33 +1105,7 @@ const SalesUpdateStatus: React.FC = () => {
               <div className="w-px bg-slate-300 mx-2"></div>
 
               
-              <button onClick={async ()=>{
-                const ids = selectedOrderIds.slice();
-                if (ids.length===0) { Swal.fire('تحذير','اختر طلبيات أولاً','warning'); return; }
-                // ask for optional warehouse id to restock returns (select from available warehouses)
-                const warehouseId = await promptWarehouseForReturn();
-                if (warehouseId === undefined) return; // cancelled
-                try {
-                  await Promise.all(ids.map(id => fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(Object.assign({ id, status: 'returned' }, warehouseId ? { warehouseId } : {})) })));
-                  // remove returned orders from rep list
-                  const removed = (openRepOrders?.orders||[]).filter((o:any)=> ids.includes(o.id));
-                  setOpenRepOrders((prev:any)=> (prev ? ({ ...prev, orders: (prev.orders||[]).filter((o:any)=> !ids.includes(o.id)) }) : prev));
-                  adjustRepCounts(openRepOrders?.repId ?? openRepOrders?.repId, removed);
-                  setSelectedOrderIds([]);
-                  // Build confirmation modal: number of orders, total products, warehouse name
-                  try {
-                    const ordersCount = removed.length;
-                    const productsCount = removed.reduce((s:number,o:any) => s + ((o.products||[]).reduce((ss:number,p:any)=> ss + Number(p.quantity||p.qty||0),0)), 0);
-                    const wh = (warehouses||[]).find(w => Number(w.id) === Number(warehouseId));
-                    const whName = (wh && (wh.name || wh.title || wh.label)) || (warehouseId ? (`المستودع #${warehouseId}`) : 'غير محدد');
-                    const txt = `تم استلام\nطلبيات : ${ordersCount}\nمنتجات : ${productsCount}\nفى المخزن: ${whName}`;
-                    console.debug('Full-return confirmation', { ordersCount, productsCount, warehouseId, whName });
-                    Swal.fire({ title: 'تم', html: txt.replace(/\n/g, '<br/>'), icon: 'success', confirmButtonText: 'حسناً' });
-                  } catch(e) {
-                    Swal.fire('تم', 'تم تسجيل المرتجع للمحدد.', 'success');
-                  }
-                } catch (e) { console.error(e); Swal.fire('خطأ','فشل في العملية.','error'); }
-              }} className="px-5 py-2.5 bg-rose-600 text-white rounded-xl font-bold shadow-lg hover:bg-rose-700">مرتجع كلي</button>
+              <button onClick={handleReturnSelected} className="px-5 py-2.5 bg-rose-600 text-white rounded-xl font-bold shadow-lg hover:bg-rose-700">مرتجع كلي</button>
               
               
             </div>

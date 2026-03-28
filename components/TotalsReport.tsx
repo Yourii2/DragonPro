@@ -10,13 +10,33 @@ const TotalsReport: React.FC = () => {
   const firstDay = new Date(); firstDay.setDate(firstDay.getDate()-7);
   const [startDate, setStartDate] = useState<string>(formatDate(firstDay));
   const [endDate, setEndDate] = useState<string>(formatDate(today));
+  const [treasuries, setTreasuries] = useState<any[]>([]);
+  const [treasuryId, setTreasuryId] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [startingBalance, setStartingBalance] = useState<number>(0);
   const [endBalance, setEndBalance] = useState<number>(0);
   const [records, setRecords] = useState<any[]>([]);
   const [ordersMap, setOrdersMap] = useState<Record<number, any>>({});
+  const [assignedToRepsStats, setAssignedToRepsStats] = useState<{ orders: number; pieces: number }>({ orders: 0, pieces: 0 });
 
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    const loadTreasuries = async () => {
+      try {
+        const res = await fetch(`${API_BASE_PATH}/api.php?module=treasuries&action=getAll`);
+        const data = await res.json();
+        if (data && data.success) {
+          setTreasuries(data.data || []);
+        } else {
+          setTreasuries([]);
+        }
+      } catch (e) {
+        setTreasuries([]);
+      }
+    };
+    loadTreasuries();
+  }, []);
 
   const load = async () => {
     setLoading(true);
@@ -32,9 +52,25 @@ const TotalsReport: React.FC = () => {
         }
       } catch(e) { console.debug('Failed to load orders for totals report', e); }
 
-      const url = `${API_BASE_PATH}/api.php?module=reports&action=finance&start_date=${startDate}&end_date=${endDate}`;
+      const treasuryQuery = treasuryId ? `&treasury_id=${encodeURIComponent(treasuryId)}` : '';
+      const url = `${API_BASE_PATH}/api.php?module=reports&action=finance&start_date=${startDate}&end_date=${endDate}${treasuryQuery}`;
       const r = await fetch(url);
       const j = await r.json();
+      // Fetch rep_daily_journal stats for the selected date range
+      try {
+        const repJournalUrl = `${API_BASE_PATH}/api.php?module=sales&action=getRepDailyJournal&from=${startDate}&to=${endDate}`;
+        const repRes = await fetch(repJournalUrl);
+        const repJson = await repRes.json();
+        if (repJson && repJson.success && Array.isArray(repJson.data)) {
+          const orders = repJson.data.reduce((sum: number, row: any) => sum + Number(row?.orders_assigned_count || 0), 0);
+          const pieces = repJson.data.reduce((sum: number, row: any) => sum + Number(row?.pieces_assigned_count || 0), 0);
+          setAssignedToRepsStats({ orders, pieces });
+        } else {
+          setAssignedToRepsStats({ orders: 0, pieces: 0 });
+        }
+      } catch (e) {
+        setAssignedToRepsStats({ orders: 0, pieces: 0 });
+      }
       if (j && j.success) {
         setStartingBalance(Number(j.data.starting_balance || 0));
         const th = j.data.treasuryBalanceHistory || [];
@@ -191,6 +227,13 @@ const TotalsReport: React.FC = () => {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
+        <label className="text-sm">الخزينة</label>
+        <select value={treasuryId} onChange={e=>setTreasuryId(e.target.value)} className="border rounded p-2 min-w-[180px]" dir="rtl">
+          <option value="">كل الخزائن</option>
+          {treasuries.map((t:any) => (
+            <option key={t.id} value={String(t.id)}>{t.name}</option>
+          ))}
+        </select>
         <label className="text-sm">من</label>
         <input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)} className="border rounded p-2" />
         <label className="text-sm">إلى</label>
@@ -199,27 +242,26 @@ const TotalsReport: React.FC = () => {
         <button onClick={exportCSV} className="px-3 py-2 bg-sky-600 text-white rounded">تصدير Excel</button>
         <button onClick={printReport} className="px-3 py-2 bg-emerald-600 text-white rounded">طباعة</button>
       </div>
-      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>رصيد البداية<br/><div className="font-black">{startingBalance.toLocaleString()}</div></div>
         <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>إجمالي الإيرادات<br/><div className="font-black">{totals.totalRevenue.toLocaleString()}</div></div>
         <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>إجمالي المصروفات<br/><div className="font-black">{totals.totalExpense.toLocaleString()}</div></div>
-        <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>إجمالي الإيداعات<br/><div className="font-black">{totals.totalDeposits.toLocaleString()}</div></div>
-        <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>إجمالي الدفعات<br/><div className="font-black">{totals.totalPayments.toLocaleString()}</div></div>
         <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>رصيد النهاية<br/><div className="font-black">{endBalance.toLocaleString()}</div></div>
       </div>
-      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 mt-2">
+      <div className="grid grid-cols-2 lg:grid-cols-8 gap-3 mt-2">
         <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>عدد الاوردرات المسلمة<br/><div className="font-black">{perDay.reduce((s:any,d:any)=> s + Number(d.deliveredOrders||0),0)}</div></div>
         <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>عدد الاوردرات المرتجعة<br/><div className="font-black">{perDay.reduce((s:any,d:any)=> s + Number(d.returnedOrders||0),0)}</div></div>
+        <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>إجمالي الأوردرات المضافة للمناديب<br/><div className="font-black">{Number(assignedToRepsStats.orders || 0).toLocaleString()}</div></div>
+        <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>عدد المنتجات المضافة للمناديب<br/><div className="font-black">{Number(assignedToRepsStats.pieces || 0).toLocaleString()}</div></div>
         <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>إجمالي القطع المسلمة<br/><div className="font-black">{perDay.reduce((s:any,d:any)=> s + Number(d.deliveredPieces||0),0)}</div></div>
         <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>إجمالي القطع المرتجعة<br/><div className="font-black">{perDay.reduce((s:any,d:any)=> s + Number(d.returnedPieces||0),0)}</div></div>
         <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>إجمالي المبيعات (مبلغ)<br/><div className="font-black">{perDay.reduce((s:any,d:any)=> s + Number(d.salesAmount||0),0).toLocaleString()}</div></div>
         <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>إجمالي المرتجعات (مبلغ)<br/><div className="font-black">{perDay.reduce((s:any,d:any)=> s + Number(d.returnsAmount||0),0).toLocaleString()}</div></div>
       </div>
 
-      <div className="grid grid-cols-3 lg:grid-cols-3 gap-3 mt-2">
-        <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>إجمالي المصروفات<br/><div className="font-black">{perDay.reduce((s:any,d:any)=> s + Number(d.expenses||0),0).toLocaleString()}</div></div>
-        <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>إجمالي دفعات للموردين<br/><div className="font-black">{perDay.reduce((s:any,d:any)=> s + Number(d.supplierPayments||0),0).toLocaleString()}</div></div>
-        <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>إجمالي الإيداعات<br/><div className="font-black">{perDay.reduce((s:any,d:any)=> s + Number(d.deposits||0),0).toLocaleString()}</div></div>
+      <div className="grid grid-cols-2 lg:grid-cols-2 gap-3 mt-2">
+        <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>إجمالي المبيعات (مبلغ)<br/><div className="font-black">{perDay.reduce((s:any,d:any)=> s + Number(d.salesAmount||0),0).toLocaleString()}</div></div>
+        <div className="p-4 rounded shadow card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>إجمالي المرتجعات (مبلغ)<br/><div className="font-black">{perDay.reduce((s:any,d:any)=> s + Number(d.returnsAmount||0),0).toLocaleString()}</div></div>
       </div>
 
       <div className="overflow-x-auto rounded border">
@@ -229,30 +271,44 @@ const TotalsReport: React.FC = () => {
               <th className="px-3 py-2">التاريخ</th>
               <th className="px-3 py-2">عدد الاوردرات المسلمة</th>
               <th className="px-3 py-2">عدد الاوردرات المرتجعة</th>
+              <th className="px-3 py-2">إجمالي الأوردرات المضافة للمناديب</th>
+              <th className="px-3 py-2">عدد المنتجات المضافة للمناديب</th>
               <th className="px-3 py-2">إجمالي القطع المسلمة</th>
               <th className="px-3 py-2">إجمالي القطع المرتجعة</th>
               <th className="px-3 py-2">إجمالي المبيعات (مبلغ)</th>
               <th className="px-3 py-2">إجمالي المرتجعات (مبلغ)</th>
+              <th className="px-3 py-2">إجمالي الإيرادات</th>
               <th className="px-3 py-2">إجمالي المصروفات</th>
-              <th className="px-3 py-2">إجمالي الدفعات للموردين</th>
-              <th className="px-3 py-2">إجمالي الإيداعات</th>
             </tr>
           </thead>
           <tbody>
-            {perDay.map((d:any) => (
-              <tr key={d.date} className="border-t">
-                <td className="px-3 py-2">{d.date}</td>
-                <td className="px-3 py-2">{d.deliveredOrders}</td>
-                <td className="px-3 py-2">{d.returnedOrders}</td>
-                <td className="px-3 py-2">{d.deliveredPieces}</td>
-                <td className="px-3 py-2">{d.returnedPieces}</td>
-                <td className="px-3 py-2">{Number(d.salesAmount||0).toLocaleString()}</td>
-                <td className="px-3 py-2">{Number(d.returnsAmount||0).toLocaleString()}</td>
-                <td className="px-3 py-2">{Number(d.expenses||0).toLocaleString()}</td>
-                <td className="px-3 py-2">{Number(d.supplierPayments||0).toLocaleString()}</td>
-                <td className="px-3 py-2">{Number(d.deposits||0).toLocaleString()}</td>
-              </tr>
-            ))}
+            {perDay.map((d:any) => {
+              // Find rep_daily_journal stats for this day
+              let repStats = { orders: 0, pieces: 0 };
+              if (Array.isArray(assignedToRepsStats) && assignedToRepsStats.length) {
+                const found = assignedToRepsStats.find((row:any) => row.date === d.date);
+                if (found) repStats = { orders: Number(found.orders_assigned_count || 0), pieces: Number(found.pieces_assigned_count || 0) };
+              }
+              // For backward compatibility, if assignedToRepsStats is not array, use totals
+              if (!Array.isArray(assignedToRepsStats)) {
+                repStats = { orders: Number(assignedToRepsStats.orders || 0), pieces: Number(assignedToRepsStats.pieces || 0) };
+              }
+              return (
+                <tr key={d.date} className="border-t">
+                  <td className="px-3 py-2">{d.date}</td>
+                  <td className="px-3 py-2">{d.deliveredOrders}</td>
+                  <td className="px-3 py-2">{d.returnedOrders}</td>
+                  <td className="px-3 py-2">{repStats.orders}</td>
+                  <td className="px-3 py-2">{repStats.pieces}</td>
+                  <td className="px-3 py-2">{d.deliveredPieces}</td>
+                  <td className="px-3 py-2">{d.returnedPieces}</td>
+                  <td className="px-3 py-2">{Number(d.salesAmount||0).toLocaleString()}</td>
+                  <td className="px-3 py-2">{Number(d.returnsAmount||0).toLocaleString()}</td>
+                  <td className="px-3 py-2">{Number(d.salesAmount||0).toLocaleString()}</td>
+                  <td className="px-3 py-2">{Number(d.expenses||0).toLocaleString()}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

@@ -1,0 +1,6 @@
+{
+  "Dragon_company_name": "TestCo",
+  "Dragon_tax_rate": "5",
+  "some_user_pref": {"theme":"dark","lang":"ar"},
+  "user_specific_key": "value"
+}

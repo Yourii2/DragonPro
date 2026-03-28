@@ -14,6 +14,13 @@ const toAbsoluteUrl = (input: string) => {
     }
 };
 
+const toLocalDateInput = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
 const SRMModule: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -191,18 +198,24 @@ const SRMModule: React.FC = () => {
               setOpeningBalance(Number(result.data?.opening_balance || 0));
               setLedgerEntries(result.data?.entries || []);
           } else {
+              setOpeningBalance(0);
+              setLedgerEntries([]);
               console.error('Failed to fetch ledger entries:', result.message);
+              Swal.fire('تعذر تحميل كشف الحساب', result.message || 'حدث خطأ أثناء تحميل البيانات.', 'error');
           }
       } catch (err) {
+          setOpeningBalance(0);
+          setLedgerEntries([]);
           console.error('Error fetching ledger entries:', err);
+          Swal.fire('خطأ في الاتصال', 'فشل الاتصال بالخادم أثناء تحميل كشف الحساب.', 'error');
       }
   };
 
   const handleOpenLedger = (supplier: any) => {
       const now = new Date();
       const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-      const defaultStart = firstDay.toISOString().slice(0, 10);
-      const defaultEnd = now.toISOString().slice(0, 10);
+      const defaultStart = toLocalDateInput(firstDay);
+      const defaultEnd = toLocalDateInput(now);
 
       setSelectedSupplier(supplier);
       setLedgerEntries([]);
@@ -213,10 +226,22 @@ const SRMModule: React.FC = () => {
       setIsLedgerModalOpen(true);
   };
 
+  const handleOpenPaymentModal = (supplier: any) => {
+      setSelectedSupplier(supplier);
+      setPaymentAmount('');
+      setPaymentNotes('');
+      if (userDefaults && userDefaults.default_treasury_id && !userDefaults.can_change_treasury) {
+          setPaymentTreasuryId(String(userDefaults.default_treasury_id));
+      } else {
+          setPaymentTreasuryId('');
+      }
+      setIsPaymentModalOpen(true);
+  };
+
   const handleRefreshLedger = () => {
       if (!selectedSupplier) return;
-      const startDate = ledgerStartDate || new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
-      const endDate = ledgerEndDate || new Date().toISOString().slice(0, 10);
+      const startDate = ledgerStartDate || toLocalDateInput(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+      const endDate = ledgerEndDate || toLocalDateInput(new Date());
       fetchSupplierLedger(selectedSupplier.id, startDate, endDate);
   };
 
@@ -267,6 +292,15 @@ const SRMModule: React.FC = () => {
 
   const removeReceiveItem = (index: number) => {
       setReceiveItems(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const getProjectedSupplierBalanceAfterPayment = (balanceBefore: number, paidAmount: number) => {
+      const paid = Math.max(0, Number(paidAmount || 0));
+      if (paid <= 0) return Number(balanceBefore || 0);
+      const before = Number(balanceBefore || 0);
+      if (before > 0) return before - paid;
+      if (before < 0) return before + paid;
+      return before + paid;
   };
 
   const handleCreateReceiving = async () => {
@@ -330,25 +364,43 @@ const SRMModule: React.FC = () => {
       }
   };
 
+        const getLedgerDisplayAmounts = (entry: any) => {
+            const type = String(entry?.type || '').toLowerCase();
+            const amount = Math.max(Math.abs(Number(entry?.debit || 0)), Math.abs(Number(entry?.credit || 0)));
+
+            if (type === 'purchase') {
+                return { creditor: amount, debtor: 0 };
+            }
+            if (type === 'return_out' || type === 'payment_out' || type === 'supplier_payment' || type === 'payment') {
+                return { creditor: 0, debtor: amount };
+            }
+
+            return {
+                creditor: Number(entry?.credit || 0) > 0 ? Math.abs(Number(entry.credit || 0)) : 0,
+                debtor: Number(entry?.debit || 0) > 0 ? Math.abs(Number(entry.debit || 0)) : 0
+            };
+        };
+
     const exportLedgerCsv = () => {
             if (!selectedSupplier) return;
             const rows = [
-                    ['التاريخ', 'نوع الحركة', 'رقم المستند', 'مدين', 'دائن', 'الرصيد'],
+                ['التاريخ', 'نوع الحركة', 'رقم المستند', 'دائن', 'مدين', 'الرصيد'],
                     [ledgerStartDate || '', 'رصيد افتتاحي', '-', '', '', openingBalance.toFixed(2)]
             ];
 
             ledgerEntries.forEach((entry: any) => {
+                const display = getLedgerDisplayAmounts(entry);
                     rows.push([
                             entry.date || '',
                             entry.type === 'purchase' ? 'فاتورة شراء' : entry.type === 'return_out' ? 'مرتجع بضاعة' : 'سداد نقدي',
                             `#${entry.id}`,
-                            entry.debit ? entry.debit.toFixed(2) : '',
-                            entry.credit ? entry.credit.toFixed(2) : '',
+                    display.creditor ? Number(display.creditor).toFixed(2) : '',
+                    display.debtor ? Number(display.debtor).toFixed(2) : '',
                             entry.balance ? Number(entry.balance).toFixed(2) : ''
                     ]);
             });
 
-            rows.push(['', 'الإجماليات', '', totalDebit.toFixed(2), totalCredit.toFixed(2), currentBalance.toFixed(2)]);
+            rows.push(['', 'الإجماليات', '', totalCreditor.toFixed(2), totalDebtor.toFixed(2), currentBalance.toFixed(2)]);
 
             const csv = rows.map(r => r.map((c: any) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
             const blob = new Blob(["\ufeff" + csv], { type: 'text/csv;charset=utf-8;' });
@@ -369,8 +421,8 @@ const SRMModule: React.FC = () => {
                             <td>${entry.date || ''}</td>
                             <td>${entry.type === 'purchase' ? 'فاتورة شراء' : entry.type === 'return_out' ? 'مرتجع بضاعة' : 'سداد نقدي'}</td>
                             <td>#${entry.id}</td>
-                            <td style="text-align:right">${entry.debit ? Number(entry.debit).toLocaleString() : '-'}</td>
-                            <td style="text-align:right">${entry.credit ? Number(entry.credit).toLocaleString() : '-'}</td>
+                            <td style="text-align:right">${(() => { const d = getLedgerDisplayAmounts(entry); return d.creditor ? Number(d.creditor).toLocaleString() : '-'; })()}</td>
+                            <td style="text-align:right">${(() => { const d = getLedgerDisplayAmounts(entry); return d.debtor ? Number(d.debtor).toLocaleString() : '-'; })()}</td>
                             <td style="text-align:right">${Number(entry.balance || 0).toLocaleString()}</td>
                         </tr>
                     `)
@@ -387,9 +439,9 @@ const SRMModule: React.FC = () => {
             <h3>كشف حساب المورد: ${selectedSupplier.name}</h3>
             <div>الفترة: ${ledgerStartDate || ''} إلى ${ledgerEndDate || ''}</div>
             <table>
-                <thead><tr><th>التاريخ</th><th>نوع الحركة</th><th>رقم المستند</th><th>مدين</th><th>دائن</th><th>الرصيد</th></tr></thead>
+                <thead><tr><th>التاريخ</th><th>نوع الحركة</th><th>رقم المستند</th><th>دائن</th><th>مدين</th><th>الرصيد</th></tr></thead>
                 <tbody>${htmlRows}</tbody>
-                <tfoot><tr><td colspan="3">الإجماليات</td><td>${totalDebit.toLocaleString()}</td><td>${totalCredit.toLocaleString()}</td><td>${currentBalance.toLocaleString()}</td></tr></tfoot>
+                <tfoot><tr><td colspan="3">الإجماليات</td><td>${totalCreditor.toLocaleString()}</td><td>${totalDebtor.toLocaleString()}</td><td>${currentBalance.toLocaleString()}</td></tr></tfoot>
             </table>
             </body></html>`;
 
@@ -458,6 +510,8 @@ const SRMModule: React.FC = () => {
             const supplierPhone = selectedSupplier?.phone || '';
             const supplierAddress = selectedSupplier?.address || '';
             const total = Number(transaction.amount || transaction.total || (transaction.credit > 0 ? transaction.credit : transaction.debit) || 0);
+            const txType = String(transaction.type || '').toLowerCase();
+            const isPaymentVoucher = txType === 'payment_out' || txType === 'supplier_payment' || txType === 'payment';
                         const defaultLogo = toAbsoluteUrl(assetUrl('Dragon.png'));
                         const companyLogo = typeof window !== 'undefined'
                             ? toAbsoluteUrl(localStorage.getItem('Dragon_company_logo') || defaultLogo)
@@ -467,12 +521,74 @@ const SRMModule: React.FC = () => {
                 if (!t) return '';
                 if (t === 'purchase' || t === 'sale') return t === 'purchase' ? 'فاتورة شراء' : 'فاتورة مبيعات';
                 if (t === 'return_out' || t === 'return_in') return t === 'return_out' ? 'سند مرتجع' : 'سند مرتجع عميل';
+                if (t === 'payment_out' || t === 'supplier_payment' || t === 'payment') return 'سند سداد نقدي';
                 return t;
             };
 
             const companyName = typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_name') || '') : '';
             const companyAddress = typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_address') || '') : '';
             const companyPhone = typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_phone') || '') : '';
+
+            const detailsObj = (() => {
+                try {
+                    if (transaction && transaction.details) return JSON.parse(transaction.details);
+                } catch {}
+                return {};
+            })();
+            const fallbackTreasuryName = transaction.treasury_id ? (treasuries.find((t:any) => Number(t.id) === Number(transaction.treasury_id))?.name || '') : '';
+            const treasuryName = transaction.treasury_name || detailsObj?.treasury_name || fallbackTreasuryName || '-';
+            const employeeName = transaction.created_by_name || transaction.created_by || (typeof window !== 'undefined' ? (() => { try { const u = JSON.parse(localStorage.getItem('Dragon_user')||'null'); return u && (u.name || u.username) ? (u.name || u.username) : '-'; } catch(e){ return '-'; } })() : '-');
+            const paidAmount = Math.abs(Number(transaction.credit || transaction.amount || transaction.total || 0));
+            const movementDelta = Number(transaction.credit || 0) - Number(transaction.debit || 0);
+            const balanceAfterPayment = Number(transaction.balance || 0);
+            const balanceBeforePayment = Number.isFinite(balanceAfterPayment)
+                ? (balanceAfterPayment - movementDelta)
+                : 0;
+
+            if (isPaymentVoucher) {
+                const html = `<!doctype html><html><head><meta charset="utf-8"><title>${invoiceNumber}</title>
+                    <style>@media print{@page{size:A4;margin:18mm}} body{font-family:Arial,Helvetica,sans-serif;color:#111;direction:rtl}
+                    .top-row{display:flex;justify-content:space-between;align-items:center}
+                    .company-name{font-size:22px;font-weight:800}
+                    .small{font-size:12px;color:#374151}
+                    .box{margin-top:16px;border:1px solid #e5e7eb;border-radius:12px;padding:14px}
+                    .row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px dashed #e5e7eb}
+                    .row:last-child{border-bottom:none}
+                    .label{color:#6b7280;font-size:13px;font-weight:700}
+                    .val{font-size:16px;font-weight:800}
+                    </style>
+                    </head><body>
+                    <div class="top-row">
+                        <div style="text-align:left"><img src="${companyLogo}" alt="logo" style="max-width:120px;" onerror="this.src='${defaultLogo}'" /></div>
+                        <div style="text-align:right">
+                            <div class="company-name">${companyName || ''}</div>
+                            <div class="small">${companyAddress || ''}</div>
+                            <div class="small">${companyPhone || ''}</div>
+                        </div>
+                    </div>
+
+                    <div style="text-align:center;margin-top:14px;font-size:24px;font-weight:900">سداد نقدي</div>
+
+                    <div class="box">
+                        <div class="row"><div class="label">رقم المستند</div><div class="val">${invoiceNumber}</div></div>
+                        <div class="row"><div class="label">تاريخ السداد</div><div class="val">${date}</div></div>
+                        <div class="row"><div class="label">الخزينة التي تم منها السداد</div><div class="val">${treasuryName}</div></div>
+                        <div class="row"><div class="label">الموظف الذي قام بالسداد</div><div class="val">${employeeName}</div></div>
+                        <div class="row"><div class="label">المورد الذي تم السداد له</div><div class="val">${supplierName || '-'}</div></div>
+                        <div class="row"><div class="label">الحساب قبل السداد</div><div class="val">${Math.abs(balanceBeforePayment).toLocaleString()} ${currencySymbol} ${balanceBeforePayment > 0 ? '(له)' : balanceBeforePayment < 0 ? '(علينا)' : '(متزن)'}</div></div>
+                        <div class="row"><div class="label">المبلغ المسدد</div><div class="val">${paidAmount.toLocaleString()} ${currencySymbol}</div></div>
+                        <div class="row"><div class="label">الحساب بعد السداد</div><div class="val">${Math.abs(balanceAfterPayment).toLocaleString()} ${currencySymbol} ${balanceAfterPayment > 0 ? '(له)' : balanceAfterPayment < 0 ? '(علينا)' : '(متزن)'}</div></div>
+                    </div>
+                    </body></html>`;
+
+                const w = window.open('', '_blank');
+                if (!w) { Swal.fire('منع النافذة', 'يرجى السماح بفتح النوافذ المنبثقة للمتابعة.', 'error'); return; }
+                w.document.write(html);
+                w.document.close();
+                w.focus();
+                setTimeout(() => { w.print(); }, 500);
+                return;
+            }
 
             const html = `<!doctype html><html><head><meta charset="utf-8"><title>${invoiceNumber}</title>
                 <style>@media print{@page{size:A4;margin:18mm}} body{font-family:Arial,Helvetica,sans-serif;color:#111;direction:rtl}
@@ -541,10 +657,10 @@ const SRMModule: React.FC = () => {
       }
   }, [invoiceToPrint]);
 
-  // Calculate Totals for Ledger
-  const totalDebit = ledgerEntries.reduce((acc, curr) => acc + (curr.debit || 0), 0); 
-  const totalCredit = ledgerEntries.reduce((acc, curr) => acc + (curr.credit || 0), 0); 
-    const currentBalance = openingBalance + totalCredit - totalDebit;
+    // Calculate Totals for Ledger
+    const totalDebtor = ledgerEntries.reduce((acc, curr) => acc + getLedgerDisplayAmounts(curr).debtor, 0);
+    const totalCreditor = ledgerEntries.reduce((acc, curr) => acc + getLedgerDisplayAmounts(curr).creditor, 0);
+    const currentBalance = selectedSupplier ? Number(selectedSupplier.balance || 0) : (openingBalance + (ledgerEntries.reduce((acc, curr) => acc + (curr.credit || 0), 0)) - (ledgerEntries.reduce((acc, curr) => acc + (curr.debit || 0), 0)));
 
   return (
     <div className="space-y-6 dir-rtl">
@@ -575,9 +691,6 @@ const SRMModule: React.FC = () => {
                     className="w-full pr-10 pl-4 py-2.5 bg-slate-50 dark:bg-slate-900 border-none rounded-xl text-sm"
                 />
             </div>
-            <button onClick={() => setIsReceiveModalOpen(true)} className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2.5 rounded-xl text-sm font-black hover:bg-emerald-700 transition-all">
-                <Plus size={18}/> فاتورة شراء
-            </button>
             <button onClick={() => handleOpenModal()} className="flex items-center gap-2 bg-accent text-white px-4 py-2.5 rounded-xl text-sm font-black hover:bg-blue-700 transition-all">
                 <Plus size={18}/> إضافة مورد
             </button>
@@ -600,6 +713,7 @@ const SRMModule: React.FC = () => {
                         </div>
                         <div className="flex gap-1">
                             <button onClick={() => handleOpenLedger(supplier)} className="p-2 text-muted hover:text-blue-600 hover:bg-blue-50 rounded-xl" title="كشف حساب"><Eye size={18}/></button>
+                            <button onClick={() => handleOpenPaymentModal(supplier)} className="p-2 text-muted hover:text-emerald-600 hover:bg-emerald-50 rounded-xl" title="إنشاء معاملة"><Wallet size={18}/></button>
                             <button onClick={() => handleOpenModal(supplier)} className="p-2 text-muted hover:text-amber-600 hover:bg-amber-50 rounded-xl" title="تعديل"><Edit size={18}/></button>
                         </div>
                     </div>
@@ -614,7 +728,7 @@ const SRMModule: React.FC = () => {
                     <div className="pt-4 border-t dark:border-slate-700 flex justify-between items-center">
                         <span className="text-xs font-bold text-muted">الرصيد الحالي</span>
                         <span className={`text-lg font-black ${supplier.balance > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
-                            {supplier.balance?.toLocaleString() || 0} {currencySymbol}
+                            {Math.abs(Number(supplier.balance) || 0).toLocaleString()} {currencySymbol} {Number(supplier.balance) < 0 ? '(له)' : Number(supplier.balance) > 0 ? '(عليه)' : '(متزن)'}
                         </span>
                     </div>
                 </div>
@@ -645,20 +759,21 @@ const SRMModule: React.FC = () => {
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-6">
-                    <table className="w-full text-right text-sm border-collapse">
-                        <thead className="bg-slate-100 dark:bg-slate-900/50 text-slate-600 dark:text-slate-400 sticky top-0 z-10">
+                    <table className="supplier-ledger-table w-full text-right text-sm border-collapse">
+                        {/* <thead className="bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-400 sticky top-0 z-20"> */}
+                        <thead className="ledger-sticky-head bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 sticky top-0 z-30 shadow-sm">
                             <tr>
-                                <th className="p-3 border-b dark:border-slate-700">التاريخ</th>
-                                <th className="p-3 border-b dark:border-slate-700">نوع الحركة</th>
-                                    <th className="p-3 border-b dark:border-slate-700">رقم المستند</th>
-                                <th className="p-3 border-b dark:border-slate-700 text-center bg-rose-50/50 text-rose-700">مدين (لنا)</th>
-                                <th className="p-3 border-b dark:border-slate-700 text-center bg-emerald-50/50 text-emerald-700">دائن (له)</th>
-                                <th className="p-3 border-b dark:border-slate-700 text-center">الرصيد</th>
-                                <th className="p-3 border-b dark:border-slate-700 text-center">إجراءات</th>
+                                <th className="ledger-head-cell p-3 border-b dark:border-slate-700">التاريخ</th>
+                                <th className="ledger-head-cell p-3 border-b dark:border-slate-700">نوع الحركة</th>
+                                    <th className="ledger-head-cell p-3 border-b dark:border-slate-700">رقم المستند</th>
+                                <th className="ledger-head-cell p-3 border-b dark:border-slate-700 text-center text-rose-700 dark:text-rose-300">توريد</th>
+                                <th className="ledger-head-cell p-3 border-b dark:border-slate-700 text-center text-emerald-700 dark:text-emerald-300">مدفوع</th>
+                                <th className="ledger-head-cell p-3 border-b dark:border-slate-700 text-center">الرصيد</th>
+                                <th className="ledger-head-cell p-3 border-b dark:border-slate-700 text-center">إجراءات</th>
                             </tr>
                         </thead>
                         <tbody className="text-slate-700 dark:text-slate-300 divide-y dark:divide-slate-700">
-                            <tr className="bg-slate-50 dark:bg-slate-900/30">
+                            <tr className="ledger-opening-row">
                                 <td className="p-3 font-mono text-xs">{ledgerStartDate}</td>
                                 <td className="p-3">رصيد افتتاحي</td>
                                 <td className="p-3 font-mono text-sm">-</td>
@@ -670,7 +785,13 @@ const SRMModule: React.FC = () => {
                             {ledgerEntries.length === 0 ? (
                                 <tr><td colSpan={7} className="text-center py-10 text-muted">لا توجد معاملات مسجلة لهذا المورد.</td></tr>
                             ) : ledgerEntries.map((entry, idx) => (
-                                <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
+                                <tr key={idx} className={
+                                    entry.type === 'purchase'
+                                        ? 'ledger-row-purchase'
+                                        : (entry.type === 'return_out' || entry.type === 'payment_out' || entry.type === 'supplier_payment' || entry.type === 'payment')
+                                            ? 'ledger-row-payment'
+                                            : 'ledger-row-default'
+                                }>
                                     <td className="p-3 font-mono text-xs">{entry.date}</td>
                                     <td className="p-3">
                                         <span className={`px-2 py-1 rounded text-[10px] font-bold ${
@@ -682,11 +803,11 @@ const SRMModule: React.FC = () => {
                                         </span>
                                     </td>
                                     <td className="p-3 font-mono text-sm">#{entry.id}</td>
-                                    <td className="p-3 text-center font-bold text-rose-600">{entry.debit > 0 ? entry.debit.toLocaleString() : '-'}</td>
-                                    <td className="p-3 text-center font-bold text-emerald-600">{entry.credit > 0 ? entry.credit.toLocaleString() : '-'}</td>
+                                    <td className="p-3 text-center font-bold text-rose-600">{getLedgerDisplayAmounts(entry).creditor > 0 ? Number(getLedgerDisplayAmounts(entry).creditor).toLocaleString() : '-'}</td>
+                                    <td className="p-3 text-center font-bold text-emerald-600">{getLedgerDisplayAmounts(entry).debtor > 0 ? Number(getLedgerDisplayAmounts(entry).debtor).toLocaleString() : '-'}</td>
                                     <td className="p-3 text-center font-bold">{Number(entry.balance || 0).toLocaleString()}</td>
                                     <td className="p-3 text-center">
-                                        {(entry.type === 'purchase' || entry.type === 'return_out') && (
+                                        {(entry.type === 'purchase' || entry.type === 'return_out' || entry.type === 'payment_out' || entry.type === 'supplier_payment' || entry.type === 'payment') && (
                                             <div className="flex justify-center gap-2">
                                                 <button onClick={() => handleViewInvoice(entry)} className="p-1.5 bg-slate-100 text-slate-600 rounded-lg hover:bg-blue-100 hover:text-blue-600" title="عرض التفاصيل"><Eye size={14}/></button>
                                                 <button onClick={() => handlePrintInvoice(entry)} className="p-1.5 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200" title="طباعة"><Printer size={14}/></button>
@@ -696,11 +817,12 @@ const SRMModule: React.FC = () => {
                                 </tr>
                             ))}
                         </tbody>
-                        <tfoot className="bg-slate-50 dark:bg-slate-900 border-t-2 border-slate-200 dark:border-slate-600 sticky bottom-0 z-10">
+{/*                         <tfoot className="bg-slate-50 dark:bg-slate-900 border-t-2 border-slate-200 dark:border-slate-600 sticky bottom-0 z-20"> */}
+                        <tfoot className="ledger-sticky-foot bg-white dark:bg-slate-800 border-t-2 border-slate-200 dark:border-slate-600 sticky bottom-0 z-20 shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
                             <tr>
                                 <td colSpan={3} className="p-4 font-black text-left">الإجماليات</td>
-                                <td className="p-4 text-center font-black text-rose-600">{totalDebit.toLocaleString()}</td>
-                                <td className="p-4 text-center font-black text-emerald-600">{totalCredit.toLocaleString()}</td>
+                                <td className="p-4 text-center font-black text-rose-600">{totalCreditor.toLocaleString()}</td>
+                                <td className="p-4 text-center font-black text-emerald-600">{totalDebtor.toLocaleString()}</td>
                                 <td className="p-4 text-center font-black">{currentBalance.toLocaleString()}</td>
                                 <td></td>
                             </tr>
@@ -710,9 +832,9 @@ const SRMModule: React.FC = () => {
 
                     <div className="p-6 bg-slate-800 text-white flex justify-between items-center">
                     <div>
-                        <p className="text-xs text-muted">الرصيد المستحق</p>
+                        <p className="text-xs text-muted">الرصيد الحالي</p>
                         <p className={`text-2xl font-black ${currentBalance > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
-                            {currentBalance.toLocaleString()} {currencySymbol} {currentBalance > 0 ? '(له)' : '(لنا)'}
+                            {currentBalance.toLocaleString()} {currencySymbol} {currentBalance < 0 ? '(له)' : currentBalance > 0 ? '(عليه)' : '(متزن)'}
                         </p>
                     </div>
                     <button onClick={printLedger} className="flex items-center gap-2 bg-white text-slate-900 px-6 py-3 rounded-xl font-bold hover:bg-slate-200 transition-all">
@@ -750,7 +872,7 @@ const SRMModule: React.FC = () => {
                           </thead>
                           <tbody>
                               {selectedInvoice.items.length === 0 ? (
-                                  <tr><td colSpan={4} className="p-4 text-center text-slate-400">جاري تحميل التفاصيل...</td></tr>
+                                  <tr><td colSpan={4} className="p-4 text-center text-slate-400">لا توجد أصناف في هذا المستند</td></tr>
                               ) : selectedInvoice.items.map((item:any, i:number) => (
                                   <tr key={i}>
                                       <td className="p-2 border">{item.name}</td>
@@ -831,8 +953,36 @@ const SRMModule: React.FC = () => {
                             <button onClick={() => setIsPaymentModalOpen(false)} className="text-slate-400 hover:text-rose-500 transition-colors"><X size={24} /></button>
                         </div>
                         <div className="p-8 space-y-4 text-right">
+                            {(() => {
+                                const currentSupplierBalance = Number(selectedSupplier?.balance || 0);
+                                const paidNow = Math.max(0, Number(paymentAmount || 0));
+                                const remainingAfterPayment = getProjectedSupplierBalanceAfterPayment(currentSupplierBalance, paidNow);
+                                const withState = (value: number) => `${Math.abs(value).toLocaleString()} ${currencySymbol} ${value < 0 ? '(له)' : value > 0 ? '(عليه)' : '(متزن)'}`;
+                                return (
+                                    <>
+                                        <div className="space-y-1">
+                                            <label className="text-xs font-bold text-slate-500 mr-2">المورد</label>
+                                            <input type="text" readOnly value={selectedSupplier?.name || ''} className="w-full bg-slate-100 dark:bg-slate-800 border-none rounded-2xl py-3 px-4 text-sm font-black text-slate-700 dark:text-slate-200" />
+                                        </div>
+                                        <div className="rounded-2xl border border-slate-200 dark:border-slate-700 p-4 bg-slate-50/70 dark:bg-slate-900/40 space-y-2 text-sm">
+                                            <div className="flex justify-between items-center">
+                                                <span className="text-slate-500 font-bold">حساب المورد الحالي</span>
+                                                <span className={`font-black ${currentSupplierBalance > 0 ? 'text-rose-600' : currentSupplierBalance < 0 ? 'text-emerald-600' : 'text-slate-700 dark:text-slate-200'}`}>{withState(currentSupplierBalance)}</span>
+                                            </div>
+                                            <div className="flex justify-between items-center">
+                                                <span className="text-slate-500 font-bold">المبلغ الذي تم دفعه</span>
+                                                <span className="font-black text-blue-600">{paidNow.toLocaleString()} {currencySymbol}</span>
+                                            </div>
+                                            <div className="flex justify-between items-center border-t border-slate-200 dark:border-slate-700 pt-2">
+                                                <span className="text-slate-500 font-bold">المتبقي</span>
+                                                <span className={`font-black ${remainingAfterPayment > 0 ? 'text-rose-600' : remainingAfterPayment < 0 ? 'text-emerald-600' : 'text-slate-700 dark:text-slate-200'}`}>{withState(remainingAfterPayment)}</span>
+                                            </div>
+                                        </div>
+                                    </>
+                                );
+                            })()}
                             <div className="space-y-1">
-                                <label className="text-xs font-bold text-slate-500 mr-2">المبلغ</label>
+                                <label className="text-xs font-bold text-slate-500 mr-2">المبلغ الذي تم دفعه</label>
                                 <input type="number" min="0" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white" />
                             </div>
                             <div className="space-y-1">

@@ -112,12 +112,80 @@ const computePieces = (order:any) => {
     
     return items.reduce((s:any, it:any) => s + Number(it.quantity || it.qty || 1), 0);
   };
+  const isValidReturnedOrder = (order: any) => {
+    const journalStatus = String(order?.status || '').toLowerCase();
+    const orderStatus = String(order?.order_status || '').toLowerCase();
+
+    if (journalStatus === 'full_return') {
+      return orderStatus === 'returned';
+    }
+
+    if (journalStatus === 'partial_return') {
+      const returnedValue = toNum(order?.returned_value) || toNum(order?.returned_value_fallback);
+      const returnedPieces = toNum(order?.returned_pieces) || toNum(order?.returned_pieces_fallback);
+      return returnedValue > 0 || returnedPieces > 0;
+    }
+
+    return false;
+  };
   const computeOrderValue = (order:any) => {
     if (order.total_amount !== undefined) return toNum(order.total_amount);
     if (order.total !== undefined) return toNum(order.total);
     const items = order.products || order.order_items || order.items || [];
     if (!Array.isArray(items)) return 0;
     return items.reduce((s:any,it:any) => s + (Number(it.quantity || it.qty || 0) * Number(it.price || it.price_per_unit || it.sale_price || 0)), 0);
+  };
+  const computeOrderValueWithoutShipping = (order: any) => {
+    const baseTotal = computeOrderValue(order);
+    const shipping = toNum(order?.shipping_fees ?? order?.shipping ?? 0);
+    return Math.max(0, baseTotal - shipping);
+  };
+  const computeReturnedOrderValue = (order: any) => {
+    const status = String(order?.status || '').toLowerCase();
+    if (status === 'partial_return' && toNum(order?.returned_value) > 0) {
+      return toNum(order?.returned_value);
+    }
+    if (status === 'partial_return' && toNum(order?.returned_value_fallback) > 0) {
+      return toNum(order?.returned_value_fallback);
+    }
+    const items = order?.products || order?.order_items || order?.items || [];
+    if (Array.isArray(items) && items.length > 0) {
+      return items.reduce((sum: number, item: any) => {
+        const quantity = toNum(item?.quantity ?? item?.qty ?? 0);
+        const price = toNum(item?.price ?? item?.price_per_unit ?? item?.sale_price ?? 0);
+        return sum + (quantity * price);
+      }, 0);
+    }
+    const total = toNum(order?.total_amount ?? order?.total ?? 0);
+    const shipping = toNum(order?.shipping_fees ?? order?.shipping ?? 0);
+    return Math.max(0, total - shipping);
+  };
+  const computeReturnedPieces = (order: any) => {
+    const status = String(order?.status || '').toLowerCase();
+    if (status === 'partial_return' && toNum(order?.returned_pieces) > 0) {
+      return toNum(order?.returned_pieces);
+    }
+    if (status === 'partial_return' && toNum(order?.returned_pieces_fallback) > 0) {
+      return toNum(order?.returned_pieces_fallback);
+    }
+    return computePieces(order);
+  };
+  const computeDeliveredNetPieces = (order: any) => {
+    const totalPieces = computePieces(order);
+    const returnedPieces = Math.max(
+      toNum(order?.returned_pieces),
+      toNum(order?.returned_pieces_fallback)
+    );
+    return Math.max(0, totalPieces - returnedPieces);
+  };
+  const computeDeliveredNetValue = (order: any) => {
+    const deliveredValue = computeOrderValueWithoutShipping(order);
+    const status = String(order?.status || '').toLowerCase();
+    const hasPartialReturn = status === 'partial_return' && (toNum(order?.returned_value) > 0 || toNum(order?.returned_value_fallback) > 0);
+    const returnedValue = hasPartialReturn
+      ? Math.max(toNum(order?.returned_value), toNum(order?.returned_value_fallback))
+      : 0;
+    return Math.max(0, deliveredValue - returnedValue);
   };
 const loadJournalLiveStats = async (journal: any) => {
   try {
@@ -259,18 +327,21 @@ const loadJournalLiveStats = async (journal: any) => {
       const deliveredOrders = ordersRes.delivered || [];
       const deferredOrders2 = ordersRes.deferred || [];
       const returnedOrders = ordersRes.returned || [];
+      const validReturnedOrders = returnedOrders.filter((order: any) => isValidReturnedOrder(order));
+      const journalReturnedValue = mergedRows.reduce((sum: number, row: any) => sum + toNum(row.returned_value), 0);
+      const journalReturnedPieces = mergedRows.reduce((sum: number, row: any) => sum + toNum(row.pieces_returned), 0);
 
-      const deliveredValue = deliveredOrders.reduce((sum: number, order: any) => sum + computeOrderValue(order), 0);
-      const deliveredPieces = deliveredOrders.reduce((sum: number, order: any) => sum + computePieces(order), 0);
-      const returnedValue = returnedOrders.reduce((sum: number, order: any) => sum + computeOrderValue(order), 0);
-      const returnedPieces = returnedOrders.reduce((sum: number, order: any) => sum + computePieces(order), 0);
-      const deferredValue = deferredOrders2.reduce((sum: number, order: any) => sum + computeOrderValue(order), 0);
+      const deliveredValue = deliveredOrders.reduce((sum: number, order: any) => sum + computeOrderValueWithoutShipping(order), 0);
+      const deliveredPieces = deliveredOrders.reduce((sum: number, order: any) => sum + computeDeliveredNetPieces(order), 0);
+      const returnedValue = journalReturnedValue;
+      const returnedPieces = journalReturnedPieces;
+      const deferredValue = deferredOrders2.reduce((sum: number, order: any) => sum + computeOrderValueWithoutShipping(order), 0);
       const deferredPieces = deferredOrders2.reduce((sum: number, order: any) => sum + computePieces(order), 0);
 
       setRepStats({
         deliveredCount: deliveredOrders.length,
         deliveredValue,
-        returnedCount: returnedOrders.length,
+        returnedCount: validReturnedOrders.length,
         returnedValue,
       });
       setRepExtras({
@@ -284,7 +355,7 @@ const loadJournalLiveStats = async (journal: any) => {
         ...prev,
         deliveredCount: deliveredOrders.length,
         deliveredTotal: deliveredValue,
-        returnedCount: returnedOrders.length,
+        returnedCount: validReturnedOrders.length,
         postponedCount: deferredOrders2.length,
         postponedTotal: deferredValue,
       }));
@@ -292,7 +363,7 @@ const loadJournalLiveStats = async (journal: any) => {
       setRepOrders(activeOrders);
       setDeferredOrders(deferredOrders2);
       setDeliveredOrdersList(deliveredOrders);
-      setReturnedOrdersList(returnedOrders);
+      setReturnedOrdersList(validReturnedOrders);
       setSelectedOrderIdsLocal(activeOrders.map((o: any) => o.id));
     } catch (e) {
       console.error('Failed to load rep daily close data', e);
@@ -303,7 +374,7 @@ const loadJournalLiveStats = async (journal: any) => {
   };
   const recalcDeferredExtras = (deferredList:any[]) => {
     const deferredPieces = (deferredList||[]).reduce((s:number,o:any) => s + computePieces(o), 0);
-    const deferredValue = (deferredList||[]).reduce((s:number,o:any) => s + computeOrderValue(o), 0);
+    const deferredValue = (deferredList||[]).reduce((s:number,o:any) => s + computeOrderValueWithoutShipping(o), 0);
     setRepExtras(prev => ({ ...prev, deferredCount: (deferredList||[]).length, deferredPieces, deferredValue }));
   };
 
@@ -475,11 +546,11 @@ const loadJournalLiveStats = async (journal: any) => {
       setRepStats(prev => ({
         ...prev,
         deliveredCount: newDelivered.length,
-        deliveredValue: newDelivered.reduce((s:number,o:any) => s + computeOrderValue(o), 0)
+        deliveredValue: newDelivered.reduce((s:number,o:any) => s + computeOrderValueWithoutShipping(o), 0)
       }));
       setRepExtras(prev => ({ 
         ...prev, 
-        deliveredPieces: newDelivered.reduce((s:number,o:any) => s + computePieces(o), 0) 
+        deliveredPieces: newDelivered.reduce((s:number,o:any) => s + computeDeliveredNetPieces(o), 0) 
       }));
 
       // تحديث rep_journal_orders
@@ -589,12 +660,17 @@ const loadJournalLiveStats = async (journal: any) => {
       Swal.fire('اختر المندوب', 'يرجى اختيار المندوب أولاً.', 'warning');
       return;
     }
-    if (!selectedTreasuryId) {
+    if (!openDailyInfo) {
+      Swal.fire('تنبيه', 'المندوب ليس له يومية مفتوحة حالياً.', 'warning');
+      return;
+    }
+    const amount = Math.max(0, toNum(paidAmount));
+
+    if (amount > 0 && !selectedTreasuryId) {
       Swal.fire('اختر الخزينة', 'يرجى اختيار الخزينة لإتمام التقفيل.', 'warning');
       return;
     }
 
-    const amount = Math.max(0, toNum(paidAmount));
     const repName = selectedRep?.name || '';
 
     const res = await Swal.fire({
@@ -606,7 +682,7 @@ const loadJournalLiveStats = async (journal: any) => {
       html: `
         <div style="text-align:right; line-height:1.9">
           <div><b>المندوب:</b> ${repName}</div>
-          <div><b>الخزينة:</b> ${selectedTreasuryName || selectedTreasuryId}</div>
+          <div><b>الخزينة:</b> ${selectedTreasuryName || selectedTreasuryId || '—'}</div>
           <div><b>طريقة التسوية:</b> ${settlementDirection === 'collect' ? 'تحصيل من المندوب' : 'دفع إلى المندوب'}</div>
           <hr/>
           <div><b>الحساب الحالى (من قاعدة البيانات):</b> ${money(repBalance)} ${currencySymbol} <span>(${balanceLabel(repBalance)})</span></div>
@@ -625,7 +701,9 @@ const loadJournalLiveStats = async (journal: any) => {
     try {
       setLoading(true);
       let settleSuccess = false;
-      if (settlementDirection === 'collect') {
+      if (amount <= 0) {
+        settleSuccess = true;
+      } else if (settlementDirection === 'collect') {
         // existing settleDaily flow (collect from rep)
         // include a reason so the backend has notes/details.reason as required
         const payload = { repId: Number(selectedRepId), treasuryId: Number(selectedTreasuryId), paidAmount: amount, details: { reason: 'اغلاق اليوميه تلقائيا' }, notes: 'اغلاق اليوميه تلقائيا' };
@@ -635,7 +713,6 @@ const loadJournalLiveStats = async (journal: any) => {
         const j = await r.json();
         if (j && j.success) {
           settleSuccess = true;
-          Swal.fire('تم', 'تم التقفيل وتنفيذ التسوية بنجاح.', 'success');
         } else {
           Swal.fire('فشل العملية', j?.message || 'تعذر تنفيذ التقفيل.', 'error');
         }
@@ -659,7 +736,6 @@ const loadJournalLiveStats = async (journal: any) => {
         const j2 = await r2.json();
         if (j2 && j2.success) {
           settleSuccess = true;
-          Swal.fire('تم', 'تم دفع المبلغ إلى المندوب وتسجيل المعاملة.', 'success');
         } else {
           Swal.fire('فشل العملية', j2?.message || 'تعذر تسجيل عملية الدفع.', 'error');
         }
@@ -673,7 +749,7 @@ const loadJournalLiveStats = async (journal: any) => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               rep_id: Number(selectedRepId),
-              treasury_id: Number(selectedTreasuryId),
+              treasury_id: selectedTreasuryId ? Number(selectedTreasuryId) : null,
               paid_amount: amount,
               direction: settlementDirection,
               event_date: new Date().toISOString().slice(0, 10),
@@ -685,10 +761,16 @@ const loadJournalLiveStats = async (journal: any) => {
         // Mark daily journal as closed
         if (openDailyInfo) {
           try {
-            await fetch(`${API_BASE_PATH}/api.php?module=sales&action=closeRepDaily`, {
+            const closeResp = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=closeRepDaily`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ rep_id: Number(selectedRepId), journal_id: openDailyInfo.id })
             });
+            const closeJson = await closeResp.json().catch(() => null);
+            if (!closeJson?.success) {
+              Swal.fire('تنبيه', closeJson?.message || 'تعذر إغلاق اليومية.', 'warning');
+            } else {
+              Swal.fire('تم', amount > 0 ? 'تم التقفيل وإغلاق اليومية بنجاح.' : 'تم إغلاق اليومية بنجاح بدون حركة مالية.', 'success');
+            }
             setOpenDailyInfo(null);
           } catch (e) { console.warn('closeRepDaily failed (non-critical)', e); }
         }
@@ -911,6 +993,10 @@ const loadJournalLiveStats = async (journal: any) => {
               </div>
               <div className="space-y-1">
                 <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400">
+                  <span>القطع المرتجعة</span>
+                  <span className="font-black">{statsLoading ? '—' : repExtras.returnedPieces}</span>
+                </div>
+                <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400">
                   <span>القيمة</span>
                   <span className="font-black text-rose-600">{statsLoading ? '—' : money(repStats.returnedValue)} {currencySymbol}</span>
                 </div>
@@ -1107,7 +1193,7 @@ const loadJournalLiveStats = async (journal: any) => {
 
             <button
               onClick={handleSubmit}
-              disabled={loading || !selectedRepId || !selectedTreasuryId}
+              disabled={loading || !selectedRepId || (toNum(paidAmount) > 0 && !selectedTreasuryId)}
               className="mt-5 w-full bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-slate-900 font-black py-3 rounded-2xl transition-colors"
             >
               تأكيد التقفيل وإغلاق اليومية
@@ -1136,7 +1222,10 @@ const loadJournalLiveStats = async (journal: any) => {
                   <div key={o.id} className="flex items-center justify-between border rounded-lg p-2">
                     <div className="flex items-center gap-3">
                       <input type="checkbox" checked={selectedOrderIdsLocal.includes(o.id)} onChange={()=>toggleSelectOrderLocal(o.id)} className="w-4 h-4" />
-                      <div className="text-sm">#{o.orderNumber||o.order_number} — {o.customerName||o.customer_name||o.name}</div>
+                      <div>
+                        <div className="text-sm">#{o.orderNumber||o.order_number} — {o.customerName||o.customer_name||o.name}</div>
+                        <div className="text-xs font-bold text-emerald-600 dark:text-emerald-400">{money(computeOrderValueWithoutShipping(o))} {currencySymbol}</div>
+                      </div>
                     </div>
                     <div className="flex items-center gap-2">
                       <button onClick={() => moveSingleToDeferred(o)} className="px-2 py-1 text-xs rounded bg-amber-400 text-white">نزول</button>
@@ -1151,7 +1240,10 @@ const loadJournalLiveStats = async (journal: any) => {
               <div className="space-y-2 max-h-80 overflow-y-auto">
                 {deferredOrders.length === 0 ? <div className="text-xs text-slate-400">لا توجد اوردرات مؤجلة.</div> : deferredOrders.map((o:any) => (
                   <div key={o.id} className="flex items-center justify-between border rounded-lg p-2">
-                    <div className="text-sm">#{o.orderNumber||o.order_number} — {o.customerName||o.customer_name||o.name}</div>
+                    <div>
+                      <div className="text-sm">#{o.orderNumber||o.order_number} — {o.customerName||o.customer_name||o.name}</div>
+                      <div className="text-xs font-bold text-emerald-600 dark:text-emerald-400">{money(computeOrderValueWithoutShipping(o))} {currencySymbol}</div>
+                    </div>
                     <div className="flex items-center gap-2">
                       <button onClick={() => moveDeferredBack(o)} className="px-2 py-1 text-xs rounded bg-slate-200">ارجاع</button>
                     </div>
@@ -1206,8 +1298,22 @@ const loadJournalLiveStats = async (journal: any) => {
                         <tr key={o.id} className="border-b border-slate-50 dark:border-slate-800/50 hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
                           <td className="p-3 font-black text-slate-900 dark:text-white">#{o.orderNumber || o.order_number || o.id}</td>
                           <td className="p-3 text-slate-700 dark:text-slate-300">{o.customerName || o.customer_name || o.name || '—'}</td>
-                          <td className="p-3 text-center text-slate-600 dark:text-slate-400">{computePieces(o)}</td>
-                          <td className="p-3 font-bold text-emerald-600 dark:text-emerald-400">{money(computeOrderValue(o))} {currencySymbol}</td>
+                          <td className="p-3 text-center text-slate-600 dark:text-slate-400">
+                            {viewModal === 'returned'
+                              ? computeReturnedPieces(o)
+                              : viewModal === 'delivered'
+                                ? computeDeliveredNetPieces(o)
+                                : computePieces(o)}
+                          </td>
+                          <td className="p-3 font-bold text-emerald-600 dark:text-emerald-400">
+                            {money(
+                              viewModal === 'returned'
+                                ? computeReturnedOrderValue(o)
+                                : viewModal === 'delivered'
+                                  ? computeDeliveredNetValue(o)
+                                  : computeOrderValueWithoutShipping(o)
+                            )} {currencySymbol}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

@@ -230,3 +230,72 @@ select, select option {
 
 /* Some browsers need the following pseudo-element tweak for the dropdown arrow */
 select::-ms-expand { color: var(--text) !important; }
+
+/* SRM supplier ledger table: force sticky and row backgrounds (override generic table reset rules) */
+.supplier-ledger-table thead.ledger-sticky-head,
+.supplier-ledger-table thead.ledger-sticky-head tr,
+.supplier-ledger-table thead.ledger-sticky-head th.ledger-head-cell {
+  background-color: var(--card-bg) !important;
+}
+
+.supplier-ledger-table tfoot.ledger-sticky-foot,
+.supplier-ledger-table tfoot.ledger-sticky-foot tr,
+.supplier-ledger-table tfoot.ledger-sticky-foot td {
+  background-color: var(--card-bg) !important;
+}
+
+.supplier-ledger-table tbody tr.ledger-opening-row {
+  background-color: rgba(241, 245, 249, 1) !important;
+}
+
+.dark .supplier-ledger-table tbody tr.ledger-opening-row {
+  background-color: rgba(15, 23, 42, 0.35) !important;
+}
+
+.supplier-ledger-table tbody tr.ledger-row-purchase {
+  background-color: rgba(255, 241, 242, 1) !important;
+}
+
+.dark .supplier-ledger-table tbody tr.ledger-row-purchase {
+  background-color: rgba(76, 5, 25, 0.4) !important;
+}
+
+.supplier-ledger-table tbody tr.ledger-row-purchase:hover {
+  background-color: rgba(255, 228, 230, 1) !important;
+}
+
+.dark .supplier-ledger-table tbody tr.ledger-row-purchase:hover {
+  background-color: rgba(88, 8, 29, 0.5) !important;
+}
+
+.supplier-ledger-table tbody tr.ledger-row-payment {
+  background-color: rgba(236, 253, 245, 1) !important;
+}
+
+.dark .supplier-ledger-table tbody tr.ledger-row-payment {
+  background-color: rgba(2, 44, 34, 0.4) !important;
+}
+
+.supplier-ledger-table tbody tr.ledger-row-payment:hover {
+  background-color: rgba(209, 250, 229, 1) !important;
+}
+
+.dark .supplier-ledger-table tbody tr.ledger-row-payment:hover {
+  background-color: rgba(3, 57, 43, 0.5) !important;
+}
+
+.supplier-ledger-table tbody tr.ledger-row-default:hover {
+  background-color: rgba(248, 250, 252, 1) !important;
+}
+
+.dark .supplier-ledger-table tbody tr.ledger-row-default:hover {
+  background-color: rgba(51, 65, 85, 0.3) !important;
+}
+
+.supplier-ledger-table thead.ledger-sticky-head {
+  z-index: 30 !important;
+}
+
+.supplier-ledger-table tfoot.ledger-sticky-foot {
+  z-index: 20 !important;
+}

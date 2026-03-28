@@ -68,26 +68,41 @@ function call_activation_service($hwid, $phone, $company) {
         return ['success' => false, 'message' => 'cURL is not available on this server.'];
     }
 
-    $ch = curl_init(ACTIVATION_SCRIPT_URL);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_POST, true);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
-    // Short timeouts to avoid slowing down UI when activation server is unreachable
-    curl_setopt($ch, CURLOPT_TIMEOUT, 2);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 1);
-    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-    curl_setopt($ch, CURLOPT_MAXREDIRS, 5);
-    curl_setopt($ch, CURLOPT_USERAGENT, 'DragonERP/1.0');
+    $attempts = 0;
+    $maxAttempts = 3;
+    $response = false;
+    $lastError = '';
 
-    $response = curl_exec($ch);
-    if ($response === false) {
-        $error = curl_error($ch);
+    while ($attempts < $maxAttempts) {
+        $ch = curl_init(ACTIVATION_SCRIPT_URL);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
+        // Increase timeouts to be tolerant of slow networks; keep reasonable limits
+        curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+        curl_setopt($ch, CURLOPT_MAXREDIRS, 5);
+        curl_setopt($ch, CURLOPT_USERAGENT, 'DragonERP/1.0');
+
+        $response = curl_exec($ch);
+        if ($response === false) {
+            $lastError = curl_error($ch);
+            curl_close($ch);
+            $attempts++;
+            // small backoff before retrying
+            if ($attempts < $maxAttempts) usleep(250000); // 250ms
+            continue;
+        }
+
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
-        return ['success' => false, 'message' => 'Activation request failed: ' . $error];
+        break;
     }
 
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
+    if ($response === false) {
+        return ['success' => false, 'message' => 'Activation request failed: ' . ($lastError ?: 'unknown error')];
+    }
 
     if ($httpCode < 200 || $httpCode >= 300) {
         return ['success' => false, 'message' => 'Activation server returned HTTP ' . $httpCode];

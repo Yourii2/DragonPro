@@ -50,8 +50,22 @@ interface ReportsModuleProps {
   initialView?: string;
 }
 
+const HIDDEN_REPORT_SUBTABS = new Set([
+  'inventory',
+  'finance',
+  'daily',
+  'sales-report',
+  'crm-srm',
+  'hrm',
+]);
+
+const normalizeReportsView = (view?: string) => {
+  const next = (view || 'sales').trim();
+  return HIDDEN_REPORT_SUBTABS.has(next) ? 'sales' : next;
+};
+
 const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
-  const [activeSubTab, setActiveSubTab] = useState<string>(initialView || 'sales');
+  const [activeSubTab, setActiveSubTab] = useState<string>(normalizeReportsView(initialView));
   const today = new Date();
   const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
   const [startDate, setStartDate] = useState(firstDayOfMonth.toISOString().split('T')[0]);
@@ -61,11 +75,6 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
 
   const [salesByProduct, setSalesByProduct] = useState([]);
   const [dailySales, setDailySales] = useState([]);
-  const [invoiceRecords, setInvoiceRecords] = useState([]);
-
-  const [salesStatus, setSalesStatus] = useState('');
-  const [salesCustomerId, setSalesCustomerId] = useState('');
-  const [salesRepId, setSalesRepId] = useState('');
 
   const [inventoryStockByWarehouse, setInventoryStockByWarehouse] = useState([]);
   const [inventoryMovement, setInventoryMovement] = useState([]);
@@ -83,8 +92,6 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
   const [financeTreasuryId, setFinanceTreasuryId] = useState('');
   const [financeTxnType, setFinanceTxnType] = useState('');
 
-  const [customers, setCustomers] = useState<any[]>([]);
-  const [reps, setReps] = useState<any[]>([]);
   const [warehouses, setWarehouses] = useState<any[]>([]);
   const [treasuries, setTreasuries] = useState<any[]>([]);
 
@@ -92,24 +99,17 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
   const [compareData, setCompareData] = useState<any>(null);
 
   useEffect(() => {
-    if (initialView) setActiveSubTab(initialView);
+    if (initialView) setActiveSubTab(normalizeReportsView(initialView));
   }, [initialView]);
 
   useEffect(() => {
     const loadLookups = async () => {
       try {
-        const [custRes, usersRes, whRes, trRes] = await Promise.all([
-          fetch(`${API_BASE_PATH}/api.php?module=customers&action=getAll`).then(r => r.json()).catch(() => ({ success: false, data: [] })),
-          fetch(`${API_BASE_PATH}/api.php?module=users&action=getAll`).then(r => r.json()).catch(() => ({ success: false, data: [] })),
+        const [whRes, trRes] = await Promise.all([
           fetch(`${API_BASE_PATH}/api.php?module=warehouses&action=getAll`).then(r => r.json()).catch(() => ({ success: false, data: [] })),
           fetch(`${API_BASE_PATH}/api.php?module=treasuries&action=getAll`).then(r => r.json()).catch(() => ({ success: false, data: [] }))
         ]);
 
-        if (custRes && custRes.success) setCustomers(custRes.data || []);
-        if (usersRes && usersRes.success) {
-          const repsOnly = (usersRes.data || []).filter((u: any) => (u.role || '').toString().toLowerCase() === 'representative');
-          setReps(repsOnly);
-        }
         if (whRes && whRes.success) setWarehouses(whRes.data || []);
         if (trRes && trRes.success) setTreasuries(trRes.data || []);
       } catch (e) {
@@ -123,18 +123,15 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
   useEffect(() => {
     const urlParams = `&start_date=${startDate}&end_date=${endDate}`;
     if (activeSubTab === 'sales') {
-      const salesParams = `${urlParams}${salesStatus ? `&status=${encodeURIComponent(salesStatus)}` : ''}${salesCustomerId ? `&customer_id=${encodeURIComponent(salesCustomerId)}` : ''}${salesRepId ? `&rep_id=${encodeURIComponent(salesRepId)}` : ''}`;
-      fetch(`${API_BASE_PATH}/api.php?module=reports&action=sales${salesParams}`)
+      fetch(`${API_BASE_PATH}/api.php?module=reports&action=sales${urlParams}`)
         .then(res => res.json())
         .then(data => {
           if (data && data.success) {
             setSalesByProduct(data.data.salesByProduct || []);
             setDailySales(data.data.dailySales || []);
-            setInvoiceRecords(data.data.invoiceRecords || []);
           } else {
             setSalesByProduct([]);
             setDailySales([]);
-            setInvoiceRecords([]);
             Swal.fire('تنبيه', 'لم يتم العثور على بيانات لتقارير المبيعات للفترة المحددة.', 'info');
           }
         }).catch(err => {
@@ -182,7 +179,7 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
           Swal.fire('خطأ', 'فشل جلب التقارير المالية. راجع الكونسول.', 'error');
         });
     }
-  }, [activeSubTab, startDate, endDate, salesStatus, salesCustomerId, salesRepId, inventoryWarehouseId, inventoryMovementType, financeTreasuryId, financeTxnType]);
+  }, [activeSubTab, startDate, endDate, inventoryWarehouseId, inventoryMovementType, financeTreasuryId, financeTxnType]);
 
   useEffect(() => {
     if (activeSubTab !== 'compare') return;
@@ -225,12 +222,16 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
     if (activeSubTab === 'sales') {
       const rows: string[][] = [
         ['section', 'field1', 'field2', 'field3', 'field4'],
-        ['salesByProduct', 'name', 'sales', '', ''],
-        ...salesByProduct.map((r: any) => ['salesByProduct', r.name, r.sales, '', '']),
+        ['salesByProduct', 'name', 'pieces_sold', 'sales_amount', 'net_profit'],
+        ...salesByProduct.map((r: any) => [
+          'salesByProduct',
+          r.name,
+          r.sales,
+          r.sales_amount,
+          r.net_profit
+        ]),
         ['dailySales', 'date', 'total', '', ''],
-        ...dailySales.map((r: any) => ['dailySales', r.date, r.total, '', '']),
-        ['invoiceRecords', 'order_number', 'date', 'customer', 'total'],
-        ...invoiceRecords.map((r: any) => ['invoiceRecords', r.order_number, r.date, r.customer, r.total])
+        ...dailySales.map((r: any) => ['dailySales', r.date, r.total, '', ''])
       ];
       downloadCsv(`sales_${startDate}_to_${endDate}.csv`, rows);
       return;
@@ -330,32 +331,6 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
   const salesFilters = (
     <div className="flex gap-2 w-full md:w-auto flex-wrap">
       {dateRangeInputs}
-      <CustomSelect
-        value={salesStatus}
-        onChange={(v) => setSalesStatus(v)}
-        options={[
-          { value: '', label: 'كل الحالات' },
-          { value: 'pending', label: 'قيد الانتظار' },
-          { value: 'with_rep', label: 'مع المندوب' },
-          { value: 'delivered', label: 'تم التسليم' },
-          { value: 'returned', label: 'مرتجع' },
-          { value: 'partial', label: 'جزئي' },
-          { value: 'postponed', label: 'مؤجل' }
-        ]}
-        placeholder="حالة الفاتورة"
-      />
-      <CustomSelect
-        value={salesCustomerId}
-        onChange={(v) => setSalesCustomerId(v)}
-        options={[{ value: '', label: 'كل العملاء' }, ...customers.map((c: any) => ({ value: String(c.id), label: c.name }))]}
-        placeholder="العملاء"
-      />
-      <CustomSelect
-        value={salesRepId}
-        onChange={(v) => setSalesRepId(v)}
-        options={[{ value: '', label: 'كل المناديب' }, ...reps.map((r: any) => ({ value: String(r.id), label: r.name }))]}
-        placeholder="المناديب"
-      />
     </div>
   );
 
@@ -436,6 +411,15 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
     expense_prev: compareData?.expense_prev?.[idx] || 0
   }));
 
+  const salesTotals = salesByProduct.reduce(
+    (sum: { pieces: number; amount: number; profit: number }, row: any) => ({
+      pieces: sum.pieces + Number(row?.sales || 0),
+      amount: sum.amount + Number(row?.sales_amount || 0),
+      profit: sum.profit + Number(row?.net_profit || 0),
+    }),
+    { pieces: 0, amount: 0, profit: 0 }
+  );
+
   return (
     <div className="space-y-6 transition-colors duration-300">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 text-right">
@@ -445,12 +429,7 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
         </div>
         <div className="flex bg-white dark:bg-slate-800 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-x-auto max-w-full">
           <button onClick={() => setActiveSubTab('sales')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'sales' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><ShoppingCart size={16}/> المبيعات</button>
-          <button onClick={() => setActiveSubTab('inventory')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'inventory' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Package size={16}/> المخزون</button>
-          <button onClick={() => setActiveSubTab('finance')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'finance' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Wallet size={16}/> المالية</button>
-          <button onClick={() => setActiveSubTab('daily')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'daily' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><History size={16}/> اليومية</button>
           <button onClick={() => setActiveSubTab('totals')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'totals' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><FileText size={16}/> ملخص الفترة</button>
-          <button onClick={() => setActiveSubTab('crm-srm')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'crm-srm' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Users size={16}/> العملاء والموردين</button>
-          <button onClick={() => setActiveSubTab('hrm')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'hrm' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Briefcase size={16}/> الموارد البشرية</button>
           <button onClick={() => setActiveSubTab('admin-audit')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'admin-audit' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><ShieldCheck size={16}/> النظام والتدقيق</button>
           <button onClick={() => setActiveSubTab('compare')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'compare' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><BarChart3 size={16}/> المقارنات</button>
         </div>
@@ -495,32 +474,32 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
             </div>
           </div>
           
-          <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2"><Table size={18} className="text-slate-400"/> سجل الفواتير</h4>
+          <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2"><Table size={18} className="text-slate-400"/> ملخص مبيعات المنتجات</h4>
           <div className="overflow-x-auto rounded-2xl border dark:border-slate-700">
             <table className="w-full text-right text-sm">
               <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400">
                 <tr>
-                  <th className="px-6 py-3 font-bold">رقم الفاتورة</th>
-                  <th className="px-6 py-3 font-bold">التاريخ</th>
-                  <th className="px-6 py-3 font-bold">العميل</th>
-                  <th className="px-6 py-3 font-bold">الإجمالي ({currencySymbol})</th>
-                  <th className="px-6 py-3 font-bold">الحالة</th>
+                  <th className="px-6 py-3 font-bold">المنتج</th>
+                  <th className="px-6 py-3 font-bold">عدد القطع المباعة</th>
+                  <th className="px-6 py-3 font-bold">إجمالي المبيعات ({currencySymbol})</th>
+                  <th className="px-6 py-3 font-bold">صافي الربح ({currencySymbol})</th>
                 </tr>
               </thead>
               <tbody className="divide-y dark:divide-slate-700 text-slate-700 dark:text-slate-300">
-                {invoiceRecords.map((item: any, index) => (
-                  <tr key={item.order_number || item.id || index} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                    <td className="px-6 py-4 font-bold">{item.order_number}</td>
-                    <td className="px-6 py-4">{item.date}</td>
-                    <td className="px-6 py-4">{item.customer}</td>
-                    <td className="px-6 py-4 font-black text-blue-600 dark:text-blue-400">{item.total.toLocaleString()}</td>
-                    <td className="px-6 py-4">
-                      <span className={`px-3 py-1 rounded-lg text-[10px] font-black ${item.status === 'Completed' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'}`}>
-                        {item.status === 'Completed' ? 'مكتمل' : 'معلق'}
-                      </span>
-                    </td>
+                {salesByProduct.map((item: any, index) => (
+                  <tr key={`${item.name || 'product'}-${index}`} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                    <td className="px-6 py-4 font-bold">{item.name}</td>
+                    <td className="px-6 py-4">{Number(item.sales || 0).toLocaleString()}</td>
+                    <td className="px-6 py-4 font-black text-blue-600 dark:text-blue-400">{Number(item.sales_amount || 0).toLocaleString()}</td>
+                    <td className={`px-6 py-4 font-black ${Number(item.net_profit || 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>{Number(item.net_profit || 0).toLocaleString()}</td>
                   </tr>
                 ))}
+                <tr className="bg-slate-100/70 dark:bg-slate-700/40">
+                  <td className="px-6 py-4 font-black">الإجمالي</td>
+                  <td className="px-6 py-4 font-black">{salesTotals.pieces.toLocaleString()}</td>
+                  <td className="px-6 py-4 font-black text-blue-700 dark:text-blue-300">{salesTotals.amount.toLocaleString()}</td>
+                  <td className={`px-6 py-4 font-black ${salesTotals.profit >= 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300'}`}>{salesTotals.profit.toLocaleString()}</td>
+                </tr>
               </tbody>
             </table>
           </div>

@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Wallet, TrendingUp, TrendingDown, ArrowLeftRight, Landmark, Plus, Search, X, Save, Edit, Trash2, Eye, Coins, ArrowDown, ArrowUp, Truck, Printer } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
@@ -14,12 +14,11 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isTransactionModalOpen, setIsTransactionModalOpen] = useState(false);
-  const [modalType, setModalType] = useState<'expense' | 'deposit' | 'payment' | 'transfer' | null>(null);
+  const [modalType, setModalType] = useState<'expense' | 'deposit' | 'transfer' | null>(null);
 
   // Form states
   const [expenseData, setExpenseData] = useState({ amount: '', treasury_id: '', notes: '' });
   const [depositData, setDepositData] = useState({ amount: '', treasury_id: '', notes: '' });
-  const [paymentData, setPaymentData] = useState({ amount: '', treasury_id: '', supplier_id: '', notes: '' });
   const [transferData, setTransferData] = useState({ amount: '', from_treasury_id: '', to_treasury_id: '', notes: '' });
 
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
@@ -41,7 +40,6 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
   const [txFromDate, setTxFromDate] = useState<string>(() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10); });
   const [txToDate, setTxToDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
   const [txTreasuryId, setTxTreasuryId] = useState<string>('');
-  const [suppliers, setSuppliers] = useState<any[]>([]);
   const [userDefaults, setUserDefaults] = useState<any>(null);
   const [accounts, setAccounts] = useState<any[]>([]);
   const [journalEntries, setJournalEntries] = useState<any[]>([]);
@@ -76,7 +74,6 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
           const d = String(defaults.default_treasury_id);
           setExpenseData(prev => ({...prev, treasury_id: prev.treasury_id || d}));
           setDepositData(prev => ({...prev, treasury_id: prev.treasury_id || d}));
-          setPaymentData(prev => ({...prev, treasury_id: prev.treasury_id || d}));
           setTransferData(prev => ({...prev, from_treasury_id: prev.from_treasury_id || d}));
           setUserDefaults(defaults);
         }
@@ -86,7 +83,6 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
     };
 
     fetchTreasuries();
-    fetchAllSuppliers();
     // fetch user defaults to prefill/lock treasury when applicable
     const fetchUserDefaults = async () => {
       try {
@@ -98,7 +94,6 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
             const d = String(jr.data.default_treasury_id);
             setExpenseData(prev => ({...prev, treasury_id: prev.treasury_id || d}));
             setDepositData(prev => ({...prev, treasury_id: prev.treasury_id || d}));
-            setPaymentData(prev => ({...prev, treasury_id: prev.treasury_id || d}));
             setTransferData(prev => ({...prev, from_treasury_id: prev.from_treasury_id || d}));
           }
         }
@@ -114,16 +109,6 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
       setActiveTab('treasuries');
     }
   }, [initialView]);
-
-  const fetchAllSuppliers = async () => {
-    try {
-      const response = await fetch(`${API_BASE_PATH}/api.php?module=suppliers&action=getAll`);
-      const result = await response.json();
-      if (result.success) setSuppliers(result.data || []);
-    } catch (error) {
-      console.error('Failed to fetch suppliers:', error);
-    }
-  };
 
   const fetchAllTreasuries = async () => {
     try {
@@ -152,9 +137,15 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
       if (treasuryId) url += `&treasury_id=${encodeURIComponent(treasuryId)}`;
       const res = await fetch(url);
       const jr = await res.json();
-      if (jr.success) setTransactions(jr.data || []);
+      if (jr.success) {
+        const data = jr.data || [];
+        setTransactions(data);
+        return data;
+      }
+      return [];
     } catch (e) {
       console.error('Failed to fetch transactions:', e);
+      return [];
     } finally {
       setIsAllTxLoading(false);
     }
@@ -170,6 +161,17 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
     );
   };
 
+  const isSupplierPaymentTx = (tx: any, details: any): boolean => {
+    const txType = String(tx?.type || '').trim();
+    const relType = String(tx?.related_to_type || '').trim();
+    const subtype = String(details?.subtype || '').trim();
+    return (
+      txType === 'supplier_payment' ||
+      subtype === 'supplier_payment' ||
+      (relType === 'supplier' && (txType === 'payment_out' || txType === 'payment'))
+    );
+  };
+
   const getTxSource = (tx: any): string => {
     const details = tx.details ? (() => { try { const p = JSON.parse(tx.details); return (p && typeof p === 'object') ? p : {}; } catch { return {}; } })() : {};
     const subtype = details.subtype || '';
@@ -180,6 +182,9 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
       return found ? found.name : (fromId ? `خزينة #${fromId}` : 'خزينة أخرى');
     }
     if (subtype === 'transfer_out' || tx.type === 'transfer_out') return tx.treasury_name || 'خزينة';
+    if (isSupplierPaymentTx(tx, details)) {
+      return tx.treasury_name || 'خزينة';
+    }
     // Rep payment: collect from rep (positive) → source is rep; pay to rep (negative) → source is treasury
     if (isRepPaymentTx(tx, details)) {
       return amt >= 0
@@ -200,6 +205,9 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
       return found ? found.name : (toId ? `خزينة #${toId}` : 'خزينة أخرى');
     }
     if (subtype === 'transfer_in' || tx.type === 'transfer_in') return tx.treasury_name || 'خزينة';
+    if (isSupplierPaymentTx(tx, details)) {
+      return tx.related_name || `مورد #${tx.related_to_id || ''}`;
+    }
     // Rep payment: collect from rep (positive) → dest is treasury; pay to rep (negative) → dest is rep
     if (isRepPaymentTx(tx, details)) {
       return amt >= 0
@@ -210,8 +218,30 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
     return tx.related_name || 'مصروف';
   };
 
+  const getTxDetailsObj = (tx: any): any => {
+    if (!tx || !tx.details) return {};
+    try {
+      const parsed = JSON.parse(tx.details);
+      return (parsed && typeof parsed === 'object') ? parsed : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const visibleTransactions = useMemo(() => {
+    const financialTypes = new Set([
+      'payment_in', 'payment_out', 'transfer_in', 'transfer_out', 'deposit', 'expense',
+      'supplier_payment', 'rep_payment_in', 'rep_payment_out', 'rep_settlement', 'payment'
+    ]);
+    return (transactions || []).filter((tx: any) => {
+      const details = getTxDetailsObj(tx);
+      const subtype = String(details.subtype || '').trim();
+      return financialTypes.has(String(tx.type || '').trim()) || financialTypes.has(subtype);
+    });
+  }, [transactions]);
+
   const printTxReport = () => {
-    const rows = transactions.map(tx => `
+    const rows = visibleTransactions.map(tx => `
       <tr>
         <td>${new Date(tx.transaction_date).toLocaleString('ar-EG')}</td>
         <td>${getTxSource(tx)}</td>
@@ -389,7 +419,7 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
     }
   };
 
-  const openTransactionModal = (type: 'expense' | 'deposit' | 'payment' | 'transfer') => {
+  const openTransactionModal = (type: 'expense' | 'deposit' | 'transfer') => {
     setModalType(type);
     setIsTransactionModalOpen(true);
   };
@@ -399,7 +429,6 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
     setModalType(null);
     setExpenseData({ amount: '', treasury_id: '', notes: '' });
     setDepositData({ amount: '', treasury_id: '', notes: '' });
-    setPaymentData({ amount: '', treasury_id: '', supplier_id: '', notes: '' });
     setTransferData({ amount: '', from_treasury_id: '', to_treasury_id: '', notes: '' });
   };
 
@@ -698,20 +727,18 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
     let payload: any = {};
     let treasuryToCheck: any = null;
     let amountToCheck = 0;
+    let affectedTreasuryId: string = '';
 
     switch (modalType) {
       case 'expense':
         payload = { ...expenseData, type: 'expense', amount: -Math.abs(parseFloat(expenseData.amount)) };
         treasuryToCheck = treasuries.find(t => t.id == expenseData.treasury_id);
         amountToCheck = parseFloat(expenseData.amount);
+        affectedTreasuryId = String(expenseData.treasury_id || '');
         break;
       case 'deposit':
         payload = { ...depositData, type: 'deposit', amount: Math.abs(parseFloat(depositData.amount)) };
-        break;
-      case 'payment':
-        payload = { ...paymentData, type: 'supplier_payment', amount: -Math.abs(parseFloat(paymentData.amount)), related_to_type: 'supplier', related_to_id: paymentData.supplier_id };
-        treasuryToCheck = treasuries.find(t => t.id == paymentData.treasury_id);
-        amountToCheck = parseFloat(paymentData.amount);
+        affectedTreasuryId = String(depositData.treasury_id || '');
         break;
       case 'transfer':
         url = `${API_BASE_PATH}/api.php?module=transactions&action=createTransfer`;
@@ -737,10 +764,6 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
       if (!depositData.treasury_id) { Swal.fire('اختر الخزينة', 'يرجى اختيار الخزينة للإيداع.', 'warning'); return; }
       if (!depositData.notes || String(depositData.notes).trim() === '') { Swal.fire('حدد البيان', 'يرجى إدخال سبب الايداع في حقل الملاحظات.', 'warning'); return; }
     }
-    if (modalType === 'payment') {
-      if (!paymentData.treasury_id) { Swal.fire('اختر الخزينة', 'يرجى اختيار الخزينة للدفعة.', 'warning'); return; }
-      if (!paymentData.notes || String(paymentData.notes).trim() === '') { Swal.fire('حدد البيان', 'يرجى إدخال سبب الدفعة في حقل الملاحظات.', 'warning'); return; }
-    }
     if (modalType === 'transfer') {
       if (!transferData.from_treasury_id || !transferData.to_treasury_id) { Swal.fire('اختر الخزنتين', 'يرجى تحديد الخزينة المرسلة والمستقبلة.', 'warning'); return; }
       if (!transferData.notes || String(transferData.notes).trim() === '') { Swal.fire('حدد البيان', 'يرجى إدخال سبب التحويل في حقل الملاحظات.', 'warning'); return; }
@@ -762,11 +785,45 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
       if (result.success) {
         Swal.fire('نجاح!', 'تم تسجيل العملية بنجاح.', 'success');
         closeTransactionModal();
-        await Promise.all([
+        const today = new Date().toISOString().slice(0, 10);
+        const nextFromDate = txFromDate && txFromDate > today ? today : txFromDate;
+        const nextToDate = !txToDate || txToDate < today ? today : txToDate;
+        const nextTreasuryFilter = (affectedTreasuryId && txTreasuryId && txTreasuryId !== affectedTreasuryId) ? '' : txTreasuryId;
+
+        if (nextFromDate !== txFromDate) setTxFromDate(nextFromDate);
+        if (nextToDate !== txToDate) setTxToDate(nextToDate);
+        if (nextTreasuryFilter !== txTreasuryId) setTxTreasuryId(nextTreasuryFilter);
+
+        const [_, refreshedTransactions] = await Promise.all([
           fetchAllTreasuries(),
-          fetchAllTransactions(txFromDate, txToDate, txTreasuryId),
-          fetchAllSuppliers(),
+          fetchAllTransactions(nextFromDate, nextToDate, nextTreasuryFilter),
         ]);
+
+        if (result.transaction_id && !(refreshedTransactions || []).some((tx: any) => Number(tx.id) === Number(result.transaction_id))) {
+          const selectedTreasuryName = treasuries.find((t: any) => String(t.id) === String(affectedTreasuryId))?.name || '';
+          const currentUserName = (() => {
+            try {
+              const user = JSON.parse(localStorage.getItem('Dragon_user') || 'null');
+              return user?.name || user?.username || '—';
+            } catch {
+              return '—';
+            }
+          })();
+          const fallbackTx = {
+            id: Number(result.transaction_id),
+            type: payload.type,
+            treasury_id: affectedTreasuryId || null,
+            treasury_name: selectedTreasuryName,
+            related_to_type: payload.related_to_type || null,
+            related_to_id: payload.related_to_id || null,
+            related_name: null,
+            amount: Number(payload.amount || 0),
+            transaction_date: new Date().toISOString().slice(0, 19).replace('T', ' '),
+            details: JSON.stringify({ notes: payload.notes || '', subtype: payload.type || '' }),
+            created_by_name: currentUserName,
+          };
+          setTransactions(prev => [fallbackTx, ...prev]);
+        }
       } else {
         Swal.fire('فشل', result.message || 'فشلت العملية. تحقق من البيانات المدخلة.', 'error');
       }
@@ -886,13 +943,6 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
               colorClass="bg-gradient-to-br from-rose-500 to-red-600 border-rose-600"
             />
             <ActionButton 
-              icon={Truck} 
-              title="دفعة لمورد" 
-              description="سداد مبلغ مستحق لمورد"
-              onClick={() => openTransactionModal('payment')}
-              colorClass="bg-gradient-to-br from-amber-500 to-orange-600 border-amber-600"
-            />
-            <ActionButton 
               icon={ArrowLeftRight} 
               title="تحويل بين الخزائن" 
               description="نقل رصيد من خزينة لأخرى"
@@ -925,7 +975,7 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
             <div className="overflow-x-auto">
               {isAllTxLoading ? (
                 <div className="p-10 text-center text-slate-400 font-bold">جاري تحميل المعاملات...</div>
-              ) : transactions.length > 0 ? (
+              ) : visibleTransactions.length > 0 ? (
                 <table className="w-full text-right text-sm">
                   <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400">
                     <tr>
@@ -939,7 +989,7 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
                     </tr>
                   </thead>
                   <tbody className="divide-y dark:divide-slate-700 text-slate-700 dark:text-slate-300">
-                    {transactions.map((tx: any) => (
+                    {visibleTransactions.map((tx: any) => (
                       <tr key={tx.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
                         <td className="px-4 py-3 text-xs whitespace-nowrap">{new Date(tx.transaction_date).toLocaleString('ar-EG')}</td>
                         <td className="px-4 py-3 text-xs font-bold text-blue-600 dark:text-blue-400 whitespace-nowrap">{getTxSource(tx)}</td>
@@ -953,7 +1003,7 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
                   </tbody>
                 </table>
               ) : (
-                <div className="p-10 text-center text-slate-400 font-bold">لا توجد معاملات في هذه الفترة</div>
+                <div className="p-10 text-center text-slate-400 font-bold">لا توجد معاملات مالية في هذه الفترة</div>
               )}
             </div>
           </div>
@@ -1065,7 +1115,6 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
               <h3 className="text-lg font-black text-slate-900 dark:text-white">
                 {modalType === 'deposit' && 'إضافة إيداع جديد'}
                 {modalType === 'expense' && 'إضافة مصروف جديد'}
-                {modalType === 'payment' && 'تسجيل دفعة لمورد'}
                 {modalType === 'transfer' && 'تحويل بين الخزائن'}
               </h3>
               <button onClick={closeTransactionModal} className="text-slate-400 hover:text-rose-500"><X size={24} /></button>
@@ -1103,33 +1152,6 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
                     />
                   </div>
                   <div><label className="text-xs font-bold text-slate-500">السبب/البيان</label><input type="text" required value={expenseData.notes} onChange={e => setExpenseData({...expenseData, notes: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1" /></div>
-                </>
-              )}
-              {/* Supplier Payment Form */}
-              {modalType === 'payment' && (
-                <>
-                  <div><label className="text-xs font-bold text-slate-500">المبلغ المدفوع</label><input type="number" required value={paymentData.amount} onChange={e => setPaymentData({...paymentData, amount: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1" /></div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-500">من خزينة</label>
-                    <CustomSelect
-                      required
-                      value={paymentData.treasury_id}
-                      onChange={v => setPaymentData({...paymentData, treasury_id: v})}
-                      options={[{ value: '', label: 'اختر خزينة' }, ...treasuries.map((t:any) => ({ value: String(t.id), label: `${t.name} (متاح: ${t.balance.toLocaleString()})` }))]}
-                      className="w-full"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-500">إلى المورد</label>
-                    <CustomSelect
-                      required
-                      value={paymentData.supplier_id}
-                      onChange={v => setPaymentData({...paymentData, supplier_id: v})}
-                      options={[{ value: '', label: 'اختر مورد' }, ...suppliers.map((s:any) => ({ value: String(s.id), label: `${s.name} (رصيده: ${s.balance?.toLocaleString() || 0})` }))]}
-                      className="w-full"
-                    />
-                  </div>
-                  <div><label className="text-xs font-bold text-slate-500">ملاحظات</label><input type="text" value={paymentData.notes} onChange={e => setPaymentData({...paymentData, notes: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1" /></div>
                 </>
               )}
               {/* Transfer Form */}

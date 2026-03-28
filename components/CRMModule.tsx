@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Search, UserPlus, FileText, Calculator, X, Save, Edit, Trash2, Eye, Archive } from 'lucide-react';
+import { Search, UserPlus, FileText, Calculator, X, Save, Edit, Trash2, Eye } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { ensurePermissionsLoaded, hasPermission } from '../services/permissions';
@@ -10,23 +10,36 @@ interface CRMModuleProps {
   initialView?: string;
 }
 
+const formatDateInput = (d: Date) => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const formatDateDMY = (isoDate: string) => {
+  if (!isoDate || !/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) return isoDate || '—';
+  const [year, month, day] = isoDate.split('-');
+  return `${day}/${month}/${year}`;
+};
+
 const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
   const [view, setView] = useState<'list' | 'ledger'>(initialView === 'ledger' ? 'ledger' : 'list');
   const [searchTerm, setSearchTerm] = useState('');
+  const [isCustomerFilterModalOpen, setIsCustomerFilterModalOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<any>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
   const [customerOrders, setCustomerOrders] = useState<any[]>([]);
   const [isLoadingOrders, setIsLoadingOrders] = useState(false);
-  const [showArchived, setShowArchived] = useState(false);
   const [interactions, setInteractions] = useState<any[]>([]);
   const [interactionType, setInteractionType] = useState('note');
   const [interactionNote, setInteractionNote] = useState('');
   const [interactionsLoading, setInteractionsLoading] = useState(false);
   const [ledgerCustomerId, setLedgerCustomerId] = useState('');
-  const [ledgerStartDate, setLedgerStartDate] = useState<string>(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]);
-  const [ledgerEndDate, setLedgerEndDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [ledgerStartDate, setLedgerStartDate] = useState<string>(formatDateInput(new Date(new Date().getFullYear(), new Date().getMonth(), 1)));
+  const [ledgerEndDate, setLedgerEndDate] = useState<string>(formatDateInput(new Date()));
   const [ledgerOpening, setLedgerOpening] = useState<number>(0);
   const [ledgerEntries, setLedgerEntries] = useState<any[]>([]);
   const [ledgerLoading, setLedgerLoading] = useState(false);
@@ -44,7 +57,9 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
 
 
   const [customers, setCustomers] = useState<any[]>([]);
-  const [filterMode, setFilterMode] = useState<'all'|'received'|'returned'>('all');
+  const [customerTypeFilter, setCustomerTypeFilter] = useState<'all'|'received'|'not_received'>('all');
+  const [customerFilterStartDate, setCustomerFilterStartDate] = useState<string>(() => formatDateInput(new Date(new Date().getFullYear(), new Date().getMonth(), 1)));
+  const [customerFilterEndDate, setCustomerFilterEndDate] = useState<string>(() => formatDateInput(new Date()));
   const [statusCustomerIds, setStatusCustomerIds] = useState<number[]>([]);
   const [stats, setStats] = useState<any>({ deliveredCount: 0, returnedCount: 0, satisfactionPct: 0, topCustomers: [] });
 
@@ -61,18 +76,14 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
     })();
   }, [initialView]);
 
-  // Recompute delivery/return stats whenever customers list or filter mode changes
+  // Recompute delivery/return stats whenever customers list changes
   useEffect(() => {
     if (customers.length > 0) loadDeliveryStats();
-  }, [customers, filterMode]);
-
-  useEffect(() => {
-    fetchCustomers();
-  }, [showArchived]);
+  }, [customers]);
 
   const fetchCustomers = async () => {
     try {
-      const r = await fetch(`${API_BASE_PATH}/api.php?module=customers&action=getAll&include_archived=${showArchived ? '1' : '0'}`);
+      const r = await fetch(`${API_BASE_PATH}/api.php?module=customers&action=getAll&include_archived=0`);
       const result = await r.json();
       if (result.success) {
         setCustomers(result.data);
@@ -173,28 +184,6 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
     });
   };
 
-  const handleArchive = async (customer: any) => {
-    if (!hasPermission('customers', 'edit')) {
-      Swal.fire('ممنوع', 'ليس لديك صلاحية تنفيذ هذا الإجراء.', 'error');
-      return;
-    }
-    const isArchived = customer.is_archived === 1 || customer.is_archived === '1';
-    const action = isArchived ? 'unarchive' : 'archive';
-    try {
-      const response = await fetch(`${API_BASE_PATH}/api.php?module=customers&action=${action}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: customer.id })
-      });
-      const result = await response.json();
-      if (!result.success) throw new Error(result.message || 'فشل تحديث حالة العميل');
-      await fetchCustomers();
-      Swal.fire('تم', isArchived ? 'تم إعادة تفعيل العميل.' : 'تم أرشفة العميل.', 'success');
-    } catch (e: any) {
-      Swal.fire('خطأ', e.message || 'تعذر تنفيذ العملية.', 'error');
-    }
-  };
-
   const handleViewDetails = async (customer: any) => {
     setSelectedCustomer(customer);
     setIsDetailModalOpen(true);
@@ -238,7 +227,14 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
   // Load delivered/returned orders and compute stats & matching customer IDs
   const loadDeliveryStats = async () => {
     try {
-      const res = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=customersByStatus&statuses=delivered,returned`);
+      const params = new URLSearchParams({
+        module: 'orders',
+        action: 'customersByStatus',
+        statuses: 'delivered,returned'
+      });
+      if (customerFilterStartDate) params.set('start_date', customerFilterStartDate);
+      if (customerFilterEndDate) params.set('end_date', customerFilterEndDate);
+      const res = await fetch(`${API_BASE_PATH}/api.php?${params.toString()}`);
       const json = await res.json().catch(() => ({ success: false, data: {} }));
       if (!json.success) throw new Error(json.message || 'Failed to load');
 
@@ -258,8 +254,8 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
 
       setStats({ deliveredCount: totalDeliveredCustomers, returnedCount: totalReturnedCustomers, satisfactionPct, topCustomers: topList });
 
-      if (filterMode === 'received') setStatusCustomerIds(deliveredIds);
-      else if (filterMode === 'returned') setStatusCustomerIds(returnedIds);
+      if (customerTypeFilter === 'received') setStatusCustomerIds(deliveredIds);
+      else if (customerTypeFilter === 'not_received') setStatusCustomerIds(returnedIds);
       else setStatusCustomerIds([]);
     } catch (e) {
       console.error('Failed to load delivery stats', e);
@@ -268,10 +264,15 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
     }
   };
 
+  const applyCustomerFilter = async () => {
+    await loadDeliveryStats();
+    setIsCustomerFilterModalOpen(false);
+  };
+
   const getVisibleCustomers = () => {
     return customers.filter(c => 
       (c.name.toLowerCase().includes(searchTerm.toLowerCase()) || c.phone1.includes(searchTerm)) &&
-      (filterMode === 'all' ? true : statusCustomerIds.includes(c.id))
+      (customerTypeFilter === 'all' ? true : statusCustomerIds.includes(Number(c.id)))
     );
   };
 
@@ -387,7 +388,7 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
 
   const filteredCustomers = customers.filter(c => 
     (c.name.toLowerCase().includes(searchTerm.toLowerCase()) || c.phone1.includes(searchTerm)) &&
-    (filterMode === 'all' ? true : statusCustomerIds.includes(c.id))
+    (customerTypeFilter === 'all' ? true : statusCustomerIds.includes(Number(c.id)))
   );
 
   const canAdd = hasPermission('customers', 'add');
@@ -407,20 +408,11 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
             >
               قائمة العملاء
             </button>
-            <button 
-              onClick={() => setView('ledger')} 
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${view === 'ledger' ? 'bg-accent text-white shadow-md' : 'hover:bg-slate-50 dark:hover:bg-slate-700'}`}
-            >
-              كشف الحساب العام
-            </button>
           </div>
 
           <div className="flex gap-2 items-center p-2 rounded-2xl border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
-            <button onClick={() => { setFilterMode(filterMode === 'received' ? 'all' : 'received'); }} className={`px-3 py-1 rounded-xl text-xs font-bold ${filterMode === 'received' ? 'bg-emerald-600 text-white' : 'hover:bg-emerald-50'}`}>
-              تم الاستلام <span className="mr-2 text-[11px] font-bold">{stats.deliveredCount || 0}</span>
-            </button>
-            <button onClick={() => { setFilterMode(filterMode === 'returned' ? 'all' : 'returned'); }} className={`px-3 py-1 rounded-xl text-xs font-bold ${filterMode === 'returned' ? 'bg-rose-600 text-white' : 'hover:bg-rose-50'}`}>
-              تم الارتجاع <span className="mr-2 text-[11px] font-bold">{stats.returnedCount || 0}</span>
+            <button onClick={() => setIsCustomerFilterModalOpen(true)} className="px-3 py-1 rounded-xl text-xs font-bold bg-slate-700 text-white hover:bg-slate-800">
+              تحديد العملاء
             </button>
             <div className="text-xs text-muted mr-3">نسبة رضا العملاء: <span className="font-black ml-2">{stats.satisfactionPct || 0}%</span></div>
           </div>
@@ -465,13 +457,6 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
   </div>
 
   <div className="flex items-center gap-2">
-    <button
-      onClick={() => setShowArchived(!showArchived)}
-      className="px-4 py-2.5 rounded-2xl text-xs font-bold border border-card shadow-sm"
-      style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}
-    >
-      {showArchived ? 'إخفاء المؤرشف' : 'إظهار المؤرشف'}
-    </button>
     {canAdd ? (
       <button 
         onClick={() => handleOpenModal()}
@@ -494,8 +479,9 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
                 <tr>
                   <th className="px-6 py-4 font-bold">اسم العميل</th>
                   <th className="px-6 py-4 font-bold">رقم الهاتف الأساسي</th>
+                  <th className="px-6 py-4 font-bold">رقم هاتف 2</th>
+                  <th className="px-6 py-4 font-bold">المحافظة</th>
                   <th className="px-6 py-4 font-bold">العنوان</th>
-                  <th className="px-6 py-4 font-bold">الرصيد</th>
                   <th className="px-6 py-4 font-bold text-center">الإجراءات</th>
                 </tr>
               </thead>
@@ -504,16 +490,11 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
                   <tr key={c.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
                     <td className="px-6 py-4 font-bold">{c.name}</td>
                     <td className="px-6 py-4 text-xs font-medium">{c.phone1}</td>
+                    <td className="px-6 py-4 text-xs text-muted">{c.phone2 || '-'}</td>
+                    <td className="px-6 py-4 text-xs text-muted">{c.governorate || '-'}</td>
                     <td className="px-6 py-4 text-xs text-muted">{c.address}</td>
-                    <td className={`px-6 py-4 font-black ${c.balance > 0 ? 'text-emerald-500' : c.balance < 0 ? 'text-rose-500' : ''}`}>
-                      {Math.abs(c.balance).toLocaleString()} {currencySymbol}
-                      <span className="text-[10px] mr-1 font-bold opacity-60">{c.balance >= 0 ? '(مدين)' : '(دائن)'}</span>
-                    </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center justify-center gap-2">
-                        <button onClick={() => handleArchive(c)} className="p-2 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-900/30 rounded-xl transition-all" title={c.is_archived ? 'إلغاء الأرشفة' : 'أرشفة'}>
-                          <Archive size={16} />
-                        </button>
                         {canDelete ? (
                           <button onClick={() => handleDelete(c.id)} className="p-2 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-xl transition-all" title="حذف"><Trash2 size={16} /></button>
                         ) : null}
@@ -528,7 +509,7 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
                   </tr>
                 )) : (
                   <tr>
-                    <td colSpan={5} className="px-6 py-10 text-center text-muted font-bold">لا يوجد نتائج تطابق بحثك</td>
+                    <td colSpan={6} className="px-6 py-10 text-center text-muted font-bold">لا يوجد نتائج تطابق بحثك</td>
                   </tr>
                 )}
               </tbody>
@@ -549,8 +530,11 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
             </div>
             <div className="flex flex-wrap gap-2 items-center">
               <CustomSelect value={ledgerCustomerId} onChange={v => setLedgerCustomerId(v)} options={[{ value: '', label: 'اختر عميل' }, ...customers.map((c:any)=>({ value: String(c.id), label: c.name }))]} className="bg-slate-50 rounded-2xl" />
-              <input type="date" value={ledgerStartDate} onChange={(e) => setLedgerStartDate(e.target.value)} className="bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-2 px-3 text-sm" />
-              <input type="date" value={ledgerEndDate} onChange={(e) => setLedgerEndDate(e.target.value)} className="bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-2 px-3 text-sm" />
+              <input type="date" lang="en-GB" value={ledgerStartDate} onChange={(e) => setLedgerStartDate(e.target.value)} className="bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-2 px-3 text-sm" />
+              <input type="date" lang="en-GB" value={ledgerEndDate} onChange={(e) => setLedgerEndDate(e.target.value)} className="bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-2 px-3 text-sm" />
+              <div className="text-[11px] text-slate-500 w-full text-right">
+                الفترة: {formatDateDMY(ledgerStartDate)} → {formatDateDMY(ledgerEndDate)}
+              </div>
               <button onClick={loadLedger} className="px-4 py-2 bg-blue-600 text-white rounded-2xl text-sm font-bold">تحميل</button>
             </div>
           </div>
@@ -589,6 +573,46 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Customer Filter Modal */}
+      {isCustomerFilterModalOpen && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-md rounded-[2rem] shadow-2xl overflow-hidden border border-card card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+            <div className="p-5 border-b dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-900/50">
+              <h3 className="text-lg font-black">تحديد العملاء</h3>
+              <button onClick={() => setIsCustomerFilterModalOpen(false)} className="text-slate-400 hover:text-rose-500"><X size={20} /></button>
+            </div>
+            <div className="p-6 space-y-4 text-right">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-muted">نوع العميل</label>
+                <CustomSelect
+                  value={customerTypeFilter}
+                  onChange={(v) => setCustomerTypeFilter((v as 'all'|'received'|'not_received') || 'all')}
+                  options={[
+                    { value: 'all', label: 'الكل' },
+                    { value: 'received', label: 'مستلم' },
+                    { value: 'not_received', label: 'غير مستلم' }
+                  ]}
+                  className="w-full"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-muted">من تاريخ</label>
+                  <input type="date" lang="en-GB" value={customerFilterStartDate} onChange={(e) => setCustomerFilterStartDate(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm" />
+                  <div className="text-[11px] text-slate-500">{formatDateDMY(customerFilterStartDate)}</div>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-muted">إلى تاريخ</label>
+                  <input type="date" lang="en-GB" value={customerFilterEndDate} onChange={(e) => setCustomerFilterEndDate(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm" />
+                  <div className="text-[11px] text-slate-500">{formatDateDMY(customerFilterEndDate)}</div>
+                </div>
+              </div>
+              <button onClick={applyCustomerFilter} className="w-full bg-blue-600 text-white py-3 rounded-xl font-black hover:bg-blue-700 transition-all">تطبيق التحديد</button>
+            </div>
+          </div>
         </div>
       )}
 
