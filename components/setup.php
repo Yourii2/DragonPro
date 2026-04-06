@@ -181,6 +181,44 @@ $stmt->execute([$input['adminName'], $input['adminUsername'], $hashed_password])
         $setting_stmt->execute([$key, $value]);
     }
 
+    // If company logo provided as data URI, save to app_files and set company_logo_file_id (prefer app_settings)
+    if (!empty($input['companyLogo']) && strpos($input['companyLogo'], 'data:') === 0) {
+        try {
+            if (preg_match('/^data:(.*?);base64,(.*)$/', $input['companyLogo'], $m)) {
+                $mime = $m[1];
+                $b64 = $m[2];
+                $bin = base64_decode($b64);
+                if ($bin !== false) {
+                    $sha1 = sha1($bin);
+                    $pdo->exec(file_get_contents(__DIR__ . '/../migrations/2026_04_03_create_app_files.sql'));
+                    $checkFile = $pdo->prepare("SELECT id FROM app_files WHERE sha1 = :sha1 LIMIT 1");
+                    $checkFile->execute([':sha1' => $sha1]);
+                    $frow = $checkFile->fetch(PDO::FETCH_ASSOC);
+                    if ($frow) {
+                        $fileId = (int)$frow['id'];
+                    } else {
+                        $insFile = $pdo->prepare("INSERT INTO app_files (filename, mime, sha1, data) VALUES (:fn, :mime, :sha1, :data)");
+                        $fn = 'company_logo_' . time();
+                        $insFile->execute([':fn' => $fn, ':mime' => $mime, ':sha1' => $sha1, ':data' => $bin]);
+                        $fileId = (int)$pdo->lastInsertId();
+                    }
+
+                    // store file id in app_settings if exists, else in settings
+                    $check = $pdo->query("SHOW TABLES LIKE 'app_settings'")->fetch();
+                    if ($check) {
+                        $up = $pdo->prepare("INSERT INTO app_settings (name, value) VALUES (:k, :v) ON DUPLICATE KEY UPDATE value = VALUES(value)");
+                        $up->execute([':k' => 'company_logo_file_id', ':v' => (string)$fileId]);
+                    } else {
+                        $up = $pdo->prepare("INSERT INTO settings (config_key, config_value) VALUES (:k, :v) ON DUPLICATE KEY UPDATE config_value = VALUES(config_value)");
+                        $up->execute([':k' => 'company_logo_file_id', ':v' => (string)$fileId]);
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            // non-fatal
+        }
+    }
+
     // --- 6. Create License File ---
     require_once __DIR__ . '/encryption.php';
 

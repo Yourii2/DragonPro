@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
+import './services/settingsBridge';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
 import Login from './components/Login';
@@ -21,6 +22,8 @@ import SalesDailyClose from './components/SalesDailyClose';
 import OrderConfirmations from './components/OrderConfirmations';
 import AttendanceModule from './components/AttendanceModule';
 import SalesOffices from './components/SalesOffices';
+import DeliveryConfirmation from './components/DeliveryConfirmation';
+import ReportsModule from './components/ReportsModule';
 import { API_BASE_PATH, testConnection } from './services/apiConfig';
 import Swal from 'sweetalert2';
 
@@ -114,7 +117,7 @@ const App: React.FC = () => {
         localStorage.setItem('Dragon_company_phone', result.settings.company_phone || '');
         localStorage.setItem('Dragon_company_address', result.settings.company_address || '');
         localStorage.setItem('Dragon_company_terms', result.settings.company_terms || '');
-        localStorage.setItem('Dragon_company_logo', result.settings.company_logo || '');
+        localStorage.setItem('Dragon_company_logo', result.settings.company_logo_url ?? result.settings.company_logo ?? '');
         localStorage.setItem('Dragon_tax_rate', result.settings.tax_rate || '14');
         localStorage.setItem('Dragon_currency', result.settings.currency || 'EGP');
         localStorage.setItem('Dragon_auto_backup', result.settings.auto_backup || 'false');
@@ -189,7 +192,7 @@ const App: React.FC = () => {
           localStorage.setItem('Dragon_company_phone', result.settings.company_phone || '');
           localStorage.setItem('Dragon_company_address', result.settings.company_address || '');
           localStorage.setItem('Dragon_company_terms', result.settings.company_terms || '');
-          localStorage.setItem('Dragon_company_logo', result.settings.company_logo || '');
+          localStorage.setItem('Dragon_company_logo', result.settings.company_logo_url ?? result.settings.company_logo ?? '');
           localStorage.setItem('Dragon_tax_rate', result.settings.tax_rate || '14');
           localStorage.setItem('Dragon_currency', result.settings.currency || 'EGP');
           localStorage.setItem('Dragon_auto_backup', result.settings.auto_backup || 'false');
@@ -339,6 +342,8 @@ const App: React.FC = () => {
     switch (activeSlug) {
       case 'dashboard':
         return <Dashboard />;
+      case 'delivery-confirmation':
+        return <DeliveryConfirmation />;
       case 'crm':
         return <CRMModule initialView={activeSubSlug} />;
       case 'srm':
@@ -347,6 +352,12 @@ const App: React.FC = () => {
         return <InventoryModule initialView={activeSubSlug} />;
       case 'orders':
         return <OrdersModule initialView={activeSubSlug} />;
+      case 'dispatch':
+        // dispatch area: support delivery-confirmation subpage
+        switch (activeSubSlug) {
+          case 'delivery-confirmation': return <DeliveryConfirmation />;
+          default: return <Dashboard />;
+        }
       case 'order-confirmations':
         return <OrderConfirmations />;
       case 'print_waybill':
@@ -365,6 +376,8 @@ const App: React.FC = () => {
         return <HRMModule initialView={activeSubSlug} />;
       case 'finance':
         return <FinanceModule initialView={activeSubSlug} />;
+      case 'reports':
+        return <ReportsModule initialView={activeSubSlug} />;
       case 'admin':
         return <AdminModule initialView={activeSubSlug} />;
       case 'settings':

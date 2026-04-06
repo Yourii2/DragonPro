@@ -725,7 +725,7 @@ const loadJournalLiveStats = async (journal: any) => {
           amount: amount,
           treasuryId: Number(selectedTreasuryId),
           direction: 'out',
-          details: { action: 'settleDaily', rep_id: Number(selectedRepId), model: 'consignment', reason: 'اغلاق اليوميه تلقائيا' },
+          details: { context: 'close_daily', action: 'settleDaily', rep_id: Number(selectedRepId), model: 'consignment', reason: 'اغلاق اليوميه تلقائيا' },
           notes: 'اغلاق اليوميه تلقائيا',
           title: `دفع إلى المندوب - تسوية يومية`,
           memo: `تسوية يومية للمندوب ${selectedRep?.name || ''}`

@@ -54,6 +54,7 @@ export const MENU_ITEMS = [
     label: 'ارسال المنتجات',
     icon: <Truck className="w-5 h-5" />,
     slug: 'dispatch'
+    
   },
   {
     id: 'factory-receiving',
@@ -102,6 +103,12 @@ export const MENU_ITEMS = [
     label: 'بدء اليومية',
     icon: <Briefcase className="w-5 h-5" />,
     slug: 'sales-daily'
+  },
+  {
+    id: 'delivery-confirmation',
+    label: 'تأكيد التسليم',
+    icon: <Truck className="w-5 h-5" />,
+    slug: 'delivery-confirmation'
   },
   {
     id: 'sales-update-status',
@@ -179,6 +186,7 @@ export const MENU_ITEMS = [
     slug: 'reports',
     subItems: [
       { label: 'تقرير المبيعات', slug: 'sales' },
+      { label: 'تقرير منتجات', slug: 'product-report' },
       { label: 'ملخص الفتره', slug: 'totals' },
     ]
   },

@@ -1255,7 +1255,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                 const treasuryName = (treasuries.find(t => String(t.id) === String(receivingData.treasuryId)) || { name: '' }).name;
                 setReceivedInvoice({
                   id: tx.id,
-                  number: tx.reference_id || `INV-${tx.id}`,
+                  number: (tx.reference_id || (tx.details && (typeof tx.details === 'object' ? tx.details.invoice_number : (() => { try { return JSON.parse(tx.details || '{}').invoice_number; } catch(e){ return null; } })()))) || `INV-${tx.id}`,
                   date: tx.transaction_date || tx.date,
                   items: items,
                   total: txAmountVal,
@@ -1307,15 +1307,34 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
   const [isReceivedInvoiceModalOpen, setIsReceivedInvoiceModalOpen] = useState(false);
   const [showInvoiceItems, setShowInvoiceItems] = useState(true);
 
-  const handlePrintReceivedInvoice = (printItems: boolean = true) => {
+  const handlePrintReceivedInvoice = async (printItems: boolean = true) => {
     if (!receivedInvoice) return;
     const items = receivedInvoice.items || [];
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
-    const companyLogo = (localStorage.getItem('Dragon_company_logo') || assetUrl('Dragon.png'));
-    const companyName = (localStorage.getItem('Dragon_company_name') || 'اسم الشركة التجارية');
-    const companyPhone = (localStorage.getItem('Dragon_company_phone') || '');
-    const companyAddress = (localStorage.getItem('Dragon_company_address') || '');
+    // Try localStorage first, then fall back to server settings via verify.php
+    let companyLogo = localStorage.getItem('Dragon_company_logo') || '';
+    let companyName = localStorage.getItem('Dragon_company_name') || '';
+    let companyPhone = localStorage.getItem('Dragon_company_phone') || '';
+    let companyAddress = localStorage.getItem('Dragon_company_address') || '';
+    let companyTerms = localStorage.getItem('Dragon_company_terms') || '';
+    if (!companyName && !companyPhone && !companyAddress && !companyLogo && !companyTerms) {
+      try {
+        const sv = await fetch(`${API_BASE_PATH}/verify.php`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force: true }) });
+        const svj = await sv.json();
+          if (svj && svj.status === 'ok' && svj.settings) {
+          companyLogo = svj.settings.company_logo_url ?? svj.settings.company_logo ?? companyLogo ?? '';
+          companyName = svj.settings.company_name || companyName || '';
+          companyPhone = svj.settings.company_phone || companyPhone || '';
+          companyAddress = svj.settings.company_address || companyAddress || '';
+          companyTerms = svj.settings.company_terms || companyTerms || '';
+        }
+      } catch (e) {
+        // ignore and fallback to whatever we have
+      }
+    }
+    if (!companyLogo) companyLogo = assetUrl('Dragon.png');
+    if (!companyName) companyName = 'اسم الشركة التجارية';
 
     let html = `<!doctype html><html><head><meta charset="utf-8"><title>فاتورة شراء</title>
     <style>@media print{@page{size:A4;margin:18mm}} body{font-family:Arial,Helvetica,sans-serif;color:#111;direction:rtl;text-align:right} table{width:100%;border-collapse:collapse} th,td{padding:6px;border:1px solid #eee} th{background:#f3f4f6;text-align:right} td{text-align:right} .num{text-align:right}</style>
@@ -1381,6 +1400,11 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
         </div>
       </div>
     </div>`;
+
+    // Company terms/policy (if present)
+    if (companyTerms && companyTerms.length) {
+      html += `<div style="margin-top:18px;border-top:1px solid #e5e7eb;padding-top:12px;font-size:12px;color:#374151">${companyTerms}</div>`;
+    }
 
     html += `<div style="margin-top:30px;display:flex;justify-content:space-between;font-size:12px"><div>توقيع المستلم: __________</div><div>توقيع المورد: __________</div></div>
     </body></html>`;
@@ -1594,7 +1618,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                 const supplierPrev = toSupplierDebt(currentSupplierForReturn?.balance);
                 setReceivedInvoice({
                   id: tx.id,
-                  number: tx.reference_id || `INV-${tx.id}`,
+                  number: (tx.reference_id || (tx.details && (typeof tx.details === 'object' ? tx.details.invoice_number : (() => { try { return JSON.parse(tx.details || '{}').invoice_number; } catch(e){ return null; } })()))) || `INV-${tx.id}`,
                   date: tx.transaction_date || tx.date,
                   items: items,
                   total: Number(tx.amount || 0),
@@ -1680,7 +1704,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                 const totalItemsCount = finalItems.reduce((s:any,it:any) => s + Number(it.qty || 0), 0);
                 setReceivedInvoice({
                   id: tx.id,
-                  number: tx.reference_id || `INV-${tx.id}`,
+                  number: (tx.reference_id || (tx.details && (typeof tx.details === 'object' ? tx.details.invoice_number : (() => { try { return JSON.parse(tx.details || '{}').invoice_number; } catch(e){ return null; } })()))) || `INV-${tx.id}`,
                   date: tx.transaction_date || tx.date,
                   items: finalItems,
                   total: Number(tx.amount || 0),

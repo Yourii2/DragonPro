@@ -29,19 +29,37 @@ try {
 
 try {
     // Prefer new `app_settings` table; fallback to legacy `settings` if not present
-    $table = 'app_settings';
-    $check = $pdo->query("SHOW TABLES LIKE 'app_settings'")->fetch();
-    if (!$check) {
-        $table = 'settings';
-    }
-
-    $stmt = $pdo->query("SELECT " . ($table === 'app_settings' ? 'k' : 'config_key') . ", " . ($table === 'app_settings' ? 'v' : 'config_value') . " FROM " . $table);
-    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
     $settings = [];
-    foreach ($rows as $r) {
-        $key = $r[$table === 'app_settings' ? 'k' : 'config_key'];
-        $val = $r[$table === 'app_settings' ? 'v' : 'config_value'];
-        $settings[$key] = $val;
+    $check = $pdo->query("SHOW TABLES LIKE 'app_settings'")->fetch();
+    if ($check) {
+        $stmt = $pdo->query("SELECT name, value FROM app_settings");
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($rows as $r) {
+            $settings[$r['name']] = $r['value'];
+        }
+        // If a logo file id is present, expose a resolvable URL for frontend
+        if (!empty($settings['company_logo_file_id']) && is_numeric($settings['company_logo_file_id'])) {
+            $id = intval($settings['company_logo_file_id']);
+            $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+            $host = $_SERVER['HTTP_HOST'] ?? '';
+            $base = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/');
+            $settings['company_logo_url'] = $proto . '://' . $host . $base . '/get_file.php?id=' . $id;
+        }
+    } else {
+        // legacy settings table
+        $stmt = $pdo->query("SELECT config_key, config_value FROM settings");
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($rows as $r) {
+            $settings[$r['config_key']] = $r['config_value'];
+        }
+        // legacy settings table may contain company_logo_file_id as config_key
+        if (!empty($settings['company_logo_file_id']) && is_numeric($settings['company_logo_file_id'])) {
+            $id = intval($settings['company_logo_file_id']);
+            $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+            $host = $_SERVER['HTTP_HOST'] ?? '';
+            $base = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/');
+            $settings['company_logo_url'] = $proto . '://' . $host . $base . '/get_file.php?id=' . $id;
+        }
     }
 
     echo json_encode(['success' => true, 'data' => $settings]);

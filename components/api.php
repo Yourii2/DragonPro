@@ -2310,6 +2310,9 @@ switch ($module) {
     // -----------------------
     case 'factory_products':
         $action = $_GET['action'] ?? 'getAll';
+
+        
+
         $fpsa_has_qty = column_exists($pdo, 'factory_product_stage_accessories', 'quantity');
 
         // Lightweight runtime migration for existing databases (dbSchema.ts affects new installs only)
@@ -5891,6 +5894,14 @@ switch ($module) {
         // Send factory products to sales (deduct from factory_stock + log movements)
         $action = $_GET['action'] ?? 'getAll';
 
+        // Backward-compatible alias: allow older frontend to call getDeliveryNote
+        // by routing it to the existing getOrderV2 handler which returns
+        // the order and its items. Normalize id -> order_id for the handler.
+        if ($action === 'getDeliveryNote') {
+            $_GET['order_id'] = $_GET['id'] ?? ($_GET['order_id'] ?? null);
+            $action = 'getOrderV2';
+        }
+
         // Use factory_products permissions to avoid requiring new permission seeding for older installs
         $perm = map_action_to_perm($action);
         if ($perm) {
@@ -9093,32 +9104,12 @@ switch ($module) {
                         $stmt = execute_query($pdo, "SELECT id FROM customers WHERE phone1 = ? OR phone2 = ? LIMIT 1", [$phone, $phone]);
                         if ($row = $stmt->fetch(PDO::FETCH_ASSOC)) $customerId = $row['id'];
                     }
-                    // if still not found, try exact name match (to avoid creating duplicates when phone absent)
-                    if (!$customerId && !empty($customerName)) {
-                        $stmt = execute_query($pdo, "SELECT id, phone1, phone2 FROM customers WHERE name = ? LIMIT 1", [$customerName]);
+                    // if still not found, try exact name match ONLY when no phone provided
+                    // (do NOT match by name when a phone was provided — this avoids merging different customers who share names)
+                    if (!$customerId && !empty($customerName) && empty($phone)) {
+                        $stmt = execute_query($pdo, "SELECT id FROM customers WHERE name = ? LIMIT 1", [$customerName]);
                         if ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
                             $customerId = $row['id'];
-                            // If the incoming order provided a phone and the stored customer lacks it,
-                            // update the customer record so future orders/showing the customer include the phone.
-                            try {
-                                $existingPhone1 = trim((string)($row['phone1'] ?? ''));
-                                $existingPhone2 = trim((string)($row['phone2'] ?? ''));
-                                if (!empty($phone)) {
-                                    if ($existingPhone1 === '') {
-                                        execute_query($pdo, "UPDATE customers SET phone1 = ? WHERE id = ?", [$phone, $customerId]);
-                                    } elseif ($existingPhone1 !== $phone && $existingPhone2 === '') {
-                                        execute_query($pdo, "UPDATE customers SET phone2 = ? WHERE id = ?", [$phone, $customerId]);
-                                    }
-                                }
-                                if (!empty($phone2)) {
-                                    // ensure phone2 column stores provided second number when missing or different
-                                    if ($existingPhone2 === '' && $phone2 !== $existingPhone1) {
-                                        execute_query($pdo, "UPDATE customers SET phone2 = ? WHERE id = ?", [$phone2, $customerId]);
-                                    }
-                                }
-                            } catch (Exception $e) {
-                                // ignore update failures and continue with existing customerId
-                            }
                         }
                     }
                     // create customer when none found (we want to persist all customers on import)
@@ -9325,7 +9316,8 @@ switch ($module) {
                                 'tax_value' => $taxValue,
                                 'tax_amount' => $taxAmount,
                                 'shipping' => $shipping,
-                                'total' => $total
+                                'total' => $total,
+                                'invoice_number' => $useOrderNumber
                             ];
                             execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txType_local, $whId, null, $rel_local, $customerId, $saleTotal, json_encode($detailsPayload)]);
                             $saleId = $pdo->lastInsertId();
@@ -11572,6 +11564,19 @@ switch ($module) {
                     $row['daily_code'] = $row['daily_code'] ?: $dailyCode;
                     $row['is_closed'] = intval($row['is_closed'] ?? 0);
                     $row['status'] = $row['is_closed'] ? 'closed' : 'open';
+                }
+
+                // If there's a non-zero opening amount, record a transaction with context 'start_daily'
+                try {
+                    if (isset($opening) && floatval($opening) !== 0.0) {
+                        $txTypeStart = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_payment_in', ['rep_payment_in','payment_in','rep_settlement','payment']);
+                        $rel_local_start = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
+                        $detailsStart = json_encode(['context' => 'start_daily', 'journal_id' => $insId, 'rep_id' => $repId]);
+                        execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txTypeStart, null, $treasuryId, $rel_local_start, $repId, floatval($opening), $detailsStart]);
+                    }
+                } catch (Exception $e) {
+                    // non-fatal: don't block startDaily if transaction logging fails
+                    error_log('startDaily: failed to insert opening transaction: ' . $e->getMessage());
                 }
 
                 audit_log($pdo, 'sales', 'start_daily', $repId, json_encode(['journal_date' => $journalDate, 'treasury' => $treasuryId, 'warehouse' => $warehouseId, 'notes' => $notes]));
@@ -14040,6 +14045,33 @@ switch ($module) {
                     'expense' => array_sum($expensePrevOut)
                 ]
             ]]);
+        } elseif ($action === 'product_delivery') {
+            try {
+                $params = [$start_date, $end_date . ' 23:59:59'];
+                $sql = "SELECT
+                            ppar.id AS product_id,
+                            ppar.name AS product_name,
+                            COALESCE(SUM(oi.quantity),0) AS total_orders,
+                            COALESCE(SUM(CASE WHEN o.status = 'delivered' THEN oi.quantity ELSE 0 END),0) AS delivered_qty,
+                            COALESCE(SUM(CASE WHEN o.status = 'delivered' THEN (oi.quantity * oi.price_per_unit) ELSE 0 END),0) AS delivered_amount,
+                            COALESCE(SUM(CASE WHEN o.status IN ('full_return','partial_return') THEN oi.quantity ELSE 0 END),0) AS returned_qty,
+                            COALESCE(SUM(CASE WHEN o.status IN ('full_return','partial_return') THEN (oi.quantity * oi.price_per_unit) ELSE 0 END),0) AS returned_amount
+                         FROM order_items oi
+                         JOIN product_variants pv ON oi.product_id = pv.id
+                         JOIN products ppar ON pv.product_id = ppar.id
+                         JOIN orders o ON oi.order_id = o.id
+                         WHERE o.created_at BETWEEN ? AND ?
+                         GROUP BY ppar.id, ppar.name
+                         ORDER BY total_orders DESC";
+
+                $stmt = execute_query($pdo, $sql, $params);
+                $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                echo json_encode(['success' => true, 'data' => $rows]);
+            } catch (Exception $e) {
+                http_response_code(500);
+                echo json_encode(['success' => false, 'message' => 'Failed to compute product delivery report: ' . $e->getMessage()]);
+            }
+
         } elseif ($action === 'archives') {
             $limit = intval($_GET['limit'] ?? 100);
             if ($limit <= 0) $limit = 100;

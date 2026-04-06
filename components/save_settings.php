@@ -85,6 +85,48 @@ try {
         'report_auto' => $input['report_auto'] ?? 'false'
     ];
 
+    // If company logo is a data URL, persist it to app_files and set company_logo_file_id
+    if (!empty($input['company_logo']) && strpos($input['company_logo'], 'data:') === 0) {
+        try {
+            // parse data URI
+            if (preg_match('/^data:(.*?);base64,(.*)$/', $input['company_logo'], $m)) {
+                $mime = $m[1];
+                $b64 = $m[2];
+                $bin = base64_decode($b64);
+                if ($bin !== false) {
+                    $sha1 = sha1($bin);
+                    // ensure app_files table exists
+                    $pdo->exec("CREATE TABLE IF NOT EXISTS `app_files` (
+                        `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                        `filename` VARCHAR(255) NOT NULL,
+                        `mime` VARCHAR(120) DEFAULT NULL,
+                        `sha1` CHAR(40) DEFAULT NULL,
+                        `data` LONGBLOB NOT NULL,
+                        `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (`id`),
+                        UNIQUE KEY `uk_app_files_sha1` (`sha1`)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+                    $checkFile = $pdo->prepare("SELECT id FROM app_files WHERE sha1 = :sha1 LIMIT 1");
+                    $checkFile->execute([':sha1' => $sha1]);
+                    $frow = $checkFile->fetch(PDO::FETCH_ASSOC);
+                    if ($frow) {
+                        $fileId = (int)$frow['id'];
+                    } else {
+                        $insFile = $pdo->prepare("INSERT INTO app_files (filename, mime, sha1, data) VALUES (:fn, :mime, :sha1, :data)");
+                        $fn = 'company_logo_' . time();
+                        $insFile->execute([':fn' => $fn, ':mime' => $mime, ':sha1' => $sha1, ':data' => $bin]);
+                        $fileId = (int)$pdo->lastInsertId();
+                    }
+
+                    $settings['company_logo_file_id'] = (string)$fileId;
+                }
+            }
+        } catch (Exception $e) {
+            // non-fatal: continue saving other settings
+        }
+    }
+
     foreach ($settings as $key => $value) {
         if ($useAppSettings) {
             $stmt->execute([$key, is_scalar($value) ? (string)$value : json_encode($value)]);

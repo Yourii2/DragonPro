@@ -637,7 +637,7 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
     try {
       const d = tx.details ? JSON.parse(tx.details) : {};
       if (d && isRepPaymentTx(tx, d)) {
-        return d.context === 'close_daily' ? 'إغلاق يومية' : 'بدء يومية';
+        return d.context === 'close_daily' ? 'بدء يومية' : 'إغلاق يومية';
       }
     } catch { /* fallthrough */ }
     return getTransactionTypeLabel(tx.type, tx.details);
@@ -650,8 +650,8 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
       if (d && isRepPaymentTx(tx, d)) {
         const isClose = d.context === 'close_daily';
         const amt = parseFloat(tx.amount);
-        if (amt >= 0) return isClose ? 'تحصيل من المندوب في إغلاق اليومية' : 'تحصيل من المندوب في بدء اليومية';
-        return isClose ? 'دفع إلى المندوب في إغلاق اليومية' : 'دفع إلى المندوب في بدء اليومية';
+        if (amt >= 0) return isClose ? 'تحصيل من المندوب في بدء اليومية' : 'تحصيل من المندوب في إغلاق اليومية';
+        return isClose ? 'دفع إلى المندوب في بدء اليومية' : 'دفع إلى المندوب في إغلاق اليومية';
       }
     } catch { /* fallthrough */ }
     if (tx.memo && String(tx.memo).trim()) return tx.memo;

@@ -180,7 +180,9 @@ const SettingsModule: React.FC = () => {
             });
           }
           
-          if (settings.company_logo) {
+          if (settings.company_logo_url) {
+            setLogoPreview(settings.company_logo_url);
+          } else if (settings.company_logo) {
             setLogoPreview(settings.company_logo);
           }
         }

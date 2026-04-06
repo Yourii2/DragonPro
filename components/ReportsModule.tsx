@@ -43,6 +43,7 @@ import { API_BASE_PATH } from '../services/apiConfig';
 import Swal from 'sweetalert2';
 import DailyReport from './DailyReport';
 import TotalsReport from './TotalsReport';
+import ProductDeliveryTable from './ProductDeliveryTable';
 import { useTheme } from './ThemeContext';
 import CustomSelect from './CustomSelect';
 
@@ -430,7 +431,7 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
         <div className="flex bg-white dark:bg-slate-800 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-x-auto max-w-full">
           <button onClick={() => setActiveSubTab('sales')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'sales' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><ShoppingCart size={16}/> المبيعات</button>
           <button onClick={() => setActiveSubTab('totals')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'totals' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><FileText size={16}/> ملخص الفترة</button>
-          <button onClick={() => setActiveSubTab('admin-audit')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'admin-audit' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><ShieldCheck size={16}/> النظام والتدقيق</button>
+          <button onClick={() => setActiveSubTab('product-report')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'product-report' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><ShoppingCart size={16}/> تقرير منتجات</button>
           <button onClick={() => setActiveSubTab('compare')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'compare' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><BarChart3 size={16}/> المقارنات</button>
         </div>
       </div>
@@ -502,6 +503,21 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
                 </tr>
               </tbody>
             </table>
+          </div>
+        </ReportSection>
+      )}
+
+      {activeSubTab === 'product-report' && (
+        <ReportSection
+          title="تقرير المنتجات والتسليم"
+          description="اسم المنتج - إجمالي الطلبات - تم التسليم - إجمالي التسليم - نسبة التسليم - تم الارتجاع - إجمالي المرتجع - نسبة المرتجع"
+          icon={Package}
+          filters={salesFilters}
+          onGenerate={() => handleGenerateReport('Product report')}
+        >
+          <div className="overflow-x-auto rounded-2xl border bg-white p-4">
+            {/* Fetch data from backend endpoint: module=reports&action=product_delivery */}
+            <ProductDeliveryTable startDate={startDate} endDate={endDate} />
           </div>
         </ReportSection>
       )}

@@ -19,6 +19,7 @@ import SalesUpdateStatus from './components/SalesUpdateStatus';
 import SalesReport from './components/SalesReport';
 import SalesDailyClose from './components/SalesDailyClose';
 import OrderConfirmations from './components/OrderConfirmations';
+import DeliveryConfirmation from './components/DeliveryConfirmation';
 import AttendanceModule from './components/AttendanceModule';
 import Profile from './components/Profile';
 import { ThemeProvider } from './components/ThemeContext';
@@ -342,6 +343,8 @@ const App_new: React.FC = () => {
     switch (activeSlug) {
       case 'dashboard':
         return canAccessPage('dashboard') ? <Dashboard /> : <BrandedWelcome />;
+      case 'delivery-confirmation':
+        return <DeliveryConfirmation />;
       case 'crm':
         return <CRMModule initialView={activeSubSlug} />;
       case 'srm':

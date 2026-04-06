@@ -93,9 +93,9 @@ const PrintWaybill: React.FC = () => {
 
     const q = parseQuery();
     const idsParam = q.get('ids') || q.get('id');
-    const companyName = q.get('companyName') || '';
-    const companyPhone = q.get('companyPhone') || '';
-    const companyTerms = q.get('companyTerms') || '';
+    let companyName = q.get('companyName') || '';
+    let companyPhone = q.get('companyPhone') || '';
+    let companyTerms = q.get('companyTerms') || '';
 
     const ids = idsParam ? idsParam.split(',').map(s => s.trim()).filter(Boolean) : [];
     if (ids.length === 0) {
@@ -122,6 +122,20 @@ const PrintWaybill: React.FC = () => {
     }
 
     (async () => {
+      // If company info is not provided via query or localStorage, try to fetch from server settings
+      if (!companyName && !companyPhone && !companyTerms) {
+        try {
+          const sv = await fetch(`${API_BASE_PATH}/verify.php`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force: true }) });
+          const svj = await sv.json();
+          if (svj && svj.status === 'ok' && svj.settings) {
+            companyName = svj.settings.company_name || '';
+            companyPhone = svj.settings.company_phone || '';
+            companyTerms = svj.settings.company_terms || '';
+          }
+        } catch (e) {
+          // ignore - we'll fallback to localStorage or empty values
+        }
+      }
       try {
         const fetched: any[] = [];
         for (const id of ids) {

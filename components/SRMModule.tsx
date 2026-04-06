@@ -471,7 +471,7 @@ const SRMModule: React.FC = () => {
             });
             const invoiceDetails = {
                     id: transaction.id,
-                    number: transaction.reference_id || `INV-${transaction.id}`,
+                    number: (transaction.reference_id || (transaction.details && (typeof transaction.details === 'object' ? transaction.details.invoice_number : (() => { try { return JSON.parse(transaction.details || '{}').invoice_number; } catch(e){ return null; } })()))) || `INV-${transaction.id}`,
                     date: transaction.transaction_date || transaction.date,
                     supplierName: selectedSupplier?.name,
                     items: items,
@@ -504,7 +504,7 @@ const SRMModule: React.FC = () => {
                 const total = Number(qty * (costPrice || price || 0));
                 return { ...it, qty, costPrice, price, total };
             });
-            const invoiceNumber = transaction.reference_id || `INV-${transaction.id}`;
+            const invoiceNumber = (transaction.reference_id || (transaction.details && (typeof transaction.details === 'object' ? transaction.details.invoice_number : (() => { try { return JSON.parse(transaction.details || '{}').invoice_number; } catch(e){ return null; } })()))) || `INV-${transaction.id}`;
             const date = transaction.transaction_date || transaction.date || new Date().toLocaleString();
             const supplierName = selectedSupplier?.name || '';
             const supplierPhone = selectedSupplier?.phone || '';
