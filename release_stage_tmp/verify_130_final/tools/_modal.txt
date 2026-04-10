@@ -1,0 +1,158 @@
+﻿
+      {/* ── Update Manager Modal ── */}
+      {showUpdateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" dir="rtl">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh] overflow-hidden">
+
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+              <div className="flex items-center gap-2">
+                <Package size={20} className="text-blue-500" />
+                <span className="font-bold text-lg text-slate-800 dark:text-slate-100">إدارة التحديثات</span>
+                {updateInfo?.current_version && (
+                  <span className="text-xs bg-slate-100 dark:bg-slate-800 text-slate-500 px-2 py-0.5 rounded-full">
+                    الحالي: {updateInfo.current_version}
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={() => { if (!isInstalling) setShowUpdateModal(false); }}
+                disabled={isInstalling}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 disabled:opacity-40"
+              >
+                <XCircle size={22} />
+              </button>
+            </div>
+
+            {/* Release List */}
+            <div className="overflow-y-auto flex-1 px-6 py-4 space-y-2">
+              {allReleases.length === 0 && (
+                <p className="text-center text-sm text-slate-400 py-8">لا توجد إصدارات.</p>
+              )}
+              {allReleases.map((rel: any) => {
+                const isSelected = selectedTags.has(rel.tag);
+                const logEntry = installLog.find((l: any) => l.tag === rel.tag);
+                const statusBadge =
+                  rel.status === 'new'     ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' :
+                  rel.status === 'current' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
+                                             'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400';
+                const statusLabel =
+                  rel.status === 'new'     ? 'جديد' :
+                  rel.status === 'current' ? 'الحالي' : 'قديم';
+
+                return (
+                  <div
+                    key={rel.tag}
+                    className={`rounded-2xl border transition-all ${isSelected && !logEntry ? 'border-blue-400 dark:border-blue-600 bg-blue-50 dark:bg-blue-950/20' : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40'}`}
+                  >
+                    <div className="flex items-center gap-3 p-3">
+                      {/* Checkbox */}
+                      <input
+                        type="checkbox"
+                        disabled={isInstalling || !rel.asset_url}
+                        checked={isSelected}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                          const next = new Set(selectedTags);
+                          if (e.target.checked) next.add(rel.tag); else next.delete(rel.tag);
+                          setSelectedTags(next);
+                        }}
+                        className="w-4 h-4 accent-blue-600 cursor-pointer flex-shrink-0"
+                      />
+
+                      {/* Info */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-sm text-slate-800 dark:text-slate-100">{rel.version}</span>
+                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${statusBadge}`}>{statusLabel}</span>
+                          {rel.prerelease && <span className="text-[10px] bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 px-2 py-0.5 rounded-full">تجريبي</span>}
+                          <span className="text-xs text-slate-500 truncate">{rel.name !== rel.tag ? rel.name : ''}</span>
+                        </div>
+                        <div className="flex items-center gap-3 mt-0.5">
+                          {rel.published_at && (
+                            <span className="text-[10px] text-slate-400">
+                              {new Date(rel.published_at).toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric' })}
+                            </span>
+                          )}
+                          {!rel.asset_url && <span className="text-[10px] text-rose-500">لا يوجد ملف ZIP</span>}
+                          {rel.asset_name && <span className="text-[10px] text-slate-400 font-mono truncate">{rel.asset_name}</span>}
+                        </div>
+                      </div>
+
+                      {/* Expand notes toggle */}
+                      {rel.body && (
+                        <button
+                          onClick={() => setExpandedTag(expandedTag === rel.tag ? null : rel.tag)}
+                          className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 flex-shrink-0"
+                        >
+                          {expandedTag === rel.tag ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
+                        </button>
+                      )}
+
+                      {/* Install status icon */}
+                      {logEntry && (
+                        <span className="flex-shrink-0">
+                          {logEntry.status === 'installing' && <RefreshCw size={16} className="animate-spin text-blue-500"/>}
+                          {logEntry.status === 'done'       && <CheckCircle size={16} className="text-emerald-500"/>}
+                          {logEntry.status === 'error'      && <AlertCircle size={16} className="text-rose-500" title={logEntry.message}/>}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Release notes */}
+                    {expandedTag === rel.tag && rel.body && (
+                      <div className="px-10 pb-3 text-xs text-slate-500 dark:text-slate-400 whitespace-pre-line border-t border-slate-200 dark:border-slate-700 pt-2 leading-relaxed">
+                        {rel.body}
+                      </div>
+                    )}
+
+                    {/* Install log message */}
+                    {logEntry?.message && (
+                      <div className={`px-10 pb-2 text-[11px] ${logEntry.status === 'error' ? 'text-rose-500' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                        {logEntry.message}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between gap-3 flex-wrap">
+              <div className="text-xs text-slate-500">
+                {selectedTags.size > 0
+                  ? `${selectedTags.size} تحديث محدد — سيتم التثبيت من الأقدم للأحدث`
+                  : 'حدد التحديثات المراد تثبيتها'}
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => {
+                    const allTags = new Set<string>(allReleases.filter((r: any) => r.asset_url).map((r: any) => r.tag as string));
+                    setSelectedTags(allTags);
+                  }}
+                  disabled={isInstalling}
+                  className="text-xs px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40"
+                >
+                  تحديد الكل
+                </button>
+                <button
+                  onClick={() => setSelectedTags(new Set())}
+                  disabled={isInstalling}
+                  className="text-xs px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40"
+                >
+                  إلغاء التحديد
+                </button>
+                <button
+                  onClick={installSelected}
+                  disabled={isInstalling || selectedTags.size === 0}
+                  className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-bold text-sm transition-all disabled:opacity-50 shadow"
+                >
+                  {isInstalling
+                    ? <><RefreshCw size={14} className="animate-spin"/> جارٍ التثبيت...</>
+                    : <><Upload size={14}/> تثبيت المحدد ({selectedTags.size})</>}
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}

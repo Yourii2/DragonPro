@@ -1,0 +1,22 @@
+{
+  "github": {
+    "owner": "Yourii2",
+    "repo": "DragonPro",
+    "assetName": ""
+  },
+  "preserve": [
+    "config.php",
+    "Dragon.lic",
+    "nexus.lic",
+    "uploads/",
+    "logs/",
+    "backups/",
+    ".env.local",
+    "Dragon.png"
+  ],
+  "allowedHosts": [
+    "github.com",
+    "objects.githubusercontent.com",
+    "raw.githubusercontent.com"
+  ]
+}

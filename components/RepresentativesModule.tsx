@@ -1,0 +1,2340 @@
+// آخر تحديث: 2026-02-11 (إصدار 1.0.4)
+import React, { useState, useEffect } from 'react';
+import { Users, Box, FileText, Search, UserCheck, RefreshCcw, Edit, Trash2, Eye, X, Save, PlusCircle, MinusCircle, Play, Square, Wallet, ShoppingCart } from 'lucide-react';
+import Swal from 'sweetalert2';
+
+import { API_BASE_PATH } from '../services/apiConfig';
+import CustomSelect from './CustomSelect';
+import { PrintableOrders } from './PrintableOrderCard';
+
+interface RepresentativesModuleProps {
+  initialView?: string;
+}
+
+const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialView }) => {
+  const [view, setView] = useState<'list' | 'custody' | 'transactions' | 'rep-cycle' | 'rep-performance'>(
+    initialView === 'custody'
+      ? 'custody'
+      : initialView === 'transactions'
+        ? 'transactions'
+        : initialView === 'rep-cycle'
+          ? 'rep-cycle'
+          : initialView === 'rep-performance'
+            ? 'rep-performance'
+            : 'list'
+  );
+  const [searchTerm, setSearchTerm] = useState('');
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingRep, setEditingRep] = useState<any>(null);
+  const [formData, setFormData] = useState({ name: '', phone: '', insurance_paid: false, insurance_amount: '' });
+  const [representatives, setRepresentatives] = useState<any[]>([]);
+  const [pendingOrders, setPendingOrders] = useState<any[]>([]);
+  const [repAssignedOrders, setRepAssignedOrders] = useState<any[]>([]);
+  const [selectedRepId, setSelectedRepId] = useState<number | null>(null);
+  const currencySymbol = 'ج.م';
+  const [repTransactions, setRepTransactions] = useState<any[]>([]);
+  const [paymentForm, setPaymentForm] = useState<{ amount: string; type: 'payment'|'fine'|'settlement'; direction: 'in'|'out'; treasuryId: string; note: string }>({ amount: '', type: 'payment', direction: 'in', treasuryId: '', note: '' });
+  const [treasuries, setTreasuries] = useState<any[]>([]);
+  const [warehouses, setWarehouses] = useState<any[]>([]);
+  const [userDefaults, setUserDefaults] = useState<any>(null);
+
+  const todayISO = new Date().toISOString().split('T')[0];
+  const [perfMode, setPerfMode] = useState<'date' | 'day' | 'week' | 'month' | 'year'>('month');
+  const [perfDate, setPerfDate] = useState<string>(todayISO);
+  const [perfMonth, setPerfMonth] = useState<string>(todayISO.slice(0, 7));
+
+  const [companySettings, setCompanySettings] = useState<any>({
+    name: localStorage.getItem('Dragon_company_name') || 'اسم الشركة',
+    phone: localStorage.getItem('Dragon_company_phone') || '',
+    address: localStorage.getItem('Dragon_company_address') || '',
+    terms: localStorage.getItem('Dragon_company_terms') || '',
+    logo: localStorage.getItem('Dragon_company_logo') || null
+  });
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const resp = await fetch(`${API_BASE_PATH}/get_settings.php`);
+        const jr = await resp.json().catch(() => null);
+        if (jr && jr.success && jr.data) {
+          const s = jr.data;
+          setCompanySettings((prev: any) => ({
+            ...prev,
+            name: s.company_name || prev.name,
+            phone: s.company_phone || prev.phone,
+            address: s.company_address || prev.address,
+            terms: s.company_terms || prev.terms,
+            logo: s.company_logo_url || s.company_logo || prev.logo
+          }));
+        }
+      } catch (e) {}
+    })();
+  }, []);
+  const [perfYear, setPerfYear] = useState<string>(String(new Date().getFullYear()));
+  const [perfRepId, setPerfRepId] = useState<string>('all');
+  const [perfLoading, setPerfLoading] = useState(false);
+  const [perfRows, setPerfRows] = useState<any[]>([]);
+  const [perfTop10, setPerfTop10] = useState<any[]>([]);
+
+  // ─── يوميات المندوب ───
+  const [journalFrom, setJournalFrom] = useState<string>(todayISO);
+  const [journalTo, setJournalTo] = useState<string>(todayISO);
+  const [journalRepId, setJournalRepId] = useState<number | 'all' | null>('all');
+  const [journalOnlyOpen, setJournalOnlyOpen] = useState(false);
+  const [repJournalLoading, setRepJournalLoading] = useState(false);
+  const [repJournalRows, setRepJournalRows] = useState<any[]>([]);
+  const [expandedJournalIds, setExpandedJournalIds] = useState<Set<number>>(new Set());
+  const toggleJournalExpand = (id: number) => setExpandedJournalIds(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const [waybillPrintOrders, setWaybillPrintOrders] = useState<any[] | null>(null);
+  // Live stats per journal row (computed on-demand)
+  const [journalLiveStats, setJournalLiveStats] = useState<Record<number, any>>({});
+  useEffect(() => {
+    if (!waybillPrintOrders) return;
+    const t = setTimeout(() => {
+      window.print();
+      setTimeout(() => setWaybillPrintOrders(null), 1200);
+    }, 500);
+    return () => clearTimeout(t);
+  }, [waybillPrintOrders]);
+
+  const parseTxDetails = (details: any) => {
+    if (!details) return {};
+    if (typeof details === 'object') return details;
+    try { return JSON.parse(details); } catch (e) { return {}; }
+  };
+
+  const getTxLabel = (type: string, details: any) => {
+    const labels: { [key: string]: string } = {
+      rep_assignment: 'تسليم عهدة لمندوب',
+      rep_payment_in: 'تحصيل من مندوب',
+      rep_payment_out: 'دفعة لمندوب',
+      rep_settlement: 'تسوية مندوب',
+      rep_penalty: 'غرامة على المندوب',
+      payment_in: 'تحصيل',
+      payment_out: 'صرف'
+    };
+    const subtype = details?.subtype || '';
+    if (subtype && labels[subtype]) return labels[subtype];
+    return labels[type] || type || '-';
+  } // <-- close getTxLabel
+
+  // enhance getTxLabel to include common transaction types in Arabic
+  const getTxLabelEnhanced = (type: string, details: any) => {
+    const t = (type || '').toString();
+    const map: { [k: string]: string } = {
+      sale: 'مبيعات',
+      purchase: 'شراء',
+      return_in: 'مرتجع من عميل',
+      return_out: 'مرتجع لمورد',
+      rep_payment_in: 'تحصيل من مندوب',
+      rep_payment_out: 'دفعة لمندوب',
+      rep_settlement: 'تسوية مندوب',
+      rep_penalty: 'غرامة',
+      payment_in: 'تحصيل',
+      payment_out: 'صرف',
+      advance: 'دفع مسبق',
+      daily_open: 'بدء يومية',
+      daily_close: 'تقفيل يوم',
+      settlement: 'تسوية',
+      adjustment: 'تسوية',
+      transfer: 'نقل',
+      expense: 'مصروف'
+    };
+    const subtype = details?.subtype || '';
+    if (subtype && map[subtype]) return map[subtype];
+    return map[t] || getTxLabel(type, details) || '-';
+  };
+
+  const fetchReps = async () => {
+    try {
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=users&action=getAllWithBalance`);
+      const js = await res.json();
+      if (js.success && Array.isArray(js.data)) {
+        setRepresentatives(js.data);
+      } else {
+        setRepresentatives([]);
+      }
+    } catch (e) {
+      console.error('Failed to fetch reps', e);
+      setRepresentatives([]);
+    }
+  };
+
+  useEffect(() => {
+    if (['list', 'custody', 'transactions', 'rep-cycle', 'rep-performance'].includes(initialView || '')) {
+      setView(initialView as any);
+    }
+
+    const fetchPending = async () => {
+      try {
+        const r = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=pending`);
+        const jr = await r.json();
+        if (jr.success) setPendingOrders(jr.data || []);
+      } catch (e) { console.error('Failed to fetch pending orders', e); }
+    };
+
+    const fetchTreasuries = async () => {
+      try {
+        const [tr, ud] = await Promise.all([
+          fetch(`${API_BASE_PATH}/api.php?module=treasuries&action=getAll`).then(r=>r.json()),
+          fetch(`${API_BASE_PATH}/api.php?module=permissions&action=getUserDefaults`).then(r=>r.json()).catch(()=>({success:false}))
+        ]);
+        const list = (tr && tr.success) ? (tr.data || []) : [];
+        const defaults = (ud && ud.success) ? (ud.data || null) : null;
+        if (defaults && defaults.default_treasury_id && !defaults.can_change_treasury) setTreasuries(list.filter((t:any)=>Number(t.id)===Number(defaults.default_treasury_id)));
+        else setTreasuries(list);
+        if (defaults && defaults.default_treasury_id && !paymentForm.treasuryId) setPaymentForm(prev => ({...prev, treasuryId: String(defaults.default_treasury_id)}));
+        if (defaults) setUserDefaults(defaults);
+      } catch (e) { console.error('Failed to fetch treasuries', e); }
+    };
+
+    const fetchUserDefaults = async () => {
+      try {
+        const r = await fetch(`${API_BASE_PATH}/api.php?module=permissions&action=getUserDefaults`);
+        const jr = await r.json();
+        if (jr && jr.success) {
+          setUserDefaults(jr.data || null);
+          if (jr.data && jr.data.default_treasury_id && !paymentForm.treasuryId) setPaymentForm(prev => ({...prev, treasuryId: String(jr.data.default_treasury_id)}));
+        }
+      } catch (e) { console.error('Failed to fetch user defaults', e); }
+    };
+
+    fetchReps();
+    fetchPending();
+    fetchTreasuries();
+    fetchUserDefaults();
+    // fetch warehouses for returns/restock
+    const fetchWarehouses = async () => {
+      try {
+        const r = await fetch(`${API_BASE_PATH}/api.php?module=warehouses&action=getAll`);
+        const jr = await r.json();
+        if (jr && jr.success) setWarehouses(jr.data || []);
+      } catch (e) { console.error('Failed to fetch warehouses', e); }
+    };
+    fetchWarehouses();
+  }, [initialView]);
+
+  const filteredReps = representatives.filter(r =>
+    (r.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    String(r.phone || '').includes(searchTerm)
+  );
+
+  const toISODate = (d: Date) => d.toISOString().split('T')[0];
+
+  const getPerfDateRange = () => {
+    const safeDate = (s: string) => {
+      const d = new Date(`${s}T00:00:00`);
+      return isNaN(d.getTime()) ? new Date() : d;
+    };
+
+    if (perfMode === 'date' || perfMode === 'day') {
+      const d = safeDate(perfDate);
+      const iso = toISODate(d);
+      return { startDate: iso, endDate: iso };
+    }
+
+    if (perfMode === 'week') {
+      const d = safeDate(perfDate);
+      const day = d.getDay(); // 0=Sun..6=Sat
+      const diffToMonday = (day + 6) % 7; // Monday start
+      const start = new Date(d);
+      start.setDate(d.getDate() - diffToMonday);
+      const end = new Date(start);
+      end.setDate(start.getDate() + 6);
+      return { startDate: toISODate(start), endDate: toISODate(end) };
+    }
+
+    if (perfMode === 'month') {
+      const [y, m] = (perfMonth || '').split('-').map(v => Number(v));
+      const year = y || new Date().getFullYear();
+      const monthIndex = (m ? m - 1 : new Date().getMonth());
+      const start = new Date(year, monthIndex, 1);
+      const end = new Date(year, monthIndex + 1, 0);
+      return { startDate: toISODate(start), endDate: toISODate(end) };
+    }
+
+    const y = Number(perfYear) || new Date().getFullYear();
+    const start = new Date(y, 0, 1);
+    const end = new Date(y, 11, 31);
+    return { startDate: toISODate(start), endDate: toISODate(end) };
+  };
+
+  const computePerfFromOrders = (orders: any[]) => {
+    const safeOrders = Array.isArray(orders) ? orders : [];
+    const normalizeStatus = (raw: any) => String(raw || '').trim().toLowerCase();
+    const getStatus = (o: any) => normalizeStatus(o?.status || o?.order_status || o?.state || o?.delivery_status || '');
+
+    const deliveredStatuses = new Set(['delivered', 'completed', 'done', 'delivered_final', 'تم التسليم']);
+    const returnedStatuses = new Set(['returned', 'return', 'returned_final', 'مرتجع', 'تم الارجاع', 'تم الإرجاع']);
+    const withRepStatuses = new Set(['with_rep', 'in_delivery', 'out_for_delivery', 'assigned_to_rep', 'withrep', 'قيد التوصيل']);
+
+    const delivered = safeOrders.filter(o => deliveredStatuses.has(getStatus(o)));
+    const returned = safeOrders.filter(o => returnedStatuses.has(getStatus(o)));
+    const withRep = safeOrders.filter(o => withRepStatuses.has(getStatus(o)));
+    const total = safeOrders.length;
+    const totalHandled = delivered.length + returned.length;
+    const returnRate = totalHandled > 0 ? Math.round((returned.length / totalHandled) * 100) : 0;
+    const pct = (n: number) => (total > 0 ? Math.round((n / total) * 100) : 0);
+    return {
+      total,
+      delivered: delivered.length,
+      returned: returned.length,
+      withRep: withRep.length,
+      deliveredPct: pct(delivered.length),
+      returnedPct: pct(returned.length),
+      withRepPct: pct(withRep.length),
+      returnRate,
+    };
+  };
+
+  const toNum = (v: any) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const pickFinalJournalRowsPerDay = (rows: any[]) => {
+    const byDate: Record<string, any> = {};
+    (Array.isArray(rows) ? rows : []).forEach((row: any) => {
+      const dateKey = String(row?.journal_date || '').slice(0, 10);
+      if (!dateKey) return;
+      const prev = byDate[dateKey];
+      if (!prev) {
+        byDate[dateKey] = row;
+        return;
+      }
+
+      const prevSeq = toNum(prev?.session_seq);
+      const currSeq = toNum(row?.session_seq);
+      if (currSeq > prevSeq) {
+        byDate[dateKey] = row;
+        return;
+      }
+      if (currSeq < prevSeq) return;
+
+      const prevTs = new Date(prev?.opened_at || prev?.created_at || prev?.start_time || 0).getTime() || 0;
+      const currTs = new Date(row?.opened_at || row?.created_at || row?.start_time || 0).getTime() || 0;
+      if (currTs >= prevTs) byDate[dateKey] = row;
+    });
+    return Object.values(byDate);
+  };
+
+  const computePerfFromJournalRows = (rows: any[]) => {
+    // 1. Sort journals chronologically to find the final 'in custody' state, while summing all transactions
+    const sortedRows = [...rows].sort((a, b) => {
+      const tsA = new Date(a.opened_at || a.created_at || a.journal_date || 0).getTime();
+      const tsB = new Date(b.opened_at || b.created_at || b.journal_date || 0).getTime();
+      let diff = tsA - tsB;
+      if (diff === 0) {
+        diff = toNum(a.session_seq) - toNum(b.session_seq);
+      }
+      return diff;
+    });
+
+    const totals = sortedRows.reduce((acc: any, row: any) => {
+      const delivered = toNum(row?.delivered_orders_count ?? row?.deliveredCount ?? 0);
+      const returned = toNum(row?.returned_orders_count ?? row?.returnedCount ?? 0);
+
+      acc.delivered += delivered;
+      acc.returned += returned;
+      return acc;
+    }, { delivered: 0, returned: 0, withRep: 0, total: 0 });
+
+    if (sortedRows.length > 0) {
+      const latestRow = sortedRows[sortedRows.length - 1];
+      totals.withRep = toNum(latestRow?.deferred_orders_count ?? latestRow?.deferredCount ?? 0);
+    }
+    
+    // total received MUST mathematically equal what they accomplished + what's still with them
+    totals.total = totals.delivered + totals.returned + totals.withRep;
+
+    const totalHandled = totals.delivered + totals.returned;
+    const returnRate = totalHandled > 0 ? Math.round((totals.returned / totalHandled) * 100) : 0;
+    const pct = (n: number) => (totals.total > 0 ? Math.round((n / totals.total) * 100) : 0);
+
+    return {
+      total: totals.total,
+      delivered: totals.delivered,
+      returned: totals.returned,
+      withRep: totals.withRep,
+      deliveredPct: pct(totals.delivered),
+      returnedPct: pct(totals.returned),
+      withRepPct: pct(totals.withRep),
+      returnRate,
+    };
+  };
+
+  const fetchPerformanceReport = async () => {
+    if (!Array.isArray(representatives) || representatives.length === 0) {
+      setPerfRows([]);
+      setPerfTop10([]);
+      return;
+    }
+
+    const { startDate, endDate } = getPerfDateRange();
+    const isInRange = (order: any) => {
+      const raw = order?.created_at || order?.createdAt || order?.date || order?.order_date || null;
+      if (!raw) return false;
+      const d = new Date(raw);
+      if (isNaN(d.getTime())) return false;
+      const from = new Date(`${startDate}T00:00:00`);
+      const to = new Date(`${endDate}T23:59:59`);
+      return d >= from && d <= to;
+    };
+
+    const buildRepOrdersUrl = (repId: number) => {
+      const params = new URLSearchParams({
+        module: 'orders',
+        action: 'getByRep',
+        rep_id: String(repId),
+        start_date: startDate,
+        end_date: endDate,
+        from: startDate,
+        to: endDate,
+        date_from: startDate,
+        date_to: endDate,
+      });
+      return `${API_BASE_PATH}/api.php?${params.toString()}`;
+    };
+
+    const buildRepJournalUrl = (repId: number) => {
+      const params = new URLSearchParams({
+        module: 'sales',
+        action: 'getRepDailyJournal',
+        rep_id: String(repId),
+        from: startDate,
+        to: endDate,
+      });
+      return `${API_BASE_PATH}/api.php?${params.toString()}`;
+    };
+
+    setPerfLoading(true);
+    try {
+      const reps = representatives.slice();
+      const rows = await Promise.all(
+        reps.map(async (rep: any) => {
+          const repId = Number(rep.id);
+          if (!repId) return { repId: rep.id, repName: rep.name || '-', ...computePerfFromOrders([]) };
+
+          try {
+            const journalRes = await fetch(buildRepJournalUrl(repId));
+            const journalJs = await journalRes.json();
+            const journalRows = (journalJs && journalJs.success && Array.isArray(journalJs.data)) ? journalJs.data : [];
+
+            let perf: any;
+            const hasJournalData = journalRows.some((row: any) =>
+              toNum(row?.total_orders_count ?? row?.orders_count ?? 0) > 0 ||
+              toNum(row?.delivered_orders_count ?? row?.deliveredCount ?? 0) > 0 ||
+              toNum(row?.returned_orders_count ?? row?.returnedCount ?? 0) > 0 ||
+              toNum(row?.deferred_orders_count ?? row?.deferredCount ?? 0) > 0
+            );
+
+            if (hasJournalData) {
+              perf = computePerfFromJournalRows(journalRows);
+            } else {
+              const ordersRes = await fetch(buildRepOrdersUrl(repId));
+              const ordersJs = await ordersRes.json();
+              const serverOrders = (ordersJs && ordersJs.success && Array.isArray(ordersJs.data)) ? ordersJs.data : [];
+              const strictRangeOrders = serverOrders.filter(isInRange);
+              const ordersForPerf = strictRangeOrders.length > 0 || serverOrders.length === 0
+                ? strictRangeOrders
+                : serverOrders;
+              perf = computePerfFromOrders(ordersForPerf);
+            }
+
+            return { repId, repName: rep.name || `مندوب ${repId}`, ...perf };
+          } catch (e) {
+            console.error('Failed to fetch rep performance row', repId, e);
+            return { repId, repName: rep.name || `مندوب ${repId}`, ...computePerfFromOrders([]) };
+          }
+        })
+      );
+
+      rows.sort((a, b) => (b.delivered - a.delivered) || (a.returnRate - b.returnRate));
+      setPerfRows(rows);
+      setPerfTop10(rows.slice(0, 10));
+    } finally {
+      setPerfLoading(false);
+    }
+  };
+
+  const handleOpenModal = (rep: any = null) => {
+    if (rep) {
+      setEditingRep(rep);
+      setFormData({ name: rep.name || '', phone: rep.phone || '', insurance_paid: !!rep.insurance_paid, insurance_amount: rep.insurance_amount ? String(rep.insurance_amount) : '' });
+    } else {
+      setEditingRep(null);
+      setFormData({ name: '', phone: '', insurance_paid: false, insurance_amount: '' });
+    }
+    setIsModalOpen(true);
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    (async () => {
+      try {
+        if (editingRep) {
+          // لا يتم تعديل مبلغ التأمين (ولا حالة دفع التأمين) عند التعديل
+          const res = await fetch(`${API_BASE_PATH}/api.php?module=users&action=update`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name: formData.name, phone: formData.phone, role: 'representative', id: editingRep.id, insurance_paid: editingRep.insurance_paid ? 1 : 0, insurance_amount: Number(editingRep.insurance_amount || 0) }) });
+          const raw = await res.text();
+          let js: any = null;
+          try { js = JSON.parse(raw); } catch (e) { console.error('Save rep raw response (update):', raw); Swal.fire('خطأ في الخادم', raw.substring(0, 1000), 'error'); return; }
+          if (js.success) {
+            await fetchReps();
+            setIsModalOpen(false);
+            Swal.fire('تم الحفظ', 'تم تحديث بيانات المندوب بنجاح.', 'success');
+          } else Swal.fire('فشل الحفظ', js.message || 'فشل تحديث المندوب', 'error');
+        } else {
+          // Default permissions: only update order status
+          const defaultPerms = JSON.stringify({ update_order_status: true });
+          const payload: any = { name: formData.name, phone: formData.phone, role: 'representative', permissions: defaultPerms, insurance_paid: formData.insurance_paid ? 1 : 0, insurance_amount: formData.insurance_paid ? Number(formData.insurance_amount || 0) : 0 };
+          const res = await fetch(`${API_BASE_PATH}/api.php?module=users&action=create`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+          const raw = await res.text();
+          let js: any = null;
+          try { js = JSON.parse(raw); } catch (e) { console.error('Save rep raw response (create):', raw); Swal.fire('خطأ في الخادم', raw.substring(0, 1000), 'error'); return; }
+          if (js.success) {
+            // server may return created record in js.data or insert_id
+            // إضافة معاملة مالية في خزينة تأمين المناديب إذا تم دفع التأمين
+            if (formData.insurance_paid && Number(formData.insurance_amount) > 0) {
+              await createInsuranceTransaction(js.data?.id || js.insert_id, Number(formData.insurance_amount));
+            }
+            await fetchReps();
+            setIsModalOpen(false);
+            Swal.fire('تم الحفظ', 'تم إضافة مندوب جديد.', 'success');
+          } else Swal.fire('فشل الحفظ', js.message || 'فشل إضافة المندوب', 'error');
+        }
+      } catch (err) {
+        console.error('Save rep error', err);
+        Swal.fire('خطأ في الاتصال', 'فشل الاتصال بالخادم.', 'error');
+      }
+    })();
+  };
+
+  const handleDelete = (repId: number) => {
+    const rep = representatives.find(r => r.id === repId);
+    if (!rep) return;
+
+    const repInsuranceAmount = Number(rep.insurance_amount ?? 0);
+    const repInsurancePaid = !!rep.insurance_paid;
+    if ((repInsurancePaid && repInsuranceAmount > 0) || repInsuranceAmount > 0) {
+      Swal.fire({
+        icon: 'error',
+        title: 'عملية مرفوضة',
+        text: `لا يمكن حذف المندوب "${rep.name}" لأن لديه تأمين بقيمة ${repInsuranceAmount.toLocaleString()} ${currencySymbol}. يجب تصفية/تسوية حسابه أولاً.`,
+        confirmButtonText: 'موافق',
+      });
+      return;
+    }
+
+    const repBalance = Number(rep.balance ?? 0);
+    if (!Number.isFinite(repBalance)) {
+      Swal.fire({
+        icon: 'error',
+        title: 'عملية مرفوضة',
+        text: `لا يمكن حذف المندوب "${rep.name}" لأن رصيده غير معروف.` ,
+        confirmButtonText: 'موافق',
+      });
+      return;
+    }
+    if (Math.abs(repBalance) > 0.000001) {
+      Swal.fire({
+        icon: 'error',
+        title: 'عملية مرفوضة',
+        text: `لا يمكن حذف المندوب "${rep.name}" لأن حسابه غير صفري. الرصيد الحالي: ${repBalance.toLocaleString()} ${currencySymbol}. يجب تصفية/تسوية حسابه أولاً.`,
+        confirmButtonText: 'موافق',
+      });
+      return;
+    }
+
+    Swal.fire({
+      title: 'تأكيد الحذف',
+      text: `هل أنت متأكد من حذف المندوب "${rep.name}"؟`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#d33',
+      cancelButtonColor: '#3085d6',
+      confirmButtonText: 'نعم، احذفه',
+      cancelButtonText: 'إلغاء'
+    }).then(async (result) => {
+      if (result.isConfirmed) {
+        try {
+          const res = await fetch(`${API_BASE_PATH}/api.php?module=users&action=delete`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ id: repId }) });
+          const js = await res.json();
+          if (js.success) {
+            setRepresentatives(prev => prev.filter(r => r.id !== repId));
+            Swal.fire('تم الحذف!', `تم حذف المندوب "${rep.name}" بنجاح.`, 'success');
+          } else Swal.fire('فشل الحذف', js.message || 'فشل حذف المندوب', 'error');
+        } catch (err) { console.error('Delete rep error', err); Swal.fire('خطأ في الاتصال', 'فشل الاتصال بالخادم.', 'error'); }
+      }
+    });
+  };
+
+  const openSettle = async (rep: any) => {
+    if (!rep) return;
+
+    const repId = Number(rep.id);
+    const repName = rep.name || `مندوب ${repId}`;
+    const insuranceAmount = Math.max(0, Number(rep.insurance_amount || 0));
+
+    let liveBalance = Number(rep.balance || 0);
+    try {
+      const txRes = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=getByRelated&related_to_type=rep&related_to_id=${repId}`);
+      const txJs = await txRes.json();
+      if (txJs && txJs.success && Array.isArray(txJs.data)) {
+        liveBalance = txJs.data.reduce((sum: number, tx: any) => sum + Number(tx.amount || 0), 0);
+      }
+    } catch (e) {
+      console.error('Failed to load live rep balance for settlement', e);
+    }
+
+    const netAfterInsurance = liveBalance + insuranceAmount;
+    const beforeSettlementLabel = liveBalance === 0
+      ? `0 ${currencySymbol}`
+      : `${Math.abs(liveBalance).toLocaleString()} ${currencySymbol} ${liveBalance > 0 ? 'له قبل التصفية' : 'عليه قبل التصفية'}`;
+    const netLabel = netAfterInsurance === 0
+      ? `0 ${currencySymbol}`
+      : `${Math.abs(netAfterInsurance).toLocaleString()} ${currencySymbol} ${netAfterInsurance > 0 ? 'له بعد احتساب التأمين' : 'عليه بعد احتساب التأمين'}`;
+
+    const treasuryOptions = treasuries
+      .map((t: any) => `<option value="${String(t.id)}">${String(t.name || t.title || `خزينة ${t.id}`)}</option>`)
+      .join('');
+    const fallbackTreasuryId = String(paymentForm.treasuryId || userDefaults?.default_treasury_id || treasuries?.[0]?.id || '');
+
+    const setupResult = await Swal.fire({
+      title: 'تسوية / تصفية حساب المندوب',
+      width: 720,
+      html: `
+        <div style="text-align:right;line-height:1.9;font-size:14px">
+          <div><b>اسم المندوب:</b> ${repName}</div>
+          <div><b>مبلغ التأمين:</b> ${insuranceAmount.toLocaleString()} ${currencySymbol}</div>
+          <div><b>حساب المندوب:</b> ${Math.abs(liveBalance).toLocaleString()} ${currencySymbol} ${liveBalance > 0 ? 'له' : liveBalance < 0 ? 'عليه' : ''}</div>
+          <div><b>الحساب الحالي بعد احتساب التأمين:</b> ${Math.abs(netAfterInsurance).toLocaleString()} ${currencySymbol} ${netAfterInsurance > 0 ? 'له' : netAfterInsurance < 0 ? 'عليه' : ''}</div>
+          <div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:#f8fafc"><b>قبل التصفية:</b> ${beforeSettlementLabel}</div>
+          <div style="margin-top:6px;padding:8px 10px;border-radius:8px;background:#f1f5f9"><b>الصافي النهائي:</b> ${netLabel}</div>
+          <div style="margin-top:12px">
+            <label for="rep_settle_treasury" style="display:block;margin-bottom:6px"><b>اختر الخزينة</b></label>
+            <select id="rep_settle_treasury" class="swal2-select" style="width:100%">
+              <option value="">-- اختر الخزينة --</option>
+              ${treasuryOptions}
+            </select>
+          </div>
+        </div>
+      `,
+      showCancelButton: true,
+      confirmButtonText: 'تنفيذ التسوية',
+      cancelButtonText: 'إلغاء',
+      didOpen: () => {
+        const select = document.getElementById('rep_settle_treasury') as HTMLSelectElement | null;
+        if (select && fallbackTreasuryId) select.value = fallbackTreasuryId;
+      },
+      preConfirm: () => {
+        const select = document.getElementById('rep_settle_treasury') as HTMLSelectElement | null;
+        const treasuryId = select?.value || '';
+        const hasCashMovement = netAfterInsurance !== 0;
+        if (hasCashMovement && !treasuryId) {
+          Swal.showValidationMessage('يرجى اختيار الخزينة أولاً');
+          return false;
+        }
+        return { treasuryId };
+      }
+    });
+
+    if (!setupResult.isConfirmed) return;
+
+    const treasuryIdRaw = String(setupResult.value?.treasuryId || '');
+    const treasuryId = treasuryIdRaw ? Number(treasuryIdRaw) : null;
+    const selectedTreasury = treasuries.find((t: any) => Number(t.id) === Number(treasuryId));
+
+    const debt = liveBalance < 0 ? Math.abs(liveBalance) : 0;
+    const appliedFromInsurance = debt > 0 ? Math.min(insuranceAmount, debt) : 0;
+    const remainingDebt = debt - appliedFromInsurance;
+    const remainingInsurance = insuranceAmount - appliedFromInsurance;
+    const payoutFromTreasury = (liveBalance > 0 ? Math.abs(liveBalance) : 0) + (remainingInsurance > 0 ? remainingInsurance : 0);
+
+    if ((payoutFromTreasury > 0 || remainingDebt > 0) && !selectedTreasury) {
+      return Swal.fire('اختر الخزينة', 'تعذر تحديد الخزينة المختارة لتنفيذ التسوية.', 'warning');
+    }
+
+    const treasuryBalanceRaw = selectedTreasury?.current_balance
+      ?? selectedTreasury?.balance
+      ?? selectedTreasury?.amount
+      ?? selectedTreasury?.cash
+      ?? null;
+    const treasuryBalance = treasuryBalanceRaw === null ? null : Number(treasuryBalanceRaw);
+
+    if (payoutFromTreasury > 0 && treasuryBalance !== null && Number.isFinite(treasuryBalance) && treasuryBalance < payoutFromTreasury) {
+      return Swal.fire(
+        'رصيد الخزينة غير كافٍ',
+        `الرصيد المتاح في الخزينة (${treasuryBalance.toLocaleString()} ${currencySymbol}) أقل من المطلوب للدفع (${payoutFromTreasury.toLocaleString()} ${currencySymbol}).`,
+        'error'
+      );
+    }
+
+    if (liveBalance === 0 && insuranceAmount === 0) {
+      return Swal.fire('لا توجد تسوية', 'حساب المندوب والتأمين بالفعل صفر.', 'info');
+    }
+
+    try {
+      const createTx = async (payload: any, failMsg: string) => {
+        if (!payload.title && payload.type) payload.title = getTxLabelEnhanced(payload.type, payload.details || {});
+        if (!payload.memo) payload.memo = payload.details?.notes || '';
+        const res = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=create`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const raw = await res.text();
+        let js: any = null;
+        try { js = JSON.parse(raw); } catch (e) { js = { success: false, message: raw }; }
+        if (!js.success) throw new Error(js.message || failMsg);
+      };
+
+      if (appliedFromInsurance > 0) {
+        await createTx(
+          {
+            type: 'rep_payment_in',
+            related_to_type: 'rep',
+            related_to_id: repId,
+            amount: appliedFromInsurance,
+            treasuryId: null,
+            direction: 'in',
+            details: { notes: 'خصم من التأمين لتسوية دين المندوب', subtype: 'rep_insurance_apply' }
+          },
+          'فشل خصم مبلغ من التأمين'
+        );
+      }
+
+      if (liveBalance > 0) {
+        await createTx(
+          {
+            type: 'rep_settlement',
+            related_to_type: 'rep',
+            related_to_id: repId,
+            amount: Math.abs(liveBalance),
+            treasuryId,
+            direction: 'out',
+            details: { notes: 'تسوية ودفع مستحقات المندوب', subtype: 'rep_settlement', insurance_amount: insuranceAmount }
+          },
+          'فشل صرف مستحقات المندوب'
+        );
+      } else if (remainingDebt > 0) {
+        await createTx(
+          {
+            type: 'rep_settlement',
+            related_to_type: 'rep',
+            related_to_id: repId,
+            amount: remainingDebt,
+            treasuryId,
+            direction: 'in',
+            details: { notes: 'تحصيل مديونية المندوب بعد خصم التأمين', subtype: 'rep_settlement', insurance_amount: insuranceAmount }
+          },
+          'فشل تحصيل مديونية المندوب'
+        );
+      }
+
+      if (remainingInsurance > 0) {
+        await createTx(
+          {
+            type: 'payment_out',
+            related_to_type: 'none',
+            related_to_id: null,
+            amount: remainingInsurance,
+            treasuryId,
+            direction: 'out',
+            details: { notes: 'رد المتبقي من تأمين المندوب', subtype: 'rep_insurance_return', rep_id: repId }
+          },
+          'فشل رد المتبقي من التأمين'
+        );
+      }
+
+      if (insuranceAmount > 0) {
+        const updRes = await fetch(`${API_BASE_PATH}/api.php?module=users&action=update`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: repId, insurance_paid: 0, insurance_amount: 0 })
+        });
+        const updRaw = await updRes.text();
+        let updJs: any = null;
+        try { updJs = JSON.parse(updRaw); } catch (e) { updJs = { success: false, message: updRaw }; }
+        if (!updJs.success) throw new Error(updJs.message || 'فشل تحديث التأمين بعد التسوية');
+      }
+
+      await fetchReps();
+      if (selectedRepId && Number(selectedRepId) === repId) {
+        await fetchRepTransactions();
+      }
+
+      const deletePrompt = await Swal.fire({
+        icon: 'success',
+        title: 'تمت التسوية بنجاح',
+        text: 'هل تريد حذف المندوب من النظام الآن؟',
+        showCancelButton: true,
+        confirmButtonText: 'نعم، احذف المندوب',
+        cancelButtonText: 'لا، إبقاء المندوب'
+      });
+
+      if (deletePrompt.isConfirmed) {
+        const delRes = await fetch(`${API_BASE_PATH}/api.php?module=users&action=delete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: repId })
+        });
+        const delJs = await delRes.json();
+        if (delJs.success) {
+          setRepresentatives(prev => prev.filter((r: any) => Number(r.id) !== repId));
+          if (selectedRepId && Number(selectedRepId) === repId) {
+            setSelectedRepId(null);
+          }
+          await Swal.fire('تم الحذف', `تم حذف المندوب "${repName}" بنجاح.`, 'success');
+        } else {
+          await Swal.fire('تعذر الحذف', delJs.message || 'فشل حذف المندوب بعد التسوية.', 'error');
+        }
+      }
+    } catch (err: any) {
+      console.error('Settle rep popup flow error', err);
+      Swal.fire('فشل التسوية', err?.message || 'حدث خطأ أثناء تسوية حساب المندوب.', 'error');
+    }
+  };
+
+  // ─── يوميات المندوب: تحميل و طباعة ───
+
+  const loadRepJournal = async (repId: number | 'all', from: string, to: string) => {
+    setRepJournalLoading(true);
+    setRepJournalRows([]);
+    try {
+      const repParam = repId === 'all' ? '' : repId;
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getRepDailyJournal&rep_id=${repParam}&from=${from}&to=${to}`);
+      const js = await res.json();
+      if (js.success) {
+        setRepJournalRows(js.data || []);
+      } else {
+        Swal.fire('تنبيه', js.message || 'لا توجد يوميات أو الجدول غير موجود', 'info');
+        setRepJournalRows([]);
+      }
+    } catch (e) {
+      console.error('loadRepJournal error', e);
+      setRepJournalRows([]);
+    } finally {
+      setRepJournalLoading(false);
+    }
+  };
+
+  const _parseJournalOrders = (row: any): Array<{id: number; order_number: string; source: string}> => {
+    try {
+      const raw = row.orders_json;
+      if (!raw) return [];
+      const arr = Array.isArray(raw) ? raw : JSON.parse(raw);
+      return Array.isArray(arr) ? arr : [];
+    } catch (_) { return []; }
+  };
+
+  const _fetchOrdersByIds = async (ids: number[]): Promise<any[]> => {
+    if (!ids.length) return [];
+    // Use module=sales to avoid orders-module permission restrictions
+    const res = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getOrdersByIds&ids=${ids.join(',')}`);
+    const js = await res.json();
+    return js.success ? (js.data || []) : [];
+  };
+
+  const computeJournalLiveStats = async (row: any) => {
+    try {
+      setJournalLiveStats(prev => ({ ...prev, [row.id]: { loading: true } }));
+      const jOrders = _parseJournalOrders(row);
+      if (!jOrders || jOrders.length === 0) {
+        setJournalLiveStats(prev => ({ ...prev, [row.id]: { loading: false, deliveredCount: 0, deliveredTotal: 0, returnedCount: 0, postponedCount: 0, postponedTotal: 0, oldOrdersCount: 0, todayOrdersCount: 0 } }));
+        return;
+      }
+      const ids = jOrders.map((o:any) => o.id).filter(Boolean);
+      const full = await _fetchOrdersByIds(ids);
+
+      let delivered = 0, deliveredVal = 0, returned = 0, postponed = 0, postponedVal = 0;
+      full.forEach((o:any) => {
+        const status = o.status || o.order_status || '';
+        const total = Number(o.total || o.total_amount || 0) || 0;
+        if (status === 'delivered') { delivered++; deliveredVal += total; }
+        else if (status === 'returned') { returned++; }
+        else { postponed++; postponedVal += total; }
+      });
+
+      setJournalLiveStats(prev => ({
+        ...prev,
+        [row.id]: {
+          loading: false,
+          deliveredCount: delivered,
+          deliveredTotal: deliveredVal,
+          returnedCount: returned,
+          postponedCount: postponed,
+          postponedTotal: postponedVal,
+          oldOrdersCount: jOrders.filter((o:any) => o.source === 'old').length,
+          todayOrdersCount: jOrders.filter((o:any) => o.source === 'today').length
+        }
+      }));
+    } catch (e) {
+      console.error('computeJournalLiveStats failed', e);
+      setJournalLiveStats(prev => ({ ...prev, [row.id]: { loading: false } }));
+    }
+  };
+
+  const _toN = (v: any) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+  const _orderSub = (o: any) => {
+    if (Array.isArray(o.products) && o.products.length > 0) {
+      return o.products.reduce((s: number, p: any) => {
+        const qty = _toN(p.quantity ?? p.qty ?? 0);
+        let line = _toN(p.total ?? p.line_total ?? p.total_price ?? 0);
+        if (!line) line = _toN(p.price ?? p.price_per_unit ?? 0) * qty;
+        return s + line;
+      }, 0);
+    }
+    return _toN(o.total ?? o.total_amount ?? 0);
+  };
+  const _orderPieces = (o: any) =>
+    (o.products || []).reduce((s: number, p: any) => s + _toN(p.quantity ?? p.qty ?? 0), 0);
+  const _balLabel = (v: number) => (v > 0 ? 'له' : v < 0 ? 'عليه' : '');
+
+  const printDailyJournalRow = async (row: any) => {
+    const repTargetId = row.rep_id || selectedRepId;
+    const repName = representatives.find((r: any) => Number(r.id) === Number(repTargetId))?.name || '';
+    const dateStr = row.journal_date || new Date().toLocaleDateString();
+    const journalOrders = _parseJournalOrders(row);
+    const allIds = journalOrders.map(x => x.id).filter(Boolean);
+
+    let fullOrders: any[] = [];
+    if (allIds.length > 0) {
+      try { fullOrders = await _fetchOrdersByIds(allIds); } catch (_) {}
+    }
+    const byId: Record<number, any> = {};
+    fullOrders.forEach(o => { byId[o.id] = o; });
+
+    const oldIds   = new Set(journalOrders.filter(x => x.source === 'old').map(x => x.id));
+    const todayIds = new Set(journalOrders.filter(x => x.source === 'today').map(x => x.id));
+    const oldOrders   = journalOrders.filter(x => x.source === 'old').map(x => byId[x.id] || {id: x.id, orderNumber: x.order_number, order_number: x.order_number, products: []});
+    const todayOrders = journalOrders.filter(x => x.source === 'today').map(x => byId[x.id] || {id: x.id, orderNumber: x.order_number, order_number: x.order_number, products: []});
+    const allOrdersFull = journalOrders.map(x => byId[x.id] || {id: x.id, orderNumber: x.order_number, order_number: x.order_number, products: []});
+
+    const prevBal         = _toN(row.prev_balance ?? 0);
+    const oldOrdersValue  = _toN(row.old_orders_value ?? 0);
+    const oldOrdersCount  = _toN(row.opening_orders_count ?? 0);
+    const oldPiecesCount  = _toN(row.opening_pieces_count ?? 0);
+    const sumValue        = _toN(row.assigned_value ?? 0);
+    const todayPieces     = _toN(row.pieces_assigned_count ?? 0);
+    const totalOrdersCount = _toN(row.total_orders_count ?? 0);
+    const totalPieces     = _toN(row.total_pieces_count ?? 0);
+    const totalValue      = _toN(row.total_orders_value ?? 0);
+    const finalBeforePay  = _toN(row.final_before_payment ?? 0);
+    const paymentAmt      = _toN(row.payment_amount ?? 0);
+    const paymentAction   = row.payment_action || 'collect';
+    const afterPay        = _toN(row.balance_after_payment ?? 0);
+    const paidNow         = paymentAction === 'collect' ? paymentAmt : -paymentAmt;
+    const localTotalShipping = allOrdersFull.reduce((s: number, o: any) => s + _toN(o.shipping ?? o.shipping_fees ?? 0), 0);
+
+    // Products summary (old + today combined)
+    const summaryMap: Record<string, {name:string; color:string; size:string; qty:number}> = {};
+    allOrdersFull.forEach((o: any) => {
+      (o.products || []).forEach((p: any) => {
+        const key = `${p.name||''}||${p.color||''}||${p.size||''}`;
+        if (!summaryMap[key]) summaryMap[key] = {name: p.name||'', color: p.color||'', size: p.size||'', qty: 0};
+        summaryMap[key].qty += _toN(p.quantity ?? p.qty ?? 0);
+      });
+    });
+    const prodRows = Object.values(summaryMap);
+
+    const orderRow = (o: any) => {
+      const sub = _orderSub(o);
+      const ship = _toN(o.shipping ?? o.shipping_fees ?? 0);
+      const empVal = o.employee ?? o.employee_name ?? o.assigneeName ?? row.employee ?? '';
+      const pgVal  = o.page ?? o.page_raw ?? o.page_name ?? o.pageName ?? o.source ?? row.page ?? '';
+      return `<tr>
+        <td>${o.orderNumber ?? o.order_number ?? o.id ?? ''}</td>
+        <td>${o.customerName ?? o.customer_name ?? ''}</td>
+        <td>${o.phone ?? o.phone1 ?? ''}</td>
+        <td>${o.governorate ?? ''}</td>
+        <td>${o.address ?? ''}</td>
+        <td>${empVal}</td>
+        <td>${pgVal}</td>
+        <td>${sub.toLocaleString()}</td>
+        <td>${ship.toLocaleString()}</td>
+        <td>${(sub + ship).toLocaleString()}</td>
+        <td>${o.notes ?? ''}</td>
+      </tr>`;
+    };
+
+    const colHeaders = `<tr><th>رقم اوردر</th><th>اسم العميل</th><th>الهاتف</th><th>المحافظة</th><th>العنوان</th><th>الموظف</th><th>البيدج</th><th>الإجمالي</th><th>شحن</th><th>الإجمالي الكلي</th><th>ملاحظات</th></tr>`;
+
+    const pageVal = row.page || row.page_number || row.page_no || row.pageName || row.page_name || row.source || '';
+
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>يومية المندوب</title>
+<style>
+body{font-family:Arial,Helvetica,'Noto Naskh Arabic',sans-serif;direction:rtl;padding:12px;font-size:12px;}
+h1{font-size:18px;text-align:center;margin:0 0 6px 0}
+.header{display:flex;justify-content:space-between;align-items:center;}
+table{width:100%;border-collapse:collapse;margin-top:8px;}
+th,td{border:1px solid #333;padding:5px;font-size:11px;text-align:right}
+th{background:#eee;}
+h3{font-size:13px;margin:14px 0 4px;}
+</style></head><body>
+<div class="header"><div></div><div style="text-align:center;"><h1>يومية المندوب "${repName}"</h1></div><div></div></div>
+<div style="display:flex;gap:12px;align-items:flex-start;margin-top:8px;font-size:12px">
+  <div style="flex:0 0 auto;min-width:140px;padding:6px">التاريخ: <b>${dateStr}</b>${row.employee ? `<br>الموظف: <b>${row.employee}</b>` : ''}${pageVal ? `<br>البيدج: <b>${pageVal}</b>` : ''}</div>
+  <div style="flex:1;display:flex;gap:8px;flex-wrap:wrap">
+    <div style="flex:1;min-width:150px;padding:6px;border:1px solid #ddd;border-radius:6px">
+      <div style="font-weight:700;">الأرصدة القديمة</div>
+      <div>قيمة اوردرات قديمة: <b>${oldOrdersValue.toLocaleString()} ج.م</b></div>
+      <div>المستحق: <b>${_balLabel(prevBal)} ${Math.abs(prevBal).toLocaleString()} ج.م</b></div>
+      <div>الاوردرات: <b>${oldOrdersCount}</b> • قطع: <b>${oldPiecesCount}</b></div>
+    </div>
+    <div style="flex:1;min-width:150px;padding:6px;border:1px solid #ddd;border-radius:6px">
+      <div style="font-weight:700;">تسليم اليوم</div>
+      <div>قيمة اوردرات اليوم: <b>${sumValue.toLocaleString()} ج.م</b></div>
+      <div>عدد اوردرات: <b>${todayOrders.length}</b> • قطع: <b>${todayPieces}</b></div>
+    </div>
+    <div style="flex:1;min-width:150px;padding:6px;border:1px solid #ddd;border-radius:6px;background:#f0fdf4">
+      <div style="font-weight:700;">المبلغ المدفوع</div>
+      <div>النوع: <b>${paymentAction === 'collect' ? 'تحصيل' : 'دفع'}</b></div>
+      <div>المبلغ: <b>${paymentAmt.toLocaleString()} ج.م</b></div>
+    </div>
+    <div style="flex:0 0 160px;padding:6px;border:1px solid #ddd;border-radius:6px;background:#fff5f6">
+      <div style="font-weight:700;">الباقي بعد الدفع</div>
+      <div style="font-weight:800;font-size:14px">${Math.abs(afterPay).toLocaleString()} ${_balLabel(afterPay)} ج.م</div>
+    </div>
+  </div>
+</div>
+${todayOrders.length > 0 ? `<h3>اوردرات اليوم (${todayOrders.length})</h3>
+<table><thead>${colHeaders}</thead><tbody>${todayOrders.map(orderRow).join('')}</tbody></table>` : ''}
+${oldOrders.length > 0 ? `<h3>اوردرات نزول / قديمة (${oldOrders.length})</h3>
+<table><thead>${colHeaders}</thead><tbody>${oldOrders.map(orderRow).join('')}</tbody></table>` : ''}
+${prodRows.length > 0 ? `<h3>البضاعة المستلمة — جميع المنتجات (قديم + اليوم)</h3>
+<table><thead><tr><th>المنتج</th><th>اللون</th><th>المقاس</th><th>الكمية</th></tr></thead>
+<tbody>${prodRows.map(r => `<tr><td>${r.name}</td><td>${r.color}</td><td>${r.size}</td><td>${r.qty}</td></tr>`).join('')}</tbody></table>` : ''}
+</body></html>`;
+
+    const w = window.open('', '_blank', 'toolbar=0,location=0,menubar=0,scrollbars=1,width=960,height=720');
+    if (!w) { Swal.fire('تنبيه', 'يرجى السماح بفتح النوافذ المنبثقة', 'warning'); return; }
+    w.document.write(html); w.document.close(); w.focus(); setTimeout(() => w.print(), 500);
+  };
+
+  const printDeliveryPermit = async (row: any) => {
+    const repTargetId = row.rep_id || selectedRepId;
+    const repName = representatives.find((r: any) => Number(r.id) === Number(repTargetId))?.name || '';
+    const dateStr = row.journal_date || new Date().toLocaleString();
+    const journalOrders = _parseJournalOrders(row);
+    const allIds = journalOrders.map(x => x.id).filter(Boolean);
+
+    let fullOrders: any[] = [];
+    if (allIds.length > 0) {
+      try { fullOrders = await _fetchOrdersByIds(allIds); } catch (_) {}
+    }
+    const byId: Record<number, any> = {};
+    fullOrders.forEach(o => { byId[o.id] = o; });
+    const allOrdersFull = journalOrders.map(x => byId[x.id] || {id: x.id, orderNumber: x.order_number, order_number: x.order_number, products: []});
+
+    // Build products summary map (same as SalesDaily printThermal)
+    const summaryMap: Record<string, {name:string; color:string; size:string; qty:number}> = {};
+    allOrdersFull.forEach((o: any) => {
+      (o.products || []).forEach((p: any) => {
+        const key = `${p.name||''}||${p.color||''}||${p.size||''}`;
+        if (!summaryMap[key]) summaryMap[key] = {name: p.name||'', color: p.color||'', size: p.size||'', qty: 0};
+        summaryMap[key].qty += _toN(p.quantity ?? p.qty ?? 0);
+      });
+    });
+    const rows = Object.values(summaryMap);
+    const totalProducts = rows.length;
+    const totalPieces = rows.reduce((s, r) => s + r.qty, 0);
+
+    let cachedUserName = '';
+    try {
+      const u = JSON.parse(localStorage.getItem('Dragon_user') || 'null');
+      cachedUserName = u && (u.name || u.username) ? (u.name || u.username) : '';
+    } catch(e) {}
+    const employeeName = userDefaults?.name || userDefaults?.username || cachedUserName || '';
+    const noteCode = row.daily_code || '';
+
+    const barcodeSvg = noteCode
+      ? `<div class="center" style="margin:8px 0 4px 0;"><svg id="barcode"></svg></div>` +
+        `<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>` +
+        `<script>JsBarcode("#barcode", "${noteCode}", {format: "CODE128", width: 2, height: 40, displayValue: false, margin: 0});</script>`
+      : '';
+
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>أذن تسليم</title>` +
+      `<style>@page{size:80mm auto; margin:2mm;}body{font-family: Arial, Helvetica, 'Noto Naskh Arabic', sans-serif; direction:rtl; width:80mm; padding:4px; margin:0; font-size:12px; color:#000;} h1{text-align:center; font-size:18px; font-weight:bold; margin:4px 0; border-bottom:1px solid #000; padding-bottom:4px;} table{width:100%; border-collapse:collapse; font-size:12px;} th,td{font-size:12px; padding:3px 2px; border-bottom:1px solid #ddd; text-align:right;} th{font-weight:700; background-color:#f5f5f5;} .totals{margin-top:6px; font-weight:700; font-size:13px; border-top:1px solid #000; padding-top:4px;} .center{text-align:center;} .small{font-size:11px;} .header-row{display:flex; justify-content:space-between; margin:4px 0;} .header-item{flex:1; text-align:center;}</style>` +
+      `<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>` +
+      `</head><body>` +
+      `<h1>أذن تسليم</h1>` +
+      barcodeSvg +
+      (noteCode ? `<div class="center" style="margin-bottom:4px;"><b>${noteCode}</b></div>` : '') +
+      `<div class="header-row">` +
+      `<div class="header-item" style="text-align:right;">المندوب: ${repName}</div>` +
+      `<div class="header-item" style="text-align:left;">الموظف: ${employeeName}</div>` +
+      `</div>` +
+      `<div class="center" style="margin:4px 0;">التاريخ: ${dateStr}</div>` +
+      `<div style="border-bottom:1px solid #000; margin:4px 0;"></div>` +
+      `<table><thead><tr><th style="width:45%">المنتج</th><th style="width:20%">اللون</th><th style="width:15%">المقاس</th><th style="width:20%">الكمية</th></tr></thead><tbody>` +
+      rows
+        .map(r => `<tr><td style="word-break:break-word">${r.name}</td><td>${r.color}</td><td>${r.size}</td><td style="text-align:left">${r.qty}</td></tr>`)
+        .join('') +
+      `</tbody></table>` +
+      `<div class="totals">اجمالى المنتجات: ${totalProducts}</div>` +
+      `<div class="totals">اجمالى القطع: ${totalPieces}</div>` +
+      (noteCode ? `<script>JsBarcode("#barcode", "${noteCode}", {format: "CODE128", width: 2, height: 40, displayValue: false, margin: 0});</script>` : '') +
+      `</body></html>`;
+
+    const w = window.open('', '_blank', 'width=400,height=800');
+    if (!w) { Swal.fire('تنبيه', 'يرجى السماح بفتح النوافذ المنبثقة', 'warning'); return; }
+    w.document.write(html); w.document.close(); w.focus(); setTimeout(() => w.print(), 500);
+  };
+
+  const printWaybills = async (row: any) => {
+    const journalOrders = _parseJournalOrders(row);
+    const allIds = journalOrders.map(x => x.id).filter(Boolean);
+    if (allIds.length === 0) {
+      Swal.fire('تنبيه', 'لا توجد أوردرات مسجلة لهذه اليومية', 'warning');
+      return;
+    }
+    let fullOrders: any[] = [];
+    try { fullOrders = await _fetchOrdersByIds(allIds); } catch (_) {}
+    if (fullOrders.length === 0) {
+      Swal.fire('تنبيه', 'تعذر تحميل بيانات الأوردرات', 'warning');
+      return;
+    }
+    // Normalise field names so PrintableContent gets what it expects
+    const normalised = fullOrders.map(o => ({
+      ...o,
+      orderNumber: o.orderNumber ?? o.order_number ?? String(o.id ?? ''),
+      customerName: o.customerName ?? o.customer_name ?? '',
+      phone:  o.phone  ?? o.phone1 ?? '',
+      phone1: o.phone1 ?? o.phone  ?? '',
+      phone2: o.phone2 ?? '',
+    }));
+    setWaybillPrintOrders(normalised);
+  };
+
+  const fetchRepTransactions = async () => {
+    try {
+      const r = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=getByRelated&related_to_type=rep&related_to_id=${selectedRepId}`);
+      const jr = await r.json();
+      if (jr.success) {
+        const txs = (jr.data || []).map((t:any) => ({
+          ...t,
+          _label: (t.title && String(t.title).trim()) ? t.title : ((t.memo && String(t.memo).trim()) ? t.memo : getTxLabelEnhanced(t.type || t.tx_type || '', parseTxDetails(t.details || t.data || {})))
+        }));
+        setRepTransactions(txs);
+      }
+    } catch (e) { console.error('Failed to fetch rep transactions', e); }
+  };
+
+  const handleCreateTransaction = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!selectedRepId) return Swal.fire('اختر مندوب', 'يرجى اختيار مندوب أولاً.', 'warning');
+
+    // Settlement is handled by a dedicated flow
+    if (paymentForm.type === 'settlement') {
+      await handleSettleRepAccount();
+      return;
+    }
+
+    const amount = Number(paymentForm.amount || 0);
+    if (!amount || isNaN(amount) || amount <= 0) return Swal.fire('قيمة غير صحيحة', 'أدخل مبلغًا صالحًا أكبر من صفر.', 'error');
+
+    // Always require a statement/note
+    if (!paymentForm.note || String(paymentForm.note).trim() === '') {
+      return Swal.fire('حدد البيان', 'يرجى إدخال سبب/بيان المعاملة في الحقل المخصص.', 'warning');
+    }
+
+    // Treasury is required for cash collection/payment, but not for penalties (debt-only)
+    if (paymentForm.type === 'payment' && !paymentForm.treasuryId) {
+      return Swal.fire('اختر الخزينة', 'يرجى اختيار الخزينة المسؤولة عن المعاملة.', 'warning');
+    }
+
+    const isFine = paymentForm.type === 'fine';
+    const direction: 'in'|'out' = isFine ? 'out' : paymentForm.direction;
+    const txType = isFine
+      ? 'rep_payment_out'
+      : (direction === 'in' ? 'rep_payment_in' : 'rep_payment_out');
+
+    const payload = {
+      type: txType,
+      related_to_type: 'rep',
+      related_to_id: selectedRepId,
+      amount: amount,
+      treasuryId: isFine ? null : (paymentForm.treasuryId || null),
+      direction,
+      details: isFine
+        ? { notes: paymentForm.note, subtype: 'rep_penalty' }
+        : { notes: paymentForm.note }
+    };
+    // include human-friendly title and memo so transaction lists can show descriptive names
+    payload['title'] = getTxLabelEnhanced(payload.type, payload.details);
+    payload['memo'] = paymentForm.note || '';
+
+    try {
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=create`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const js = await res.json();
+      if (js.success) {
+        Swal.fire('تم التسجيل', 'تم تسجيل المعاملة بنجاح.', 'success');
+        // refresh transactions and rep balance
+        await fetchRepTransactions();
+        // clear form
+        setPaymentForm({ amount: '', type: 'payment', direction: 'in', treasuryId: '', note: '' });
+      } else {
+        Swal.fire('فشل العملية', js.message || 'خطأ أثناء تسجيل المعاملة', 'error');
+      }
+    } catch (err) { console.error('Create tx error', err); Swal.fire('خطأ في الاتصال', 'فشل الاتصال بالخادم.', 'error'); }
+  };
+
+  const submitPartialReturn = async () => {
+    if (!partialReturnOrder || !selectedRepId) return Swal.fire('خطأ', 'بيانات الطلب/المندوب غير محددة', 'error');
+    const items = Object.entries(partialReturnInputs).map(([pid, q]) => ({ productId: Number(pid), returnedQuantity: Number(q) })).filter(it => it.returnedQuantity > 0);
+    if (items.length === 0) return Swal.fire('اختر كمية', 'الرجاء إدخال كميات المرتجع أولاً', 'warning');
+
+    try {
+      const payload = { order_id: partialReturnOrder.id, rep_id: selectedRepId, items, warehouse_id: partialReturnWarehouse || null, notes: partialReturnNotes };
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=partialReturn`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const js = await res.json();
+      if (js.success) {
+        Swal.fire('تم', `تمت معالجة المرتجع الجزئي. المبلغ: ${Number(js.returnedValue||0).toLocaleString()} ${currencySymbol}`, 'success');
+        // تحديث rep_journal_orders (fire-and-forget)
+        try {
+          await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ rep_id: selectedRepId, order_ids: [partialReturnOrder.id], status: 'partial_return' })
+          });
+        } catch (jErr) { console.warn('updateJournalOrderStatus partial_return failed (non-critical)', jErr); }
+        setIsPartialReturnOpen(false);
+        setPartialReturnOrder(null);
+        await refreshAssignedAndTx();
+        // Refresh the rep journal rows so the daily journal reflects the partial return
+        try {
+          if (selectedRepId) await loadRepJournal(selectedRepId, journalFrom, journalTo);
+        } catch (e) { console.error('Failed to refresh rep journal after partial return', e); }
+      } else {
+        Swal.fire('فشل', js.message || 'فشل معالجة المرتجع الجزئي', 'error');
+      }
+    } catch (err) { console.error('Partial return error', err); Swal.fire('خطأ في الاتصال', 'فشل الاتصال بالخادم.', 'error'); }
+  };
+
+  const handleSettleRepAccount = async () => {
+    if (!selectedRepId) return Swal.fire('اختر مندوب', 'يرجى اختيار مندوب أولاً.', 'warning');
+
+    const currentBalance = Number(repCashBalance || 0);
+    if (isNaN(currentBalance)) {
+      return Swal.fire('خطأ', 'تعذر قراءة رصيد المندوب الحالي.', 'error');
+    }
+
+    const rep = representatives.find(r => Number(r.id) === Number(selectedRepId));
+    const insuranceAmount = rep && rep.insurance_paid ? Number(rep.insurance_amount || 0) : 0;
+
+    // Settlement math (per requested rules):
+    // Net cash movement is based on (rep balance + insurance).
+    // - If net < 0: rep owes company => collect abs(net) into selected treasury.
+    // - If net > 0: company owes rep => pay abs(net) from selected treasury.
+    // Insurance itself is then cleared via an internal adjustment (no treasury), so the rep's account reaches zero.
+    const netAfterInsurance = currentBalance + (insuranceAmount > 0 ? insuranceAmount : 0);
+
+    if ((!insuranceAmount || insuranceAmount <= 0) && (!currentBalance || currentBalance === 0)) {
+      return Swal.fire('لا توجد تسوية', 'رصيد المندوب وتأمينه صفر بالفعل.', 'info');
+    }
+
+    // Treasury is only needed if there will be a cash movement.
+    if (netAfterInsurance !== 0 && !paymentForm.treasuryId) {
+      return Swal.fire('اختر الخزينة', 'يرجى اختيار الخزينة المسؤولة عن التسوية.', 'warning');
+    }
+
+    const defaultNote = 'تسوية / تصفية حساب المندوب';
+    const note = (paymentForm.note && String(paymentForm.note).trim() !== '') ? paymentForm.note : defaultNote;
+
+    const balanceText = currentBalance === 0 ? '0' : `${Math.abs(currentBalance).toLocaleString()} ${currencySymbol} ${currentBalance > 0 ? 'له' : 'عليه'}`;
+    const netText = netAfterInsurance === 0 ? '0' : `${Math.abs(netAfterInsurance).toLocaleString()} ${currencySymbol} ${netAfterInsurance > 0 ? 'له' : 'عليه'}`;
+    const confirmText = `سيتم تنفيذ التسوية.\nالرصيد: ${balanceText}\nالتأمين: ${insuranceAmount.toLocaleString()} ${currencySymbol}\nالصافي بعد التأمين: ${netText}`;
+
+    const r = await Swal.fire({
+      title: 'تأكيد التسوية',
+      text: confirmText,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'تنفيذ',
+      cancelButtonText: 'إلغاء'
+    });
+    if (!r.isConfirmed) return;
+
+    try {
+      // We'll collect created transactions locally so UI can reflect them immediately
+      const createdTxs: any[] = [];
+      const bal = Number(repCashBalance || 0);
+      const ins = (selectedRepData && selectedRepData.insurance_paid) ? Number(selectedRepData.insurance_amount || 0) : 0;
+
+      // Helper to fetch transaction by returned id and push
+      const pushCreatedTx = async (resp: any) => {
+        if (!resp) return;
+        const txId = resp.transaction_id || resp.transaction_id || resp.transaction_id;
+        if (txId) {
+          try {
+            const txRes = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=getById&id=${txId}`);
+            const txJs = await txRes.json();
+            // Only merge rep-related transactions into the rep ledger UI.
+            if (txJs.success && txJs.data && String(txJs.data.related_to_type || '') === 'rep' && String(txJs.data.related_to_id || '') === String(selectedRepId)) {
+              createdTxs.push(txJs.data);
+            }
+          } catch (e) { console.error('Failed to fetch created tx', e); }
+        }
+      };
+
+      const updateInsurance = async (newAmount: number) => {
+        const next = Math.max(0, Number(newAmount || 0));
+        const rUpd = await fetch(`${API_BASE_PATH}/api.php?module=users&action=update`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: selectedRepId, insurance_paid: next > 0 ? 1 : 0, insurance_amount: next })
+        });
+        const raw = await rUpd.text();
+        let js: any = null;
+        try { js = JSON.parse(raw); } catch (e) { js = { success: false, message: raw }; }
+        if (!js.success) throw new Error(js.message || 'فشل تحديث بيانات التأمين');
+        setRepresentatives(prev => prev.map(p => Number(p.id) === Number(selectedRepId) ? { ...p, insurance_paid: next > 0 ? 1 : 0, insurance_amount: next } : p));
+      };
+
+      const createTx = async (payload: any, failMsg: string) => {
+        // Ensure title/memo present for server record
+        try {
+          if (!payload.title && payload.type) payload.title = getTxLabelEnhanced(payload.type, payload.details || {});
+          if (!payload.memo && payload.details && (payload.details.notes || payload.details.note)) payload.memo = payload.details.notes || payload.details.note || '';
+        } catch (e) {}
+
+        const res = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=create`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const raw = await res.text();
+        let js: any = null;
+        try { js = JSON.parse(raw); } catch (e) { js = { success: false, message: raw }; }
+        if (!js.success) {
+          throw new Error(js.message || failMsg);
+        }
+        await pushCreatedTx(js);
+        return js;
+      };
+
+      // 1) Apply insurance against debt (accounting-only, no treasury), then settle remaining balance with cash,
+      // 2) Return any remaining insurance to rep (cash, but NOT rep-related since insurance deposit isn't in rep ledger).
+      const owe = bal < 0 ? Math.abs(bal) : 0;
+      const appliedFromInsurance = owe > 0 ? Math.min(ins, owe) : 0;
+      const remainingDebt = owe - appliedFromInsurance;
+      const remainingInsurance = ins - appliedFromInsurance;
+
+      // Apply insurance to rep debt if needed
+      if (appliedFromInsurance > 0) {
+        await createTx(
+          {
+            type: 'rep_payment_in',
+            related_to_type: 'rep',
+            related_to_id: selectedRepId,
+            amount: appliedFromInsurance,
+            treasuryId: null,
+            direction: 'in',
+            details: { notes: 'استخدام التأمين لتصفية جزء/كل الدين', subtype: 'rep_insurance_apply' }
+          },
+          'فشل تطبيق التأمين على الدين'
+        );
+      }
+
+      // Settle rep balance with cash movements
+      if (bal > 0) {
+        // company owes rep: pay rep's balance from treasury (rep-related)
+        if (!paymentForm.treasuryId) return Swal.fire('اختر الخزينة', 'يرجى اختيار الخزينة المسؤولة عن الدفع.', 'warning');
+        await createTx(
+          {
+            type: 'rep_settlement',
+            related_to_type: 'rep',
+            related_to_id: selectedRepId,
+            amount: Math.abs(bal),
+            treasuryId: paymentForm.treasuryId || null,
+            direction: 'out',
+            details: { notes: note, subtype: 'rep_settlement', insurance_amount: ins }
+          },
+          'فشل تنفيذ الدفع للمندوب'
+        );
+      } else if (remainingDebt > 0) {
+        // rep owes company: collect remaining debt into treasury (rep-related)
+        if (!paymentForm.treasuryId) return Swal.fire('اختر الخزينة', 'يرجى اختيار الخزينة لتحصيل المبلغ المتبقي.', 'warning');
+        await createTx(
+          {
+            type: 'rep_settlement',
+            related_to_type: 'rep',
+            related_to_id: selectedRepId,
+            amount: remainingDebt,
+            treasuryId: paymentForm.treasuryId || null,
+            direction: 'in',
+            details: { notes: 'تحصيل المتبقي بعد استخدام التأمين', subtype: 'rep_settlement', insurance_amount: ins }
+          },
+          'فشل تحصيل المبلغ المتبقي'
+        );
+      }
+
+      // Return remaining insurance to rep (cash movement but not rep ledger)
+      let insuranceAfterSettlement = remainingInsurance;
+      if (remainingInsurance > 0) {
+        if (!paymentForm.treasuryId) return Swal.fire('اختر الخزينة', 'يرجى اختيار الخزينة المسؤولة عن رد التأمين.', 'warning');
+        await createTx(
+          {
+            type: 'payment_out',
+            related_to_type: 'none',
+            related_to_id: null,
+            amount: remainingInsurance,
+            treasuryId: paymentForm.treasuryId || null,
+            direction: 'out',
+            details: { notes: 'رد المتبقي من تأمين المندوب', subtype: 'rep_insurance_return', rep_id: Number(selectedRepId) }
+          },
+          'فشل رد المبلغ المتبقي من التأمين'
+        );
+
+        // After returning the remaining insurance, it should be cleared.
+        insuranceAfterSettlement = 0;
+      }
+
+      // Update insurance fields to reflect what remains
+      await updateInsurance(insuranceAfterSettlement);
+
+      // Ensure UI reflects the new transactions immediately: prepend createdTxs and recompute balance
+      if (createdTxs.length > 0) {
+        setRepTransactions(prev => {
+          const merged = [...createdTxs, ...prev];
+          // recompute balance from merged txs
+          const bal = merged.reduce((s:any, t:any) => s + Number(t.amount || 0), 0);
+          setRepresentatives(prevReps => prevReps.map(p => Number(p.id) === Number(selectedRepId) ? { ...p, balance: bal } : p));
+          return merged;
+        });
+      } else {
+        // no created txs (unlikely) — still clear local txs and reset balance
+        setRepTransactions([]);
+        setRepresentatives(prev => prev.map(p => Number(p.id) === Number(selectedRepId) ? { ...p, balance: 0 } : p));
+      }
+
+      Swal.fire('تمت التسوية', 'تمت تصفية حساب المندوب بنجاح.', 'success');
+      // Refresh transactions from server (may reflect new txs); UI already shows updated state until fetch completes
+      await fetchRepTransactions();
+      // Refresh reps list to get server-side computed balances (same technique used in FinanceModule)
+      await fetchReps();
+      setPaymentForm(prev => ({ ...prev, amount: '', note: '', type: 'payment' }));
+    } catch (err) {
+      console.error('Settle rep error', err);
+      Swal.fire('خطأ في الاتصال', 'فشل الاتصال بالخادم.', 'error');
+    }
+  };
+
+  const selectedRepData = representatives.find(r => r.id === selectedRepId);
+  const selectedRepCustody = selectedRepId ? (repAssignedOrders || []).filter(o => Number(o.rep_id) === Number(selectedRepId)) : [];
+  const [isPartialReturnOpen, setIsPartialReturnOpen] = useState(false);
+  const [partialReturnOrder, setPartialReturnOrder] = useState<any>(null);
+  const [partialReturnInputs, setPartialReturnInputs] = useState<{ [productId: string]: number }>({});
+  const [partialReturnWarehouse, setPartialReturnWarehouse] = useState<number | ''>('');
+  const [partialReturnNotes, setPartialReturnNotes] = useState<string>('');
+  const repCashIn = repTransactions.reduce((s:any, t:any) => s + (Number(t.amount || 0) > 0 ? Number(t.amount || 0) : 0), 0);
+  const repCashOut = repTransactions.reduce((s:any, t:any) => s + (Number(t.amount || 0) < 0 ? Math.abs(Number(t.amount || 0)) : 0), 0);
+  const repCashBalance = repTransactions.reduce((s:any, t:any) => s + Number(t.amount || 0), 0);
+
+  // In settlement mode, auto-fill the amount with the remaining balance after applying insurance.
+  useEffect(() => {
+    if (paymentForm.type !== 'settlement') return;
+    if (!selectedRepId) {
+      if (paymentForm.amount !== '') setPaymentForm(prev => ({ ...prev, amount: '' }));
+      return;
+    }
+    const insuranceAmount = (selectedRepData && selectedRepData.insurance_paid) ? Number(selectedRepData.insurance_amount || 0) : 0;
+    const bal = Number(repCashBalance || 0);
+    const net = bal + (insuranceAmount > 0 ? insuranceAmount : 0);
+    const nextAmount = String(Math.abs(net || 0));
+    if (paymentForm.amount !== nextAmount) {
+      setPaymentForm(prev => ({ ...prev, amount: nextAmount }));
+    }
+  }, [paymentForm.type, selectedRepId, repCashBalance, selectedRepData, paymentForm.amount]);
+
+  useEffect(() => {
+    if (!selectedRepId) return;
+    const fetchAssigned = async () => {
+      try {
+        const r = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getByRep&rep_id=${selectedRepId}&status=with_rep`);
+        const jr = await r.json();
+        if (jr.success) {
+          // filter orders assigned to this rep
+          setRepAssignedOrders(jr.data || []);
+        }
+      } catch (e) { console.error('Failed to fetch rep assigned orders', e); }
+    };
+    fetchAssigned();
+    fetchRepTransactions();
+  }, [selectedRepId]);
+
+  const refreshAssignedAndTx = async () => {
+    if (!selectedRepId) return;
+    try {
+      const r = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getByRep&rep_id=${selectedRepId}&status=with_rep`);
+      const jr = await r.json();
+      if (jr.success) setRepAssignedOrders(jr.data || []);
+    } catch (e) { console.error('Failed to refresh assigned orders', e); }
+    await fetchRepTransactions();
+  };
+
+  useEffect(() => {
+    if (view !== 'rep-performance') return;
+    fetchPerformanceReport();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, perfMode, perfDate, perfMonth, perfYear, representatives.length]);
+
+  // Daily reconciliation state
+  const [cycleDate, setCycleDate] = useState<string>(todayISO);
+  const [dailySummary, setDailySummary] = useState<any>(null);
+  const [isSummaryLoading, setIsSummaryLoading] = useState(false);
+
+  const fetchDailySummary = async (repId: number, dateIso: string) => {
+    setIsSummaryLoading(true);
+    try {
+      const startDate = dateIso;
+      const endDate = dateIso;
+
+      // 1) orders for the day
+      const oRes = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getByRep&rep_id=${repId}&start_date=${startDate}&end_date=${endDate}`);
+      const oJs = await oRes.json();
+      const todaysOrders = (oJs && oJs.success) ? (oJs.data || []) : [];
+
+      // 2) all orders assigned to rep (to compute old orders before date)
+      const allAssignedRes = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getByRep&rep_id=${repId}`);
+      const allAssignedJs = await allAssignedRes.json();
+      const allAssigned = (allAssignedJs && allAssignedJs.success) ? (allAssignedJs.data || []) : [];
+      const oldOrders = allAssigned.filter((o:any) => new Date(o.created_at) < new Date(startDate + 'T00:00:00'));
+
+      // 3) transactions for rep
+      const tRes = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=getByRelated&related_to_type=rep&related_to_id=${repId}`);
+      const tJs = await tRes.json();
+      const allTx = (tJs && tJs.success) ? (tJs.data || []) : [];
+
+      const dayStart = new Date(startDate + 'T00:00:00');
+      const dayEnd = new Date(endDate + 'T23:59:59');
+
+      const openingBalance = allTx.filter((tx:any)=> new Date(tx.transaction_date) < dayStart).reduce((s:any,tx:any)=>s+Number(tx.amount||0),0);
+      const todaysTx = allTx.filter((tx:any)=> { const d=new Date(tx.transaction_date); return d>=dayStart && d<=dayEnd; });
+      const accountToday = todaysTx.reduce((s:any,tx:any)=>s+Number(tx.amount||0),0);
+
+      const delivered = todaysOrders.filter((o:any)=> (o.status||'') === 'delivered');
+      const returned = todaysOrders.filter((o:any)=> (o.status||'') === 'returned');
+      const postponed = todaysOrders.filter((o:any)=> (o.status||'') === 'postponed' || (o.status||'') === 'in_delivery');
+
+      const sumOrderValue = (orders:any[]) => orders.reduce((s:any,o:any)=> s + Number(o.total || o.total_amount || 0),0);
+      const sumOrderPieces = (orders:any[]) => orders.reduce((s:any,o:any)=> s + (Array.isArray(o.products)? o.products.reduce((ss:any,p:any)=> ss + Number(p.quantity||0),0) : 0),0);
+
+      const partialDeliveryAmount = todaysTx.filter((tx:any)=>{
+        const d = parseTxDetails(tx.details);
+        return (d?.action === 'partial_delivered' || d?.subtype === 'partial_delivered' || (d?.notes||'').toString().toLowerCase().includes('partial_delivered'));
+      }).reduce((s:any,tx:any)=>s + Math.abs(Number(tx.amount||0)),0);
+      const partialReturnAmount = todaysTx.filter((tx:any)=>{
+        const d = parseTxDetails(tx.details);
+        return (d?.action === 'partial_returned' || d?.subtype === 'partial_return' || d?.subtype === 'partial_returned' || (d?.notes||'').toString().toLowerCase().includes('partial_return'));
+      }).reduce((s:any,tx:any)=>s + Math.abs(Number(tx.amount||0)),0);
+
+      const summary = {
+        date: dateIso,
+        openingBalance,
+        oldOrdersCount: oldOrders.length,
+        oldPieces: sumOrderPieces(oldOrders),
+        todaysOrdersCount: delivered.length,
+        todaysPieces: sumOrderPieces(delivered),
+        totalDeliveredValue: sumOrderValue(delivered),
+        prepaid: todaysTx.filter((tx:any)=> (tx.type||tx.tx_type||'').includes('rep_payment_in')).reduce((s:any,tx:any)=>s+Number(tx.amount||0),0),
+        accountToday,
+        deliveredCount: delivered.length,
+        deliveredAmount: sumOrderValue(delivered),
+        returnedCount: returned.length,
+        returnedAmount: sumOrderValue(returned),
+        partialDeliveryAmount: partialDeliveryAmount,
+        partialReturnAmount: partialReturnAmount,
+        remaining: null,
+        postponedCount: postponed.length,
+        postponedOrders: postponed,
+      };
+
+      // remaining: openingBalance + accountToday - deliveredAmount + returnedAmount
+      summary.remaining = summary.openingBalance + summary.accountToday - summary.totalDeliveredValue + summary.returnedAmount;
+
+      setDailySummary(summary);
+    } catch (e) {
+      console.error('Failed to fetch daily summary', e);
+      setDailySummary(null);
+    } finally {
+      setIsSummaryLoading(false);
+    }
+  };
+
+  const handleApplySummarySettlement = async () => {
+    if (!selectedRepId) return Swal.fire('اختر مندوب', 'يرجى اختيار مندوب أولاً.', 'warning');
+    if (!dailySummary) return Swal.fire('لا توجد بيانات', 'يرجى تحميل ملخص اليوم أولاً.', 'warning');
+
+    const remaining = Number(dailySummary.remaining || 0);
+    if (!remaining || remaining === 0) return Swal.fire('لا توجد تسوية', 'لا يوجد مبلغ متبقي للتسوية اليوم.', 'info');
+
+    if (!paymentForm.treasuryId) return Swal.fire('اختر الخزينة', 'يرجى اختيار الخزينة لتنفيذ حركة الصندوق ضمن التسوية.', 'warning');
+
+    const amount = Math.abs(remaining);
+    const direction: 'in'|'out' = remaining < 0 ? 'in' : 'out';
+
+    const r = await Swal.fire({
+      title: 'تأكيد تسوية ملخص اليوم',
+      html: `سيتم تنفيذ تسوية بناءً على ملخص اليوم بقيمة <b>${amount.toLocaleString()}</b> ${currencySymbol} (<b>${direction === 'in' ? 'تحصيل من المندوب' : 'دفع للمندوب'}</b>).`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'تنفيذ',
+      cancelButtonText: 'إلغاء'
+    });
+    if (!r.isConfirmed) return;
+
+    try {
+      const payload = {
+        type: 'rep_settlement',
+        related_to_type: 'rep',
+        related_to_id: selectedRepId,
+        amount,
+        treasuryId: paymentForm.treasuryId || null,
+        direction,
+        details: { notes: `تسوية يومية بتاريخ ${cycleDate}`, subtype: 'daily_summary_settlement' }
+      };
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=create`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const js = await res.json();
+      if (js.success) {
+        Swal.fire('تمت التسوية', 'تم تنفيذ تسوية ملخص اليوم بنجاح.', 'success');
+        await fetchRepTransactions();
+        setDailySummary(null);
+      } else {
+        Swal.fire('فشل العملية', js.message || 'فشل تنفيذ التسوية من الملخص', 'error');
+      }
+    } catch (err) {
+      console.error('Apply summary settlement error', err);
+      Swal.fire('خطأ في الاتصال', 'فشل الاتصال بالخادم.', 'error');
+    }
+  };
+
+  const exportDailySummaryCSV = () => {
+    if (!dailySummary) return Swal.fire('لا توجد بيانات', 'يرجى تحميل ملخص اليوم أولاً.', 'warning');
+    try {
+      const rows: any[] = [];
+      rows.push(['الحقل', 'القيمة']);
+      rows.push(['التاريخ', dailySummary.date || '']);
+      rows.push(['رصيد الافتتاح', Number(dailySummary.openingBalance||0).toString()]);
+      rows.push(['عدد الاوردرات القديمة', String(dailySummary.oldOrdersCount||0)]);
+      rows.push(['قطع قديمة', String(dailySummary.oldPieces||0)]);
+      rows.push(['استلام اليوم (عدد)', String(dailySummary.todaysOrdersCount||0)]);
+      rows.push(['قيمة المسلّم اليوم', Number(dailySummary.totalDeliveredValue||0).toString()]);
+      rows.push(['المبالغ المستلمة اليوم', Number(dailySummary.prepaid||0).toString()]);
+      rows.push(['مجموع التسليم الجزئي (قيمة)', Number(dailySummary.partialDeliveryAmount||0).toString()]);
+      rows.push(['مجموع المرتجع الجزئي (قيمة)', Number(dailySummary.partialReturnAmount||0).toString()]);
+      rows.push(['المبلغ المرتجع اليوم', Number(dailySummary.returnedAmount||0).toString()]);
+      rows.push(['المنقوص/المتبقي', Number(dailySummary.remaining||0).toString()]);
+      rows.push(['الاوردرات المؤجلة (عدد)', String(dailySummary.postponedCount||0)]);
+
+      if (Array.isArray(dailySummary.postponedOrders) && dailySummary.postponedOrders.length > 0) {
+        rows.push([]);
+        rows.push(['الاوردرات المؤجلة — تفاصيل']);
+        rows.push(['رقم الاوردر', 'العميل', 'قيمة', 'الحالة']);
+        for (const o of dailySummary.postponedOrders) {
+          rows.push([o.order_number || o.orderNumber || ('#' + (o.id||'')), o.customer_name || o.customerName || '', String(o.total || o.total_amount || 0), o.status || '']);
+        }
+      }
+
+      const esc = (v: any) => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+      const csv = rows.map(r => Array.isArray(r) ? r.map(esc).join(',') : (r ? esc(r) : '')).join('\r\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const fname = `rep_${selectedRepId || 'unknown'}_daily_summary_${dailySummary.date || todayISO}.csv`;
+      a.download = fname;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('Export CSV error', e);
+      Swal.fire('خطأ', 'فشل تصدير CSV.', 'error');
+    }
+  };
+
+  return (
+    <div className="space-y-6 transition-colors duration-300">
+      <div className="flex justify-between items-center">
+        <div>
+          <h2 className="text-xl font-black text-slate-900 dark:text-white">إدارة المناديب</h2>
+          <p className="text-sm text-muted font-medium">متابعة أداء المناديب وعهدتهم ومعاملاتهم</p>
+        </div>
+        <div className="flex gap-1 p-1.5 rounded-2xl border border-card shadow-sm card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+          <button onClick={() => handleOpenModal(null)} className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black bg-green-600 text-white hover:opacity-90"><PlusCircle size={16}/> إضافة مندوب</button>
+          <button onClick={() => setView('list')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${view === 'list' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Users size={16}/> قائمة المناديب</button>
+          <button onClick={() => setView('rep-cycle')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${view === 'rep-cycle' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Wallet size={16}/> يوميات المندوب</button>
+          <button onClick={() => setView('rep-performance')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${view === 'rep-performance' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><ShoppingCart size={16}/> أداء المناديب</button>
+        </div>
+      </div>
+
+      {view === 'list' && (
+        <div className="rounded-3xl shadow-sm border border-card overflow-hidden animate-in fade-in card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+          <div className="p-4 border-b dark:border-slate-700 flex items-center justify-between gap-4 bg-slate-50/50 dark:bg-slate-900/30">
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-muted w-4 h-4" />
+              <input
+                type="text"
+                placeholder="بحث بالاسم أو رقم الهاتف..."
+                className="w-full pr-10 pl-4 py-2.5 bg-white dark:bg-slate-900 border-none rounded-2xl text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white text-right"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+            <h3 className="font-bold text-slate-800 dark:text-white">قائمة المناديب المسجلين</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-right text-sm">
+              <thead className="bg-slate-50 dark:bg-slate-900/50 text-muted">
+                  <tr>
+                  <th className="px-6 py-4 font-bold">اسم المندوب</th>
+                  <th className="px-6 py-4 font-bold">رقم الهاتف</th>
+                  <th className="px-6 py-4 font-bold">مبلغ التأمين</th>
+                  <th className="px-6 py-4 font-bold">الرصيد</th>
+                  <th className="px-6 py-4 font-bold text-center">الإجراءات</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y dark:divide-slate-700 text-slate-700 dark:text-slate-300">
+                {filteredReps.map((rep:any) => {
+                  const repBal = Number(rep.balance ?? 0);
+                  const repIns = Number(rep.insurance_amount ?? 0);
+                  const hasInsurance = (!!rep.insurance_paid && repIns > 0) || repIns > 0;
+                  const hasNonZeroBalance = Number.isFinite(repBal) && Math.abs(repBal) > 0.000001;
+                  const canDelete = !hasInsurance && !hasNonZeroBalance;
+                  const deleteReason = hasInsurance
+                    ? `لا يمكن الحذف: لديه تأمين ${repIns.toLocaleString()} ${currencySymbol}`
+                    : (hasNonZeroBalance ? `لا يمكن الحذف: الرصيد ${repBal.toLocaleString()} ${currencySymbol}` : 'حذف');
+
+                  return (
+                    <tr key={rep.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                      <td className="px-6 py-4 font-bold">{rep.name}</td>
+                      <td className="px-6 py-4 text-xs">{rep.phone}</td>
+                      <td className="px-6 py-4 text-sm font-black">{rep.insurance_amount ? Number(rep.insurance_amount).toLocaleString() : '—'} {currencySymbol}</td>
+                      <td className="px-6 py-4 text-sm font-black">
+                        {Math.abs(Number(rep.balance || 0)).toLocaleString()} {currencySymbol}{' '}
+                        <span className="text-sm font-bold" style={{color: (rep.balance>0? 'green': (rep.balance<0? 'red':'#666'))}}>{rep.balance>0? 'له' : (rep.balance<0? 'عليه' : '')}</span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center justify-center gap-2">
+                          <button
+                            onClick={() => handleDelete(rep.id)}
+                            disabled={!canDelete}
+                            className={`p-2 rounded-xl transition-all ${canDelete ? 'text-muted hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/30' : 'opacity-50 cursor-not-allowed text-muted'}`}
+                            title={deleteReason}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                          <button onClick={() => openSettle(rep)} className="p-2 text-muted hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-xl transition-all" title="تسوية"><Wallet size={16} /></button>
+                          <button onClick={() => handleOpenModal(rep)} className="p-2 text-muted hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded-xl transition-all" title="تعديل"><Edit size={16} /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {view === 'custody' && (
+        <div className="p-8 rounded-3xl border border-card shadow-sm animate-in zoom-in duration-300 card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+          <div className="flex items-center gap-4 mb-6">
+            <div className="flex-1 max-w-sm">
+              <label className="text-xs font-bold text-muted mr-2">اختر مندوب لعرض عهدته</label>
+              <CustomSelect
+                value={String(selectedRepId || '')}
+                onChange={v => setSelectedRepId(v ? Number(v) : null)}
+                options={[{ value: '', label: '-- اختر مندوب --' }, ...representatives.map((rep:any) => ({ value: String(rep.id), label: rep.name }))]}
+                className="w-full mt-1"
+              />
+            </div>
+          </div>
+
+          {selectedRepId && selectedRepData ? (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-in fade-in">
+              <div>
+                <h4 className="font-bold mb-4">عهدة البضاعة</h4>
+                <div className="bg-slate-50 dark:bg-slate-900/50 rounded-2xl p-4 border dark:border-slate-700">
+                  {repAssignedOrders.length > 0 ? (
+                    <div>
+
+          {isPartialReturnOpen && partialReturnOrder && (
+            <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+              <div className="w-full max-w-2xl rounded-[2rem] shadow-2xl overflow-hidden border border-card card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+                <div className="p-5 border-b flex justify-between items-center bg-slate-50 dark:bg-slate-900/50">
+                  <h3 className="font-black">مرتجع جزئي للطلب #{partialReturnOrder.orderNumber}</h3>
+                  <button onClick={() => setIsPartialReturnOpen(false)} className="text-slate-400 hover:text-rose-500"><X size={20} /></button>
+                </div>
+                <div className="p-6 space-y-4">
+                  <div className="grid grid-cols-1 gap-3">
+                    <div className="text-sm text-slate-500">اختر المستودع لإعادة الكميات (اختياري)</div>
+                    <CustomSelect
+                      value={String(partialReturnWarehouse || '')}
+                      onChange={v => setPartialReturnWarehouse(v ? Number(v) : '')}
+                      options={[{ value: '', label: '-- لا توجد إعادة إلى مستودع --' }, ...warehouses.map((w:any) => ({ value: String(w.id), label: w.name }))]}
+                      className="w-full"
+                    />
+                  </div>
+                  <div className="border rounded-2xl overflow-auto max-h-72">
+                    <table className="w-full text-right text-sm">
+                      <thead className="bg-slate-50 dark:bg-slate-900/50 text-muted">
+                        <tr><th className="p-3">الصنف</th><th className="p-3">الموجود</th><th className="p-3">سعر الوحدة</th><th className="p-3">كمية المرتجع</th></tr>
+                      </thead>
+                      <tbody className="divide-y dark:divide-slate-700">
+                        {(partialReturnOrder.products||[]).map((p:any)=> (
+                          <tr key={p.productId} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50">
+                            <td className="p-3">{p.name}</td>
+                            <td className="p-3">{p.quantity}</td>
+                            <td className="p-3">{Number(p.price||p.price_per_unit||0).toLocaleString()}</td>
+                            <td className="p-3"><input type="number" min={0} max={p.quantity} value={partialReturnInputs[String(p.productId)]||0} onChange={e=> setPartialReturnInputs(prev=>({...prev,[String(p.productId)]: Math.max(0, Math.min(Number(e.target.value||0), Number(p.quantity||0))) }))} className="w-24 bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm" /></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-500">ملاحظات</label>
+                    <input value={partialReturnNotes} onChange={e=>setPartialReturnNotes(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm mt-1" />
+                  </div>
+                  <div className="flex gap-2 justify-end">
+                    <button onClick={()=>setIsPartialReturnOpen(false)} className="px-4 py-2 rounded-2xl border">إلغاء</button>
+                    <button onClick={submitPartialReturn} className="px-4 py-2 rounded-2xl bg-blue-600 text-white font-black">تنفيذ المرتجع الجزئي</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+                      <p className="text-sm font-bold mb-2">الاوردرات المسندة لهذا المندوب:</p>
+                      <ul className="space-y-2">
+                        {repAssignedOrders.map((order:any) => (
+                          <li key={order.id} className="flex justify-between items-center p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800">
+                            <div>
+                              <div className="font-medium text-sm">#{order.orderNumber} - {order.customerName}</div>
+                              <div className="text-xs text-muted">{order.phone1}</div>
+                              <div className="text-xs text-slate-600 dark:text-slate-300 mt-1 flex flex-wrap gap-2">
+                                <span>المبلغ: {Number(order.total || order.total_amount || 0).toLocaleString()} {currencySymbol}</span>
+                                <span>القطع: {order.products?.reduce((s:any,p:any)=>s+(Number(p.quantity||0)),0) || 0}</span>
+                                <span>المتبقي: {Number(order.remainingPieces || order.remaining_pieces || order.remaining_qty || (order.products?.reduce((s:any,p:any)=>s+(Number(p.quantity||0)),0) || 0)).toLocaleString()}</span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="font-bold text-sm">{order.products?.reduce((s:any,p:any)=>s+(Number(p.quantity||0)),0)} قطعة</div>
+                              <button onClick={() => { setPartialReturnOrder(order); setPartialReturnInputs(Object.fromEntries((order.products||[]).map((p:any)=>[p.productId, 0]))); setPartialReturnWarehouse(''); setPartialReturnNotes(''); setIsPartialReturnOpen(true); }} className="px-3 py-1 bg-amber-100 text-amber-800 rounded-lg text-xs font-bold hover:bg-amber-200">مرتجع جزئي</button>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : (
+                    <p className="text-center text-xs text-muted p-4">لا توجد بضاعة في عهدة هذا المندوب حالياً.</p>
+                  )}
+                </div>
+              </div>
+              <div>
+                <h4 className="font-bold mb-4">العهدة النقدية</h4>
+                <div className="bg-slate-50 dark:bg-slate-900/50 rounded-2xl p-4 border dark:border-slate-700">
+                  {repTransactions.length > 0 ? (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                        <div className="p-3 bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700">
+                          <div className="text-muted">تحصيل من المندوب</div>
+                          <div className="font-black text-emerald-600">{repCashIn.toLocaleString()} {currencySymbol}</div>
+                        </div>
+                        <div className="p-3 bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700">
+                          <div className="text-muted">دفعات للمندوب</div>
+                          <div className="font-black text-rose-600">{repCashOut.toLocaleString()} {currencySymbol}</div>
+                        </div>
+                        <div className="p-3 bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700">
+                          <div className="text-muted">الرصيد الصافي</div>
+                          <div className="font-black">{repCashBalance.toLocaleString()} {currencySymbol}</div>
+                        </div>
+                      </div>
+                      <div className="border-t dark:border-slate-700 pt-3">
+                        <div className="text-xs font-bold mb-2">آخر الحركات</div>
+                        <div className="space-y-2">
+                          {repTransactions.slice(0, 5).map((t:any) => {
+                            const details = parseTxDetails(t.details);
+                            const label = t._label || getTxLabelEnhanced(t.type || t.tx_type || '', details);
+                            const note = details.note || details.notes || t.note || '-';
+                            return (
+                              <div key={t.id} className="flex justify-between text-xs">
+                                <div>
+                                  <div className="font-bold">{label}</div>
+                                  <div className="text-muted">{note}</div>
+                                </div>
+                                <div className="font-black" style={{ color: Number(t.amount || 0) >= 0 ? 'green' : 'red' }}>
+                                  {Number(t.amount || 0).toLocaleString()} {currencySymbol}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted">لا توجد حركات مالية لهذا المندوب.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="text-center p-10 text-muted">
+              <Box size={48} className="mx-auto opacity-20 mb-4" />
+              <p className="font-bold">يرجى اختيار مندوب لعرض تفاصيل عهدته الحالية.</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {view === 'transactions' && (
+        selectedRepData ? (
+          <div className="p-8 rounded-3xl border border-card shadow-sm animate-in zoom-in duration-300 card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">سجل معاملات المندوب: {selectedRepData.name}</h3>
+            <p className="text-sm text-muted mb-6">عرض مفصل لجميع المعاملات التي قام بها المندوب، بما في ذلك فواتير المبيعات، المتحصلات النقدية، والمرتجعات.</p>
+            {repTransactions.length === 0 ? (
+              <div className="p-10 border-2 border-dashed rounded-2xl text-center text-muted">لا توجد معاملات مسجلة لهذا المندوب.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-right text-sm">
+                  <thead className="bg-slate-50 dark:bg-slate-900/50 text-muted">
+                    <tr>
+                      <th className="px-6 py-3 font-bold">التاريخ</th>
+                      <th className="px-6 py-3 font-bold">النوع</th>
+                      <th className="px-6 py-3 font-bold">المبلغ</th>
+                      <th className="px-6 py-3 font-bold">الملاحظات</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y dark:divide-slate-700 text-slate-700 dark:text-slate-300">
+                    {repTransactions.map((t:any) => {
+                      const details = parseTxDetails(t.details);
+                      const label = t._label || getTxLabelEnhanced(t.type || t.tx_type || '', details);
+                      const note = details.note || details.notes || t.note || '-';
+                      const when = t.transaction_date || t.created_at || t.createdAt || t.date || t.ts || Date.now();
+                      return (
+                        <tr key={t.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                          <td className="px-6 py-4 text-xs">{new Date(when).toLocaleString()}</td>
+                          <td className="px-6 py-4 text-sm font-medium">{label}</td>
+                          <td className="px-6 py-4 text-sm font-black" style={{color: Number(t.amount||0) >= 0 ? 'green' : 'red'}}>{Number(t.amount||0).toLocaleString()} {currencySymbol}</td>
+                          <td className="px-6 py-4 text-xs">{note}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="p-12 rounded-3xl border text-center animate-in zoom-in duration-300 card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+            <UserCheck className="w-16 h-16 mx-auto mb-4 opacity-20 text-blue-500" />
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">سجل معاملات المندوب</h3>
+            <p className="text-sm max-w-md mx-auto">يرجى اختيار مندوب من <button onClick={() => setView('list')} className="text-blue-600 font-bold hover:underline">قائمة المناديب</button> لعرض سجل معاملاته.</p>
+          </div>
+        )
+      )}
+
+      {view === 'rep-performance' && (
+        <div className="p-8 rounded-3xl border border-card shadow-sm animate-in zoom-in duration-300 card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+          <div className="flex justify-between items-center mb-2">
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white">أداء المناديب</h3>
+            <button
+              type="button"
+              onClick={fetchPerformanceReport}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black bg-accent text-white hover:opacity-90"
+              disabled={perfLoading}
+            >
+              <RefreshCcw size={16} /> تحديث
+            </button>
+          </div>
+          <p className="text-sm text-muted mb-6">تقرير استلام/تسليم/مرتجع المناديب حسب الفترة، مع أفضل 10 مناديب.</p>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-muted mr-2">الفترة</label>
+              <CustomSelect
+                value={perfMode}
+                onChange={v => setPerfMode(v as any)}
+                options={[{ value: 'date', label: 'تاريخ محدد' }, { value: 'day', label: 'يوم' }, { value: 'week', label: 'أسبوع' }, { value: 'month', label: 'شهر' }, { value: 'year', label: 'سنة' }]}
+                className="w-full"
+              />
+            </div>
+
+            {(perfMode === 'date' || perfMode === 'day' || perfMode === 'week') && (
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-muted mr-2">التاريخ</label>
+                <input type="date" value={perfDate} onChange={(e) => setPerfDate(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm" />
+              </div>
+            )}
+
+            {perfMode === 'month' && (
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-muted mr-2">الشهر</label>
+                <input type="month" value={perfMonth} onChange={(e) => setPerfMonth(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm" />
+              </div>
+            )}
+
+            {perfMode === 'year' && (
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-muted mr-2">السنة</label>
+                <input type="number" value={perfYear} onChange={(e) => setPerfYear(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm" />
+              </div>
+            )}
+
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-muted mr-2">المندوب</label>
+              <CustomSelect
+                value={String(perfRepId || 'all')}
+                onChange={v => setPerfRepId(v)}
+                options={[{ value: 'all', label: 'الكل' }, ...representatives.map((rep:any) => ({ value: String(rep.id), label: rep.name }))]}
+                className="w-full"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="md:col-span-2">
+              <div className="overflow-x-auto bg-slate-50 dark:bg-slate-900/50 rounded-2xl p-4 border dark:border-slate-700">
+                {perfLoading ? (
+                  <div className="text-xs text-muted">جاري تحميل التقرير...</div>
+                ) : (
+                  <table className="w-full text-right text-sm">
+                    <thead className="text-muted">
+                      <tr>
+                        <th className="py-2 font-bold">المندوب</th>
+                        <th className="py-2 font-bold">استلام</th>
+                        <th className="py-2 font-bold">تسليم</th>
+                        <th className="py-2 font-bold">مرتجع</th>
+                        <th className="py-2 font-bold">في العهدة</th>
+                        <th className="py-2 font-bold">نسبة المرتجع</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y dark:divide-slate-700">
+                      {(perfRepId === 'all' ? perfRows : perfRows.filter(r => String(r.repId) === String(perfRepId))).map((row: any) => (
+                        <tr key={row.repId} className="hover:bg-white/60 dark:hover:bg-slate-800/40 transition-colors">
+                          <td className="py-2 font-bold">{row.repName}</td>
+                          <td className="py-2">{row.total}</td>
+                          <td className="py-2">{row.delivered} <span className="text-[10px] text-muted">({row.deliveredPct}%)</span></td>
+                          <td className="py-2">{row.returned} <span className="text-[10px] text-muted">({row.returnedPct}%)</span></td>
+                          <td className="py-2">{row.withRep} <span className="text-[10px] text-muted">({row.withRepPct}%)</span></td>
+                          <td className="py-2 font-black">{row.returnRate}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+
+            <div className="md:col-span-1">
+              <div className="bg-slate-50 dark:bg-slate-900/50 rounded-2xl p-4 border dark:border-slate-700">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-sm font-black">أفضل 10 مناديب</h4>
+                  <span className="text-[10px] text-muted">حسب عدد التسليم</span>
+                </div>
+                {perfTop10.length === 0 ? (
+                  <div className="text-xs text-muted">لا توجد بيانات.</div>
+                ) : (
+                  <div className="space-y-2">
+                    {perfTop10.map((r: any, idx: number) => (
+                      <div key={r.repId} className="flex justify-between items-center text-xs p-2 bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700">
+                        <div>
+                          <div className="font-bold">#{idx + 1} {r.repName}</div>
+                          <div className="text-muted">نسبة المرتجع: {r.returnRate}%</div>
+                        </div>
+                        <div className="font-black text-emerald-600">{r.delivered} تسليم</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {view === 'rep-cycle' && (
+        <div className="animate-in zoom-in duration-300 space-y-4">
+
+          {/* ─── فلاتر البحث ─── */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-700 p-5 shadow-sm">
+            <h3 className="text-base font-black text-slate-800 dark:text-white mb-4 flex items-center gap-2">
+              <FileText className="w-4 h-4 text-blue-500" /> يوميات المندوب
+            </h3>
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="flex-1 min-w-[200px]">
+                <label className="text-xs font-bold text-slate-500 block mb-1">المندوب</label>
+                <CustomSelect
+                  value={String(journalRepId || '')}
+                  onChange={v => { setJournalRepId(v === 'all' ? 'all' : (v ? Number(v) : null)); setRepJournalRows([]); }}
+                  options={[{ value: 'all', label: '-- كل المناديب --' }, ...representatives.map((r:any) => ({ value: String(r.id), label: r.name }))]}
+                  className="w-full"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-500 block mb-1">من</label>
+                <input
+                  type="date" value={journalFrom}
+                  onChange={e => setJournalFrom(e.target.value)}
+                  className="border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 rounded-xl px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-500 block mb-1">إلى</label>
+                <input
+                  type="date" value={journalTo}
+                  onChange={e => setJournalTo(e.target.value)}
+                  className="border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 rounded-xl px-3 py-2 text-sm"
+                />
+              </div>
+              <button
+                type="button"
+                disabled={journalRepId === null || repJournalLoading}
+                onClick={() => { if (journalRepId !== null) loadRepJournal(journalRepId, journalFrom, journalTo); }}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-sm font-black transition-colors"
+              >
+                {repJournalLoading
+                  ? <RefreshCcw className="w-4 h-4 animate-spin" />
+                  : <Eye className="w-4 h-4" />}
+                عرض اليوميات
+              </button>
+              <button type="button" className="px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-bold text-slate-600 hover:bg-blue-50 transition-colors"
+                onClick={() => { const d = new Date(); const f = (x:Date)=>x.toISOString().slice(0,10); setJournalFrom(f(d)); setJournalTo(f(d)); }}>اليوم</button>
+              <button type="button" className="px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-bold text-slate-600 hover:bg-blue-50 transition-colors"
+                onClick={() => { const f=(x:Date)=>x.toISOString().slice(0,10); const to=new Date(); const from=new Date(); from.setDate(to.getDate()-7); setJournalFrom(f(from)); setJournalTo(f(to)); }}>آخر أسبوع</button>
+              <button type="button" className="px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-bold text-slate-600 hover:bg-blue-50 transition-colors"
+                onClick={() => { const d=new Date(); const from=new Date(d.getFullYear(),d.getMonth(),1); const f=(x:Date)=>x.toISOString().slice(0,10); setJournalFrom(f(from)); setJournalTo(f(d)); }}>هذا الشهر</button>
+            </div>
+
+            <div className="mt-4 flex items-center gap-2">
+              <label className="flex items-center gap-2 cursor-pointer text-sm font-bold text-slate-700 dark:text-slate-300 select-none">
+                <input 
+                  type="checkbox" 
+                  checked={journalOnlyOpen} 
+                  onChange={e => setJournalOnlyOpen(e.target.checked)}
+                  className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                />
+                عرض اليوميات المفتوحة فقط
+              </label>
+            </div>
+          </div>
+
+          {/* ─── حالة التحميل ─── */}
+          {repJournalLoading && (
+            <div className="flex items-center justify-center py-16 text-slate-400 gap-3">
+              <RefreshCcw className="w-5 h-5 animate-spin" />
+              <span className="text-sm font-bold">جاري تحميل اليوميات...</span>
+            </div>
+          )}
+
+          {/* ─── اختر مندوب ─── */}
+          {!repJournalLoading && journalRepId === null && (
+            <div className="text-center py-16 text-slate-400">
+              <Users className="w-14 h-14 mx-auto mb-3 opacity-20" />
+              <p className="text-sm font-bold">اختر مندوباً لعرض يومياته</p>
+            </div>
+          )}
+
+          {/* ─── لا توجد نتائج ─── */}
+          {!repJournalLoading && journalRepId !== null && repJournalRows.filter((row: any) => !journalOnlyOpen || Number(row.is_closed ?? row.closed ?? 0) === 0).length === 0 && (
+            <div className="text-center py-16 text-slate-400">
+              <FileText className="w-14 h-14 mx-auto mb-3 opacity-20" />
+              <p className="text-sm font-bold">لا توجد يوميات لتعرض</p>
+              <p className="text-xs mt-1 opacity-60">قد لا توجد يوميات مفتوحة أو لا توجد يوميات في النطاق الزمني المحدد.</p>
+            </div>
+          )}
+
+          {/* ─── قائمة اليوميات ─── */}
+          {!repJournalLoading && repJournalRows.filter((row: any) => !journalOnlyOpen || Number(row.is_closed ?? row.closed ?? 0) === 0).length > 0 && (
+            <div className="space-y-3">
+              {repJournalRows.filter((row: any) => !journalOnlyOpen || Number(row.is_closed ?? row.closed ?? 0) === 0).map((row: any) => {
+                const isClosed = Number(row.is_closed ?? row.closed ?? 0) === 1;
+                const startDateTime = row.opened_at || row.start_time || row.opening_time || row.created_at || row.journal_date || '—';
+                const closedDateTime = row.closed_at || row.end_time || row.closing_time || row.closed_time || row.updated_at || '—';
+
+                return (
+                <div key={row.id} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm hover:shadow-md transition-shadow">
+                  <div className="flex flex-wrap items-start gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-3">
+                          <div className="text-xs text-slate-500 font-bold mb-1">كود اليومية</div>
+                          <div className="text-sm font-black text-slate-800 dark:text-white pb-1">
+                            {row.daily_code || `DLY-${String(row.id || '').padStart(5, '0')}`}
+                            {journalRepId === 'all' && (
+                              <span className="mr-2 text-[11px] font-bold text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-full inline-block">
+                                {representatives.find((r:any) => Number(r.id) === Number(row.rep_id))?.name || `مندوب ${row.rep_id}`}
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-2 text-xs font-bold">
+                            حالة اليومية:{' '}
+                            <span className={isClosed ? 'text-rose-600' : 'text-emerald-600'}>
+                              {isClosed ? 'مغلقة' : 'مفتوحة'}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-3">
+                          <div className="text-xs text-slate-500 font-bold mb-1">تاريخ ووقت بدء اليومية</div>
+                          <div className="text-sm font-black text-slate-800 dark:text-white">
+                            {startDateTime}
+                          </div>
+                          {isClosed && (
+                            <>
+                              <div className="text-xs text-slate-500 font-bold mt-2 mb-1">تاريخ الإغلاق</div>
+                              <div className="text-sm font-black text-slate-800 dark:text-white">
+                                {closedDateTime}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-2 shrink-0 w-full md:w-auto">
+                      <button
+                        type="button"
+                        onClick={() => printDailyJournalRow(row)}
+                        className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black transition-colors whitespace-nowrap"
+                      >
+                        <Eye className="w-3.5 h-3.5" /> عرض و طباعة يومية المندوب
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => printDeliveryPermit(row)}
+                        className="flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black transition-colors whitespace-nowrap"
+                      >
+                        <FileText className="w-3.5 h-3.5" /> عرض و طباعة إذن التسليم
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => printWaybills(row)}
+                        className="flex items-center justify-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-black transition-colors whitespace-nowrap"
+                      >
+                        <Box className="w-3.5 h-3.5" /> عرض و طباعة بوالص التسليم
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )})}
+            </div>
+          )}
+
+        </div>
+      )}
+
+      {/* Edit Rep Modal */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden border border-card card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+            <div className="p-6 border-b dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-900/50">
+              <h3 className="text-lg font-black text-slate-900 dark:text-white">{editingRep ? 'تعديل بيانات المندوب' : 'إضافة مندوب جديد'}</h3>
+              <button onClick={() => setIsModalOpen(false)} className="text-muted hover:text-rose-500 transition-colors"><X size={24} /></button>
+            </div>
+            <form onSubmit={handleSubmit} className="p-8 space-y-6 text-right">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-muted mr-2">الاسم بالكامل</label>
+                <input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-muted mr-2">رقم الهاتف</label>
+                <input type="text" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm" />
+              </div>
+              <div className="space-y-1 flex items-center">
+                <input id="insurance_paid" type="checkbox" disabled={!!editingRep} checked={formData.insurance_paid} onChange={e => setFormData({...formData, insurance_paid: e.target.checked})} className="mr-2" />
+                <label htmlFor="insurance_paid" className="text-xs font-bold text-muted">دفع تأمين</label>
+              </div>
+              {formData.insurance_paid && (
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-muted mr-2">مبلغ التأمين المدفوع</label>
+                  <input type="number" min="0" disabled={!!editingRep} required={!editingRep} value={formData.insurance_amount} onChange={e => setFormData({...formData, insurance_amount: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm" />
+                </div>
+              )}
+              <button type="submit" className="w-full bg-accent text-white py-4 rounded-2xl font-black shadow-xl shadow-blue-500/30 hover:bg-blue-700 transition-all flex items-center justify-center gap-2">
+                <Save size={18} /> {editingRep ? 'حفظ التعديلات' : 'إضافة مندوب'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* Waybill print layer — same component as SalesModule order printing */}
+      {waybillPrintOrders && (
+        <PrintableOrders
+          orders={waybillPrintOrders}
+          companyName={companySettings.name}
+          companyPhone={companySettings.phone}
+          companyAddress={companySettings.address}
+          companyLogo={companySettings.logo || undefined}
+          terms={companySettings.terms}
+        />
+      )}
+    </div>
+  );
+};
+
+// إضافة دالة لإنشاء معاملة مالية في خزينة تأمين المناديب (خارج JSX)
+async function createInsuranceTransaction(repId: number, amount: number): Promise<boolean> {
+  try {
+    // جلب كل الخزائن للبحث عن خزينة "تأمين المناديب"
+    const res = await fetch(`${API_BASE_PATH}/api.php?module=treasuries&action=getAll`);
+    const raw = await res.text();
+    let js: any = null;
+    try { js = JSON.parse(raw); } catch (e) {
+      console.error('treasuries getAll raw response:', raw);
+      await Swal.fire('خطأ في الخادم', raw.substring(0, 1000), 'error');
+      return false;
+    }
+
+    if (!js?.success || !Array.isArray(js.data)) {
+      await Swal.fire('فشل تحميل الخزائن', js?.message || 'تعذر جلب قائمة الخزائن.', 'error');
+      return false;
+    }
+
+    const treasury = js.data.find((t: any) => (t?.name || t?.title) === 'تأمين المناديب');
+    if (!treasury?.id) {
+      await Swal.fire('خزينة التأمين غير موجودة', 'لم يتم العثور على خزينة "تأمين المناديب" لإتمام العملية.', 'error');
+      return false;
+    }
+
+    // إنشاء معاملة مالية (إيداع التأمين)
+    const txRes = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'payment_in',
+        related_to_type: 'none',
+        related_to_id: null,
+        amount,
+        treasuryId: treasury.id,
+        direction: 'in',
+        details: {
+          notes: `تأمين مندوب جديد (مندوب رقم ${repId})`,
+          subtype: 'rep_insurance_deposit',
+          rep_id: repId
+        }
+      })
+    });
+    const txRaw = await txRes.text();
+    let txJs: any = null;
+    try { txJs = JSON.parse(txRaw); } catch (e) {
+      console.error('insurance tx raw response:', txRaw);
+      await Swal.fire('خطأ في الخادم', txRaw.substring(0, 1000), 'error');
+      return false;
+    }
+    if (!txJs?.success) {
+      await Swal.fire('فشل إيداع التأمين', txJs?.message || 'لم يتم إنشاء معاملة التأمين.', 'error');
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error('insurance transaction error', e);
+    await Swal.fire('خطأ في الاتصال', 'فشل الاتصال بالخادم أثناء إيداع التأمين.', 'error');
+    return false;
+  }
+}
+
+export default RepresentativesModule;
