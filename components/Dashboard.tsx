@@ -169,11 +169,13 @@ const Dashboard: React.FC = () => {
   const prevRev   = Number(overview?.prev_revenue || 0);
   const margin    = revenue > 0 ? (profit / revenue) * 100 : 0;
   const changePct = typeof overview?.revenue_change_pct === 'number' ? overview.revenue_change_pct : null;
-  const ordersMonth   = Number(overview?.orders_month || 0);
-  const ordersPending = Number(overview?.orders_pending || 0);
-  const lowStock      = Number(overview?.low_stock_count || 0);
-  const absent        = Number(overview?.attendance_today?.absent || 0);
-  const present       = Number(overview?.attendance_today?.present || 0);
+  const ordersMonth     = Number(overview?.orders_month || 0);
+  const ordersDelivered = Number(overview?.orders_delivered || 0);
+  const ordersReturned  = Number(overview?.orders_returned || 0);
+  const ordersPending   = Number(overview?.orders_pending || 0);
+  const lowStock        = Number(overview?.low_stock_count || 0);
+  const absent          = Number(overview?.attendance_today?.absent || 0);
+  const present         = Number(overview?.attendance_today?.present || 0);
 
   const trend = useMemo(() => {
     if (!overview?.trend) return [];
@@ -269,7 +271,7 @@ const Dashboard: React.FC = () => {
 
       {/* KPI Row 1 */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard title="إجمالي الإيرادات" gradient="bg-gradient-to-br from-blue-600 to-blue-800"
+        <KpiCard title="إيرادات المسلَّمة" gradient="bg-gradient-to-br from-blue-600 to-blue-800"
           value={loading ? '...' : fmtCur(revenue, currencySymbol)}
           sub={changePct !== null ? `${Math.abs(changePct).toFixed(1)}%` : undefined}
           isPositive={changePct !== null ? changePct >= 0 : true} icon={DollarSign} />
@@ -277,14 +279,14 @@ const Dashboard: React.FC = () => {
           value={loading ? '...' : fmtCur(profit, currencySymbol)}
           sub={loading ? undefined : `هامش ${margin.toFixed(1)}%`}
           isPositive={profit >= 0} icon={TrendingUp} />
-        <KpiCard title="طلبات الفترة" gradient="bg-gradient-to-br from-violet-500 to-purple-700"
-          value={loading ? '...' : fmt(ordersMonth)}
+        <KpiCard title="أوردرات مسلَّمة" gradient="bg-gradient-to-br from-emerald-500 to-green-700"
+          value={loading ? '...' : fmt(ordersDelivered)}
           sub={loading ? undefined : `معلق: ${fmt(ordersPending)}`}
-          isPositive={ordersPending < 10} icon={Briefcase} />
-        <KpiCard title="العملاء" gradient="bg-gradient-to-br from-rose-500 to-pink-700"
-          value={loading ? '...' : fmt(Number(overview?.customers_count || 0))}
-          sub={loading ? undefined : `موظف: ${fmt(Number(overview?.employees_count || 0))}`}
-          isPositive={true} icon={Users} />
+          isPositive={ordersPending < 10} icon={ClipboardCheck} />
+        <KpiCard title="أوردرات مرتجعة" gradient="bg-gradient-to-br from-rose-500 to-pink-700"
+          value={loading ? '...' : fmt(ordersReturned)}
+          sub={loading ? undefined : `إجمالي: ${fmt(ordersMonth)}`}
+          isPositive={ordersReturned === 0} icon={Briefcase} />
       </div>
 
       {/* KPI Row 2 */}

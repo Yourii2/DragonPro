@@ -7489,14 +7489,20 @@ switch ($module) {
             $prevStart = $prevStartObj->format('Y-m-d');
             $prevEnd = $prevEndObj->format('Y-m-d');
 
-            $revRangeStmt = execute_query($pdo, "SELECT COALESCE(SUM(total_amount),0) as total FROM orders WHERE DATE(created_at) BETWEEN ? AND ?", [$rangeStart, $rangeEnd]);
+            $revRangeStmt = execute_query($pdo, "SELECT COALESCE(SUM(total_amount),0) as total FROM orders WHERE DATE(created_at) BETWEEN ? AND ? AND status = 'delivered'", [$rangeStart, $rangeEnd]);
             $revenueRange = floatval($revRangeStmt->fetchColumn() ?? 0);
 
-            $revPrevStmt = execute_query($pdo, "SELECT COALESCE(SUM(total_amount),0) as total FROM orders WHERE DATE(created_at) BETWEEN ? AND ?", [$prevStart, $prevEnd]);
+            $revPrevStmt = execute_query($pdo, "SELECT COALESCE(SUM(total_amount),0) as total FROM orders WHERE DATE(created_at) BETWEEN ? AND ? AND status = 'delivered'", [$prevStart, $prevEnd]);
             $revenuePrev = floatval($revPrevStmt->fetchColumn() ?? 0);
 
             $ordersRangeStmt = execute_query($pdo, "SELECT COUNT(*) FROM orders WHERE DATE(created_at) BETWEEN ? AND ?", [$rangeStart, $rangeEnd]);
             $ordersRange = intval($ordersRangeStmt->fetchColumn() ?? 0);
+
+            // Delivered / returned / pending counts
+            $ordersDeliveredStmt = execute_query($pdo, "SELECT COUNT(*) FROM orders WHERE DATE(created_at) BETWEEN ? AND ? AND status = 'delivered'", [$rangeStart, $rangeEnd]);
+            $ordersDelivered = intval($ordersDeliveredStmt->fetchColumn() ?? 0);
+            $ordersReturnedStmt = execute_query($pdo, "SELECT COUNT(*) FROM orders WHERE DATE(created_at) BETWEEN ? AND ? AND status IN ('returned','full_return','partial_return')", [$rangeStart, $rangeEnd]);
+            $ordersReturned = intval($ordersReturnedStmt->fetchColumn() ?? 0);
 
             $ordersPendingStmt = execute_query($pdo, "SELECT COUNT(*) FROM orders WHERE status = 'pending'");
             $ordersPending = intval($ordersPendingStmt->fetchColumn() ?? 0);
@@ -7812,6 +7818,8 @@ switch ($module) {
                     'top_employees'     => $topEmployees,
                     'top_products'      => $topProducts,
                     'orders_by_status'  => $ordersByStatus,
+                    'orders_delivered'  => $ordersDelivered,
+                    'orders_returned'   => $ordersReturned,
                 ]
             ]);
         } catch (Exception $e) {
