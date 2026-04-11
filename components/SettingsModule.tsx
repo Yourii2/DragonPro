@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Building2,
   ShieldCheck,
@@ -26,7 +26,10 @@ import {
   Package,
   Tag,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Monitor,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
@@ -82,6 +85,18 @@ const SettingsModule: React.FC = () => {
   const [reportOtpSent, setReportOtpSent] = useState(false);
   const [reportOtpLoading, setReportOtpLoading] = useState(false);
 
+  // — RustDesk States —
+  const [serverRustDeskId, setServerRustDeskId] = useState<string | null>(null);
+  const [serverRustDeskLoading, setServerRustDeskLoading] = useState(false);
+  const [clientRustDeskId, setClientRustDeskId] = useState<string>(
+    localStorage.getItem('Dragon_rustdesk_client_id') || ''
+  );
+  const [clientRustDeskLabel, setClientRustDeskLabel] = useState<string>(
+    localStorage.getItem('Dragon_rustdesk_client_label') || ''
+  );
+  const [clientIdSaving, setClientIdSaving] = useState(false);
+  const [allClientIds, setAllClientIds] = useState<any[]>([]);
+
   const activationStatusClass = activation.status === 'كاملة'
     ? 'text-emerald-400'
     : activation.status === 'تجريبية'
@@ -113,6 +128,35 @@ const SettingsModule: React.FC = () => {
     }
   };
 
+  const fetchServerRustDeskId = async () => {
+    setServerRustDeskLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=rustdesk&action=getServerId`);
+      const j = await res.json();
+      setServerRustDeskId(j.server_id || null);
+    } catch { setServerRustDeskId(null); } finally { setServerRustDeskLoading(false); }
+  };
+
+  const saveClientRustDeskId = async () => {
+    if (!clientRustDeskId.trim()) return;
+    setClientIdSaving(true);
+    try {
+      await fetch(`${API_BASE_PATH}/api.php?module=rustdesk&action=saveClientId`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_id: clientRustDeskId.trim(), label: clientRustDeskLabel.trim() })
+      });
+      localStorage.setItem('Dragon_rustdesk_client_id', clientRustDeskId.trim());
+      localStorage.setItem('Dragon_rustdesk_client_label', clientRustDeskLabel.trim());
+      // Refresh list
+      const r2 = await fetch(`${API_BASE_PATH}/api.php?module=rustdesk&action=getAllClientIds`);
+      const j2 = await r2.json();
+      setAllClientIds(j2.data || []);
+      Swal.fire('تم', 'تم حفظ معرف الجهاز بنجاح.', 'success');
+    } catch { Swal.fire('خطأ', 'تعذر الحفظ.', 'error'); }
+    finally { setClientIdSaving(false); }
+  };
+
   const openRustDesk = () => {
     try {
       window.location.href = 'rustdesk://';
@@ -122,6 +166,7 @@ const SettingsModule: React.FC = () => {
     // Always show a friendly hint (browser can't reliably detect if protocol opened).
     Swal.fire('ملاحظة', 'إذا لم يتم فتح RustDesk تلقائياً، تأكد من تثبيته ثم جرّب مرة أخرى أو قم بتحميله.', 'info');
   };
+
 
   const formatActivationStatus = (type: string, accountStatus: string, isExpired: boolean) => {
     if (isExpired) return 'منتهي';
@@ -133,17 +178,26 @@ const SettingsModule: React.FC = () => {
 
   useEffect(() => {
     const actData = JSON.parse(localStorage.getItem('Dragon_activation') || '{}');
-    setActivation(actData);
+    setActivation({
+      status: formatActivationStatus(actData.account_type, actData.account_status, actData.is_expired),
+      expiry: actData.expiry_date || '',
+      last_check: actData.last_check ? new Date(actData.last_check).toLocaleDateString('ar-EG') : ''
+    });
+    fetchServerRustDeskId();
+    // Load all client IDs
+    fetch(`${API_BASE_PATH}/api.php?module=rustdesk&action=getAllClientIds`)
+      .then(r => r.json())
+      .then(j => setAllClientIds(j.data || []))
+      .catch(() => {});
 
     // Fetch company settings from database
     const fetchSettings = async () => {
       try {
         const response = await fetch(`${API_BASE_PATH}/get_settings.php`);
         const result = await response.json();
-        
         if (result.success && result.data) {
           const settings = result.data;
-            setConfig({
+          setConfig({
             name: settings.company_name || '',
             phone: settings.company_phone || '',
             address: settings.company_address || '',
@@ -151,7 +205,6 @@ const SettingsModule: React.FC = () => {
             taxRate: settings.tax_rate || '14',
             salesCalcOrder: settings.sales_calc_order || 'discount_then_tax',
             currency: settings.currency || 'EGP',
-            // load new settings
             salesDisplayMethod: settings.sales_display_method || 'company',
             productSource: settings.product_source || 'both',
             salePriceSource: settings.sale_price_source || 'product',
@@ -168,7 +221,6 @@ const SettingsModule: React.FC = () => {
             reportDailyAudit: settings.report_daily_audit === 'true' || settings.report_daily_audit === '1',
             reportAuto: settings.report_auto === 'true' || settings.report_auto === '1'
           });
-
           if (settings.activation_type || settings.activation_expiry || settings.activation_account_status) {
             const isExpired = parseBool(settings.activation_is_expired);
             setActivation({
@@ -179,7 +231,6 @@ const SettingsModule: React.FC = () => {
               last_check: settings.activation_last_check || ''
             });
           }
-          
           if (settings.company_logo_url) {
             setLogoPreview(settings.company_logo_url);
           } else if (settings.company_logo) {
@@ -190,9 +241,9 @@ const SettingsModule: React.FC = () => {
         console.error('Failed to fetch settings:', error);
       }
     };
-
     fetchSettings();
   }, []);
+
 
   const saveSettingsToServer = async (reloadAfter: boolean) => {
     const response = await fetch(`${API_BASE_PATH}/save_settings.php`, {
@@ -970,9 +1021,113 @@ const SettingsModule: React.FC = () => {
 
           {/* Support Section (RustDesk) */}
           <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
-            <h3 className="font-bold flex items-center gap-2 mb-6 text-slate-800 dark:text-slate-100"><LifeBuoy className="text-slate-500" size={18}/> الدعم الفني (RustDesk)</h3>
+            <h3 className="font-bold flex items-center gap-2 mb-5 text-slate-800 dark:text-slate-100">
+              <LifeBuoy className="text-blue-500" size={18}/> الدعم الفني (RustDesk)
+            </h3>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* ─── ID السيرفر */}
+            <div className="mb-4 p-4 rounded-2xl bg-gradient-to-l from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border border-blue-100 dark:border-blue-900/40">
+              <div className="flex items-center gap-2 mb-2">
+                <Monitor size={15} className="text-blue-500 flex-shrink-0" />
+                <span className="text-xs font-black text-blue-700 dark:text-blue-300 uppercase tracking-wide">معرف جهاز السيرفر</span>
+                <button
+                  onClick={fetchServerRustDeskId}
+                  disabled={serverRustDeskLoading}
+                  className="mr-auto p-1 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/40 text-blue-500 transition-colors"
+                  title="تحديث"
+                >
+                  <RefreshCw size={12} className={serverRustDeskLoading ? 'animate-spin' : ''} />
+                </button>
+              </div>
+              {serverRustDeskLoading ? (
+                <div className="flex items-center gap-2 text-sm text-slate-400"><RefreshCw size={14} className="animate-spin" /> جارً البحث...</div>
+              ) : serverRustDeskId ? (
+                <div className="flex items-center gap-3">
+                  <span className="font-mono text-2xl font-black text-blue-700 dark:text-blue-300 tracking-widest select-all">{serverRustDeskId}</span>
+                  <button
+                    onClick={() => copyToClipboard(serverRustDeskId, 'معرف السيرفر')}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 hover:bg-blue-200 transition-colors text-xs font-bold"
+                  >
+                    <Copy size={13} /> نسخ
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400">
+                  <WifiOff size={14} />
+                  <span>لم يتم العثور على RustDesk على السيرفر. تأكد من تثبيته وتشغيله.</span>
+                </div>
+              )}
+              <p className="text-[10px] text-blue-400 dark:text-blue-500 mt-2">هذا هو معرف RustDesk لجهاز السيرفر الذي يعمل عليه DragonPro</p>
+            </div>
+
+            {/* ─── ID الجهاز الحالي (جهاز المستخدم) */}
+            <div className="mb-4 p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700">
+              <div className="flex items-center gap-2 mb-3">
+                <Wifi size={15} className="text-emerald-500 flex-shrink-0" />
+                <span className="text-xs font-black text-slate-600 dark:text-slate-300 uppercase tracking-wide">معرف جهازي (الجهاز الحالي)</span>
+              </div>
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  value={clientRustDeskId}
+                  onChange={e => setClientRustDeskId(e.target.value)}
+                  placeholder="أدخل معرف RustDesk الخاص بجهازك..."
+                  className="w-full py-2.5 px-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl text-sm font-mono font-bold text-slate-800 dark:text-white focus:ring-2 ring-blue-500/20"
+                />
+                <input
+                  type="text"
+                  value={clientRustDeskLabel}
+                  onChange={e => setClientRustDeskLabel(e.target.value)}
+                  placeholder="وصف الجهاز (اختياري) — مثل: سطح مكتب المدير"
+                  className="w-full py-2.5 px-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl text-sm text-slate-700 dark:text-white focus:ring-2 ring-blue-500/20"
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={saveClientRustDeskId}
+                    disabled={clientIdSaving || !clientRustDeskId.trim()}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-colors disabled:opacity-50"
+                  >
+                    {clientIdSaving ? <RefreshCw size={13} className="animate-spin" /> : <Save size={13} />}
+                    حفظ معرفي
+                  </button>
+                  {clientRustDeskId && (
+                    <button
+                      onClick={() => copyToClipboard(clientRustDeskId, 'معرف الجهاز')}
+                      className="flex items-center gap-1 px-3 py-2 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold hover:bg-slate-300 transition-colors"
+                    >
+                      <Copy size={13} /> نسخ
+                    </button>
+                  )}
+                </div>
+              </div>
+              <p className="text-[10px] text-slate-400 mt-2">افتح RustDesk على جهازك وأدخل المعرف (ID) الظاهر فيه هنا.</p>
+            </div>
+
+            {/* ─── قائمة معرفات العملاء المحفوظة */}
+            {allClientIds.length > 0 && (
+              <div className="mb-4 p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700">
+                <p className="text-xs font-black text-slate-500 dark:text-slate-400 mb-3 uppercase tracking-wide">معرفات محفوظة للأجهزة</p>
+                <div className="space-y-2">
+                  {allClientIds.map((c: any) => (
+                    <div key={c.user_id} className="flex items-center justify-between gap-2 bg-white dark:bg-slate-800 rounded-xl px-3 py-2 border border-slate-100 dark:border-slate-700">
+                      <div>
+                        <span className="text-xs font-bold text-slate-700 dark:text-slate-200">{c.label || c.user_name}</span>
+                        <span className="font-mono text-xs text-blue-600 dark:text-blue-400 mr-2">{c.id}</span>
+                      </div>
+                      <button
+                        onClick={() => copyToClipboard(c.id, c.label || c.user_name)}
+                        className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 transition-colors"
+                      >
+                        <Copy size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ─── أزرار فتح / تحميل */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <button
                 onClick={openRustDesk}
                 className="w-full flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-900 rounded-2xl hover:bg-slate-100 dark:hover:bg-slate-700/40 transition-all"
@@ -983,11 +1138,10 @@ const SettingsModule: React.FC = () => {
                   </div>
                   <div className="text-right">
                     <p className="text-sm font-bold text-slate-800 dark:text-slate-200">فتح RustDesk</p>
-                    <p className="text-[10px] text-slate-500">لفتح جلسة دعم فني على جهازك</p>
+                    <p className="text-[10px] text-slate-500">لفتح جلسة دعم على جهازك</p>
                   </div>
                 </div>
               </button>
-
               <button
                 onClick={() => window.open(RUSTDESK_DOWNLOAD_URL, '_blank', 'noopener,noreferrer')}
                 className="w-full flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-900 rounded-2xl hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-all"
@@ -1002,24 +1156,6 @@ const SettingsModule: React.FC = () => {
                   </div>
                 </div>
               </button>
-            </div>
-
-            <div className="mt-4 text-xs text-muted space-y-1">
-              <div>1) افتح RustDesk على الجهاز.</div>
-              <div>2) أرسل لنا الـ ID وكلمة المرور الظاهرة داخل RustDesk.</div>
-              <div>3) سيتم الاتصال بعد موافقتك.</div>
-
-              <div className="pt-2 flex items-center gap-2">
-                <span className="font-mono text-[11px] break-all">{RUSTDESK_DOWNLOAD_URL}</span>
-                <button
-                  onClick={() => copyToClipboard(RUSTDESK_DOWNLOAD_URL, 'رابط التحميل')}
-                  className="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-100"
-                  type="button"
-                >
-                  <Copy size={14} />
-                  نسخ
-                </button>
-              </div>
             </div>
           </div>
 
@@ -1276,7 +1412,7 @@ const SettingsModule: React.FC = () => {
                         <span className="flex-shrink-0">
                           {logEntry.status === 'installing' && <RefreshCw size={16} className="animate-spin text-blue-500"/>}
                           {logEntry.status === 'done'       && <CheckCircle size={16} className="text-emerald-500"/>}
-                          {logEntry.status === 'error'      && <AlertCircle size={16} className="text-rose-500" title={logEntry.message}/>}
+                          {logEntry.status === 'error'      && <span title={logEntry.message}><AlertCircle size={16} className="text-rose-500"/></span>}
                         </span>
                       )}
                     </div>

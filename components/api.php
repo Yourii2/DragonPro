@@ -2435,7 +2435,157 @@ if ($module === '') {
 // across Supplier Management and Supplier Ledger pages.
 run_supplier_reconciliation_once($pdo);
 
+// ─── RustDesk ID ─────────────────────────────────────────────────────────────
+if ($module === 'rustdesk') {
+    $action = $_GET['action'] ?? 'getServerId';
+
+    if ($action === 'getServerId') {
+        $rustdeskId = null;
+        $foundPath  = null;
+
+        // ── Priority 1: shell_exec --get-id (أسرع وأموثق) ────────────────────
+        if (function_exists('shell_exec')) {
+            $bins = [
+                'C:\\Program Files\\RustDesk\\RustDesk.exe',
+                'C:\\Program Files (x86)\\RustDesk\\RustDesk.exe',
+            ];
+            foreach ($bins as $bin) {
+                if (!@file_exists($bin)) continue;
+                $out = @shell_exec('"' . $bin . '" --get-id 2>nul');
+                if ($out) {
+                    $candidate = trim(preg_replace('/[^0-9a-zA-Z\-]/', '', $out));
+                    if (strlen($candidate) >= 6) {
+                        $rustdeskId = $candidate;
+                        $foundPath  = $bin . ' --get-id';
+                        break;
+                    }
+                }
+            }
+        }
+
+        // ── Priority 2: scan config files in all user home dirs ───────────────
+        if (!$rustdeskId) {
+            $scanDirs = [];
+
+            // All C:\Users\* directories
+            $usersBase = 'C:\\Users';
+            if (@is_dir($usersBase)) {
+                foreach (@scandir($usersBase) ?: [] as $u) {
+                    if ($u === '.' || $u === '..') continue;
+                    $scanDirs[] = $usersBase . DIRECTORY_SEPARATOR . $u
+                                . DIRECTORY_SEPARATOR . 'AppData' . DIRECTORY_SEPARATOR
+                                . 'Roaming' . DIRECTORY_SEPARATOR . 'RustDesk'
+                                . DIRECTORY_SEPARATOR . 'config';
+                }
+            }
+
+            // Windows service profile accounts
+            foreach (['LocalService', 'NetworkService'] as $svc) {
+                $scanDirs[] = 'C:\\Windows\\ServiceProfiles\\' . $svc
+                            . '\\AppData\\Roaming\\RustDesk\\config';
+            }
+
+            // ProgramData (machine-wide)
+            $scanDirs[] = 'C:\\ProgramData\\RustDesk\\config';
+
+            // APPDATA / USERPROFILE env vars fallback
+            foreach (['APPDATA', 'USERPROFILE'] as $envKey) {
+                $v = getenv($envKey);
+                if ($v) {
+                    $scanDirs[] = rtrim($v, '\\/') . DIRECTORY_SEPARATOR
+                                . 'RustDesk' . DIRECTORY_SEPARATOR . 'config';
+                }
+            }
+
+            // Linux/Mac paths
+            $scanDirs[] = '/root/.config/rustdesk';
+            $scanDirs[] = '/home/' . get_current_user() . '/.config/rustdesk';
+
+            // For each dir, try RustDesk2.toml first then RustDesk.toml
+            foreach ($scanDirs as $dir) {
+                foreach (['RustDesk2.toml', 'RustDesk.toml'] as $fname) {
+                    $path = rtrim($dir, '/\\') . DIRECTORY_SEPARATOR . $fname;
+                    if (!@file_exists($path) || !@is_readable($path)) continue;
+                    $contents = @file_get_contents($path);
+                    if ($contents === false) continue;
+                    // id = 123456789  OR  id = '123456789'  OR  id = "123456789"
+                    if (preg_match('/^\s*id\s*=\s*[\'"]?([0-9a-zA-Z\-]{6,})[\'"]?\s*(?:#.*)?$/m', $contents, $m)) {
+                        $rustdeskId = trim($m[1]);
+                        $foundPath  = $path;
+                        break 2;
+                    }
+                }
+            }
+        }
+
+        // ── Priority 3: registry key fallback ────────────────────────────────
+        if (!$rustdeskId && function_exists('shell_exec')) {
+            $regOut = @shell_exec('reg query HKLM\\SOFTWARE\\RustDesk /v id 2>nul');
+            if ($regOut && preg_match('/id\s+REG_SZ\s+([0-9a-zA-Z\-]{6,})/i', $regOut, $rm)) {
+                $rustdeskId = trim($rm[1]);
+                $foundPath  = 'registry:HKLM\\SOFTWARE\\RustDesk';
+            }
+        }
+
+        echo json_encode([
+            'success'    => true,
+            'server_id'  => $rustdeskId,
+            'found_path' => $foundPath,
+        ]);
+        exit;
+    }
+
+    // Save/Get client device IDs (stored in app_settings table)
+    if ($action === 'saveClientId') {
+        $user_id   = intval($_SESSION['user_id'] ?? 0);
+        $client_id = trim((string)($input['client_id'] ?? ''));
+        $label     = trim((string)($input['label'] ?? ''));
+        if (!$user_id) { http_response_code(401); echo json_encode(['success' => false, 'message' => 'Unauthorized']); exit; }
+        if (!$client_id) { http_response_code(400); echo json_encode(['success' => false, 'message' => 'client_id مطلوب']); exit; }
+
+        // Store in app_settings as JSON array keyed by user_id
+        try {
+            $raw = execute_query($pdo, "SELECT value FROM app_settings WHERE `key` = 'rustdesk_client_ids' LIMIT 1")->fetchColumn();
+            $map = $raw ? (json_decode($raw, true) ?: []) : [];
+            $map[$user_id] = ['id' => $client_id, 'label' => $label ?: 'جهاز #' . $user_id, 'updated_at' => date('Y-m-d H:i:s')];
+            $encoded = json_encode($map, JSON_UNESCAPED_UNICODE);
+            $exists = execute_query($pdo, "SELECT COUNT(*) FROM app_settings WHERE `key` = 'rustdesk_client_ids'")->fetchColumn();
+            if ($exists) {
+                execute_query($pdo, "UPDATE app_settings SET value = ? WHERE `key` = 'rustdesk_client_ids'", [$encoded]);
+            } else {
+                execute_query($pdo, "INSERT INTO app_settings (`key`, value) VALUES ('rustdesk_client_ids', ?)", [$encoded]);
+            }
+            echo json_encode(['success' => true]);
+        } catch (Exception $e) {
+            echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+        }
+        exit;
+    }
+
+    if ($action === 'getAllClientIds') {
+        try {
+            $raw = execute_query($pdo, "SELECT value FROM app_settings WHERE `key` = 'rustdesk_client_ids' LIMIT 1")->fetchColumn();
+            $map = $raw ? (json_decode($raw, true) ?: []) : [];
+            // Enrich with user names
+            $users = execute_query($pdo, "SELECT id, name FROM users WHERE id IN (" . implode(',', array_map('intval', array_keys($map) ?: [0])) . ")")->fetchAll(PDO::FETCH_KEY_PAIR);
+            $list  = [];
+            foreach ($map as $uid => $entry) {
+                $list[] = array_merge($entry, ['user_id' => intval($uid), 'user_name' => $users[$uid] ?? 'مستخدم #' . $uid]);
+            }
+            echo json_encode(['success' => true, 'data' => $list]);
+        } catch (Exception $e) {
+            echo json_encode(['success' => false, 'data' => []]);
+        }
+        exit;
+    }
+
+    echo json_encode(['success' => false, 'message' => 'Unknown rustdesk action']);
+    exit;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 switch ($module) {
+
     // -----------------------
     // Selected product / temporary selection persisted server-side
     // -----------------------
@@ -8816,7 +8966,7 @@ switch ($module) {
             $startDate = trim((string)($_GET['start_date'] ?? ''));
             $endDate = trim((string)($_GET['end_date'] ?? ''));
             // Ensure statuses are safe (allow only known enum values)
-            $allowed = ['pending','with_rep','delivered','returned','partial','postponed','in_delivery'];
+            $allowed = ['pending','with_rep','delivered','returned','full_return','partial_return','partial','postponed','in_delivery'];
             $statuses = array_values(array_intersect($statuses, $allowed));
             if (empty($statuses)) {
                 echo json_encode(['success' => false, 'message' => 'No valid statuses specified.']);
@@ -10504,12 +10654,12 @@ switch ($module) {
                     FROM transactions t
                     LEFT JOIN treasuries tr ON tr.id = t.treasury_id";
 
-                $conditions = [];
+                $conditions = ["t.treasury_id IS NOT NULL"];
                 $params = [];
                 if ($start_date) { $conditions[] = "DATE(t.transaction_date) >= ?"; $params[] = $start_date; }
                 if ($end_date)   { $conditions[] = "DATE(t.transaction_date) <= ?"; $params[] = $end_date; }
                 if ($filter_treasury) { $conditions[] = "t.treasury_id = ?"; $params[] = $filter_treasury; }
-                if ($conditions) $sql .= " WHERE " . implode(" AND ", $conditions);
+                $sql .= " WHERE " . implode(" AND ", $conditions);
                 $sql .= " ORDER BY t.transaction_date DESC, t.id DESC LIMIT 500";
                 $stmt = $params ? execute_query($pdo, $sql, $params) : $pdo->query($sql);
                 echo json_encode(['success' => true, 'data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
@@ -14239,24 +14389,72 @@ switch ($module) {
         } elseif ($action === 'product_delivery') {
             try {
                 $params = [$start_date, $end_date . ' 23:59:59'];
-                $sql = "SELECT
-                            ppar.id AS product_id,
-                            ppar.name AS product_name,
-                            COALESCE(SUM(oi.quantity),0) AS total_orders,
-                            COALESCE(SUM(CASE WHEN o.status = 'delivered' THEN oi.quantity ELSE 0 END),0) AS delivered_qty,
-                            COALESCE(SUM(CASE WHEN o.status = 'delivered' THEN (oi.quantity * oi.price_per_unit) ELSE 0 END),0) AS delivered_amount,
-                            COALESCE(SUM(CASE WHEN o.status IN ('full_return','partial_return') THEN oi.quantity ELSE 0 END),0) AS returned_qty,
-                            COALESCE(SUM(CASE WHEN o.status IN ('full_return','partial_return') THEN (oi.quantity * oi.price_per_unit) ELSE 0 END),0) AS returned_amount
-                         FROM order_items oi
-                         JOIN product_variants pv ON oi.product_id = pv.id
-                         JOIN products ppar ON pv.product_id = ppar.id
-                         JOIN orders o ON oi.order_id = o.id
-                         WHERE o.created_at BETWEEN ? AND ?
-                         GROUP BY ppar.id, ppar.name
-                         ORDER BY total_orders DESC";
+
+                // Detect if product_variants table exists
+                $hasVariants = false;
+                try { $pdo->query("SELECT 1 FROM product_variants LIMIT 1"); $hasVariants = true; } catch (Exception $e) {}
+
+                if ($hasVariants) {
+                    // order_items.product_id → product_variants.id → products.id
+                    $sql = "SELECT
+                                COALESCE(ppar.id, pv.id, oi.product_id)  AS product_id,
+                                COALESCE(NULLIF(TRIM(ppar.name),''), CONCAT('منتج #', oi.product_id)) AS product_name,
+                                COALESCE(SUM(oi.quantity), 0)                                            AS total_qty,
+                                COALESCE(SUM(CASE WHEN o.status = 'delivered'
+                                                  THEN oi.quantity ELSE 0 END), 0)                      AS delivered_qty,
+                                COALESCE(SUM(CASE WHEN o.status = 'delivered'
+                                                  THEN oi.quantity * oi.price_per_unit ELSE 0 END), 0)  AS delivered_amount,
+                                COALESCE(SUM(CASE WHEN o.status IN ('returned','full_return','partial_return')
+                                                  THEN oi.quantity ELSE 0 END), 0)                      AS returned_qty,
+                                COALESCE(SUM(CASE WHEN o.status IN ('returned','full_return','partial_return')
+                                                  THEN oi.quantity * oi.price_per_unit ELSE 0 END), 0)  AS returned_amount
+                             FROM order_items oi
+                             LEFT JOIN product_variants pv  ON pv.id  = oi.product_id
+                             LEFT JOIN products ppar        ON ppar.id = pv.product_id
+                             JOIN  orders o                 ON o.id   = oi.order_id
+                             WHERE o.created_at BETWEEN ? AND ?
+                             GROUP BY product_id, product_name
+                             HAVING delivered_qty > 0 OR returned_qty > 0
+                             ORDER BY delivered_qty DESC, total_qty DESC
+                             LIMIT 200";
+                } else {
+                    // Fallback: order_items.product_id → products.id directly
+                    $sql = "SELECT
+                                COALESCE(p.id, oi.product_id)                                            AS product_id,
+                                COALESCE(NULLIF(TRIM(p.name),''), CONCAT('منتج #', oi.product_id))       AS product_name,
+                                COALESCE(SUM(oi.quantity), 0)                                            AS total_qty,
+                                COALESCE(SUM(CASE WHEN o.status = 'delivered'
+                                                  THEN oi.quantity ELSE 0 END), 0)                      AS delivered_qty,
+                                COALESCE(SUM(CASE WHEN o.status = 'delivered'
+                                                  THEN oi.quantity * oi.price_per_unit ELSE 0 END), 0)  AS delivered_amount,
+                                COALESCE(SUM(CASE WHEN o.status IN ('returned','full_return','partial_return')
+                                                  THEN oi.quantity ELSE 0 END), 0)                      AS returned_qty,
+                                COALESCE(SUM(CASE WHEN o.status IN ('returned','full_return','partial_return')
+                                                  THEN oi.quantity * oi.price_per_unit ELSE 0 END), 0)  AS returned_amount
+                             FROM order_items oi
+                             LEFT JOIN products p ON p.id = oi.product_id
+                             JOIN  orders o        ON o.id = oi.order_id
+                             WHERE o.created_at BETWEEN ? AND ?
+                             GROUP BY product_id, product_name
+                             HAVING delivered_qty > 0 OR returned_qty > 0
+                             ORDER BY delivered_qty DESC, total_qty DESC
+                             LIMIT 200";
+                }
 
                 $stmt = execute_query($pdo, $sql, $params);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+                // Cast types
+                foreach ($rows as &$row) {
+                    $row['product_id']       = intval($row['product_id'] ?? 0);
+                    $row['total_qty']        = intval($row['total_qty'] ?? 0);
+                    $row['delivered_qty']    = intval($row['delivered_qty'] ?? 0);
+                    $row['returned_qty']     = intval($row['returned_qty'] ?? 0);
+                    $row['delivered_amount'] = floatval($row['delivered_amount'] ?? 0);
+                    $row['returned_amount']  = floatval($row['returned_amount'] ?? 0);
+                }
+                unset($row);
+
                 echo json_encode(['success' => true, 'data' => $rows]);
             } catch (Exception $e) {
                 http_response_code(500);

@@ -360,31 +360,36 @@ const BarcodePrintPage: React.FC = () => {
 								) : (
 									filteredItems.slice(0, 200).map(it => (
 										<tr key={it.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors">
-											<td className="px-4 py-3">
-												<div className="font-bold text-slate-900 dark:text-white">{it.name}</div>
-												{it.meta ? <div className="text-xs text-slate-500">{it.meta}</div> : null}
-											</td>
-											<td className="px-4 py-3 font-mono text-xs text-slate-700 dark:text-slate-200">{it.code || '-'}</td>
-											<td className="px-4 py-3">
-												<input
-													type="number"
-													className="w-28 p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
-													value={rowQty[it.id] ?? 1}
-													min={1}
-													max={9999}
-													onChange={e => setRowQty(prev => ({ ...prev, [it.id]: clampInt(e.target.value, 1, 9999) }))}
-												/>
-											</td>
-											<td className="px-4 py-3 text-center">
-												<button
-													onClick={() => addToQueue(it)}
-													className="px-3 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-colors disabled:opacity-50"
-													disabled={!it.code}
-												>
-													إضافة
-												</button>
-											</td>
-										</tr>
+									<td className="px-4 py-3">
+										<div className="font-bold text-slate-900 dark:text-white">{it.name}</div>
+										{it.meta ? <div className="text-xs text-slate-500">{it.meta}</div> : null}
+									</td>
+									<td className="px-4 py-3 font-mono text-xs text-slate-700 dark:text-slate-200">
+										{it.code
+											? it.code
+											: <span className="bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 text-[10px] px-1.5 py-0.5 rounded font-bold">لا يوجد كود</span>}
+									</td>
+									<td className="px-4 py-3">
+										<input
+											type="number"
+											className="w-28 p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+											value={rowQty[it.id] ?? 1}
+											min={1}
+											max={9999}
+											onChange={e => setRowQty(prev => ({ ...prev, [it.id]: clampInt(e.target.value, 1, 9999) }))}
+										/>
+									</td>
+									<td className="px-4 py-3 text-center">
+										<button
+											onClick={() => addToQueue(it)}
+											className="px-3 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+											disabled={!it.code}
+											title={!it.code ? 'هذا العنصر لا يحتوي على كود للطباعة' : 'إضافة إلى قائمة الطباعة'}
+										>
+											إضافة
+										</button>
+									</td>
+								</tr>
 									))
 								)}
 							</tbody>

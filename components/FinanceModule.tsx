@@ -229,14 +229,10 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
   };
 
   const visibleTransactions = useMemo(() => {
-    const financialTypes = new Set([
-      'payment_in', 'payment_out', 'transfer_in', 'transfer_out', 'deposit', 'expense',
-      'supplier_payment', 'rep_payment_in', 'rep_payment_out', 'rep_settlement', 'payment'
-    ]);
     return (transactions || []).filter((tx: any) => {
-      const details = getTxDetailsObj(tx);
-      const subtype = String(details.subtype || '').trim();
-      return financialTypes.has(String(tx.type || '').trim()) || financialTypes.has(subtype);
+      // Only show transactions linked to a treasury (treasury_id must be present and non-null)
+      const hasTreasury = tx.treasury_id !== null && tx.treasury_id !== undefined && String(tx.treasury_id).trim() !== '';
+      return hasTreasury;
     });
   }, [transactions]);
 

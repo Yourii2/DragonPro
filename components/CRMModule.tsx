@@ -230,7 +230,7 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
       const params = new URLSearchParams({
         module: 'orders',
         action: 'customersByStatus',
-        statuses: 'delivered,returned'
+        statuses: 'delivered,returned,full_return,partial_return'
       });
       if (customerFilterStartDate) params.set('start_date', customerFilterStartDate);
       if (customerFilterEndDate) params.set('end_date', customerFilterEndDate);
@@ -240,7 +240,16 @@ const CRMModule: React.FC<CRMModuleProps> = ({ initialView }) => {
 
       const data = json.data || {};
       const delivered = data['delivered'] || [];
-      const returned = data['returned'] || [];
+      // Merge all return types
+      const returnedRaw = [...(data['returned'] || []), ...(data['full_return'] || []), ...(data['partial_return'] || [])];
+      // De-duplicate by customer id (keep unique customer ids)
+      const returnedMap: Record<number, any> = {};
+      returnedRaw.forEach((d: any) => {
+        const id = Number(d.id);
+        if (!returnedMap[id]) returnedMap[id] = { ...d };
+        else returnedMap[id].count = (returnedMap[id].count || 0) + Number(d.count || 0);
+      });
+      const returned = Object.values(returnedMap);
 
       const deliveredIds = delivered.map((d:any) => Number(d.id));
       const returnedIds = returned.map((d:any) => Number(d.id));

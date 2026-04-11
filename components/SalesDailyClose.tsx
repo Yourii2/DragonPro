@@ -88,8 +88,6 @@ const SalesDailyClose: React.FC = () => {
   const [selectedTreasuryId, setSelectedTreasuryId] = useState<string>('');
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'electronic'>('cash');
   
-  const [selectedJournalId, setSelectedJournalId] = useState<string>('all');
-  const [repJournals, setRepJournals] = useState<any[]>([]);
 
   // Date range for statistics (default = today)
   const todayStr = new Date().toISOString().slice(0,10);
@@ -240,6 +238,8 @@ const SalesDailyClose: React.FC = () => {
   const [returnedOrdersList, setReturnedOrdersList] = useState<any[]>([]);
   const [viewModal, setViewModal] = useState<'delivered' | 'returned' | 'deferred' | null>(null);
   const [openDailyInfo, setOpenDailyInfo] = useState<{ daily_code: string; id: number } | null>(null);
+  // مشتق من openDailyInfo — 'none' = لا توجد يومية مفتوحة (يُصفّر الملخص)
+  const selectedJournalId = openDailyInfo ? String(openDailyInfo.id) : 'none';
 
   const [repOrdersViewMode, setRepOrdersViewMode] = useState<'list' | 'card'>('card');
   const [repOrdersSortOrder, setRepOrdersSortOrder] = useState<'asc' | 'desc'>('desc');
@@ -389,7 +389,6 @@ const SalesDailyClose: React.FC = () => {
   const loadRepDailyCloseData = async (repId: string, from?: string, to?: string, journalId: string = 'all') => {
     if (!repId) {
       resetDailyCloseState();
-      setRepJournals([]);
       return;
     }
 
@@ -405,7 +404,6 @@ const SalesDailyClose: React.FC = () => {
       if (!dailyRes || !dailyRes.success) throw new Error(dailyRes?.message || 'getRepDailyJournal failed');
 
       const allDailyRows = Array.isArray(dailyRes.data) ? dailyRes.data : [];
-      setRepJournals(allDailyRows);
 
       const inRange = (journalDate: any) => {
         const value = String(journalDate || '').slice(0, 10);
@@ -415,12 +413,16 @@ const SalesDailyClose: React.FC = () => {
         return true;
       };
 
-      let mergedRows = [];
-      if (journalId === 'all') {
-        mergedRows = [...allDailyRows]; // عرض كل اليوميات بدون فلترة تاريخ
+      let mergedRows: any[] = [];
+      if (journalId === 'all' || journalId === 'none') {
+        // لا يوجد يومية محددة — نصفّر الملخص ولا نعرض بيانات قديمة
+        resetDailyCloseState();
+        setStatsLoading(false);
+        return;
       } else {
         mergedRows = allDailyRows.filter((row: any) => String(row.id) === String(journalId));
       }
+
       
       const journalIds = Array.from(new Set(mergedRows.map((row: any) => Number(row.id)).filter((id: number) => Number.isFinite(id) && id > 0)));
 
@@ -623,8 +625,6 @@ const SalesDailyClose: React.FC = () => {
       setPaidAmount(0);
       resetDailyCloseState();
       setOpenDailyInfo(null);
-      setRepJournals([]);
-      setSelectedJournalId('all');
       return;
     }
 
@@ -634,8 +634,8 @@ const SalesDailyClose: React.FC = () => {
     setPaidAmount(Math.max(0, -bal));
     (async () => {
       try {
-        // Fetch open journal info first
-        let openId = 'all';
+        // جلب اليومية المفتوحة دائماً
+        let openId = 'none'; // none = تأكيد أنه لا توجد يومية مفتوحة
         try {
           const odResp = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getRepOpenDaily&rep_id=${selectedRepId}`);
           const odJson = await odResp.json();
@@ -647,8 +647,13 @@ const SalesDailyClose: React.FC = () => {
           }
         } catch { setOpenDailyInfo(null); }
 
-        // Initial load with open journal if exists
-        setSelectedJournalId(openId);
+        if (openId === 'none') {
+          // لا توجد يومية مفتوحة — تصفير كل شيء
+          resetDailyCloseState();
+          return;
+        }
+
+        // تحميل بيانات اليومية المفتوحة فقط
         await loadRepDailyCloseData(selectedRepId, statsFrom, statsTo, openId);
       } catch (e) {
         console.error('Failed to load journal data for rep', e);
@@ -656,13 +661,9 @@ const SalesDailyClose: React.FC = () => {
         setOpenDailyInfo(null);
       }
     })();
-  }, [selectedRepId, reps]); // Removed statsFrom, statsTo to prevent infinite loop or multiple loads, will handle separately
+  }, [selectedRepId, reps]);
 
-  useEffect(() => {
-     if (selectedRepId) {
-       loadRepDailyCloseData(selectedRepId, statsFrom, statsTo, selectedJournalId);
-     }
-   }, [selectedJournalId]);
+  // لا داعي لـ useEffect منفصل للـ selectedJournalId لأنه مشتق من openDailyInfo
 
   const toggleSelectAllLocal = () => {
     if ((selectedOrderIdsLocal||[]).length === (repOrders||[]).length) {
@@ -1234,32 +1235,20 @@ const SalesDailyClose: React.FC = () => {
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse flex-shrink-0" />
             <span className="text-sm font-black text-slate-700 dark:text-slate-200 truncate">
-              {selectedRepId 
-                ? (selectedJournalId === 'all' 
-                    ? `ملخص اليومية (كل يوميات الفترة) — ${selectedRep?.name || ''}` 
-                    : `ملخص اليومية (رقم: ${repJournals.find(j=>String(j.id)===String(selectedJournalId))?.journal_code || selectedJournalId}) — ${selectedRep?.name || ''}`)
+              {selectedRepId
+                ? openDailyInfo
+                  ? `ملخص اليومية — ${openDailyInfo.daily_code} — ${selectedRep?.name || ''}`
+                  : `ملخص اليومية — ${selectedRep?.name || ''}`
                 : 'ملخص اليومية'}
             </span>
             {statsLoading && (
               <RefreshCw className="w-3.5 h-3.5 text-slate-400 animate-spin flex-shrink-0" />
             )}
-          </div>
-
-          <div className="flex items-center gap-2 flex-wrap">
-            <div className="text-xs text-slate-500">اليومية:</div>
-            <select
-              value={selectedJournalId}
-              onChange={e => setSelectedJournalId(e.target.value)}
-              className="border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 rounded-xl px-3 py-1.5 text-xs font-bold"
-              disabled={!selectedRepId || statsLoading}
-            >
-              <option value="all">كل اليوميات</option>
-              {repJournals.map(j => (
-                <option key={j.id} value={j.id}>
-                  {j.journal_code} ({String(j.journal_date).slice(0,10)})
-                </option>
-              ))}
-            </select>
+            {openDailyInfo && (
+              <span className="text-[10px] bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full font-bold flex-shrink-0">
+                اليومية المفتوحة
+              </span>
+            )}
           </div>
         </div>
 
