@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CalendarDays, Fingerprint, Plus, RefreshCw, Save, Upload } from 'lucide-react';
+import { CalendarDays, Fingerprint, Plus, RefreshCw, Save, Upload, Wifi, WifiOff, Users, UserPlus, Trash2, Send, ChevronDown, ChevronUp, AlertCircle, CheckCircle } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
 import CustomSelect from './CustomSelect';
@@ -14,7 +14,7 @@ const dayOptions = [
   { value: 6, label: 'السبت' }
 ];
 
-type AttendanceTab = 'devices' | 'shifts' | 'schedules' | 'holidays' | 'logs' | 'summary';
+type AttendanceTab = 'devices' | 'hikvision' | 'shifts' | 'schedules' | 'holidays' | 'logs' | 'summary';
 
 interface AttendanceModuleProps {
   initialTab?: AttendanceTab | string;
@@ -92,6 +92,23 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
   const [scanResults, setScanResults] = useState<any[]>([]);
   const [scanLoading, setScanLoading] = useState(false);
 
+  // ── HikVision Control States ──
+  const [hikDeviceId, setHikDeviceId] = useState<string>('');
+  const [hikPingLoading, setHikPingLoading] = useState(false);
+  const [hikDeviceInfo, setHikDeviceInfo] = useState<any>(null);
+  const [hikDeviceOnline, setHikDeviceOnline] = useState<boolean | null>(null);
+  const [hikDeviceUsers, setHikDeviceUsers] = useState<any[]>([]);
+  const [hikUsersLoading, setHikUsersLoading] = useState(false);
+  const [hikPushLoading, setHikPushLoading] = useState(false);
+  const [hikPushAllLoading, setHikPushAllLoading] = useState(false);
+  const [hikExpandedUser, setHikExpandedUser] = useState<string | null>(null);
+  const [hikShiftDeviceId, setHikShiftDeviceId] = useState<string>('');
+  const [hikShiftId, setHikShiftId] = useState<string>('');
+  const [hikShiftLoading, setHikShiftLoading] = useState(false);
+  const [hikAssignUserId, setHikAssignUserId] = useState<string>('');
+  const [hikAssignPlanNo, setHikAssignPlanNo] = useState<string>('');
+  const [hikAssignLoading, setHikAssignLoading] = useState(false);
+
   const vendorLabels: Record<string, string> = useMemo(() => ({
     hikvision: 'Hikvision',
     zkteco: 'ZKTeco',
@@ -143,7 +160,7 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
   }, []);
 
   useEffect(() => {
-    const allowed: AttendanceTab[] = ['devices', 'shifts', 'schedules', 'holidays', 'logs', 'summary'];
+    const allowed: AttendanceTab[] = ['devices', 'hikvision', 'shifts', 'schedules', 'holidays', 'logs', 'summary'];
     if (initialTab && allowed.includes(initialTab as AttendanceTab)) {
       setActiveTab(initialTab as AttendanceTab);
     }
@@ -311,21 +328,100 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
     }
   };
 
+  // ══════════ HikVision ISAPI Actions ══════════
+  const hikPost = async (action: string, body: object) => {
+    const res = await fetch(`${API_BASE_PATH}/api.php?module=attendance_devices&action=${action}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    });
+    return res.json();
+  };
+
+  const handleHikPing = async () => {
+    if (!hikDeviceId) { Swal.fire('تنبيه', 'اختر الجهاز أولاً.', 'warning'); return; }
+    setHikPingLoading(true); setHikDeviceInfo(null); setHikDeviceOnline(null);
+    try {
+      const data = await hikPost('pingDevice', { device_id: Number(hikDeviceId) });
+      setHikDeviceOnline(data.success);
+      setHikDeviceInfo(data.success ? data.info : null);
+    } catch { setHikDeviceOnline(false); }
+    finally { setHikPingLoading(false); }
+  };
+
+  const handleHikPullUsers = async () => {
+    if (!hikDeviceId) { Swal.fire('تنبيه', 'اختر الجهاز أولاً.', 'warning'); return; }
+    setHikUsersLoading(true);
+    try {
+      const data = await hikPost('pullDeviceUsers', { device_id: Number(hikDeviceId) });
+      if (data.success) { setHikDeviceUsers(data.users || []); }
+      else { Swal.fire('خطأ', data.message, 'error'); }
+    } catch { Swal.fire('خطأ', 'تعذر سحب المستخدمين.', 'error'); }
+    finally { setHikUsersLoading(false); }
+  };
+
+  const handleHikPushAll = async () => {
+    if (!hikDeviceId) { Swal.fire('تنبيه', 'اختر الجهاز أولاً.', 'warning'); return; }
+    const confirm = await Swal.fire({ title: 'رفع جميع الموظفين المربوطين?', icon: 'question', showCancelButton: true, confirmButtonText: 'نعم', cancelButtonText: 'إلغاء' });
+    if (!confirm.isConfirmed) return;
+    setHikPushAllLoading(true);
+    try {
+      const data = await hikPost('pushAllUsers', { device_id: Number(hikDeviceId) });
+      Swal.fire(data.success ? 'تم' : 'تحذير', data.message || '', data.success ? 'success' : 'warning');
+    } catch { Swal.fire('خطأ', 'تعذر رفع المستخدمين.', 'error'); }
+    finally { setHikPushAllLoading(false); }
+  };
+
+  const handleHikDeleteUser = async (deviceUserId: string) => {
+    if (!hikDeviceId) return;
+    const confirm = await Swal.fire({ title: `حذف #${deviceUserId} من الجهاز?`, icon: 'warning', showCancelButton: true, confirmButtonText: 'حذف', cancelButtonText: 'إلغاء' });
+    if (!confirm.isConfirmed) return;
+    try {
+      const data = await hikPost('deleteDeviceUser', { device_id: Number(hikDeviceId), device_user_id: deviceUserId });
+      Swal.fire(data.success ? 'تم' : 'خطأ', data.message || '', data.success ? 'success' : 'error');
+      if (data.success) handleHikPullUsers();
+    } catch { Swal.fire('خطأ', 'تعذر حذف المستخدم.', 'error'); }
+  };
+
+  const handleHikPushShift = async () => {
+    if (!hikShiftDeviceId || !hikShiftId) { Swal.fire('تنبيه', 'اختر الجهاز والوردية.', 'warning'); return; }
+    setHikShiftLoading(true);
+    try {
+      const data = await hikPost('pushShift', { device_id: Number(hikShiftDeviceId), shift_id: Number(hikShiftId) });
+      Swal.fire(data.success ? 'تم' : 'خطأ', data.message || '', data.success ? 'success' : 'error');
+    } catch { Swal.fire('خطأ', 'تعذر رفع الوردية.', 'error'); }
+    finally { setHikShiftLoading(false); }
+  };
+
+  const handleHikAssignShift = async () => {
+    if (!hikShiftDeviceId || !hikAssignUserId || !hikAssignPlanNo) { Swal.fire('تنبيه', 'اكمل جميع الحقول.', 'warning'); return; }
+    setHikAssignLoading(true);
+    try {
+      const data = await hikPost('assignShiftOnDevice', { device_id: Number(hikShiftDeviceId), device_user_id: hikAssignUserId, plan_no: Number(hikAssignPlanNo) });
+      Swal.fire(data.success ? 'تم' : 'خطأ', data.message || '', data.success ? 'success' : 'error');
+    } catch { Swal.fire('خطأ', 'تعذر تعيين الوردية.', 'error'); }
+    finally { setHikAssignLoading(false); }
+  };
+
+
   return (
     <div className="space-y-6" dir="rtl">
       <div className="flex flex-wrap items-center gap-2">
         {[
-          { key: 'devices', label: 'الأجهزة' },
-          { key: 'shifts', label: 'الورديات' },
-          { key: 'schedules', label: 'الجداول' },
-          { key: 'holidays', label: 'العطلات' },
-          { key: 'logs', label: 'السجلات' },
-          { key: 'summary', label: 'الملخص' }
+          { key: 'devices',    label: 'الأجهزة' },
+          { key: 'hikvision', label: '🔵 HikVision' },
+          { key: 'shifts',     label: 'الورديات' },
+          { key: 'schedules',  label: 'الجداول' },
+          { key: 'holidays',   label: 'العطلات' },
+          { key: 'logs',       label: 'السجلات' },
+          { key: 'summary',    label: 'الملخص' }
         ].map(tab => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key as any)}
-            className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${activeTab === tab.key ? 'bg-accent text-white' : 'bg-slate-100 text-slate-600'}`}
+            className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${
+              activeTab === tab.key
+                ? tab.key === 'hikvision' ? 'bg-blue-600 text-white' : 'bg-accent text-white'
+                : 'bg-slate-100 text-slate-600'
+            }`}
           >
             {tab.label}
           </button>
@@ -652,7 +748,219 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
         </div>
       )}
 
+      {activeTab === 'hikvision' && (
+        <div className="space-y-6">
+          {/* ── Section 1: Device Status ── */}
+          <div className="p-6 rounded-3xl border border-card shadow-sm card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+            <h3 className="font-black mb-4 flex items-center gap-2 text-blue-600">
+              <Wifi size={18}/> اختبار الاتصال بالجهاز (Ping)
+            </h3>
+            <div className="flex flex-wrap gap-3 items-end text-xs">
+              <div className="flex-1 min-w-[200px]">
+                <label className="text-[11px] text-muted mb-1 block">اختر جهاز HikVision</label>
+                <CustomSelect
+                  value={hikDeviceId}
+                  onChange={v => { setHikDeviceId(v); setHikDeviceInfo(null); setHikDeviceOnline(null); setHikDeviceUsers([]); }}
+                  options={[{ value: '', label: 'اختر الجهاز' }, ...devices.filter((d:any) => d.vendor === 'hikvision' || d.driver === 'hikvision_isapi').map((d:any) => ({ value: String(d.id), label: `${d.name} (${d.ip})` }))]}
+                  className="w-full"
+                />
+              </div>
+              <button
+                className="px-5 py-2 rounded-xl bg-blue-600 text-white font-black flex items-center gap-2"
+                onClick={handleHikPing}
+                disabled={hikPingLoading || !hikDeviceId}
+              >
+                <RefreshCw size={14} className={hikPingLoading ? 'animate-spin' : ''} />
+                {hikPingLoading ? 'جارٍ الاتصال...' : 'اختبار الاتصال'}
+              </button>
+            </div>
+
+            {/* Status indicator */}
+            {hikDeviceOnline !== null && (
+              <div className={`mt-4 p-4 rounded-2xl flex items-start gap-3 ${hikDeviceOnline ? 'bg-emerald-50 border border-emerald-200' : 'bg-red-50 border border-red-200'}`}>
+                {hikDeviceOnline
+                  ? <CheckCircle size={20} className="text-emerald-600 flex-shrink-0 mt-0.5" />
+                  : <WifiOff size={20} className="text-red-500 flex-shrink-0 mt-0.5" />
+                }
+                <div className="flex-1 text-xs">
+                  <div className={`font-black text-sm mb-2 ${hikDeviceOnline ? 'text-emerald-700' : 'text-red-600'}`}>
+                    {hikDeviceOnline ? '✅ الجهاز متصل ويعمل بشكل طبيعي' : '❌ تعذر الاتصال بالجهاز'}
+                  </div>
+                  {hikDeviceOnline && hikDeviceInfo && (
+                    <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+                      {[
+                        { label: 'الموديل', value: hikDeviceInfo.model },
+                        { label: 'السيريال', value: hikDeviceInfo.serialNumber },
+                        { label: 'الإصدار', value: hikDeviceInfo.firmwareVersion },
+                        { label: 'MAC', value: hikDeviceInfo.macAddress },
+                        { label: 'اسم الجهاز', value: hikDeviceInfo.deviceName },
+                      ].map(item => (
+                        <div key={item.label} className="bg-white rounded-xl p-2">
+                          <div className="text-[10px] text-gray-400">{item.label}</div>
+                          <div className="font-bold text-gray-700 font-mono text-[11px]">{item.value || '-'}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Section 2: Device Users ── */}
+          <div className="p-6 rounded-3xl border border-card shadow-sm card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+            <h3 className="font-black mb-4 flex items-center gap-2">
+              <Users size={18}/> مستخدمو الجهاز
+            </h3>
+            <div className="flex flex-wrap gap-3 mb-4">
+              <button
+                className="px-4 py-2 rounded-xl bg-slate-700 text-white text-xs font-black flex items-center gap-2"
+                onClick={handleHikPullUsers}
+                disabled={hikUsersLoading || !hikDeviceId}
+              >
+                <RefreshCw size={13} className={hikUsersLoading ? 'animate-spin' : ''} />
+                {hikUsersLoading ? 'جارٍ السحب...' : 'سحب مستخدمي الجهاز'}
+              </button>
+              <button
+                className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-black flex items-center gap-2"
+                onClick={handleHikPushAll}
+                disabled={hikPushAllLoading || !hikDeviceId}
+              >
+                <Send size={13} className={hikPushAllLoading ? 'animate-spin' : ''} />
+                {hikPushAllLoading ? 'جارٍ الرفع...' : 'رفع كل الموظفين للجهاز'}
+              </button>
+            </div>
+
+            {hikDeviceUsers.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-right">
+                  <thead className="text-muted border-b border-slate-200">
+                    <tr>
+                      <th className="px-3 py-2">#</th>
+                      <th className="px-3 py-2">الاسم على الجهاز</th>
+                      <th className="px-3 py-2">النوع</th>
+                      <th className="px-3 py-2">مربوط بموظف؟</th>
+                      <th className="px-3 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {hikDeviceUsers.map((u: any) => (
+                      <tr key={u.employeeNo} className="border-t border-slate-100 hover:bg-slate-50">
+                        <td className="px-3 py-2 font-mono font-bold">{u.employeeNo}</td>
+                        <td className="px-3 py-2">{u.name || '—'}</td>
+                        <td className="px-3 py-2">{u.userType}</td>
+                        <td className="px-3 py-2">
+                          {u.is_mapped
+                            ? <span className="inline-flex items-center gap-1 text-emerald-600 font-bold"><CheckCircle size={12}/> {u.db_employee?.employee_name}</span>
+                            : <span className="text-orange-500 flex items-center gap-1"><AlertCircle size={12}/> غير مربوط</span>
+                          }
+                        </td>
+                        <td className="px-3 py-2">
+                          <button
+                            className="p-1.5 rounded-lg bg-red-100 text-red-600 hover:bg-red-200"
+                            onClick={() => handleHikDeleteUser(u.employeeNo)}
+                            title="حذف من الجهاز"
+                          >
+                            <Trash2 size={12}/>
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="mt-2 text-[11px] text-muted">{hikDeviceUsers.length} مستخدم على الجهاز</div>
+              </div>
+            )}
+            {hikDeviceUsers.length === 0 && !hikUsersLoading && (
+              <p className="text-xs text-muted">اضغط "سحب مستخدمي الجهاز" لعرض القائمة.</p>
+            )}
+          </div>
+
+          {/* ── Section 3: Push Shift ── */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="p-6 rounded-3xl border border-card shadow-sm card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+              <h3 className="font-black mb-4 flex items-center gap-2">
+                <Send size={16}/> رفع وردية إلى الجهاز
+              </h3>
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="text-[11px] text-muted mb-1 block">الجهاز</label>
+                  <CustomSelect
+                    value={hikShiftDeviceId}
+                    onChange={setHikShiftDeviceId}
+                    options={[{ value: '', label: 'اختر الجهاز' }, ...devices.filter((d:any) => d.vendor === 'hikvision' || d.driver === 'hikvision_isapi').map((d:any) => ({ value: String(d.id), label: `${d.name} (${d.ip})` }))]}
+                    className="w-full"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] text-muted mb-1 block">الوردية</label>
+                  <CustomSelect
+                    value={hikShiftId}
+                    onChange={setHikShiftId}
+                    options={[{ value: '', label: 'اختر الوردية' }, ...shifts.map((s:any) => ({ value: String(s.id), label: `${s.name} (${s.start_time} - ${s.end_time})` }))]}
+                    className="w-full"
+                  />
+                </div>
+                <div className="text-[11px] text-muted p-3 bg-blue-50 rounded-xl">
+                  <b>ملاحظة:</b> رقم الخطة (Plan No) سيكون نفس ID الوردية في النظام. احفظ هذا الرقم لاستخدامه في تعيين الوردية للموظف.
+                </div>
+                <button
+                  className="w-full py-3 rounded-2xl bg-blue-600 text-white font-black flex items-center justify-center gap-2"
+                  onClick={handleHikPushShift}
+                  disabled={hikShiftLoading}
+                >
+                  <Send size={14}/> {hikShiftLoading ? 'جارٍ الرفع...' : 'رفع الوردية للجهاز'}
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 rounded-3xl border border-card shadow-sm card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+              <h3 className="font-black mb-4 flex items-center gap-2">
+                <UserPlus size={16}/> تعيين وردية لموظف على الجهاز
+              </h3>
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="text-[11px] text-muted mb-1 block">الجهاز</label>
+                  <CustomSelect
+                    value={hikShiftDeviceId}
+                    onChange={setHikShiftDeviceId}
+                    options={[{ value: '', label: 'اختر الجهاز' }, ...devices.filter((d:any) => d.vendor === 'hikvision' || d.driver === 'hikvision_isapi').map((d:any) => ({ value: String(d.id), label: `${d.name} (${d.ip})` }))]}
+                    className="w-full"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] text-muted mb-1 block">رقم المستخدم على الجهاز (Employee No)</label>
+                  <input
+                    className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2 w-full"
+                    placeholder="مثال: 1"
+                    value={hikAssignUserId}
+                    onChange={e => setHikAssignUserId(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] text-muted mb-1 block">رقم خطة الوردية (Plan No = ID الوردية)</label>
+                  <input
+                    className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2 w-full"
+                    placeholder="مثال: 3"
+                    value={hikAssignPlanNo}
+                    onChange={e => setHikAssignPlanNo(e.target.value)}
+                  />
+                </div>
+                <button
+                  className="w-full py-3 rounded-2xl bg-emerald-600 text-white font-black flex items-center justify-center gap-2"
+                  onClick={handleHikAssignShift}
+                  disabled={hikAssignLoading}
+                >
+                  <UserPlus size={14}/> {hikAssignLoading ? 'جارٍ التعيين...' : 'تعيين الوردية للموظف'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {activeTab === 'shifts' && (
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="p-6 rounded-3xl border border-card shadow-sm card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
             <h3 className="font-black mb-4">إضافة وردية</h3>

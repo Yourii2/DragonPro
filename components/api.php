@@ -1071,6 +1071,271 @@ if (!function_exists('attendance_http_request_json')) {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════
+// HikVision ISAPI — Full device control helpers
+// ═══════════════════════════════════════════════════════════════
+
+if (!function_exists('hik_isapi_request')) {
+    /**
+     * Send an HTTP request to a HikVision device using Digest Auth.
+     * @param array  $device   Row from attendance_devices table
+     * @param string $path     ISAPI path, e.g. '/ISAPI/System/deviceInfo'
+     * @param string $method   GET | POST | PUT | DELETE
+     * @param array|null $body JSON-encodable body (for POST/PUT)
+     * @param int    $timeout  Seconds
+     * @return array           Decoded JSON response
+     */
+    function hik_isapi_request(array $device, string $path, string $method = 'GET', ?array $body = null, int $timeout = 15): array {
+        $ip   = trim((string)($device['ip']       ?? ''));
+        $port = intval($device['port']             ?? 80);
+        $proto= trim((string)($device['protocol'] ?? 'http'));
+        $user = (string)($device['username']       ?? 'admin');
+        $pass = (string)($device['password']       ?? '');
+
+        if ($ip === '') throw new Exception('Device IP is not configured.');
+
+        if (strpos($path, '/') !== 0) $path = '/' . $path;
+        $url = $proto . '://' . $ip . ':' . $port . $path;
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => $timeout,
+            CURLOPT_CONNECTTIMEOUT => 8,
+            CURLOPT_HTTPAUTH       => CURLAUTH_DIGEST,
+            CURLOPT_USERPWD        => "$user:$pass",
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => false,
+            CURLOPT_CUSTOMREQUEST  => strtoupper($method),
+            CURLOPT_HTTPHEADER     => ['Content-Type: application/json', 'Accept: application/json'],
+        ]);
+
+        if ($body !== null && in_array(strtoupper($method), ['POST', 'PUT'])) {
+            $encoded = json_encode($body, JSON_UNESCAPED_UNICODE);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $encoded);
+        }
+
+        $resp = curl_exec($ch);
+        $err  = curl_error($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($resp === false || $err) throw new Exception('cURL error: ' . $err);
+        if ($code === 0) throw new Exception('Could not reach device at ' . $ip . ':' . $port);
+        if ($code >= 400) throw new Exception('HTTP ' . $code . ' from device: ' . substr($resp, 0, 300));
+
+        if (trim($resp) === '') return ['_http_code' => $code, '_empty' => true];
+
+        $j = json_decode($resp, true);
+        if (!is_array($j)) return ['_raw' => $resp, '_http_code' => $code];
+        $j['_http_code'] = $code;
+        return $j;
+    }
+}
+
+if (!function_exists('hik_get_device_info')) {
+    /**
+     * Ping device + get model/firmware/serial info.
+     * Returns ['success'=>bool, 'info'=>array, 'message'=>string]
+     */
+    function hik_get_device_info(array $device): array {
+        try {
+            $j = hik_isapi_request($device, '/ISAPI/System/deviceInfo', 'GET', null, 8);
+            $info = [
+                'model'         => $j['DeviceInfo']['model']           ?? $j['model']           ?? '-',
+                'firmwareVersion'=>$j['DeviceInfo']['firmwareVersion'] ?? $j['firmwareVersion'] ?? '-',
+                'serialNumber'  => $j['DeviceInfo']['serialNumber']   ?? $j['serialNumber']   ?? '-',
+                'macAddress'    => $j['DeviceInfo']['macAddress']      ?? $j['macAddress']      ?? '-',
+                'deviceName'    => $j['DeviceInfo']['deviceName']      ?? $j['deviceName']      ?? '-',
+                'http_code'     => $j['_http_code'] ?? 200,
+            ];
+            return ['success' => true, 'info' => $info, 'message' => 'تم الاتصال بالجهاز بنجاح.'];
+        } catch (Exception $e) {
+            return ['success' => false, 'info' => [], 'message' => $e->getMessage()];
+        }
+    }
+}
+
+if (!function_exists('hik_pull_device_users')) {
+    /**
+     * Pull all users currently registered on the device.
+     * Returns ['success'=>bool, 'users'=>array, 'total'=>int, 'message'=>string]
+     */
+    function hik_pull_device_users(array $device): array {
+        try {
+            $body = [
+                'UserInfoSearchCond' => [
+                    'searchID'            => uniqid('nexus_', true),
+                    'searchResultPosition'=> 0,
+                    'maxResults'          => 10000,
+                ]
+            ];
+            $j = hik_isapi_request($device, '/ISAPI/AccessControl/UserInfo/Search?format=json', 'POST', $body, 30);
+
+            $wrapper = $j['UserInfoSearch'] ?? $j;
+            $rawUsers = $wrapper['UserInfo'] ?? [];
+            if (!is_array($rawUsers)) $rawUsers = [];
+
+            $users = [];
+            foreach ($rawUsers as $u) {
+                if (!is_array($u)) continue;
+                $users[] = [
+                    'employeeNo'  => (string)($u['employeeNo']  ?? ''),
+                    'name'        => (string)($u['name']        ?? ''),
+                    'userType'    => (string)($u['userType']    ?? 'normal'),
+                    'Valid'       => $u['Valid']                 ?? null,
+                    'numOfCard'   => intval($u['numOfCard']     ?? 0),
+                    'localUIRight'=> (bool) ($u['localUIRight'] ?? false),
+                    'raw'         => $u,
+                ];
+            }
+
+            $total = intval($wrapper['totalMatches'] ?? count($users));
+            return ['success' => true, 'users' => $users, 'total' => $total, 'message' => "تم سحب $total مستخدم من الجهاز."];
+        } catch (Exception $e) {
+            return ['success' => false, 'users' => [], 'total' => 0, 'message' => $e->getMessage()];
+        }
+    }
+}
+
+if (!function_exists('hik_push_user')) {
+    /**
+     * Add or update ONE user on the device.
+     * @param array  $device
+     * @param string $employeeNo   ID on device (must be numeric string)
+     * @param string $name         Full name
+     * @param string|null $validFrom 'YYYY-MM-DDThh:mm:ss'
+     * @param string|null $validTo
+     * @return array ['success'=>bool, 'message'=>string]
+     */
+    function hik_push_user(array $device, string $employeeNo, string $name, ?string $validFrom = null, ?string $validTo = null): array {
+        try {
+            $userInfo = [
+                'employeeNo'  => $employeeNo,
+                'name'        => mb_substr($name, 0, 32),
+                'userType'    => 'normal',
+                'localUIRight'=> false,
+                'numOfCard'   => 0,
+            ];
+            if ($validFrom && $validTo) {
+                $userInfo['Valid'] = [
+                    'enable'    => true,
+                    'beginTime' => $validFrom,
+                    'endTime'   => $validTo,
+                    'timeType'  => 'local',
+                ];
+            }
+            $body = ['UserInfo' => [$userInfo]];
+            $j    = hik_isapi_request($device, '/ISAPI/AccessControl/UserInfo/SetUp?format=json', 'POST', $body, 15);
+
+            // Check for error in response
+            if (!empty($j['statusCode']) && $j['statusCode'] !== 1 && $j['statusCode'] !== 0) {
+                $msg = $j['subStatusCode'] ?? $j['statusString'] ?? 'فشل رفع المستخدم إلى الجهاز.';
+                return ['success' => false, 'message' => $msg];
+            }
+            return ['success' => true, 'message' => "تم رفع الموظف #$employeeNo إلى الجهاز."];
+        } catch (Exception $e) {
+            return ['success' => false, 'message' => $e->getMessage()];
+        }
+    }
+}
+
+if (!function_exists('hik_delete_device_user')) {
+    /**
+     * Delete a user from the device.
+     * @return array ['success'=>bool, 'message'=>string]
+     */
+    function hik_delete_device_user(array $device, string $employeeNo): array {
+        try {
+            $body = ['UserInfoDelCond' => ['EmployeeNoList' => [['employeeNo' => $employeeNo]]]];
+            $j    = hik_isapi_request($device, '/ISAPI/AccessControl/UserInfo/Delete?format=json', 'PUT', $body, 15);
+            if (!empty($j['statusCode']) && $j['statusCode'] !== 1 && $j['statusCode'] !== 0) {
+                return ['success' => false, 'message' => $j['subStatusCode'] ?? 'فشل حذف المستخدم من الجهاز.'];
+            }
+            return ['success' => true, 'message' => "تم حذف #$employeeNo من الجهاز."];
+        } catch (Exception $e) {
+            return ['success' => false, 'message' => $e->getMessage()];
+        }
+    }
+}
+
+if (!function_exists('hik_push_shift')) {
+    /**
+     * Push a work schedule (shift) to the device.
+     * @param array  $device
+     * @param int    $planNo      Unique plan number (1-255)
+     * @param string $name
+     * @param string $startTime   HH:MM:SS
+     * @param string $endTime     HH:MM:SS
+     * @param array  $weekDays    0-6 (0=Sun) days when shift is active
+     * @return array ['success'=>bool, 'message'=>string]
+     */
+    function hik_push_shift(array $device, int $planNo, string $name, string $startTime, string $endTime, array $weekDays = []): array {
+        try {
+            // Build weekly template — each day has time segments
+            $weekPlan = [];
+            for ($d = 0; $d <= 6; $d++) {
+                $dayNo = $d + 1; // HikVision uses 1=Sun..7=Sat
+                if (in_array($d, $weekDays)) {
+                    $weekPlan[] = [
+                        'dayNo'     => $dayNo,
+                        'TimeSegment' => [[
+                            'beginTime' => $startTime,
+                            'endTime'   => $endTime,
+                        ]]
+                    ];
+                } else {
+                    $weekPlan[] = ['dayNo' => $dayNo, 'TimeSegment' => []];
+                }
+            }
+
+            $body = [
+                'PlanTemplateInfo' => [
+                    'planNo'           => $planNo,
+                    'planName'         => mb_substr($name, 0, 32),
+                    'planTemplateType' => 'weekPlan',
+                    'WeekPlanCfg'      => $weekPlan,
+                ]
+            ];
+
+            $j = hik_isapi_request($device, '/ISAPI/AccessControl/WorkSchedule?format=json', 'POST', $body, 15);
+            if (!empty($j['statusCode']) && $j['statusCode'] !== 1 && $j['statusCode'] !== 0) {
+                return ['success' => false, 'message' => $j['subStatusCode'] ?? 'فشل رفع الوردية إلى الجهاز.'];
+            }
+            return ['success' => true, 'message' => "تم رفع الوردية '$name' إلى الجهاز."];
+        } catch (Exception $e) {
+            return ['success' => false, 'message' => $e->getMessage()];
+        }
+    }
+}
+
+if (!function_exists('hik_assign_shift_to_employee')) {
+    /**
+     * Assign a work schedule plan to an employee on the device.
+     * @param int $planNo  Same planNo used in hik_push_shift
+     */
+    function hik_assign_shift_to_employee(array $device, string $employeeNo, int $planNo): array {
+        try {
+            $body = [
+                'SetEmployeeSchedule' => [
+                    'EmployeeScheduleList' => [[
+                        'employeeNo' => $employeeNo,
+                        'planNo'     => $planNo,
+                    ]]
+                ]
+            ];
+            $j = hik_isapi_request($device, '/ISAPI/AccessControl/WorkSchedule/Employees?format=json', 'POST', $body, 15);
+            if (!empty($j['statusCode']) && $j['statusCode'] !== 1 && $j['statusCode'] !== 0) {
+                return ['success' => false, 'message' => $j['subStatusCode'] ?? 'فشل تعيين الوردية للموظف على الجهاز.'];
+            }
+            return ['success' => true, 'message' => "تم تعيين الخطة #$planNo للموظف #$employeeNo على الجهاز."];
+        } catch (Exception $e) {
+            return ['success' => false, 'message' => $e->getMessage()];
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
 if (!function_exists('attendance_driver_pull_logs')) {
     // Returns: array of logs: [ ['device_user_id'=>..., 'check_time'=>..., 'direction'=>..., 'raw_payload'=>mixed], ... ]
     function attendance_driver_pull_logs($device, $start, $end) {
@@ -7358,6 +7623,120 @@ switch ($module) {
                 http_response_code(500);
                 echo json_encode(['success' => false, 'message' => $e->getMessage()]);
             }
+            break;
+        }
+        if ($action === 'pingDevice') {
+            check_permission_or_die($pdo, 'employees', 'view');
+            $device_id = intval($input['device_id'] ?? ($_GET['device_id'] ?? 0));
+            if (!$device_id) { echo json_encode(['success'=>false,'message'=>'device_id required']); break; }
+            $device = execute_query($pdo, "SELECT * FROM attendance_devices WHERE id=? LIMIT 1", [$device_id])->fetch(PDO::FETCH_ASSOC);
+            if (!$device) { echo json_encode(['success'=>false,'message'=>'Device not found']); break; }
+            $result = hik_get_device_info($device);
+            echo json_encode(array_merge(['success'=>$result['success']], $result));
+            break;
+        }
+        if ($action === 'pullDeviceUsers') {
+            check_permission_or_die($pdo, 'employees', 'view');
+            $device_id = intval($input['device_id'] ?? ($_GET['device_id'] ?? 0));
+            if (!$device_id) { echo json_encode(['success'=>false,'message'=>'device_id required']); break; }
+            $device = execute_query($pdo, "SELECT * FROM attendance_devices WHERE id=? LIMIT 1", [$device_id])->fetch(PDO::FETCH_ASSOC);
+            if (!$device) { echo json_encode(['success'=>false,'message'=>'Device not found']); break; }
+            $result = hik_pull_device_users($device);
+            // Enrich with DB mapping
+            if ($result['success']) {
+                $mappings = execute_query($pdo, "SELECT adu.device_user_id, e.id as employee_id, e.name as employee_name
+                    FROM attendance_device_users adu
+                    LEFT JOIN employees e ON e.id = adu.employee_id
+                    WHERE adu.device_id = ?", [$device_id])->fetchAll(PDO::FETCH_ASSOC);
+                $mapIndex = [];
+                foreach ($mappings as $m) $mapIndex[$m['device_user_id']] = $m;
+                foreach ($result['users'] as &$u) {
+                    $u['db_employee'] = $mapIndex[$u['employeeNo']] ?? null;
+                    $u['is_mapped']   = isset($mapIndex[$u['employeeNo']]);
+                }
+                unset($u);
+            }
+            echo json_encode($result);
+            break;
+        }
+        if ($action === 'pushSingleUser') {
+            check_permission_or_die($pdo, 'employees', 'edit');
+            $device_id   = intval($input['device_id'] ?? 0);
+            $employee_id = intval($input['employee_id'] ?? 0);
+            $device_user_id = trim((string)($input['device_user_id'] ?? ''));
+            if (!$device_id || !$employee_id || $device_user_id === '') {
+                echo json_encode(['success'=>false,'message'=>'device_id, employee_id, device_user_id required']); break;
+            }
+            $device = execute_query($pdo, "SELECT * FROM attendance_devices WHERE id=? LIMIT 1", [$device_id])->fetch(PDO::FETCH_ASSOC);
+            $emp    = execute_query($pdo, "SELECT * FROM employees WHERE id=? LIMIT 1", [$employee_id])->fetch(PDO::FETCH_ASSOC);
+            if (!$device || !$emp) { echo json_encode(['success'=>false,'message'=>'Device or employee not found']); break; }
+            $result = hik_push_user($device, $device_user_id, (string)($emp['name'] ?? ''));
+            echo json_encode($result);
+            break;
+        }
+        if ($action === 'pushAllUsers') {
+            check_permission_or_die($pdo, 'employees', 'edit');
+            $device_id = intval($input['device_id'] ?? ($_GET['device_id'] ?? 0));
+            if (!$device_id) { echo json_encode(['success'=>false,'message'=>'device_id required']); break; }
+            $device = execute_query($pdo, "SELECT * FROM attendance_devices WHERE id=? LIMIT 1", [$device_id])->fetch(PDO::FETCH_ASSOC);
+            if (!$device) { echo json_encode(['success'=>false,'message'=>'Device not found']); break; }
+            $mappings = execute_query($pdo, "SELECT adu.device_user_id, e.name
+                FROM attendance_device_users adu
+                LEFT JOIN employees e ON e.id = adu.employee_id
+                WHERE adu.device_id = ?", [$device_id])->fetchAll(PDO::FETCH_ASSOC);
+            if (count($mappings) === 0) { echo json_encode(['success'=>true,'message'=>'لا يوجد موظفون مربوطون بهذا الجهاز.','pushed'=>0,'failed'=>0]); break; }
+            $pushed = 0; $failed = 0; $errors = [];
+            foreach ($mappings as $m) {
+                $r = hik_push_user($device, (string)$m['device_user_id'], (string)($m['name'] ?? ''));
+                if ($r['success']) $pushed++; else { $failed++; $errors[] = "#".$m['device_user_id'].": ".($r['message']??''); }
+            }
+            echo json_encode(['success' => $failed === 0, 'pushed' => $pushed, 'failed' => $failed, 'errors' => $errors, 'message' => "تم رفع $pushed موظف. فشل: $failed."]);
+            break;
+        }
+        if ($action === 'deleteDeviceUser') {
+            check_permission_or_die($pdo, 'employees', 'edit');
+            $device_id      = intval($input['device_id'] ?? 0);
+            $device_user_id = trim((string)($input['device_user_id'] ?? ''));
+            if (!$device_id || $device_user_id === '') { echo json_encode(['success'=>false,'message'=>'device_id, device_user_id required']); break; }
+            $device = execute_query($pdo, "SELECT * FROM attendance_devices WHERE id=? LIMIT 1", [$device_id])->fetch(PDO::FETCH_ASSOC);
+            if (!$device) { echo json_encode(['success'=>false,'message'=>'Device not found']); break; }
+            $result = hik_delete_device_user($device, $device_user_id);
+            echo json_encode($result);
+            break;
+        }
+        if ($action === 'pushShift') {
+            check_permission_or_die($pdo, 'employees', 'edit');
+            $device_id = intval($input['device_id'] ?? 0);
+            $shift_id  = intval($input['shift_id']  ?? 0);
+            $plan_no   = intval($input['plan_no']   ?? $shift_id);
+            if (!$device_id || !$shift_id) { echo json_encode(['success'=>false,'message'=>'device_id, shift_id required']); break; }
+            $device = execute_query($pdo, "SELECT * FROM attendance_devices WHERE id=? LIMIT 1", [$device_id])->fetch(PDO::FETCH_ASSOC);
+            $shift  = execute_query($pdo, "SELECT * FROM attendance_shifts WHERE id=? LIMIT 1", [$shift_id])->fetch(PDO::FETCH_ASSOC);
+            if (!$device || !$shift) { echo json_encode(['success'=>false,'message'=>'Device or shift not found']); break; }
+            $offDays = array_map('intval', array_filter(explode(',', (string)($shift['weekly_off_days']??'')), fn($v)=>$v!==''));
+            $allDays = [0,1,2,3,4,5,6];
+            $workDays = array_values(array_diff($allDays, $offDays));
+            $result = hik_push_shift(
+                $device,
+                $plan_no > 0 ? $plan_no : $shift_id,
+                (string)($shift['name'] ?? 'Shift'),
+                (string)($shift['start_time'] ?? '09:00:00'),
+                (string)($shift['end_time']   ?? '17:00:00'),
+                $workDays
+            );
+            echo json_encode($result);
+            break;
+        }
+        if ($action === 'assignShiftOnDevice') {
+            check_permission_or_die($pdo, 'employees', 'edit');
+            $device_id      = intval($input['device_id']      ?? 0);
+            $device_user_id = trim((string)($input['device_user_id'] ?? ''));
+            $plan_no        = intval($input['plan_no']         ?? 0);
+            if (!$device_id || $device_user_id === '' || !$plan_no) { echo json_encode(['success'=>false,'message'=>'device_id, device_user_id, plan_no required']); break; }
+            $device = execute_query($pdo, "SELECT * FROM attendance_devices WHERE id=? LIMIT 1", [$device_id])->fetch(PDO::FETCH_ASSOC);
+            if (!$device) { echo json_encode(['success'=>false,'message'=>'Device not found']); break; }
+            $result = hik_assign_shift_to_employee($device, $device_user_id, $plan_no);
+            echo json_encode($result);
             break;
         }
         handle_crud($pdo, 'attendance_devices', $input, ['name', 'vendor', 'protocol', 'driver', 'driver_config', 'ip', 'port', 'serial_number', 'username', 'password', 'location', 'enabled', 'last_sync_at']);
