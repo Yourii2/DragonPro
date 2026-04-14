@@ -14,9 +14,9 @@ const parseNumeric = (v: any) => {
   if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
   let s = String(v || '').trim();
   if (s === '') return 0;
-  const map: Record<string,string> = {
-    '٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9',
-    '۰':'0','۱':'1','۲':'2','۳':'3','۴':'4','۵':'5','۶':'6','۷':'7','۸':'8','۹':'9'
+  const map: Record<string, string> = {
+    '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9',
+    '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4', '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9'
   };
   s = s.split('').map(ch => map[ch] || ch).join('');
   s = s.replace(/[\s,]+/g, '');
@@ -76,6 +76,7 @@ const emptyJournalStats: JournalStatsState = {
 
 const SalesDailyClose: React.FC = () => {
   const currencySymbol = 'ج.م';
+  const getRealOrderId = (o: any) => String(o?.order_id ?? o?.id ?? '');
 
   const [loading, setLoading] = useState(false);
   const [statsLoading, setStatsLoading] = useState(false);
@@ -87,141 +88,12 @@ const SalesDailyClose: React.FC = () => {
   const [selectedRepId, setSelectedRepId] = useState<string>('');
   const [selectedTreasuryId, setSelectedTreasuryId] = useState<string>('');
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'electronic'>('cash');
-  
 
-  // Date range for statistics (default = today)
-  const todayStr = new Date().toISOString().slice(0,10);
-  const [statsFrom, setStatsFrom] = useState<string>(todayStr);
-  const [statsTo, setStatsTo] = useState<string>(todayStr);
-
-  // Period summary (rep-level) - default last 7 days
-  const defaultPeriodEnd = new Date();
-  const defaultPeriodStart = new Date(); defaultPeriodStart.setDate(defaultPeriodEnd.getDate() - 6);
-  const [periodStart, setPeriodStart] = useState<string>(defaultPeriodStart.toISOString().slice(0,10));
-  const [periodEnd, setPeriodEnd] = useState<string>(defaultPeriodEnd.toISOString().slice(0,10));
-  const [periodSummary, setPeriodSummary] = useState<any>(null);
-  const [periodLoading, setPeriodLoading] = useState<boolean>(false);
-
-  // يتم تحديث ملخص الفترة عند تغيير التواريخ أو تغيير المندوب
-  useEffect(() => { fetchPeriodSummary(); }, [periodStart, periodEnd, selectedRepId]);
-
-  const fetchPeriodSummary = async () => {
-    if (!selectedRepId) {
-      setPeriodSummary(null);
-      return;
-    }
-
-    setPeriodLoading(true);
-    try {
-      // 1. جلب كافة سجلات اليومية الخاصة بالمندوب
-      const dailyUrl = `${API_BASE_PATH}/api.php?module=sales&action=getRepDailyJournal&rep_id=${encodeURIComponent(selectedRepId)}`;
-      const dailyRes = await fetch(dailyUrl).then(r => r.json());
-      
-      if (!dailyRes || !dailyRes.success) throw new Error('getRepDailyJournal failed');
-
-      const allDailyRows = Array.isArray(dailyRes.data) ? dailyRes.data : [];
-      
-      // 2. فلترة سجلات اليومية بناءً على التواريخ المحددة (periodStart, periodEnd)
-      const inRange = (journalDate: any) => {
-        const val = String(journalDate || '').slice(0, 10);
-        return val && val >= periodStart && val <= periodEnd;
-      };
-      
-      const filteredRows = allDailyRows.filter((row: any) => inRange(row.journal_date));
-      const journalIds = Array.from(new Set(filteredRows.map((row: any) => Number(row.id)).filter(id => id > 0)));
-
-      if (journalIds.length === 0) {
-        setPeriodSummary({
-          delivered: { count: 0, pieces: 0, value: 0 },
-          returned: { count: 0, pieces: 0, value: 0 },
-          _delivered_list: [],
-          _returned_list: []
-        });
-        return;
-      }
-
-      // 3. جلب كافة الأوردرات المرتبطة بهذه اليوميات
-      const ordersUrl = `${API_BASE_PATH}/api.php?module=sales&action=getJournalOrders&rep_id=${encodeURIComponent(selectedRepId)}&journal_ids=${encodeURIComponent(journalIds.join(','))}`;
-      const ordersRes = await fetch(ordersUrl).then(r => r.json());
-
-      if (!ordersRes || !ordersRes.success) throw new Error('getJournalOrders failed');
-
-      const deliveredOrders = ordersRes.delivered || [];
-      const returnedOrders = ordersRes.returned || [];
-      const deferredOrders = ordersRes.deferred || [];
-
-      // تجميع كل الطلبات المنجزة لفلترتها بدقة
-      const allCompletedOrders = uniqOrdersById([...(deliveredOrders || []), ...(returnedOrders || [])]);
-
-      // المسلم: أي أوردر له قطع مسلمة > 0 (يستبعد المرتجع الكامل)
-      const combinedDelivered = allCompletedOrders.filter((o: any) => {
-        const status = String(o.status || o.order_status || '').toLowerCase();
-        if (status === 'returned' || status === 'full_return') return false;
-        return computeDeliveredNetPieces(o) > 0;
-      });
-
-      // المرتجع: أي أوردر له قطع مرتجعة > 0 (يشمل المرتجع الكامل والجزئي)
-      const combinedReturned = allCompletedOrders.filter((o: any) => {
-        const status = String(o.status || o.order_status || '').toLowerCase();
-        return status === 'returned' || status === 'full_return' || computeReturnedPieces(o) > 0;
-      });
-
-      setPeriodSummary({
-        delivered: {
-          count: combinedDelivered.length,
-          pieces: combinedDelivered.reduce((s: number, o: any) => s + computeDeliveredNetPieces(o), 0),
-          value: combinedDelivered.reduce((s: number, o: any) => s + computeDeliveredNetValue(o), 0)
-        },
-        returned: {
-          count: combinedReturned.length,
-          pieces: combinedReturned.reduce((s: number, o: any) => s + computeReturnedPieces(o), 0),
-          value: combinedReturned.reduce((s: number, o: any) => s + computeReturnedOrderValue(o), 0)
-        },
-        deferred: {
-          count: deferredOrders.length,
-          pieces: deferredOrders.reduce((s: number, o: any) => s + computePieces(o), 0),
-          value: deferredOrders.reduce((s: number, o: any) => s + computeOrderValueWithoutShipping(o), 0)
-        },
-        _delivered_list: combinedDelivered,
-        _returned_list: combinedReturned,
-        _deferred_list: deferredOrders
-      });
-    } catch (e) {
-      console.error('Error fetching period summary:', e);
-      setPeriodSummary(null);
-    } finally {
-      setPeriodLoading(false);
-    }
-  };
-
-  const showPeriodDetails = async (type: 'delivered' | 'returned' | 'deferred') => {
-    try {
-      if (!periodSummary) return;
-      if (type === 'delivered') {
-        setDeliveredOrdersList(periodSummary._delivered_list || []);
-        setViewModal('delivered');
-      } else if (type === 'returned') {
-        setReturnedOrdersList(periodSummary._returned_list || []);
-        setViewModal('returned');
-      } else if (type === 'deferred') {
-        setDeferredOrders(periodSummary._deferred_list || []);
-        setViewModal('deferred');
-      }
-    } catch (err) { console.error('showPeriodDetails failed', err); }
-  };
-
-  const setPeriodPreset = (preset: 'today'|'week'|'month'|'year') => {
-    const now = new Date(); const fmt = (d:Date) => d.toISOString().slice(0,10);
-    if (preset === 'today') { setPeriodStart(fmt(now)); setPeriodEnd(fmt(now)); }
-    else if (preset === 'week') { const s = new Date(now); s.setDate(now.getDate()-6); setPeriodStart(fmt(s)); setPeriodEnd(fmt(now)); }
-    else if (preset === 'month') { const s = new Date(now.getFullYear(), now.getMonth(), 1); setPeriodStart(fmt(s)); setPeriodEnd(fmt(now)); }
-    else if (preset === 'year') { const s = new Date(now.getFullYear(), 0, 1); setPeriodStart(fmt(s)); setPeriodEnd(fmt(now)); }
-  };
 
   const [repBalance, setRepBalance] = useState<number>(0);
   const [paidAmount, setPaidAmount] = useState<number>(0);
-  const [settlementDirection, setSettlementDirection] = useState<'collect'|'pay'>('collect');
-  const [repTxType, setRepTxType] = useState<'none'|'bonus'|'penalty'>('none');
+  const [settlementDirection, setSettlementDirection] = useState<'collect' | 'pay'>('collect');
+  const [repTxType, setRepTxType] = useState<'none' | 'bonus' | 'penalty'>('none');
   const [repTxAmount, setRepTxAmount] = useState<number>(0);
   const [repTxReason, setRepTxReason] = useState<string>('');
   const [repTxLoading, setRepTxLoading] = useState<boolean>(false);
@@ -268,7 +140,7 @@ const SalesDailyClose: React.FC = () => {
 
   const computeOrderValueWithoutShipping = (o: any) => {
     const status = String(o?.status || o?.order_status || '').toLowerCase();
-    
+
     // إذا كان المرتجع كاملاً، القيمة المسلمة صفر
     if (status === 'returned' || status === 'full_return') return 0;
 
@@ -291,20 +163,22 @@ const SalesDailyClose: React.FC = () => {
       return Math.max(0, rawSub - ship);
     }
     if ((!items || items.length === 0) && o.subTotal === undefined && ship > 0 && rawSub > ship) {
-        return Math.max(0, rawSub - ship);
+      return Math.max(0, rawSub - ship);
     }
     return rawSub;
   };
 
   const computeOrderValue = (o: any) => {
-      const ship = parseNumeric(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0);
-      return computeOrderValueWithoutShipping(o) + ship;
+    const ship = parseNumeric(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0);
+    return computeOrderValueWithoutShipping(o) + ship;
   };
 
   const computePieces = (order: any) => {
     const status = String(order?.status || order?.order_status || '').toLowerCase();
+    // بالنسبة للمرتجع الكلي، القطع المتبقية هي 0
     if (status === 'returned' || status === 'full_return') return 0;
-
+    
+    // حساب القطع من المنتجات
     const items = order.products || order.order_items || order.items || [];
     if (Array.isArray(items) && items.length > 0) {
       return items.reduce((s: number, p: any) => s + toNum(p.quantity ?? p.qty ?? 0), 0);
@@ -318,35 +192,86 @@ const SalesDailyClose: React.FC = () => {
   // المرتجع الفعلي: المسجل في حقول المرتجع فقط
   const computeReturnedPieces = (order: any) => {
     const status = String(order?.status || order?.order_status || '').toLowerCase();
+    
+    // أولاً: اقرأ من returned_pieces المسجل في rep_journal_orders (الأدق)
+    const directVal = toNum(order?.returned_pieces) || toNum(order?.returned_pieces_fallback);
+    if (directVal > 0) return directVal;
+
+    // إذا كان مرتجع كلي
     if (status === 'returned' || status === 'full_return') {
+      // ثانياً: احسب من المنتجات (قد تكون صفراً بعد إعادة التخزين)
       const items = order.products || order.order_items || order.items || [];
       if (Array.isArray(items) && items.length > 0) {
-        return items.reduce((s: number, p: any) => s + toNum(p.quantity ?? p.qty ?? 0), 0);
+        const fromItems = items.reduce((s: number, p: any) => s + toNum(p.quantity ?? p.qty ?? 0), 0);
+        if (fromItems > 0) return fromItems;
       }
-      return Math.max(toNum(order?.pieces_count), toNum(order?.total_pieces));
+      // ثالثاً: أحقال احتياطية
+      return toNum(order?.pieces_count) || toNum(order?.total_pieces) || 0;
     }
-    // في حالة التسليم الجزئي أو المندوب، نأخذ الرقم المسجل للمرتجع فقط
-    return Math.max(toNum(order?.returned_pieces), toNum(order?.returned_pieces_fallback));
+    // في حالة المرتجع الجزئي (أو أي حالة أخرى)
+    let val = directVal;
+    if (!val) {
+      const items = order.products || order.order_items || order.items || [];
+      if (Array.isArray(items) && items.length > 0) {
+        val = items.reduce((s: number, p: any) => s + (toNum(p.returned_quantity ?? p.returnedPieces ?? 0)), 0);
+      }
+    }
+    return val;
   };
 
   const computeReturnedOrderValue = (order: any) => {
     const status = String(order?.status || order?.order_status || '').toLowerCase();
+    
+    // أولاً: اقرأ returned_value من rep_journal_orders (الأدق — لا يتأثر بالتصفير)
+    const directVal = Math.max(toNum(order?.returned_value), toNum(order?.returned_value_fallback));
+    if (directVal > 0) return directVal;
+
     if (status === 'returned' || status === 'full_return') {
+      // ثانياً: استخدم total_amount كـ fallback
       const rawSub = parseNumeric(order.subTotal ?? order.total_amount ?? order.total ?? 0);
       const ship = parseNumeric(order.shipping ?? order.shipping_fees ?? order.shippingCost ?? 0);
       if (ship > 0 && rawSub > ship) return Math.max(0, rawSub - ship);
       return rawSub;
     }
-    return Math.max(toNum(order?.returned_value), toNum(order?.returned_value_fallback));
+    return directVal;
   };
 
-  // المسلم الفعلي: إجمالي الأوردر الحالي (لأن قاعدة البيانات تخصم المرتجع من الأوردر نفسه)
-  const computeDeliveredNetPieces = (order: any) => computePieces(order);
-  const computeDeliveredNetValue = (order: any) => computeOrderValueWithoutShipping(order);
+  // المسلم الصافي الفعلي: بما أن السيرفر يحدث الكميات والمبالغ لتكون صافية بعد المرتجع الجزئي،
+  // فإن القيم المحسوبة من الأوردر هي بالفعل "الصافي المسلم".
+  const computeDeliveredNetPieces = (order: any) => {
+    const status = String(order?.status || order?.order_status || '').toLowerCase();
+    // إذا كان الأوردر مرتجعاً بالكامل، المسلم هو 0
+    if (status === 'returned' || status === 'full_return') return 0;
+    
+    // غير ذلك، نستخدم القطع المتبقية (التي أصبحت صافية بعد تحديث السيرفر)
+    return computePieces(order);
+  };
 
-  // إجمالي الأوردر الأصلي (قبل الخصم)
-  const computeOriginalPieces = (order: any) => computeDeliveredNetPieces(order) + computeReturnedPieces(order);
-  const computeOriginalOrderValue = (order: any) => computeDeliveredNetValue(order) + computeReturnedOrderValue(order);
+  const computeDeliveredNetValue = (order: any) => {
+    const status = String(order?.status || order?.order_status || '').toLowerCase();
+    if (status === 'returned' || status === 'full_return') return 0;
+    
+    // نستخدم القيمة المتبقية (التي أصبحت صافية بعد تحديث السيرفر)
+    return computeOrderValueWithoutShipping(order);
+  };
+
+  // إجمالي الأوردر الأصلي (قبل أي مرتجع) = الصافي المسلم حالياً + ما تم إرجاعه
+  const computeOriginalPieces = (order: any) => {
+    const pc = toNum(order?.pieces_count) || toNum(order?.total_pieces);
+    const net = computeDeliveredNetPieces(order);
+    const ret = computeReturnedPieces(order);
+    
+    // إذا كان المجموع (صافي + مرتجع) أكبر من الحقل المسجل، نستخدم المجموع
+    return Math.max(pc, net + ret);
+  };
+
+  const computeOriginalOrderValue = (order: any) => {
+    const amt = toNum(order?.total_amount) || toNum(order?.total);
+    const net = computeDeliveredNetValue(order);
+    const ret = computeReturnedOrderValue(order);
+    
+    return Math.max(amt, net + ret);
+  };
 
   const isPartialReturn = (order: any) => {
     const status = String(order?.status || order?.order_status || '').toLowerCase();
@@ -362,7 +287,13 @@ const SalesDailyClose: React.FC = () => {
     return (status === 'returned' || status === 'full_return') || (ret > 0 && del === 0);
   };
 
-  const uniqOrdersById = (arr: any[]) => {
+  const isFullDeliveryOrder = (order: any) => {
+    const del = computeDeliveredNetPieces(order);
+    const ret = computeReturnedPieces(order);
+    return del > 0 && ret === 0;
+  };
+
+  /* const uniqOrdersById = (arr: any[]) => {
     const seen = new Set<number>();
     const out: any[] = [];
     for (const it of (arr || [])) {
@@ -373,8 +304,20 @@ const SalesDailyClose: React.FC = () => {
       out.push(it);
     }
     return out;
+  }; */
+const uniqOrdersById = (arr: any[]) => {
+    const seen = new Set<string>();
+    const out: any[] = [];
+    for (const it of (arr || [])) {
+      // التعديل هنا: إعطاء الأولوية لـ order_id عشان لو البيانات جاية من جدول اليومية ميتلخبطش مع id الاوردر الأصلي
+      const id = String(it?.order_id ?? it?.id ?? '');
+      if (!id) continue;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push(it);
+    }
+    return out;
   };
-
   const resetDailyCloseState = () => {
     setRepStats(emptyRepStats);
     setRepExtras(emptyRepExtras);
@@ -386,7 +329,7 @@ const SalesDailyClose: React.FC = () => {
     setSelectedOrderIdsLocal([]);
   };
 
-  const loadRepDailyCloseData = async (repId: string, from?: string, to?: string, journalId: string = 'all') => {
+  const loadRepDailyCloseData = async (repId: string, journalId: string = 'all') => {
     if (!repId) {
       resetDailyCloseState();
       return;
@@ -394,9 +337,8 @@ const SalesDailyClose: React.FC = () => {
 
     setStatsLoading(true);
     try {
+      // 1. جلب بيانات اليومية المفتوحة
       const dailyUrl = `${API_BASE_PATH}/api.php?module=sales&action=getRepDailyJournal&rep_id=${encodeURIComponent(repId)}`;
-      // const openDailyUrl = `${API_BASE_PATH}/api.php?module=sales&action=getRepOpenDaily&rep_id=${encodeURIComponent(repId)}`;
-
       const [dailyRes] = await Promise.all([
         fetch(dailyUrl).then(r => r.json())
       ]);
@@ -404,14 +346,6 @@ const SalesDailyClose: React.FC = () => {
       if (!dailyRes || !dailyRes.success) throw new Error(dailyRes?.message || 'getRepDailyJournal failed');
 
       const allDailyRows = Array.isArray(dailyRes.data) ? dailyRes.data : [];
-
-      const inRange = (journalDate: any) => {
-        const value = String(journalDate || '').slice(0, 10);
-        if (!value) return false;
-        if (from && value < from) return false;
-        if (to && value > to) return false;
-        return true;
-      };
 
       let mergedRows: any[] = [];
       if (journalId === 'all' || journalId === 'none') {
@@ -423,7 +357,6 @@ const SalesDailyClose: React.FC = () => {
         mergedRows = allDailyRows.filter((row: any) => String(row.id) === String(journalId));
       }
 
-      
       const journalIds = Array.from(new Set(mergedRows.map((row: any) => Number(row.id)).filter((id: number) => Number.isFinite(id) && id > 0)));
 
       if (journalIds.length === 0) {
@@ -446,6 +379,18 @@ const SalesDailyClose: React.FC = () => {
         return;
       }
 
+      // 2. جلب الأوردرات المباشرة (العهدة الحالية للمندوب اللي مش في اليومية)
+      let directActiveOrders: any[] = [];
+      try {
+        const directRes = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getActiveWithRep&rep_id=${encodeURIComponent(repId)}`).then(r => r.json());
+        if (directRes && directRes.success && Array.isArray(directRes.data)) {
+          directActiveOrders = directRes.data;
+        }
+      } catch (err) {
+        console.error("خطأ في جلب أوردرات العهدة المباشرة:", err);
+      }
+
+      // 3. جلب تفاصيل أوردرات اليومية
       const ordersUrl = `${API_BASE_PATH}/api.php?module=sales&action=getJournalOrders&rep_id=${encodeURIComponent(repId)}&journal_ids=${encodeURIComponent(journalIds.join(','))}`;
       const ordersRes = await fetch(ordersUrl).then(r => r.json());
       if (!ordersRes || !ordersRes.success) throw new Error(ordersRes?.message || 'getJournalOrders failed');
@@ -456,33 +401,96 @@ const SalesDailyClose: React.FC = () => {
       const rawDeferred = ordersRes.deferred || [];
       const rawReturned = ordersRes.returned || [];
 
-      // توحيد المعرفات لضمان عدم التكرار (استخدام id أو order_id)
-      const getOrderIdStr = (o: any) => String(o?.id ?? o?.order_id ?? '');
+      // 1. تجميع المرتجع (كامل وجزئي) - ما حدث في هذه اليومية فقط
+      const openJournalId = openDailyInfo ? Number(openDailyInfo.id) : 0;
+      // المرتجع الكامل هو ما ورد في قائمة rawReturned من السيرفر لهذه اليومية
+      // المرتجع الجزئي هو ما ورد في أي قائمة وله حالة journal_status = partial_return لهذه اليومية
+      const allPossibleReturns = [...rawReturned, ...rawActive, ...rawDeferred];
+      const validReturnedOrders = uniqOrdersById(allPossibleReturns.filter((o: any) => {
+        const jId = Number(o.journal_id || o.journalId || 0);
+        const isJournalMatch = jId === openJournalId;
+        const jStatus = String(o?.journal_status || o?.journalStatus || '').toLowerCase();
+        
+        // المرتجع المعتمد لهذه اليومية هو:
+        // 1. أوردر في قائمة rawReturned (التي هي أصلاً مفلترة بالسيرفر)
+        // 2. أوردر في أي قائمة أخرى ولكن حالته في اليومية هي مرتجع جزئي أو مرتجع
+        const isReturnStatus = jStatus === 'returned' || jStatus === 'full_return' || jStatus === 'partial_return' || jStatus === 'partial';
+        
+        // إذا كان الأوردر في rawReturned، فالسيرفر أكد أنه مرتجع لهذه اليومية
+        const isInRawReturned = rawReturned.some((r: any) => getRealOrderId(r) === getRealOrderId(o));
+        
+        return isJournalMatch && (isInRawReturned || isReturnStatus);
+      }));
+      const returnedIds = new Set(validReturnedOrders.map(getRealOrderId));
 
-      // 1. تجميع الاوردرات المنتهية (مسلم ومرتجع) - لها الأولوية القصوى
-      const deliveredCombined = uniqOrdersById(rawDelivered);
-      const validReturnedOrders = uniqOrdersById(rawReturned);
-      const completedIds = new Set([...deliveredCombined, ...validReturnedOrders].map(getOrderIdStr).filter(id => id !== ''));
+      // 2. تجميع المسلم (كامل وجزئي) - ما حدث في هذه اليومية فقط
+      const allPossibleDelivered = [...rawDelivered, ...rawActive, ...rawDeferred, ...rawReturned];
+      const deliveredCombined = uniqOrdersById(allPossibleDelivered.filter((o: any) => {
+        const jId = Number(o.journal_id || o.journalId || 0);
+        const isJournalMatch = jId === openJournalId;
+        const jStatus = String(o?.journal_status || o?.journalStatus || '').toLowerCase();
+        
+        // الأوردر المسلم في هذه اليومية هو أي أوردر ينتمي لليومية ويحتوي على قطع مسلمة
+        // ويستثنى منه المرتجع الكامل فقط
+        const isFullReturn = jStatus === 'returned' || jStatus === 'full_return';
+        
+        // التحقق من وجود قطع مسلمة فعلياً (أو وجوده في قائمة المسلم من السيرفر)
+        const hasDeliveredPieces = computeDeliveredNetPieces(o) > 0;
+        const isInRawDelivered = rawDelivered.some((r: any) => getRealOrderId(r) === getRealOrderId(o));
 
-      // 2. تجميع الاوردرات الحالية (مع استبعاد المنتهي منها)
-      const activeUnique = uniqOrdersById(rawActive);
-      const exclusiveActive = activeUnique.filter(o => !completedIds.has(getOrderIdStr(o)));
-      const activeIds = new Set(exclusiveActive.map(getOrderIdStr).filter(id => id !== ''));
+        // إذا كان الأوردر في قائمة rawDelivered فهو بالتأكيد مسلم لهذه اليومية
+        if (isInRawDelivered && isJournalMatch) return true;
 
-      // 3. تجميع الاوردرات المؤجلة (مع استبعاد المنتهي والحالي منها)
+        // غير ذلك، يجب أن يكون ضمن اليومية، وليس مرتجعاً كاملاً، وله قطع مسلمة
+        return isJournalMatch && !isFullReturn && hasDeliveredPieces;
+      }));
+      const deliveredIds = new Set(deliveredCombined.map(getRealOrderId));
+
+      // 3. تجميع الاوردرات المؤجلة (النزول) - ما حدث في هذه اليومية فقط
       const deferredUnique = uniqOrdersById(rawDeferred);
+      // الاوردر المؤجل هو الذي حالته حالياً deferred، بغض النظر عما إذا كان قد سلم جزءاً منه أم لا
+      // نقوم بفلترة المؤجل لليومية الحالية فقط لعرضه في "ملخص اليومية"
       const exclusiveDeferredOrders = deferredUnique.filter(o => {
-        const id = getOrderIdStr(o);
-        return id !== '' && !completedIds.has(id) && !activeIds.has(id);
+        const jId = Number(o.journal_id || o.journalId || 0);
+        return jId === openJournalId;
+      });
+      const deferredIds = new Set(exclusiveDeferredOrders.map(getRealOrderId));
+
+      // 4. تجميع الاوردرات الحالية مع المندوب (Active + العهدة المباشرة) - الحالة الفيزيائية الحالية
+      const allActiveUnique = uniqOrdersById([...rawActive, ...directActiveOrders]); 
+      const exclusiveActive = allActiveUnique.filter(o => {
+        const id = getRealOrderId(o);
+        const jId = Number(o.journal_id || o.journalId || 0);
+        
+        // الأوردرات التي تظهر في العهدة الحالية هي:
+        // 1. أوردرات اليومية الحالية التي لم تُغلق بعد (delivered/returned)
+        // 2. أوردرات العهدة المباشرة (journal_id = 0)
+        const isFromThisJournal = jId === openJournalId;
+        const isDirectCustody = jId === 0;
+        
+        if (!isFromThisJournal && !isDirectCustody) return false;
+
+        const status = String(o.status || '').toLowerCase();
+        const orderStatus = String(o.order_status || '').toLowerCase();
+        
+        // إذا كان الاوردر تم تسليمه بالكامل أو إرجاعه بالكامل، لا يظهر في العهدة الحالية
+        if (status === 'delivered' || orderStatus === 'delivered') return false;
+        if (status === 'returned' || orderStatus === 'returned' || status === 'full_return' || orderStatus === 'full_return') return false;
+        
+        // إذا كان مؤجلاً بالفعل في اليومية الحالية، يظهر في قائمة المؤجل فقط
+        if (deferredIds.has(id)) return false;
+        
+        return true;
       });
 
       // حساب القيم بدقة من القوائم النهائية المفلترة
       const deliveredValue = deliveredCombined.reduce((sum: number, order: any) => sum + computeDeliveredNetValue(order), 0);
       const deliveredPieces = deliveredCombined.reduce((sum: number, order: any) => sum + computeDeliveredNetPieces(order), 0);
-      
+
+      // المرتجع: يشمل المرتجع الكامل والجزئي
       const returnedValue = validReturnedOrders.reduce((sum: number, order: any) => sum + computeReturnedOrderValue(order), 0);
       const returnedPieces = validReturnedOrders.reduce((sum: number, order: any) => sum + computeReturnedPieces(order), 0);
-      
+
       const deferredValue = exclusiveDeferredOrders.reduce((sum: number, order: any) => sum + computeOrderValueWithoutShipping(order), 0);
       const deferredPieces = exclusiveDeferredOrders.reduce((sum: number, order: any) => sum + computePieces(order), 0);
 
@@ -493,7 +501,7 @@ const SalesDailyClose: React.FC = () => {
         returnedCount: validReturnedOrders.length,
         returnedValue,
       });
-      
+
       setRepExtras({
         deliveredPieces,
         returnedPieces,
@@ -501,7 +509,7 @@ const SalesDailyClose: React.FC = () => {
         deferredPieces,
         deferredValue,
       });
-      
+
       setJournalStats({
         oldOrdersCount: mergedRows.reduce((sum: number, row: any) => sum + toNum(row.opening_orders_count), 0),
         todayOrdersCount: mergedRows.reduce((sum: number, row: any) => sum + toNum(row.orders_assigned_count), 0),
@@ -517,7 +525,7 @@ const SalesDailyClose: React.FC = () => {
       setDeliveredOrdersList(deliveredCombined);
       setReturnedOrdersList(validReturnedOrders);
       setSelectedOrderIdsLocal(exclusiveActive.map((o: any) => o.id));
-      
+
     } catch (e) {
       console.error('Failed to load rep daily close data', e);
       resetDailyCloseState();
@@ -525,10 +533,10 @@ const SalesDailyClose: React.FC = () => {
       setStatsLoading(false);
     }
   };
-  const recalcDeferredExtras = (deferredList:any[]) => {
-    const deferredPieces = (deferredList||[]).reduce((s:number,o:any) => s + computePieces(o), 0);
-    const deferredValue = (deferredList||[]).reduce((s:number,o:any) => s + computeOrderValueWithoutShipping(o), 0);
-    setRepExtras(prev => ({ ...prev, deferredCount: (deferredList||[]).length, deferredPieces, deferredValue }));
+  const recalcDeferredExtras = (deferredList: any[]) => {
+    const deferredPieces = (deferredList || []).reduce((s: number, o: any) => s + computePieces(o), 0);
+    const deferredValue = (deferredList || []).reduce((s: number, o: any) => s + computeOrderValueWithoutShipping(o), 0);
+    setRepExtras(prev => ({ ...prev, deferredCount: (deferredList || []).length, deferredPieces, deferredValue }));
   };
 
   const selectedRep = useMemo(
@@ -587,8 +595,8 @@ const SalesDailyClose: React.FC = () => {
     }
   };
 
-  const loadRepDailyStats = async (repId: string, from?: string, to?: string, journalId: string = 'all') => {
-    await loadRepDailyCloseData(repId, from, to, journalId);
+  const loadRepDailyStats = async (repId: string, journalId: string = 'all') => {
+    await loadRepDailyCloseData(repId, journalId);
   };
 
   const refreshSelectedRepBalanceFromServer = async (repId: string) => {
@@ -633,9 +641,13 @@ const SalesDailyClose: React.FC = () => {
     setRepBalance(bal);
     setPaidAmount(Math.max(0, -bal));
     (async () => {
+      setLoading(true);
       try {
+        // تنفيذ أوامر التحديث (مثل زر تحديث)
+        await Promise.all([loadReps(), loadTreasuriesAndDefaults()]);
+
         // جلب اليومية المفتوحة دائماً
-        let openId = 'none'; // none = تأكيد أنه لا توجد يومية مفتوحة
+        let openId = 'none';
         try {
           const odResp = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getRepOpenDaily&rep_id=${selectedRepId}`);
           const odJson = await odResp.json();
@@ -648,45 +660,51 @@ const SalesDailyClose: React.FC = () => {
         } catch { setOpenDailyInfo(null); }
 
         if (openId === 'none') {
-          // لا توجد يومية مفتوحة — تصفير كل شيء
           resetDailyCloseState();
+          // تحديث الرصيد بدقة حتى لو مفيش يومية
+          await refreshSelectedRepBalanceFromServer(selectedRepId);
           return;
         }
 
-        // تحميل بيانات اليومية المفتوحة فقط
-        await loadRepDailyCloseData(selectedRepId, statsFrom, statsTo, openId);
+        // تحميل بيانات اليومية المفتوحة + تحديث رصيد المندوب من السيرفر
+        await Promise.all([
+          loadRepDailyCloseData(selectedRepId, openId),
+          refreshSelectedRepBalanceFromServer(selectedRepId)
+        ]);
       } catch (e) {
         console.error('Failed to load journal data for rep', e);
         resetDailyCloseState();
         setOpenDailyInfo(null);
+      } finally {
+        setLoading(false);
       }
     })();
-  }, [selectedRepId, reps]);
+  }, [selectedRepId]);
 
   // لا داعي لـ useEffect منفصل للـ selectedJournalId لأنه مشتق من openDailyInfo
 
   const toggleSelectAllLocal = () => {
-    if ((selectedOrderIdsLocal||[]).length === (repOrders||[]).length) {
+    if ((selectedOrderIdsLocal || []).length === (repOrders || []).length) {
       setSelectedOrderIdsLocal([]);
     } else {
-      setSelectedOrderIdsLocal((repOrders||[]).map((o:any)=>o.id));
+      setSelectedOrderIdsLocal((repOrders || []).map((o: any) => o.id));
     }
   };
 
-  const toggleSelectOrderLocal = (id:number) => {
-    setSelectedOrderIdsLocal(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id]);
+  const toggleSelectOrderLocal = (id: number) => {
+    setSelectedOrderIdsLocal(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   };
 
   const markSelectedDelivered = async () => {
     const ids = selectedOrderIdsLocal.slice();
-    if (ids.length === 0) { 
-      Swal.fire('تحذير','اختر الاوردرات أولاً','warning'); 
-      return; 
+    if (ids.length === 0) {
+      Swal.fire('تحذير', 'اختر الاوردرات أولاً', 'warning');
+      return;
     }
     try {
       setLoading(true);
       // Separate orders into partial-return cases vs full deliveries
-      const moved = (repOrders || []).filter((o:any)=> ids.includes(o.id));
+      const moved = (repOrders || []).filter((o: any) => ids.includes(o.id));
       const partialIds: number[] = [];
       const fullIds: number[] = [];
       moved.forEach((o: any) => {
@@ -698,8 +716,8 @@ const SalesDailyClose: React.FC = () => {
       let ordersUpdateFailed: number[] = [];
       if (fullIds.length > 0) {
         console.log('Sending update for orders:', fullIds, 'with status: delivered');
-        const respPromises = fullIds.map(id => fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, { 
-          method: 'POST', headers: {'Content-Type':'application/json'},
+        const respPromises = fullIds.map(id => fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id, status: 'delivered', repId: Number(selectedRepId) })
         }).catch(err => ({ ok: false, error: err })));
 
@@ -725,7 +743,7 @@ const SalesDailyClose: React.FC = () => {
       if (fullIds.length > 0) {
         try {
           const r = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
-            method: 'POST', headers: {'Content-Type':'application/json'},
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: fullIds, status: 'delivered' })
           });
           const j = await r.json().catch(() => null);
@@ -735,7 +753,7 @@ const SalesDailyClose: React.FC = () => {
       if (partialIds.length > 0) {
         try {
           const r2 = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
-            method: 'POST', headers: {'Content-Type':'application/json'},
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: partialIds, status: 'partial_return' })
           });
           const j2 = await r2.json().catch(() => null);
@@ -748,7 +766,7 @@ const SalesDailyClose: React.FC = () => {
         if (typeof window !== 'undefined') (window as any).__lastMarkDelivered = { ordersUpdateFailed, journalErrors };
         Swal.fire('خطأ', 'فشل تحديث بعض الاوردرات على الخادم. تحقق من السجل.', 'error');
         // Re-fetch to ensure UI reflects server state
-        await loadRepDailyStats(selectedRepId, statsFrom, statsTo, selectedJournalId);
+        await loadRepDailyStats(selectedRepId, selectedJournalId);
         return;
       }
 
@@ -756,7 +774,7 @@ const SalesDailyClose: React.FC = () => {
       // so the order appears in delivered lists. Call orders.update -> status: 'delivered' for partialIds.
       if (partialIds.length > 0) {
         const respPromises2 = partialIds.map(id => fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
-          method: 'POST', headers: {'Content-Type':'application/json'},
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id, status: 'delivered', repId: Number(selectedRepId) })
         }).catch(err => ({ ok: false, error: err })));
 
@@ -775,115 +793,96 @@ const SalesDailyClose: React.FC = () => {
           console.warn('markSelectedDelivered: failed to mark partialIds delivered', failedPartialUpdates);
           if (typeof window !== 'undefined') (window as any).__lastMarkDelivered = { failedPartialUpdates };
           Swal.fire('تحذير', 'تم تحديث اليومية لكن فشل تحديث حالة بعض الاوردرات إلى تم التسليم.', 'warning');
-          await loadRepDailyStats(selectedRepId, statsFrom, statsTo, selectedJournalId);
+          await loadRepDailyStats(selectedRepId, selectedJournalId);
           return;
         }
 
-      // store last responses for debugging in browser console
-      try {
-        if (typeof window !== 'undefined') {
-          (window as any).__lastMarkDelivered = (window as any).__lastMarkDelivered || {};
-          (window as any).__lastMarkDelivered.timestamp = new Date().toISOString();
-        }
-      } catch (e) {}
+        // store last responses for debugging in browser console
+        try {
+          if (typeof window !== 'undefined') {
+            (window as any).__lastMarkDelivered = (window as any).__lastMarkDelivered || {};
+            (window as any).__lastMarkDelivered.timestamp = new Date().toISOString();
+          }
+        } catch (e) { }
       }
 
-      // Update local lists: remove all moved from repOrders, add them to delivered list; partial ones should also be present in returned list
-      setRepOrders(prev => prev.filter((o:any)=> !ids.includes(o.id)));
-      setDeferredOrders(prev => prev.filter((o:any)=> !ids.includes(o.id)));
-      setDeliveredOrdersList(prev => uniqOrdersById([...(prev || []), ...moved]));
-      // ensure partial returned orders are in returnedOrdersList
-      if (partialIds.length > 0) {
-        const partialMoved = moved.filter((o:any)=> partialIds.includes(Number(o.id)));
-        setReturnedOrdersList(prev => uniqOrdersById([...(prev || []), ...partialMoved]));
-      }
+      // Re-fetch everything from server to ensure UI reflects real state and stats are correct
+      await Promise.all([
+        refreshSelectedRepBalanceFromServer(selectedRepId),
+        loadRepDailyStats(selectedRepId, openDailyInfo?.id ? String(openDailyInfo.id) : 'none')
+      ]);
 
       setSelectedOrderIdsLocal([]);
-
-      const newDelivered = uniqOrdersById([...(deliveredOrdersList || []), ...moved]);
-      setRepStats(prev => {
-        const deliveredValue = newDelivered.reduce((s: number, o: any) => s + computeDeliveredNetValue(o), 0);
-        return {
-          ...prev,
-          deliveredCount: newDelivered.length,
-          deliveredValue
-        };
-      });
-      setRepExtras(prev => ({ 
-        ...prev, 
-        deliveredPieces: newDelivered.reduce((s:number,o:any) => s + computeDeliveredNetPieces(o), 0) 
-      }));
-
       Swal.fire('تم', `تم تحديث حالة ${ids.length} أوردر بنجاح.`, 'success');
     } catch (e) {
-      console.error(e); 
-      Swal.fire('خطأ','فشل تحديث حالة الاوردرات.','error');
-    } finally { 
-      setLoading(false); 
+      console.error(e);
+      Swal.fire('خطأ', 'فشل تحديث حالة الاوردرات.', 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
   const moveSelectedToDeferred = async () => {
     const ids = selectedOrderIdsLocal.slice();
-    if (ids.length === 0) { 
-      Swal.fire('تحذير','اختر الاوردرات أولاً','warning'); 
-      return; 
+    if (ids.length === 0) {
+      Swal.fire('تحذير', 'اختر الاوردرات أولاً', 'warning');
+      return;
     }
     try {
       setLoading(true);
       const resp = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
-        method: 'POST', headers: {'Content-Type':'application/json'},
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: ids, status: 'deferred' })
       });
       const jj = await resp.json().catch(() => null);
-      
-      await loadRepDailyStats(selectedRepId, statsFrom, statsTo, selectedJournalId);
+
+      await loadRepDailyStats(selectedRepId, selectedJournalId);
       setSelectedOrderIdsLocal([]);
       Swal.fire('تم', 'تم نقل الاوردرات المحددة إلى المؤجلة.', 'success');
-    } catch (e) { 
-      console.error(e); 
-      Swal.fire('خطأ','فشل نقل الاوردرات.','error'); 
-    } finally { 
-      setLoading(false); 
+    } catch (e) {
+      console.error(e);
+      Swal.fire('خطأ', 'فشل نقل الاوردرات.', 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const moveSingleToDeferred = async (order:any) => {
+  const moveSingleToDeferred = async (order: any) => {
     try {
       setLoading(true);
       await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
-        method: 'POST', headers: {'Content-Type':'application/json'},
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: [order.id], status: 'deferred' })
       });
-      await loadRepDailyStats(selectedRepId, statsFrom, statsTo, selectedJournalId);
-    } catch (e) { 
-      console.error(e); 
-      Swal.fire('خطأ','فشل نقل الاوردر.','error'); 
-    } finally { 
-      setLoading(false); 
+      await loadRepDailyStats(selectedRepId, selectedJournalId);
+    } catch (e) {
+      console.error(e);
+      Swal.fire('خطأ', 'فشل نقل الاوردر.', 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const moveDeferredBack = async (order:any) => {
+  const moveDeferredBack = async (order: any) => {
     try {
       setLoading(true);
       await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
-        method: 'POST', headers: {'Content-Type':'application/json'},
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: [order.id], status: 'with_rep' })
       });
 
-      await fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, { 
-        method: 'POST', 
-        headers: {'Content-Type':'application/json'}, 
-        body: JSON.stringify({ id: order.id, status: 'with_rep', repId: Number(selectedRepId) }) 
+      await fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: order.id, status: 'with_rep', repId: Number(selectedRepId) })
       });
 
-      await loadRepDailyStats(selectedRepId, statsFrom, statsTo, selectedJournalId);
-    } catch (e) { 
-      console.error(e); 
-      Swal.fire('خطأ','فشل استرجاع الاوردر.','error'); 
-    } finally { 
-      setLoading(false); 
+      await loadRepDailyStats(selectedRepId, selectedJournalId);
+    } catch (e) {
+      console.error(e);
+      Swal.fire('خطأ', 'فشل استرجاع الاوردر.', 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1002,7 +1001,10 @@ const SalesDailyClose: React.FC = () => {
           } catch (e) { console.warn('closeRepDaily failed (non-critical)', e); }
         }
       }
-      await Promise.all([refreshSelectedRepBalanceFromServer(selectedRepId), loadRepDailyStats(selectedRepId, statsFrom, statsTo, selectedJournalId)]);
+      await Promise.all([
+        refreshSelectedRepBalanceFromServer(selectedRepId),
+        loadRepDailyStats(selectedRepId, selectedJournalId)
+      ]);
     } catch (e) {
       console.error('Settle daily failed', e);
       Swal.fire('خطأ', 'فشل الاتصال بالخادم أثناء تنفيذ التقفيل.', 'error');
@@ -1027,7 +1029,12 @@ const SalesDailyClose: React.FC = () => {
               setLoading(true);
               try {
                 await Promise.all([loadReps(), loadTreasuriesAndDefaults()]);
-                if (selectedRepId) await Promise.all([refreshSelectedRepBalanceFromServer(selectedRepId), loadRepDailyStats(selectedRepId, statsFrom, statsTo, selectedJournalId)]);
+                if (selectedRepId) {
+                  await Promise.all([
+                    refreshSelectedRepBalanceFromServer(selectedRepId),
+                    loadRepDailyStats(selectedRepId, selectedJournalId)
+                  ]);
+                }
               } finally {
                 setLoading(false);
               }
@@ -1053,14 +1060,14 @@ const SalesDailyClose: React.FC = () => {
             disabled={loading}
           />
           {selectedRepId && (
-            <div className="mt-2">
+            <div className="mt-2 flex flex-wrap gap-2">
               {openDailyInfo ? (
-                <span className="inline-flex items-center gap-1.5 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 px-3 py-1 rounded-full text-xs font-bold border border-green-200 dark:border-green-800">
+                <span className="inline-flex items-center gap-1.5 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 px-3 py-1 rounded-full text-[10px] font-bold border border-green-200 dark:border-green-800">
                   <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block" />
                   يومية مفتوحة: {openDailyInfo.daily_code}
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-1.5 bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 px-3 py-1 rounded-full text-xs border border-rose-200 dark:border-rose-800">
+                <span className="inline-flex items-center gap-1.5 bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 px-3 py-1 rounded-full text-[10px] border border-rose-200 dark:border-rose-800">
                   <span className="w-1.5 h-1.5 rounded-full bg-rose-500 inline-block" />
                   لا يوجد يومية مفتوحة
                 </span>
@@ -1068,6 +1075,7 @@ const SalesDailyClose: React.FC = () => {
             </div>
           )}
         </div>
+
         <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
           <div className="text-xs text-slate-500 mb-2">طريقة الدفع</div>
           <div className="flex gap-2 mb-3">
@@ -1150,86 +1158,6 @@ const SalesDailyClose: React.FC = () => {
         </div>
       </div>
 
-      {/* Period Summary box (Company-level -> Rep-level now) */}
-      <div className="mt-4 border border-slate-200 dark:border-slate-700 rounded-3xl p-5 bg-white dark:bg-slate-900 shadow-sm">
-        <div className="flex flex-wrap items-center gap-3 mb-4">
-          <div className="text-sm font-black flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" />
-            ملخص الفترة الخاصة بالمندوب
-          </div>
-          <div className="flex items-center gap-2 flex-wrap text-sm">
-            <div className="text-xs text-slate-500">من</div>
-            <input type="date" value={periodStart} onChange={e=>setPeriodStart(e.target.value)} className="border border-slate-200 dark:border-slate-600 p-1.5 rounded-xl bg-white text-slate-900 dark:bg-slate-800 dark:text-white text-xs" />
-            <div className="text-xs text-slate-500">إلى</div>
-            <input type="date" value={periodEnd} onChange={e=>setPeriodEnd(e.target.value)} className="border border-slate-200 dark:border-slate-600 p-1.5 rounded-xl bg-white text-slate-900 dark:bg-slate-800 dark:text-white text-xs" />
-            
-            <div className="mr-4 flex gap-1">
-              <button onClick={()=>setPeriodPreset('today')} className="px-2.5 py-1 text-xs font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-lg transition-colors">اليوم</button>
-              <button onClick={()=>setPeriodPreset('week')} className="px-2.5 py-1 text-xs font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-lg transition-colors">الأسبوع</button>
-              <button onClick={()=>setPeriodPreset('month')} className="px-2.5 py-1 text-xs font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-lg transition-colors">الشهر</button>
-            </div>
-            <div className="mr-auto">
-              <button onClick={fetchPeriodSummary} disabled={!selectedRepId || periodLoading} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg disabled:opacity-50 transition-colors">
-                تحديث الفترة
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {!selectedRepId ? (
-          <div className="text-sm font-bold text-amber-700 dark:text-amber-400 p-3 bg-amber-50 dark:bg-amber-900/30 rounded-xl border border-amber-200 dark:border-amber-800 flex items-center justify-center">
-            برجاء اختيار المندوب أولاً لعرض ملخص الفترة الخاص به.
-          </div>
-        ) : periodLoading ? (
-          <div className="text-sm text-slate-500 flex items-center justify-center py-4">جاري تحميل بيانات الفترة...</div>
-        ) : periodSummary ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-            <div className="bg-white dark:bg-slate-900 border border-emerald-100 dark:border-slate-700 rounded-2xl p-4 flex flex-col justify-between">
-              <div>
-                <div className="flex items-start justify-between mb-2">
-                  <span className="text-[12px] font-black text-emerald-600 uppercase tracking-wide">إجمالي تسليم (الفترة)</span>
-                </div>
-                <div className="text-lg font-black text-emerald-700 dark:text-emerald-400 leading-none mb-2">
-                  {Number(periodSummary.delivered?.count || 0).toLocaleString()} <span className="text-xs font-bold text-slate-500 mr-1">طلب</span>
-                  {periodSummary._delivered_list?.some((o: any) => isPartialReturn(o)) && (
-                    <span className="text-xs font-bold text-amber-600 mr-1">(تسليم جزئي)</span>
-                  )}
-                </div>
-                <div className="space-y-1 text-xs text-slate-600 dark:text-slate-400">
-                  <div className="flex justify-between"><span>القطع المسلمة</span><span className="font-black">{Number(periodSummary.delivered?.pieces || 0).toLocaleString()}</span></div>
-                  <div className="flex justify-between"><span>القيمة</span><span className="font-black text-emerald-600">{Number(periodSummary.delivered?.value || 0).toLocaleString()} ج.م</span></div>
-                </div>
-              </div>
-              <button onClick={() => showPeriodDetails('delivered')} className="mt-3 flex items-center justify-center gap-1 text-xs bg-slate-50 dark:bg-slate-800 hover:bg-emerald-50 text-slate-600 hover:text-emerald-600 py-1.5 px-3 rounded-xl transition-colors w-full border border-slate-100 dark:border-slate-700">
-                <Eye className="w-3.5 h-3.5" /> عرض التفاصيل
-              </button>
-            </div>
-
-
-
-            <div className="bg-white dark:bg-slate-900 border border-rose-100 dark:border-slate-700 rounded-2xl p-4 flex flex-col justify-between">
-              <div>
-                <div className="flex items-start justify-between mb-2">
-                  <span className="text-[12px] font-black text-rose-600 uppercase tracking-wide">إجمالي مرتجع (الفترة)</span>
-                </div>
-                <div className="text-lg font-black text-rose-700 dark:text-rose-400 leading-none mb-2">
-                  {Number(periodSummary.returned?.count || 0).toLocaleString()} <span className="text-xs font-bold text-slate-500 mr-1">طلب</span>
-                </div>
-                <div className="space-y-1 text-xs text-slate-600 dark:text-slate-400">
-                  <div className="flex justify-between"><span>القطع المرتجعة</span><span className="font-black">{Number(periodSummary.returned?.pieces || 0).toLocaleString()}</span></div>
-                  <div className="flex justify-between"><span>القيمة</span><span className="font-black text-rose-600">{Number(periodSummary.returned?.value || 0).toLocaleString()} ج.م</span></div>
-                </div>
-              </div>
-              <button onClick={() => showPeriodDetails('returned')} className="mt-3 flex items-center justify-center gap-1 text-xs bg-slate-50 dark:bg-slate-800 hover:bg-rose-50 text-slate-600 hover:text-rose-600 py-1.5 px-3 rounded-xl transition-colors w-full border border-slate-100 dark:border-slate-700">
-                <Eye className="w-3.5 h-3.5" /> عرض التفاصيل
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="text-sm text-slate-500 flex items-center justify-center py-4">لا توجد بيانات للفترة المحددة.</div>
-        )}
-      </div>
-
       <div className="mb-4 rounded-3xl border border-blue-100 bg-gradient-to-br from-blue-50 to-slate-50 dark:from-slate-800 dark:to-slate-900 dark:border-slate-700 p-5 shadow-sm mt-4">
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -1241,9 +1169,7 @@ const SalesDailyClose: React.FC = () => {
                   : `ملخص اليومية — ${selectedRep?.name || ''}`
                 : 'ملخص اليومية'}
             </span>
-            {statsLoading && (
-              <RefreshCw className="w-3.5 h-3.5 text-slate-400 animate-spin flex-shrink-0" />
-            )}
+            {/* تمت إزالة علامة التحميل هنا */}
             {openDailyInfo && (
               <span className="text-[10px] bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-full font-bold flex-shrink-0">
                 اليومية المفتوحة
@@ -1369,8 +1295,8 @@ const SalesDailyClose: React.FC = () => {
         <div className="lg:col-span-1 space-y-4">
           <div className="rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 shadow-sm">
             <div className="flex items-center gap-2 mb-4 text-slate-900 dark:text-white font-black">
-                <User className="w-5 h-5 text-blue-600" />
-                معاملة مالية للمندوب
+              <User className="w-5 h-5 text-blue-600" />
+              معاملة مالية للمندوب
             </div>
 
             <div className="grid grid-cols-1 gap-3">
@@ -1378,15 +1304,15 @@ const SalesDailyClose: React.FC = () => {
                 <div className="text-xs text-slate-600 dark:text-slate-200 font-black mb-2">نوع المعاملة</div>
                 <div className="flex items-center gap-3">
                   <label className="inline-flex items-center gap-2 text-sm">
-                    <input type="radio" name="rep_tx" checked={repTxType==='bonus'} onChange={() => setRepTxType('bonus')} />
+                    <input type="radio" name="rep_tx" checked={repTxType === 'bonus'} onChange={() => setRepTxType('bonus')} />
                     <span>اضافة حافز للمندوب</span>
                   </label>
                   <label className="inline-flex items-center gap-2 text-sm">
-                    <input type="radio" name="rep_tx" checked={repTxType==='penalty'} onChange={() => setRepTxType('penalty')} />
+                    <input type="radio" name="rep_tx" checked={repTxType === 'penalty'} onChange={() => setRepTxType('penalty')} />
                     <span>تطبيق غرامه على المندوب</span>
                   </label>
                   <label className="inline-flex items-center gap-2 text-sm">
-                    <input type="radio" name="rep_tx" checked={repTxType==='none'} onChange={() => setRepTxType('none')} />
+                    <input type="radio" name="rep_tx" checked={repTxType === 'none'} onChange={() => setRepTxType('none')} />
                     <span>لا شيء</span>
                   </label>
                 </div>
@@ -1399,7 +1325,7 @@ const SalesDailyClose: React.FC = () => {
                     className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl px-3 py-2 text-sm"
                     value={repTxAmount}
                     onChange={e => setRepTxAmount(Math.max(0, toNum(e.target.value)))}
-                    disabled={repTxType==='none' || !selectedRepId}
+                    disabled={repTxType === 'none' || !selectedRepId}
                   />
                   <input
                     type="text"
@@ -1407,27 +1333,27 @@ const SalesDailyClose: React.FC = () => {
                     className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl px-3 py-2 text-sm"
                     value={repTxReason}
                     onChange={e => setRepTxReason(e.target.value)}
-                    disabled={repTxType==='none' || !selectedRepId}
+                    disabled={repTxType === 'none' || !selectedRepId}
                   />
 
                   <div className="flex justify-end">
                     <button
                       className="px-3 py-2 rounded-2xl bg-emerald-500 text-white text-sm font-black disabled:opacity-50"
-                      disabled={repTxType==='none' || repTxAmount <= 0 || !selectedRepId || repTxLoading}
+                      disabled={repTxType === 'none' || repTxAmount <= 0 || !selectedRepId || repTxLoading}
                       onClick={async () => {
-                        if (!selectedRepId) { 
-                          Swal.fire('اختر المندوب','يرجى اختيار المندوب أولاً','warning'); 
-                          return; 
+                        if (!selectedRepId) {
+                          Swal.fire('اختر المندوب', 'يرجى اختيار المندوب أولاً', 'warning');
+                          return;
                         }
-                        if (repTxType==='none') return;
+                        if (repTxType === 'none') return;
                         const amt = Math.max(0, toNum(repTxAmount));
-                        if (amt <= 0) { 
-                          Swal.fire('مبلغ غير صالح','ادخل مبلغًا أكبر من صفر','warning'); 
-                          return; 
+                        if (amt <= 0) {
+                          Swal.fire('مبلغ غير صالح', 'ادخل مبلغًا أكبر من صفر', 'warning');
+                          return;
                         }
                         try {
                           setRepTxLoading(true);
-                          const payload:any = {
+                          const payload: any = {
                             related_to_type: 'rep',
                             related_to_id: Number(selectedRepId),
                             amount: amt,
@@ -1446,28 +1372,28 @@ const SalesDailyClose: React.FC = () => {
                           }
                           if (selectedTreasuryId) payload.treasuryId = Number(selectedTreasuryId);
 
-                          const r = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=create`, { 
-                            method: 'POST', 
-                            headers: { 'Content-Type':'application/json' }, 
-                            body: JSON.stringify(payload) 
+                          const r = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=create`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
                           });
                           const j = await r.json();
                           if (j && j.success) {
                             setRepBalance(prev => repTxType === 'bonus' ? prev + amt : prev - amt);
-                            setReps(prev => prev.map(u => String(u.id) === String(selectedRepId) ? { ...u, balance: toNum((u.balance || 0) + (repTxType==='bonus' ? amt : -amt)) } : u));
+                            setReps(prev => prev.map(u => String(u.id) === String(selectedRepId) ? { ...u, balance: toNum((u.balance || 0) + (repTxType === 'bonus' ? amt : -amt)) } : u));
                             Swal.fire('تم', repTxType === 'bonus' ? 'تم إضافة الحافز وتحديث حساب المندوب.' : 'تم تطبيق الغرامة وتحديث حساب المندوب.', 'success');
-                            setRepTxAmount(0); 
-                            setRepTxReason(''); 
+                            setRepTxAmount(0);
+                            setRepTxReason('');
                             setRepTxType('none');
-                            refreshSelectedRepBalanceFromServer(selectedRepId).catch(()=>{});
+                            refreshSelectedRepBalanceFromServer(selectedRepId).catch(() => { });
                           } else {
                             Swal.fire('فشل العملية', j?.message || 'تعذر تسجيل المعاملة.', 'error');
                           }
                         } catch (e) {
-                          console.error('rep tx failed', e); 
-                          Swal.fire('خطأ','فشل الاتصال أثناء تسجيل المعاملة.','error');
-                        } finally { 
-                          setRepTxLoading(false); 
+                          console.error('rep tx failed', e);
+                          Swal.fire('خطأ', 'فشل الاتصال أثناء تسجيل المعاملة.', 'error');
+                        } finally {
+                          setRepTxLoading(false);
                         }
                       }}
                     >
@@ -1492,11 +1418,11 @@ const SalesDailyClose: React.FC = () => {
               <div className="text-xs text-slate-700 dark:text-slate-200 mb-2">طريقة التسوية</div>
               <div className="flex items-center gap-3 mb-3">
                 <label className="inline-flex items-center gap-2 text-xs">
-                  <input type="radio" name="settle_dir" checked={settlementDirection==='collect'} onChange={()=>setSettlementDirection('collect')} />
+                  <input type="radio" name="settle_dir" checked={settlementDirection === 'collect'} onChange={() => setSettlementDirection('collect')} />
                   <span className="text-slate-800 dark:text-slate-200">تحصيل من المندوب</span>
                 </label>
                 <label className="inline-flex items-center gap-2 text-xs">
-                  <input type="radio" name="settle_dir" checked={settlementDirection==='pay'} onChange={()=>setSettlementDirection('pay')} />
+                  <input type="radio" name="settle_dir" checked={settlementDirection === 'pay'} onChange={() => setSettlementDirection('pay')} />
                   <span className="text-slate-800 dark:text-slate-200">دفع إلى المندوب</span>
                 </label>
               </div>
@@ -1606,11 +1532,11 @@ const SalesDailyClose: React.FC = () => {
                       return (
                         <div key={o.id} className="flex items-center justify-between py-2 px-1 hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
                           <div className="flex items-center gap-3">
-                            <input 
-                              type="checkbox" 
-                              checked={selectedOrderIdsLocal.includes(o.id)} 
-                              onChange={() => toggleSelectOrderLocal(o.id)} 
-                              className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer" 
+                            <input
+                              type="checkbox"
+                              checked={selectedOrderIdsLocal.includes(o.id)}
+                              onChange={() => toggleSelectOrderLocal(o.id)}
+                              className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                             />
                             <div>
                               <div className="flex items-center gap-2 flex-wrap">
@@ -1636,8 +1562,8 @@ const SalesDailyClose: React.FC = () => {
                                 {money(originalValue)} {currencySymbol}
                               </div>
                             )}
-                            <button 
-                              onClick={() => moveSingleToDeferred(o)} 
+                            <button
+                              onClick={() => moveSingleToDeferred(o)}
                               className="px-2.5 py-1 text-[11px] font-bold rounded bg-amber-100 hover:bg-amber-200 text-amber-700 dark:bg-amber-900/40 dark:hover:bg-amber-900/60 dark:text-amber-400 transition-colors"
                             >
                               نزول
@@ -1665,11 +1591,11 @@ const SalesDailyClose: React.FC = () => {
                         <div key={o.id} className="flex flex-col border border-slate-200 dark:border-slate-700 rounded-xl p-3 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors bg-white dark:bg-slate-900 shadow-sm">
                           <div className="flex items-start justify-between mb-2">
                             <div className="flex items-start gap-3">
-                              <input 
-                                type="checkbox" 
-                                checked={selectedOrderIdsLocal.includes(o.id)} 
-                                onChange={() => toggleSelectOrderLocal(o.id)} 
-                                className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 mt-0.5 cursor-pointer" 
+                              <input
+                                type="checkbox"
+                                checked={selectedOrderIdsLocal.includes(o.id)}
+                                onChange={() => toggleSelectOrderLocal(o.id)}
+                                className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 mt-0.5 cursor-pointer"
                               />
                               <div>
                                 <div className="flex items-center gap-2 flex-wrap">
@@ -1683,8 +1609,8 @@ const SalesDailyClose: React.FC = () => {
                               </div>
                             </div>
                             <div className="flex items-center gap-2">
-                              <button 
-                                onClick={() => moveSingleToDeferred(o)} 
+                              <button
+                                onClick={() => moveSingleToDeferred(o)}
                                 className="px-3 py-1.5 text-xs font-bold rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-700 dark:bg-amber-900/40 dark:hover:bg-amber-900/60 dark:text-amber-400 transition-colors"
                               >
                                 نزول
@@ -1695,15 +1621,19 @@ const SalesDailyClose: React.FC = () => {
                           <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-2.5 mb-2 border border-slate-100 dark:border-slate-700/50 ml-7">
                             <p className="text-[10px] text-slate-500 font-bold mb-1.5">ملخص المنتجات:</p>
                             <div className="space-y-1">
-                                {(Array.isArray(o.products) ? o.products : []).slice(0, 2).map((p:any, i:number) => (
-                                    <div key={i} className="flex justify-between text-[11px]">
-                                        <span className="text-slate-700 dark:text-slate-300 truncate max-w-[70%]">{p.name || p.product_name || p.product_id}</span>
-                                        <span className="text-slate-500 font-mono font-bold">x{p.quantity || p.qty}</span>
-                                    </div>
-                                ))}
-                                {(Array.isArray(o.products) ? o.products : []).length > 2 && (
-                                    <p className="text-[10px] text-indigo-500 font-bold pt-1">+ {(Array.isArray(o.products) ? o.products : []).length - 2} منتجات أخرى</p>
-                                )}
+                              {(Array.isArray(o.products) ? o.products : []).map((p: any, i: number) => {
+                                const q = toNum(p.quantity ?? p.qty ?? 0);
+                                if (q <= 0 && (Array.isArray(o.products) && o.products.length > 2)) return null;
+                                return (
+                                  <div key={i} className="flex justify-between text-[11px]">
+                                    <span className={`text-slate-700 dark:text-slate-300 truncate max-w-[70%] ${q <= 0 ? 'line-through opacity-50' : ''}`}>{p.name || p.product_name || p.product_id}</span>
+                                    <span className={`text-slate-500 font-mono font-bold ${q <= 0 ? 'text-rose-400' : ''}`}>x{q}</span>
+                                  </div>
+                                );
+                              }).filter(Boolean).slice(0, 2)}
+                              {(Array.isArray(o.products) ? o.products : []).length > 2 && (
+                                <p className="text-[10px] text-indigo-500 font-bold pt-1">+ {(Array.isArray(o.products) ? o.products : []).length - 2} منتجات أخرى</p>
+                              )}
                             </div>
                           </div>
 
@@ -1711,7 +1641,7 @@ const SalesDailyClose: React.FC = () => {
                             {isPartial ? (
                               <div className="text-right w-full">
                                 <div className="text-sm font-black text-emerald-600 dark:text-emerald-400">
-                                  {money(netValue)} {currencySymbol} 
+                                  {money(netValue)} {currencySymbol}
                                   <span className="text-slate-400 font-normal mr-1 text-[10px] line-through">(أصل المبلغ: {money(originalValue)})</span>
                                 </div>
                                 <div className="text-[10px] text-amber-600 dark:text-amber-400 font-medium mt-0.5">
@@ -1762,23 +1692,23 @@ const SalesDailyClose: React.FC = () => {
                   </div>
                 </div>
               </div>
-              
+
               {deferredOrdersViewMode === 'list' ? (
                 <div className="divide-y max-h-96 overflow-y-auto pr-1">
                   {deferredOrders.length === 0 ? (
                     <div className="text-xs text-slate-400 text-center p-3">لا توجد اوردرات مؤجلة.</div>
                   ) : (
-                    deferredOrdersSorted.map((o:any) => (
+                    deferredOrdersSorted.map((o: any) => (
                       <div key={o.id} className="flex items-center justify-between py-2 px-1 hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
                         <div>
-                          <div className="text-sm font-bold text-slate-800 dark:text-slate-100">#{o.orderNumber||o.order_number} — {o.customerName||o.customer_name||o.name}</div>
+                          <div className="text-sm font-bold text-slate-800 dark:text-slate-100">#{o.orderNumber || o.order_number} — {o.customerName || o.customer_name || o.name}</div>
                         </div>
                         <div className="flex items-center gap-4">
                           <div className="text-xs font-black text-emerald-600 dark:text-emerald-400">
                             {money(computeOrderValueWithoutShipping(o))} {currencySymbol}
                           </div>
-                          <button 
-                            onClick={() => moveDeferredBack(o)} 
+                          <button
+                            onClick={() => moveDeferredBack(o)}
                             className="px-2.5 py-1 text-[11px] font-bold rounded bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 transition-colors"
                           >
                             ارجاع
@@ -1790,33 +1720,66 @@ const SalesDailyClose: React.FC = () => {
                 </div>
               ) : (
                 <div className="space-y-2 max-h-96 overflow-y-auto pr-1 pb-1">
-                  {deferredOrders.length === 0 ? <div className="text-xs text-slate-400 text-center p-3">لا توجد اوردرات مؤجلة.</div> : deferredOrdersSorted.map((o:any) => (
+                  {deferredOrders.length === 0 ? <div className="text-xs text-slate-400 text-center p-3">لا توجد اوردرات مؤجلة.</div> : deferredOrdersSorted.map((o: any) => {
+                    const netPieces = computeDeliveredNetPieces(o);
+                    const returnedPieces = computeReturnedPieces(o);
+                    const originalPieces = computeOriginalPieces(o);
+                    const netValue = computeDeliveredNetValue(o);
+                    const originalValue = computeOriginalOrderValue(o);
+                    const isPartial = isPartialReturn(o);
+
+                    return (
                     <div key={o.id} className="flex flex-col border border-slate-200 dark:border-slate-700 rounded-xl p-3 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors bg-white dark:bg-slate-900 shadow-sm">
                       <div className="flex items-start justify-between mb-2">
-                        <div className="text-sm font-bold text-slate-800 dark:text-slate-100">#{o.orderNumber||o.order_number} — {o.customerName||o.customer_name||o.name}</div>
+                        <div>
+                          <div className="text-sm font-bold text-slate-800 dark:text-slate-100">#{o.orderNumber || o.order_number} — {o.customerName || o.customer_name || o.name}</div>
+                          {isPartial && (
+                            <span className="bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-2 py-0.5 rounded text-[10px] font-bold whitespace-nowrap mt-1 inline-block">
+                              مرتجع جزئي
+                            </span>
+                          )}
+                        </div>
                         <button onClick={() => moveDeferredBack(o)} className="px-3 py-1.5 text-xs font-bold rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 transition-colors">ارجاع</button>
                       </div>
 
                       <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-2.5 mb-2 border border-slate-100 dark:border-slate-700/50">
                         <p className="text-[10px] text-slate-500 font-bold mb-1.5">ملخص المنتجات:</p>
                         <div className="space-y-1">
-                            {(Array.isArray(o.products) ? o.products : []).slice(0, 2).map((p:any, i:number) => (
-                                <div key={i} className="flex justify-between text-[11px]">
-                                    <span className="text-slate-700 dark:text-slate-300 truncate max-w-[70%]">{p.name || p.product_name || p.product_id}</span>
-                                    <span className="text-slate-500 font-mono font-bold">x{p.quantity || p.qty}</span>
-                                </div>
-                            ))}
-                            {(Array.isArray(o.products) ? o.products : []).length > 2 && (
-                                <p className="text-[10px] text-indigo-500 font-bold pt-1">+ {(Array.isArray(o.products) ? o.products : []).length - 2} منتجات أخرى</p>
-                            )}
+                          {(Array.isArray(o.products) ? o.products : []).map((p: any, i: number) => {
+                            const q = toNum(p.quantity ?? p.qty ?? 0);
+                            if (q <= 0 && (Array.isArray(o.products) && o.products.length > 2)) return null;
+                            return (
+                              <div key={i} className="flex justify-between text-[11px]">
+                                <span className={`text-slate-700 dark:text-slate-300 truncate max-w-[70%] ${q <= 0 ? 'line-through opacity-50' : ''}`}>{p.name || p.product_name || p.product_id}</span>
+                                <span className={`text-slate-500 font-mono font-bold ${q <= 0 ? 'text-rose-400' : ''}`}>x{q}</span>
+                              </div>
+                            );
+                          }).filter(Boolean).slice(0, 2)}
+                          {(Array.isArray(o.products) ? o.products : []).length > 2 && (
+                            <p className="text-[10px] text-indigo-500 font-bold pt-1">+ {(Array.isArray(o.products) ? o.products : []).length - 2} منتجات أخرى</p>
+                          )}
                         </div>
                       </div>
 
-                      <div className="text-sm font-black text-emerald-600 dark:text-emerald-400 text-right">
-                          {money(computeOrderValueWithoutShipping(o))} {currencySymbol}
+                      <div className="text-right">
+                        {isPartial ? (
+                          <div>
+                            <div className="text-sm font-black text-emerald-600 dark:text-emerald-400">
+                              {money(netValue)} {currencySymbol}
+                              <span className="text-slate-400 font-normal mr-1 text-[10px] line-through">(أصل المبلغ: {money(originalValue)})</span>
+                            </div>
+                            <div className="text-[10px] text-amber-600 dark:text-amber-400 font-medium mt-0.5">
+                              المتبقي للتسليم: {netPieces} قطعة (تم إرجاع {returnedPieces} من أصل {originalPieces})
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-sm font-black text-emerald-600 dark:text-emerald-400">
+                            {money(originalValue)} {currencySymbol}
+                          </div>
+                        )}
                       </div>
                     </div>
-                  ))}
+                  )})}
                 </div>
               )}
             </div>
@@ -1832,18 +1795,18 @@ const SalesDailyClose: React.FC = () => {
                 {viewModal === 'delivered' ? <PackageCheck className="text-emerald-500" /> : viewModal === 'returned' ? <PackageX className="text-rose-500" /> : <PackageCheck className="text-amber-500" />}
                 {viewModal === 'delivered' ? 'الاوردرات المسلمة' : viewModal === 'returned' ? 'الاوردرات المرتجعة' : 'الاوردرات المؤجلة'}
               </h3>
-              <button 
-                onClick={() => setViewModal(null)} 
+              <button
+                onClick={() => setViewModal(null)}
                 className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors"
               >
                 ✕
               </button>
             </div>
-            
+
             <div className="p-5 overflow-y-auto flex-1 custom-scrollbar">
               {(() => {
                 const list = viewModal === 'delivered' ? deliveredOrdersList : viewModal === 'returned' ? returnedOrdersList : deferredOrders;
-                
+
                 if (list.length === 0) return (
                   <div className="text-center text-slate-500 dark:text-slate-400 py-12 flex flex-col items-center gap-3">
                     <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-2xl">📭</div>
@@ -1857,6 +1820,9 @@ const SalesDailyClose: React.FC = () => {
                       <tr>
                         <th className="p-3 font-bold rounded-r-xl">رقم الاوردر</th>
                         <th className="p-3 font-bold">العميل</th>
+                        {viewModal === 'returned' && (
+                          <th className="p-3 font-bold">رقم اليومية</th>
+                        )}
                         <th className="p-3 font-bold text-center">{viewModal === 'returned' ? 'القطع المرتجعة' : viewModal === 'delivered' ? 'القطع المسلمة' : 'القطع'}</th>
                         <th className="p-3 font-bold rounded-l-xl">{viewModal === 'returned' ? 'قيمة القطع المرتجعة' : viewModal === 'delivered' ? 'قيمة القطع المسلمة' : 'القيمة'}</th>
                       </tr>
@@ -1866,70 +1832,90 @@ const SalesDailyClose: React.FC = () => {
                         const delPieces = computeDeliveredNetPieces(o);
                         const retPieces = computeReturnedPieces(o);
                         const origPieces = computeOriginalPieces(o);
-                        
+
                         const delValue = computeDeliveredNetValue(o);
                         const retValue = computeReturnedOrderValue(o);
                         const origValue = computeOriginalOrderValue(o);
 
                         const isFullRet = isFullReturnOrder(o);
+                        const isFullDel = isFullDeliveryOrder(o);
                         const isPart = isPartialReturn(o);
+                        
+                        const currentJournalId = openDailyInfo?.id || 0;
+                        const oJournalId = Number(o.journal_id || o.journalId || 0);
+                        const isJournalMatch = oJournalId === currentJournalId || (oJournalId === 0 && (
+                          deliveredOrdersList.some(d => getRealOrderId(d) === getRealOrderId(o)) || 
+                          returnedOrdersList.some(r => getRealOrderId(r) === getRealOrderId(o)) || 
+                          deferredOrders.some(df => getRealOrderId(df) === getRealOrderId(o))
+                        ));
 
                         return (
-                        <tr key={o.id} className="border-b border-slate-50 dark:border-slate-800/50 hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
-                          <td className="p-3 font-black text-slate-900 dark:text-white">
-                            <div className="flex items-center gap-2">
-                              <span>#{o.orderNumber || o.order_number || o.id}</span>
+                          <tr key={o.id} className="border-b border-slate-50 dark:border-slate-800/50 hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
+                            <td className="p-3 font-black text-slate-900 dark:text-white">
+                              <div className="flex items-center gap-2">
+                                <span>#{o.orderNumber || o.order_number || o.id}</span>
+                                {viewModal === 'returned' && isFullRet && (
+                                  <span className="bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400 px-2 py-0.5 rounded text-[10px] font-bold whitespace-nowrap">
+                                    مرتجع كامل
+                                  </span>
+                                )}
+                                {viewModal === 'returned' && isPart && (
+                                  <span className="bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400 px-2 py-0.5 rounded text-[10px] font-bold whitespace-nowrap">
+                                    مرتجع جزئي
+                                  </span>
+                                )}
+                                {viewModal === 'delivered' && isFullDel && (
+                                  <span className="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 rounded text-[10px] font-bold whitespace-nowrap">
+                                    تسليم كامل
+                                  </span>
+                                )}
+                                {viewModal === 'delivered' && isPart && (
+                                  <span className="bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-2 py-0.5 rounded text-[10px] font-bold whitespace-nowrap">
+                                    تسليم جزئي
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="p-3 text-slate-700 dark:text-slate-300">{o.customerName || o.customer_name || o.name || '—'}</td>
+                            {viewModal === 'returned' && (
+                              <td className="p-3 text-slate-700 dark:text-slate-300">
+                                {oJournalId || (isJournalMatch ? currentJournalId : '—')}
+                              </td>
+                            )}
+                            <td className="p-3 text-center text-slate-600 dark:text-slate-400">
+                              {viewModal === 'returned' ? retPieces : viewModal === 'delivered' ? delPieces : computePieces(o)}
                               {viewModal === 'returned' && isFullRet && (
-                                <span className="bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400 px-2 py-0.5 rounded text-[10px] font-bold whitespace-nowrap">
-                                  مرتجع كامل
-                                </span>
+                                <div className="text-[10px] text-rose-600 dark:text-rose-400 mt-1">
+                                  (إجمالي {origPieces} قطعة)
+                                </div>
                               )}
                               {viewModal === 'returned' && isPart && (
-                                <span className="bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400 px-2 py-0.5 rounded text-[10px] font-bold whitespace-nowrap">
-                                  مرتجع جزئي
-                                </span>
+                                <div className="text-[10px] text-rose-600 dark:text-rose-400 mt-1">
+                                  (من أصل {origPieces} قطعة)
+                                </div>
                               )}
                               {viewModal === 'delivered' && isPart && (
-                                <span className="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 rounded text-[10px] font-bold whitespace-nowrap">
-                                  تسليم جزئي
-                                </span>
+                                <div className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">
+                                  (تم إرجاع {retPieces} من أصل {origPieces})
+                                </div>
                               )}
-                            </div>
-                          </td>
-                          <td className="p-3 text-slate-700 dark:text-slate-300">{o.customerName || o.customer_name || o.name || '—'}</td>
-                          <td className="p-3 text-center text-slate-600 dark:text-slate-400">
-                            {viewModal === 'returned' ? retPieces : viewModal === 'delivered' ? delPieces : computePieces(o)}
-                            {viewModal === 'returned' && isFullRet && (
-                              <div className="text-[10px] text-rose-600 dark:text-rose-400 mt-1">
-                                (إجمالي {origPieces} قطعة)
-                              </div>
-                            )}
-                            {viewModal === 'returned' && isPart && (
-                              <div className="text-[10px] text-rose-600 dark:text-rose-400 mt-1">
-                                (من أصل {origPieces} قطعة)
-                              </div>
-                            )}
-                            {viewModal === 'delivered' && isPart && (
-                              <div className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-1">
-                                (من أصل {origPieces} قطعة)
-                              </div>
-                            )}
-                          </td>
-                          <td className="p-3 font-bold text-emerald-600 dark:text-emerald-400">
-                            {money(viewModal === 'returned' ? retValue : viewModal === 'delivered' ? delValue : computeOrderValueWithoutShipping(o))} {currencySymbol}
-                            {viewModal === 'returned' && isPart && (
-                              <div className="text-[10px] text-rose-600 dark:text-rose-400 mt-1">
-                                (من أصل {money(origValue)} {currencySymbol})
-                              </div>
-                            )}
-                            {viewModal === 'delivered' && isPart && (
-                              <div className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-1">
-                                (من أصل {money(origValue)} {currencySymbol})
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                      )})}
+                            </td>
+                            <td className="p-3 font-bold text-emerald-600 dark:text-emerald-400">
+                              {money(viewModal === 'returned' ? retValue : viewModal === 'delivered' ? delValue : computeOrderValueWithoutShipping(o))} {currencySymbol}
+                              {viewModal === 'returned' && isPart && (
+                                <div className="text-[10px] text-rose-600 dark:text-rose-400 mt-1">
+                                  (من أصل {money(origValue)} {currencySymbol})
+                                </div>
+                              )}
+                              {viewModal === 'delivered' && isPart && (
+                                <div className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">
+                                  (أصل المبلغ: {money(origValue)} {currencySymbol})
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 );

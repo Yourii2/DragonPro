@@ -39,9 +39,8 @@ init();
 window.localStorage.getItem = function(key: string) {
   try {
     const name = keyToSettingName(key);
-    if (name) {
-      if (name in cache) return cache[name];
-      return null;
+    if (name && (name in cache)) {
+      return cache[name];
     }
   } catch (e) {}
   return originalGet(key);
@@ -59,7 +58,7 @@ window.localStorage.setItem = function(key: string, value: string) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ [name]: value })
       }).catch(()=>{});
-      return;
+      // Do NOT return here, so that originalSet is called
     }
   } catch (e) {}
   return originalSet(key, value);

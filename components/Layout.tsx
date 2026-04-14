@@ -40,7 +40,7 @@ const Layout: React.FC<LayoutProps> = ({
   const { isDark, toggleTheme } = useTheme();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [allowedModules, setAllowedModules] = useState<string[] | null>(null);
-  const [allowedModulesRaw, setAllowedModulesRaw] = useState<any[] | null>(null);
+  const [allowedModulesRaw, setAllowedModulesRaw] = useState<any | null>(null);
   const [showPermsModal, setShowPermsModal] = useState(false);
   const [openAccordions, setOpenAccordions] = useState<string[]>([]);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -435,7 +435,13 @@ const Layout: React.FC<LayoutProps> = ({
                         ids.forEach((id) => next.add(id));
                         readNotifIdsRef.current = next;
                         try {
-                          localStorage.setItem(readNotifKey, JSON.stringify(Array.from(next)));
+                          const jsonStr = JSON.stringify(Array.from(next));
+                          localStorage.setItem(readNotifKey, jsonStr);
+                          fetch(`${API_BASE_PATH}/api.php?module=user_preferences&action=set`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ key: 'notif_read_ids', value: jsonStr })
+                          });
                         } catch (e) {
                           // ignore storage failures
                         }

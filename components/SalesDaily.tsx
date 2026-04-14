@@ -334,12 +334,12 @@ const SalesDaily: React.FC = () => {
 
     // Old custody orders (with_rep)
     try {
-      const r = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getByRep&rep_id=${repId}&status=with_rep`);
+      const r = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getByRep&rep_id=${repId}&status=active`);
       const jr = await r.json();
       if (jr && jr.success) {
         setAssignedOrders(jr.data || []);
       } else {
-        const all = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=with_rep`).then(x => x.json());
+        const all = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=active`).then(x => x.json());
         const list = all && all.success ? all.data || [] : [];
         setAssignedOrders(list.filter((o: any) => Number(o.rep_id ?? o.repId) === Number(repId)));
       }

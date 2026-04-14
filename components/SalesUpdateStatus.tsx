@@ -140,6 +140,7 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
       'pending': 'مؤجل',
       'in_delivery': 'قيد التسليم',
       'cancelled': 'أُلغي',
+      'partial': 'مرتجع جزئي',
       'new': 'جديد'
     };
     return map[st] || s;
@@ -178,7 +179,7 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
         // استبعاد الطلبات التي تم إرجاعها بالكامل فقط
         if (status === 'returned' || status === 'full_return') return false;
         // الطلبات التي تم إرجاعها جزئيًا أو التي لا تزال تحتوي على قطع متبقية يجب أن تظهر
-        if (status === 'partial_return') return true;
+        if (status === 'partial_return' || status === 'partial') return true;
         return Number(o?.remainingPieces || 0) > 0;
       });
   };
@@ -229,139 +230,89 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
   // Perform return for currently selected orders (asks optional warehouse like the existing UI)
   const handleReturnSelected = async () => {
     const ids = selectedOrderIds.slice();
-    if (ids.length===0) { Swal.fire('تحذير','اختر طلبيات أولاً','warning'); return; }
+    if (ids.length === 0) { Swal.fire('تحذير', 'اختر طلبيات أولاً', 'warning'); return; }
     const warehouseId = await promptWarehouseForReturn();
     if (warehouseId === undefined) return; // cancelled
     try {
-      // For full-return, call partialReturn per-order so server returns returnedValue and updated order
       const repIdLocal = openRepOrders?.repId ?? null;
-      // build payloads first so we can compute product counts for the confirmation message
-      const payloads = ids.map((id) => {
-        const ord = (openRepOrders?.orders||[]).find((o:any)=> o.id === id);
-        const orderRepId = ord?.rep_id ?? ord?.repId ?? repIdLocal;
-        const items = (ord?.products||[]).map((p:any)=> ({ productId: p.productId || p.product_id, quantity: Number(p.quantity || p.qty || 0) }));
-        return { order_id: id, rep_id: orderRepId, items, warehouse_id: warehouseId, notes: '' };
-      });
-
-      const promises = payloads.map(async (payload) => {
-        const r = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=partialReturn`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
-        return r.json();
-      });
-      const results = await Promise.all(promises);
-      // Apply server-side updates locally
       let totalReturned = 0;
-      const updatedOrdersMap:any = {};
-      results.forEach((res:any) => {
-        if (!res) return;
-        totalReturned += Number(res.returnedValue || 0);
-        if (res.order) updatedOrdersMap[res.order.id] = res.order;
-      });
-
-      setOpenRepOrders((prev:any) => {
-        if (!prev) return prev;
-        // Replace updated orders, remove fully-emptied orders (no products)
-        const removedIds = (ids || []).map((x:any) => Number(x));
-        const newOrders = (prev.orders||[]).map((o:any) => {
-          const oid = Number(o.id);
-          const u = updatedOrdersMap[oid] || updatedOrdersMap[String(oid)];
-          if (u) {
-            const products = Array.isArray(u.products) ? u.products.map((p:any)=> ({ productId: p.productId || p.product_id, name: p.name, color: p.color, size: p.size, quantity: p.quantity, price: p.price || p.price_per_unit, total: p.total })) : [];
-            return { ...o, products };
+      let totalPartialReturned = 0;
+      let totalPartialDelivered = 0;
+      let updatedOrders: any[] = [];
+      for (const id of ids) {
+        const ord = (openRepOrders?.orders || []).find((o: any) => o.id === id);
+        if (!ord) continue;
+        const orderRepId = ord?.rep_id ?? ord?.repId ?? repIdLocal;
+        const products = ord?.products || [];
+        // تحقق هل كل المنتجات سيتم إرجاعها (مرتجع كامل)
+        const isFullReturn = products.every((p: any) => Number(p.quantity || p.qty || 0) > 0);
+        // إذا كان مرتجع كامل: لا تعدل المنتجات، فقط غير الحالة وأعد الكميات للمخزن
+        if (isFullReturn) {
+          // إرسال طلب تحديث الحالة فقط
+          await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rep_id: Number(orderRepId), order_ids: [id], status: 'full_return' })
+          });
+          // إعادة الكميات للمخزن (API يجب أن يدعم ذلك)
+          await fetch(`${API_BASE_PATH}/api.php?module=orders&action=returnToStock`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ order_id: id, warehouse_id: warehouseId })
+          });
+          // لا تعدل المنتجات في الواجهة
+          totalReturned += computeOrderSubtotal(ord);
+        } else {
+          // مرتجع جزئي: قسم المنتجات المرتجعة عن المسلمة
+          const returnedProducts = products.filter((p: any) => Number(p.returnQuantity || 0) > 0);
+          const deliveredProducts = products.filter((p: any) => !p.returnQuantity || Number(p.returnQuantity) < Number(p.quantity || p.qty || 0));
+          // إرسال المرتجع للمخزن
+          if (returnedProducts.length > 0) {
+            await fetch(`${API_BASE_PATH}/api.php?module=orders&action=partialReturn`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ order_id: id, rep_id: orderRepId, items: returnedProducts.map((p: any) => ({ productId: p.productId || p.product_id, quantity: Number(p.returnQuantity) })), warehouse_id: warehouseId, notes: '' })
+            });
+            totalPartialReturned += returnedProducts.reduce((s: number, p: any) => s + (Number(p.returnQuantity) * Number(p.price || p.sale_price || 0)), 0);
           }
-          // if this id was in removedIds and server didn't return updated order, treat as fully returned => remove
-          if (removedIds.includes(oid)) return null;
-          return o;
-        }).filter((o:any)=> o !== null);
-
-        // update counts
-        try {
-          const repIdLocal2 = prev.repId;
-          const ordersCount = newOrders.length;
-          const productsCount = newOrders.reduce((s:number,ord:any)=> s + ((ord.products||[]).reduce((ss:number,p:any)=> ss + Number(p.quantity||p.qty||0),0)), 0);
-          setRepsSummary(rs => rs.map(r => String(r.repId) === String(repIdLocal2) ? ({ ...r, ordersCount, productsCount }) : r));
-        } catch(e) {}
-
-        return { ...prev, orders: newOrders };
-      });
-
-      // Remove any scanned barcode entries that point to removed orders and clear selection
-      try {
-        const removedIds = (ids || []).map((x:any) => Number(x));
-        setScannedBarcodes(prev => (prev || []).filter(s => !s.orderId || !removedIds.includes(Number(s.orderId))));
-        setSelectedOrderIds([]);
-      } catch(e) {}
-
-      // Update rep balance locally by subtracting totalReturned (returned goods credit the rep)
+          // المنتجات المسلمة تبقى كما هي (لا تعدل الشحن)
+          if (deliveredProducts.length > 0) {
+            // تحديث حالة الأوردر إلى تسليم جزئي إذا لزم الأمر
+            await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ rep_id: Number(orderRepId), order_ids: [id], status: 'partial_return' })
+            });
+            totalPartialDelivered += deliveredProducts.reduce((s: number, p: any) => s + (Number(p.quantity || p.qty || 0) * Number(p.price || p.sale_price || 0)), 0);
+          }
+        }
+      }
+      // خصم قيمة المرتجع فقط من حساب المندوب (بدون المساس بالشحن)
       if (totalReturned > 0 && openRepOrders) {
         const repIdLocal2 = openRepOrders.repId;
         setRepsSummary(prev => prev.map(r => {
           if (String(r.repId) !== String(repIdLocal2)) return r;
           return { ...r, balance: Number((r.balance || 0)) - totalReturned };
         }));
-        setOpenRepOrders((prev:any) => prev ? ({ ...prev, balance: Number((prev.balance || 0)) - totalReturned }) : prev);
+        setOpenRepOrders((prev: any) => prev ? ({ ...prev, balance: Number((prev.balance || 0)) - totalReturned }) : prev);
       }
-
+      if (totalPartialReturned > 0 && openRepOrders) {
+        const repIdLocal2 = openRepOrders.repId;
+        setRepsSummary(prev => prev.map(r => {
+          if (String(r.repId) !== String(repIdLocal2)) return r;
+          return { ...r, balance: Number((r.balance || 0)) - totalPartialReturned };
+        }));
+        setOpenRepOrders((prev: any) => prev ? ({ ...prev, balance: Number((prev.balance || 0)) - totalPartialReturned }) : prev);
+      }
       setSelectedOrderIds([]);
       setIsBarcodeModalOpen(false);
       setScanInput('');
-      // Log return event (fire-and-forget – non-critical)
-      try {
-        await fetch(`${API_BASE_PATH}/api.php?module=sales&action=logReturnEvent`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            rep_id: repIdLocal,
-            warehouse_id: warehouseId,
-            order_ids: ids,
-            event_date: new Date().toISOString().slice(0, 10)
-          })
-        });
-      } catch (logErr) { console.warn('logReturnEvent failed (non-critical)', logErr); }
-      // تحديث rep_journal_orders (fire-and-forget)
-      try {
-        const updatesByRep = (payloads || []).reduce((acc:any, p:any) => {
-          const rid = Number(p?.rep_id || 0);
-          if (!rid) return acc;
-          if (!acc[rid]) acc[rid] = [];
-          acc[rid].push(Number(p.order_id));
-          return acc;
-        }, {} as Record<number, number[]>);
-
-        const updateReqs = Object.entries(updatesByRep).map(([rid, orderIds]) =>
-          fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ rep_id: Number(rid), order_ids: orderIds, status: 'full_return' })
-          })
-        );
-        if (updateReqs.length > 0) await Promise.all(updateReqs);
-      } catch (jErr) { console.warn('updateJournalOrderStatus full_return failed (non-critical)', jErr); }
-      // Ensure UI reflects server state: re-fetch orders for this rep so fully-returned orders disappear
+      Swal.fire('تم', 'تم تسجيل المرتجع بنجاح.', 'success');
+      // تحديث الواجهة: إعادة تحميل الأوردرات
       try {
         const repIdLocalForRefresh = openRepOrders?.repId ?? null;
         if (repIdLocalForRefresh) {
           const freshOrders = await fetchOrdersForRep(Number(repIdLocalForRefresh));
-          setOpenRepOrders((prev:any) => prev ? ({ ...prev, orders: freshOrders }) : prev);
-          // update repsSummary counts
-          try {
-            setRepsSummary(rs => rs.map(r => {
-              if (String(r.repId) !== String(repIdLocalForRefresh)) return r;
-              return { ...r, ordersCount: (freshOrders||[]).length, productsCount: (freshOrders||[]).reduce((s:number,o:any)=> s + ((o.products||[]).reduce((ss:number,p:any)=> ss + Number(p.quantity||p.qty||0),0)), 0) };
-            }));
-          } catch(e) {}
+          setOpenRepOrders((prev: any) => prev ? ({ ...prev, orders: freshOrders }) : prev);
         }
-      } catch(e) { console.warn('Failed to refresh rep orders after return', e); }
-      // Build and show a concise confirmation message: number of orders, total products, warehouse name
-      try {
-        const successfulCount = results.filter((r:any) => r && r.success).length;
-        const totalProducts = payloads.reduce((s:number,p:any) => s + ((p.items||[]).reduce((ss:number,it:any) => ss + Number(it.quantity||0),0)), 0);
-        const wh = (warehouses||[]).find(w => Number(w.id) === Number(warehouseId));
-        const whName = (wh && (wh.name || wh.title || wh.label)) || (warehouseId ? (`المستودع #${warehouseId}`) : 'غير محدد');
-        const txt = `تم استلام\nطلبيات : ${successfulCount}\nمنتجات : ${totalProducts}\nفى المخزن: ${whName}`;
-        Swal.fire({ title: 'تم', html: txt.replace(/\n/g, '<br/>'), icon: 'success', confirmButtonText: 'حسناً' });
-      } catch(e) {
-        Swal.fire('تم', 'تم تسجيل المرتجع للمحدد.', 'success');
-      }
-    } catch (e) { console.error(e); Swal.fire('خطأ','فشل في العملية.','error'); }
+      } catch (e) { }
+    } catch (e) { console.error(e); Swal.fire('خطأ', 'فشل في العملية.', 'error'); }
   };
 
   // تفعيل الطباعة عند تغيير state
@@ -409,7 +360,8 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
         return list.filter((o:any) => Number(o.shipping_company_id ?? o.shippingCompanyId) === Number(repId));
       }
       // جلب جميع الطلبات الموجودة مع المندوب، بما في ذلك الطلبات التي تم إرجاعها جزئيًا
-      const r = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getByRep&rep_id=${repId}`);
+      // نطلب الحالات النشطة فقط (active) لضمان عدم سحب المرتجعات الكلية السابقة
+      const r = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getByRep&rep_id=${repId}&status=active`);
       const jr = await r.json();
       const list = jr && jr.success ? jr.data || [] : [];
       return normalizeOrdersForReturnsView(list);

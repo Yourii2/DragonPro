@@ -159,6 +159,44 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
     fetchAll();
   }, []);
 
+  // -- Auto Sync Logic (15 min) --
+  useEffect(() => {
+    const pullAllDevices = async () => {
+      // Get all enabled devices that support pulling
+      const enabledDevices = devices.filter(d => d.enabled && (d.driver === 'hikvision_isapi' || d.driver === 'http_json_pull'));
+      if (enabledDevices.length === 0) return;
+
+      const today = new Date().toISOString().split('T')[0];
+      
+      for (const dev of enabledDevices) {
+        try {
+          await fetch(`${API_BASE_PATH}/api.php?module=attendance_devices&action=pullLogs`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              device_id: Number(dev.id),
+              start_date: today,
+              end_date: today
+            })
+          });
+        } catch (e) {
+          console.error(`Failed to auto-pull logs for device ${dev.id}`, e);
+        }
+      }
+      // Refresh summary after pulls
+      try {
+        await fetch(`${API_BASE_PATH}/api.php?module=attendance_summary&action=generateForRange`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ start_date: today, end_date: today })
+        });
+      } catch (e) {}
+    };
+
+    const interval = setInterval(pullAllDevices, 15 * 60 * 1000); // 15 minutes
+    return () => clearInterval(interval);
+  }, [devices]);
+
   useEffect(() => {
     const allowed: AttendanceTab[] = ['devices', 'hikvision', 'shifts', 'schedules', 'holidays', 'logs', 'summary'];
     if (initialTab && allowed.includes(initialTab as AttendanceTab)) {

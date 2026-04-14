@@ -149,6 +149,40 @@ const SalesReport: React.FC = () => {
     [treasuries, selectedTreasuryId]
   );
 
+  const exportCSV = () => {
+    let csv = '\uFEFF';
+    csv += `"تاريخ اليومية","${dailyDate}"\n`;
+    csv += `"الخزينة","${selectedTreasuryName || '—'}"\n\n`;
+    csv += `"رصيد البداية","${totals.opening}"\n`;
+    csv += `"إجمالي الاستلامات","${totals.totalIn}"\n`;
+    csv += `"إجمالي المدفوعات","${totals.totalOut}"\n`;
+    csv += `"رصيد النهاية","${totals.closing}"\n\n`;
+    csv += `"الجهة / السبب","تاريخ الحركة","نوع الحركة","استلام (موجب)","دفع (سالب)"\n`;
+    
+    const rows = [...cashIn, ...cashOut].sort((a,b) => {
+      const da = new Date(a.date || a.transaction_date || 0).getTime();
+      const db = new Date(b.date || b.transaction_date || 0).getTime();
+      return da - db;
+    });
+
+    rows.forEach(rec => {
+      const amt = toNum(rec.amount);
+      const isOut = amt < 0;
+      const entity = isOut ? getReasonForOut(rec) : getEntityNameForIn(rec);
+      const date = String(rec.date || rec.transaction_date || '');
+      const tLabel = getTypeLabel(rec) || '';
+      csv += `"${entity.replace(/"/g,'""')}","${date}","${tLabel.replace(/"/g,'""')}","${!isOut ? amt : ''}","${isOut ? Math.abs(amt) : ''}"\n`;
+    });
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `treasury_report_${dailyDate}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="p-6 space-y-5">
       <div className="rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 shadow-sm">
@@ -158,6 +192,7 @@ const SalesReport: React.FC = () => {
             <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
               تقرير خاص بالخزينة فقط — {selectedTreasuryName ? `(${selectedTreasuryName})` : ''}
             </div>
+            <button onClick={exportCSV} className="mt-3 px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-colors">تصدير CSV</button>
           </div>
           <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
             <div>

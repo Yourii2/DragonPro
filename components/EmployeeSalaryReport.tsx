@@ -228,6 +228,43 @@ const EmployeeSalaryReport: React.FC<EmployeeSalaryReportProps> = ({ employees }
     w.print();
   };
 
+  const exportCSV = () => {
+    if (!report) {
+      Swal.fire('تنبيه', 'يرجى عرض التقرير أولاً.', 'warning');
+      return;
+    }
+    let csv = '\uFEFF';
+    const emp = report.employee || {};
+    csv += `"تقرير راتب موظف"\n`;
+    csv += `"الموظف","${emp.name || '-'}"\n`;
+    csv += `"الشهر","${report.month || '-'}"\n\n`;
+
+    const c = report.computed || {};
+    csv += `"الراتب الأساسي","${c.base_salary || 0}"\n`;
+    csv += `"إجمالي الخصومات","${c.deductions || 0}"\n`;
+    csv += `"إجمالي الحوافز","${c.bonuses || 0}"\n`;
+    csv += `"صافي متوقع","${c.net_estimate || 0}"\n\n`;
+
+    csv += `"المعاملات خلال الشهر"\n`;
+    csv += `"التاريخ","النوع","المبلغ","ملاحظات"\n`;
+    (report.transactions?.rows || []).forEach((tx: any) => {
+      let tType = '';
+      if (tx.type === 'advance') tType = 'سلفة';
+      if (tx.type === 'bonus') tType = 'حافز';
+      if (tx.type === 'penalty') tType = 'خصم';
+      if (tx.type === 'salary') tType = 'راتب';
+      csv += `"${tx.date}","${tType}","${tx.amount || 0}","${(tx.notes || '').replace(/"/g,'""')}"\n`;
+    });
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `salary_report_${emp.name || 'emp'}_${report.month}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const totals = report?.attendance?.totals || {};
   const penalties = report?.attendance?.penalties || {};
   const txTotals = report?.transactions?.totals || {};
@@ -237,21 +274,24 @@ const EmployeeSalaryReport: React.FC<EmployeeSalaryReportProps> = ({ employees }
     <div className="space-y-6">
       <div className="p-6 rounded-3xl border border-card shadow-sm card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
         <h3 className="font-black mb-4 flex items-center gap-2"><FileText size={18}/> تقرير راتب موظف</h3>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 text-xs">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-3 text-xs">
           <div className="space-y-1">
             <label className="text-[11px] text-muted">الموظف</label>
             <CustomSelect value={String(selectedEmployee || '')} onChange={v => setSelectedEmployee(v)} options={[{ value: '', label: 'اختر موظف' }, ...employees.map((emp:any)=>({ value: String(emp.id), label: emp.name }))]} className="w-full" />
           </div>
           <div className="space-y-1">
             <label className="text-[11px] text-muted">الشهر</label>
-            <input type="month" className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2" value={month} onChange={e => setMonth(e.target.value)} />
+            <input type="month" className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2 border border-slate-200 dark:border-slate-700 w-full" value={month} onChange={e => setMonth(e.target.value)} />
           </div>
-          <div className="flex items-end gap-2">
-            <button className="w-full bg-emerald-600 text-white py-3 rounded-2xl text-xs font-black flex items-center justify-center gap-2" onClick={loadReport} disabled={loading}>
+          <div className="flex items-end gap-2 lg:col-span-2">
+            <button className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-2xl text-xs font-black flex items-center justify-center gap-2" onClick={loadReport} disabled={loading}>
               <RefreshCw size={14}/> {loading ? 'جارٍ التحميل...' : 'عرض التقرير'}
             </button>
-            <button className="w-full bg-slate-200 py-3 rounded-2xl text-xs font-black" onClick={exportPdf}>
+            <button className="flex-1 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 py-3 rounded-2xl text-xs font-black" onClick={exportPdf}>
               تصدير PDF
+            </button>
+            <button className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-2xl text-xs font-black" onClick={exportCSV}>
+              تصدير CSV
             </button>
           </div>
         </div>

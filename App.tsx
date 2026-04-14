@@ -24,8 +24,11 @@ import AttendanceModule from './components/AttendanceModule';
 import SalesOffices from './components/SalesOffices';
 import DeliveryConfirmation from './components/DeliveryConfirmation';
 import ReportsModule from './components/ReportsModule';
+import WorkersModule from './components/WorkersModule';
+import BarcodePrintPage from './components/BarcodePrintPage';
 import { API_BASE_PATH, testConnection } from './services/apiConfig';
 import Swal from 'sweetalert2';
+import { useTheme } from './components/ThemeContext';
 
 const migrateStorageKeys = () => {
   if (typeof window === 'undefined') return;
@@ -82,8 +85,37 @@ const App: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [activeSlug, setActiveSlug] = useState('dashboard');
   const [activeSubSlug, setActiveSubSlug] = useState('');
-  const [isDark, setIsDark] = useState(false);
+  const { isDark, setDark } = useTheme();
   const lastRouteStorageKey = 'Dragon_last_route';
+
+  // ── User Preferences Sync (theme + notification reads) ──
+  const saveUserPref = useCallback(async (key: string, value: string) => {
+    try {
+      await fetch(`${API_BASE_PATH}/api.php?module=user_preferences&action=set`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, value })
+      });
+    } catch { /* silent */ }
+  }, []);
+
+  const loadUserPrefs = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=user_preferences&action=get`);
+      const data = await res.json();
+      if (data.success && data.data) {
+        if (data.data.theme && typeof setDark === 'function') {
+          const isDarkPref = data.data.theme === 'dark';
+          setDark(isDarkPref);
+        }
+        if (data.data.notif_read_ids) {
+          localStorage.setItem('Dragon_notif_read_ids', data.data.notif_read_ids);
+        }
+      }
+    } catch { /* silent */ }
+  }, [setDark]);
+
+  // App.tsx no longer auto-syncs on render to prevent infinite loop or overwriting DB.
 
   const formatActivationStatus = (type: string, accountStatus: string, isExpired: string | boolean) => {
     const expired = isExpired === true || isExpired === 'true';
@@ -113,15 +145,13 @@ const App: React.FC = () => {
         setAppStatus('error');
       } else if (result.status === 'ok') {
         // Store settings from backend
-        localStorage.setItem('Dragon_company_name', result.settings.company_name || '');
-        localStorage.setItem('Dragon_company_phone', result.settings.company_phone || '');
-        localStorage.setItem('Dragon_company_address', result.settings.company_address || '');
-        localStorage.setItem('Dragon_company_terms', result.settings.company_terms || '');
-        localStorage.setItem('Dragon_company_logo', result.settings.company_logo_url ?? result.settings.company_logo ?? '');
-        localStorage.setItem('Dragon_tax_rate', result.settings.tax_rate || '14');
-        localStorage.setItem('Dragon_currency', result.settings.currency || 'EGP');
-        localStorage.setItem('Dragon_auto_backup', result.settings.auto_backup || 'false');
-        localStorage.setItem('Dragon_backup_freq', result.settings.backup_frequency || 'daily');
+        if (result.settings && typeof result.settings === 'object') {
+          Object.entries(result.settings).forEach(([key, value]) => {
+            if (value !== null && value !== undefined) {
+              localStorage.setItem(`Dragon_${key}`, String(value));
+            }
+          });
+        }
 
         if (result.activation) {
           localStorage.setItem('Dragon_activation', JSON.stringify({
@@ -136,6 +166,7 @@ const App: React.FC = () => {
         setIsLoggedIn(result.is_logged_in);
         if(result.is_logged_in) {
           localStorage.setItem('Dragon_user', JSON.stringify(result.user));
+          loadUserPrefs();
         }
         setAppStatus('ready');
       } else {
@@ -170,98 +201,22 @@ const App: React.FC = () => {
       }) as any;
     }
 
-    const verifyInstallation = useCallback(async () => {
-      try {
-        const response = await fetch(`${API_BASE_PATH}/verify.php`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ force: true })
-        });
-        const result = await response.json();
-
-        if (result.status === 'not_installed') {
-          setAppStatus('not_installed');
-        } else if (result.status === 'activation_blocked' || result.status === 'activation_expired') {
-          setErrorMessage(result.message || 'ترخيص غير صالح.');
-          setAppStatus('error');
-        } else if (result.status === 'invalid_device' || result.status === 'tampered') {
-          setErrorMessage(result.message || 'تعذر التحقق من الترخيص.');
-          setAppStatus('error');
-        } else if (result.status === 'ok') {
-          // Store settings from backend
-          localStorage.setItem('Dragon_company_name', result.settings.company_name || '');
-          localStorage.setItem('Dragon_company_phone', result.settings.company_phone || '');
-          localStorage.setItem('Dragon_company_address', result.settings.company_address || '');
-          localStorage.setItem('Dragon_company_terms', result.settings.company_terms || '');
-          localStorage.setItem('Dragon_company_logo', result.settings.company_logo_url ?? result.settings.company_logo ?? '');
-          localStorage.setItem('Dragon_tax_rate', result.settings.tax_rate || '14');
-          localStorage.setItem('Dragon_currency', result.settings.currency || 'EGP');
-          localStorage.setItem('Dragon_auto_backup', result.settings.auto_backup || 'false');
-          localStorage.setItem('Dragon_backup_freq', result.settings.backup_frequency || 'daily');
-
-          if (result.activation) {
-            localStorage.setItem('Dragon_activation', JSON.stringify({
-              status: formatActivationStatus(result.activation.type, result.activation.account_status, result.activation.is_expired),
-              expiry: result.activation.expiry || 'غير محدد',
-              account_status: result.activation.account_status || 'Active',
-              is_expired: result.activation.is_expired || 'false',
-              last_check: result.activation.last_check || ''
-            }));
-          }
-          
-          setIsLoggedIn(result.is_logged_in);
-          if(result.is_logged_in) {
-            localStorage.setItem('Dragon_user', JSON.stringify(result.user));
-          }
-          setAppStatus('ready');
-        } else {
-          setErrorMessage(result.message || 'An unknown verification error occurred.');
-          setAppStatus('error');
-        }
-      } catch (error) {
-        console.error('Verification error:', error);
-        setErrorMessage('Cannot connect to the server. Please ensure XAMPP is running.');
-        setAppStatus('error');
-      }
-    }, []);
-
     verifyInstallation();
 
-    // Sync navigation from URL hash if present
-    const applyHash = () => {
+    // Sync navigation from stored route (if any)
+    const applyInitialRoute = () => {
       try {
-        const hash = window.location.hash || '';
-        if (!hash) {
-          const storedRouteRaw = localStorage.getItem(lastRouteStorageKey);
-          if (!storedRouteRaw) return;
-          const storedRoute = JSON.parse(storedRouteRaw || '{}');
-          const slug = typeof storedRoute.slug === 'string' && storedRoute.slug ? storedRoute.slug : 'dashboard';
-          const sub = typeof storedRoute.subSlug === 'string' ? storedRoute.subSlug : '';
-          setActiveSlug(slug);
-          setActiveSubSlug(sub);
-          return;
-        }
-        // remove leading '#' and optional leading '/'
-        const cleaned = hash.replace(/^#\/?/, '');
-        // strip query string if present
-        const pathOnly = cleaned.split('?')[0] || '';
-        const parts = pathOnly.split('/');
-        const slug = parts[0] || 'dashboard';
-        const sub = parts[1] || '';
+        const storedRouteRaw = localStorage.getItem(lastRouteStorageKey);
+        if (!storedRouteRaw) return;
+        const storedRoute = JSON.parse(storedRouteRaw || '{}');
+        const slug = typeof storedRoute.slug === 'string' && storedRoute.slug ? storedRoute.slug : 'dashboard';
+        const sub = typeof storedRoute.subSlug === 'string' ? storedRoute.subSlug : '';
         setActiveSlug(slug);
         setActiveSubSlug(sub);
       } catch (e) { /* ignore */ }
     };
-    applyHash();
-    window.addEventListener('hashchange', applyHash);
-    return () => window.removeEventListener('hashchange', applyHash);
-
-    if (isDark) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  }, [isDark]);
+    applyInitialRoute();
+  }, []);
 
   const setActiveView = (slug: string, subSlug: string = '') => {
     console.debug('App: setActiveView ->', slug, subSlug);
@@ -272,12 +227,6 @@ const App: React.FC = () => {
         localStorage.setItem(lastRouteStorageKey, JSON.stringify({ slug, subSlug }));
       } catch (e) {
         // ignore storage failures
-      }
-    }
-    if (typeof window !== 'undefined') {
-      const nextHash = subSlug ? `#/${slug}/${subSlug}` : `#/${slug}`;
-      if (window.location.hash !== nextHash) {
-        window.location.hash = nextHash;
       }
     }
   };
@@ -365,13 +314,14 @@ const App: React.FC = () => {
       case 'reps':
         return <RepresentativesModule initialView={activeSubSlug} />;
       case 'sales':
-        switch (activeSubSlug) {
-          case 'sales-daily': return <SalesDaily />;
-          case 'sales-update-status': return <SalesUpdateStatus />;
-          case 'sales-report': return <SalesReport />;
-          case 'close-daily': return <SalesDailyClose />;
-          default: return <SalesDaily />;
-        }
+      case 'sales-daily':
+        return <SalesDaily />;
+      case 'sales-update-status':
+        return <SalesUpdateStatus />;
+      case 'close-daily':
+        return <SalesDailyClose />;
+      case 'barcode-print':
+        return <BarcodePrintPage />;
       case 'hrm':
         return <HRMModule initialView={activeSubSlug} />;
       case 'finance':
@@ -384,6 +334,8 @@ const App: React.FC = () => {
         return <SettingsModule />;
       case 'attendance':
         return <AttendanceModule initialTab={activeSubSlug} />;
+      case 'workers':
+        return <WorkersModule initialView={activeSubSlug} />;
       case 'sales-offices':
         return <SalesOffices />;
       default:

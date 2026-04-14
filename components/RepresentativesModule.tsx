@@ -1,6 +1,6 @@
 // آخر تحديث: 2026-02-11 (إصدار 1.0.4)
 import React, { useState, useEffect } from 'react';
-import { Users, Box, FileText, Search, UserCheck, RefreshCcw, Edit, Trash2, Eye, X, Save, PlusCircle, MinusCircle, Play, Square, Wallet, ShoppingCart } from 'lucide-react';
+import { Users, Box, FileText, Search, UserCheck, RefreshCcw, Edit, Trash2, Eye, X, Save, PlusCircle, MinusCircle, Play, Square, Wallet, ShoppingCart, PackageCheck, PackageX, RefreshCw, LayoutGrid, List, ArrowUp, ArrowDown } from 'lucide-react';
 import Swal from 'sweetalert2';
 
 import { API_BASE_PATH } from '../services/apiConfig';
@@ -84,6 +84,145 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
   const [repJournalLoading, setRepJournalLoading] = useState(false);
   const [repJournalRows, setRepJournalRows] = useState<any[]>([]);
   const [expandedJournalIds, setExpandedJournalIds] = useState<Set<number>>(new Set());
+
+  // ─── ملخص الفترة (تم نقله من SalesDailyClose) ───
+  const parseNumeric = (v: any) => {
+    if (v === null || typeof v === 'undefined') return 0;
+    if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+    let s = String(v || '').trim();
+    if (s === '') return 0;
+    const map: Record<string, string> = {
+      '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9',
+      '۰': '0', '۱': '1', '۲': '3', '۳': '3', '۴': '4', '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9'
+    };
+    s = s.split('').map(ch => map[ch] || ch).join('');
+    s = s.replace(/[\s,]+/g, '');
+    s = s.replace(/[^0-9.\-]+/g, '');
+    const n = Number(s);
+    return Number.isFinite(n) ? n : 0;
+  };
+  const money = (n: number) => toNum(n).toLocaleString();
+
+  const [periodSummary, setPeriodSummary] = useState<{
+    deliveredCount: number;
+    deliveredValue: number;
+    returnedCount: number;
+    returnedValue: number;
+    deliveredPieces?: number;
+    returnedPieces?: number;
+    _delivered_list?: any[];
+    _returned_list?: any[];
+  } | null>(null);
+  const [periodLoading, setPeriodLoading] = useState(false);
+
+  const fetchPeriodSummary = async () => {
+    if (journalRepId === null) {
+      setPeriodSummary(null);
+      return;
+    }
+    setPeriodLoading(true);
+    try {
+      const repParam = journalRepId === 'all' ? '' : journalRepId;
+      
+      // 1. جلب الإحصائيات الإجمالية
+      const statsUrl = `${API_BASE_PATH}/api.php?module=reports&action=getOrderStats&start_date=${journalFrom}&end_date=${journalTo}&rep_id=${repParam}`;
+      const statsRes = await fetch(statsUrl).then(r => r.json());
+      
+      // 2. جلب قوائم الأوردرات (للتفاصيل)
+      const listUrl = `${API_BASE_PATH}/api.php?module=reports&action=sales&start_date=${journalFrom}&end_date=${journalTo}&rep_id=${repParam}`;
+      const listRes = await fetch(listUrl).then(r => r.json());
+
+      if (statsRes.success && statsRes.data?.totals) {
+        const t = statsRes.data.totals;
+        const allRecords = listRes.success && listRes.data?.invoiceRecords ? listRes.data.invoiceRecords : [];
+        
+        setPeriodSummary({
+          deliveredCount: t.delivered_orders || 0,
+          deliveredValue: t.delivered_amount || 0,
+          returnedCount: t.returned_orders || 0,
+          returnedValue: t.returned_amount || 0,
+          deliveredPieces: t.delivered_pieces || 0,
+          returnedPieces: t.returned_pieces || 0,
+          _delivered_list: allRecords.filter((r: any) => r.status === 'delivered'),
+          _returned_list: allRecords.filter((r: any) => ['returned', 'full_return', 'partial_return'].includes(r.status))
+        });
+      } else {
+        setPeriodSummary({ deliveredCount: 0, deliveredValue: 0, returnedCount: 0, returnedValue: 0 });
+      }
+    } catch (e) {
+      console.error('Failed to fetch period summary', e);
+      setPeriodSummary({ deliveredCount: 0, deliveredValue: 0, returnedCount: 0, returnedValue: 0 });
+    } finally {
+      setPeriodLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (journalRepId) {
+      fetchPeriodSummary();
+    } else {
+      setPeriodSummary(null);
+    }
+  }, [journalFrom, journalTo, journalRepId]);
+
+  const setPeriodPreset = (days: number | 'month') => {
+    const to = new Date();
+    const from = new Date();
+    if (days === 'month') {
+      from.setDate(1);
+    } else {
+      from.setDate(to.getDate() - days);
+    }
+    const f = (d: Date) => d.toISOString().split('T')[0];
+    setJournalFrom(f(from));
+    setJournalTo(f(to));
+  };
+
+  const showPeriodDetails = (type: 'delivered' | 'returned') => {
+    if (!periodSummary) return;
+    const list = type === 'delivered' ? (periodSummary._delivered_list || []) : (periodSummary._returned_list || []);
+    if (list.length === 0) {
+      Swal.fire('تنبيه', 'لا توجد طلبات لعرض تفاصيلها.', 'info');
+      return;
+    }
+
+    const html = `
+      <div class="max-h-[60vh] overflow-y-auto text-right dir-rtl">
+        <table class="w-full text-xs border-collapse">
+          <thead>
+            <tr class="bg-slate-100 dark:bg-slate-800">
+              <th class="p-2 border border-slate-200 dark:border-slate-700">رقم الاوردر</th>
+              <th class="p-2 border border-slate-200 dark:border-slate-700">العميل</th>
+              <th class="p-2 border border-slate-200 dark:border-slate-700">القطع</th>
+              <th class="p-2 border border-slate-200 dark:border-slate-700">القيمة</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${list.map((o: any) => `
+              <tr class="border-b border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                <td class="p-2 border border-slate-200 dark:border-slate-700">#${o.order_number || o.id}</td>
+                <td class="p-2 border border-slate-200 dark:border-slate-700">${o.customer || o.customer_name || o.name || '-'}</td>
+                <td class="p-2 border border-slate-200 dark:border-slate-700 text-center font-bold">${type === 'delivered' ? (o.delivered_pieces || o.pieces || '-') : (o.returned_pieces || '-')}</td>
+                <td class="p-2 border border-slate-200 dark:border-slate-700 text-center font-black text-emerald-600 dark:text-emerald-400">
+                  ${money(type === 'delivered' ? (o.total || o.delivered_value || 0) : (o.total || o.returned_value || 0))} ج.م
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    Swal.fire({
+      title: type === 'delivered' ? 'تفاصيل التسليم للفترة' : 'تفاصيل المرتجع للفترة',
+      html,
+      width: '800px',
+      confirmButtonText: 'إغلاق',
+      customClass: {
+        container: 'swal-rtl'
+      }
+    });
+  };
   const toggleJournalExpand = (id: number) => setExpandedJournalIds(prev => {
     const next = new Set(prev);
     if (next.has(id)) next.delete(id); else next.add(id);
@@ -2122,6 +2261,89 @@ ${prodRows.length > 0 ? `<h3>البضاعة المستلمة — جميع الم
               </label>
             </div>
           </div>
+
+          {/* ─── ملخص الفترة (تم نقله من SalesDailyClose) ─── */}
+          {!repJournalLoading && journalRepId !== null && (
+            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm overflow-hidden relative group">
+              <div className="flex flex-wrap items-center justify-between gap-4 mb-6 relative z-10">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-indigo-50 dark:bg-indigo-900/30 rounded-2xl">
+                    <LayoutGrid className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-slate-800 dark:text-white leading-tight">
+                      {journalRepId === 'all' ? 'ملخص الفترة لجميع المناديب' : 'ملخص الفترة'}
+                    </h3>
+                    <p className="text-[11px] text-slate-500 font-bold mt-0.5">من {journalFrom} إلى {journalTo}</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => fetchPeriodSummary()}
+                    className="p-2.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-xl text-slate-500 hover:text-indigo-600 transition-all active:scale-95"
+                    title="تحديث البيانات"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${periodLoading ? 'animate-spin' : ''}`} />
+                  </button>
+                  <div className="h-8 w-px bg-slate-200 dark:bg-slate-700 mx-1 hidden sm:block"></div>
+                  <button onClick={() => setPeriodPreset(0)} className="px-3 py-1.5 text-[10px] font-black rounded-lg bg-slate-50 hover:bg-indigo-50 text-slate-600 hover:text-indigo-600 dark:bg-slate-800 dark:text-slate-400 transition-colors">اليوم</button>
+                  <button onClick={() => setPeriodPreset(7)} className="px-3 py-1.5 text-[10px] font-black rounded-lg bg-slate-50 hover:bg-indigo-50 text-slate-600 hover:text-indigo-600 dark:bg-slate-800 dark:text-slate-400 transition-colors">أخر أسبوع</button>
+                  <button onClick={() => setPeriodPreset('month')} className="px-3 py-1.5 text-[10px] font-black rounded-lg bg-slate-50 hover:bg-indigo-50 text-slate-600 hover:text-indigo-600 dark:bg-slate-800 dark:text-slate-400 transition-colors">هذا الشهر</button>
+                </div>
+              </div>
+
+              {periodLoading ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 animate-pulse">
+                  {[1, 2].map(i => <div key={i} className="h-28 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-800"></div>)}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Delivered Card */}
+                  <div className="bg-emerald-50/40 dark:bg-emerald-900/10 border border-emerald-100/50 dark:border-emerald-800/30 rounded-2xl p-4 flex items-center gap-4 group/card hover:shadow-lg hover:shadow-emerald-500/5 transition-all">
+                    <div className="w-12 h-12 bg-white dark:bg-emerald-900/40 rounded-xl flex items-center justify-center shadow-sm group-hover/card:scale-110 transition-transform">
+                      <PackageCheck className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
+                    </div>
+                    <div>
+                      <div className="text-[10px] font-black text-emerald-600/70 dark:text-emerald-400/70 uppercase tracking-wider mb-0.5">إجمالي التسليم للفترة</div>
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-xl font-black text-slate-800 dark:text-white">{money(periodSummary?.deliveredValue || 0)}</span>
+                        <span className="text-[10px] font-bold text-slate-500">ج.م</span>
+                      </div>
+                      <div className="text-[11px] font-bold text-emerald-700/60 dark:text-emerald-500/60 mt-1 flex items-center gap-1">
+                          <List className="w-3 h-3" /> {periodSummary?.deliveredCount || 0} طلب مكتمل
+                          {periodSummary?.deliveredPieces && <span className="mr-2">({periodSummary.deliveredPieces} قطعة)</span>}
+                        </div>
+                    </div>
+                    <button onClick={() => showPeriodDetails('delivered')} className="mr-auto p-2 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 rounded-lg transition-colors text-emerald-600">
+                      <Eye className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* Returned Card */}
+                  <div className="bg-rose-50/40 dark:bg-rose-900/10 border border-rose-100/50 dark:border-rose-800/30 rounded-2xl p-4 flex items-center gap-4 group/card hover:shadow-lg hover:shadow-rose-500/5 transition-all">
+                    <div className="w-12 h-12 bg-white dark:bg-rose-900/40 rounded-xl flex items-center justify-center shadow-sm group-hover/card:scale-110 transition-transform">
+                      <PackageX className="w-6 h-6 text-rose-600 dark:text-rose-400" />
+                    </div>
+                    <div>
+                      <div className="text-[10px] font-black text-rose-600/70 dark:text-rose-400/70 uppercase tracking-wider mb-0.5">إجمالي المرتجع للفترة</div>
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-xl font-black text-slate-800 dark:text-white">{money(periodSummary?.returnedValue || 0)}</span>
+                        <span className="text-[10px] font-bold text-slate-500">ج.م</span>
+                      </div>
+                      <div className="text-[11px] font-bold text-rose-700/60 dark:text-rose-500/60 mt-1 flex items-center gap-1">
+                          <List className="w-3 h-3" /> {periodSummary?.returnedCount || 0} طلب مرتجع
+                          {periodSummary?.returnedPieces && <span className="mr-2">({periodSummary.returnedPieces} قطعة)</span>}
+                        </div>
+                    </div>
+                    <button onClick={() => showPeriodDetails('returned')} className="mr-auto p-2 hover:bg-rose-100 dark:hover:bg-rose-900/40 rounded-lg transition-colors text-rose-600">
+                      <Eye className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* ─── حالة التحميل ─── */}
           {repJournalLoading && (

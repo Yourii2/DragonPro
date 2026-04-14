@@ -2,7 +2,8 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
-import App from './App_new';
+import App from './App';
+import { ThemeProvider } from './components/ThemeContext';
 
 // Wrap fetch to log any API responses that are advertised as JSON but fail to parse.
 // This is temporary debug instrumentation to capture stray PHP output or warnings.
@@ -41,6 +42,8 @@ if (!rootElement) {
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
-    <App />
+    <ThemeProvider>
+      <App />
+    </ThemeProvider>
   </React.StrictMode>
 );

@@ -3,6 +3,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 interface ThemeContextType {
   isDark: boolean;
   toggleTheme: () => void;
+  setDark: (dark: boolean) => void;
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
@@ -12,8 +13,8 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // Check localStorage first, default to false if not set
     const saved = localStorage.getItem('Dragon_theme');
     if (saved) return saved === 'dark';
-    // Check system preference
-    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    // Default to light theme if no preference is saved
+    return false;
   });
 
   useEffect(() => {
@@ -62,10 +63,29 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [isDark]);
 
-  const toggleTheme = () => setIsDark(prev => !prev);
+  const toggleTheme = () => {
+    setIsDark(prev => {
+      const nextTheme = !prev;
+      try {
+        // Safe backend sync
+        if (typeof window !== 'undefined') {
+          // Dynamic import to avoid missing apiConfig context, or rely on absolute path since this is running in browser
+          const apiPath = localStorage.getItem('apiBasePath') || '';
+          const baseUrl = apiPath ? (apiPath.endsWith('/') ? apiPath.slice(0, -1) : apiPath) : '/DragonPro';
+          fetch(`${baseUrl}/api.php?module=user_preferences&action=set`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key: 'theme', value: nextTheme ? 'dark' : 'light' })
+          }).catch(() => {});
+        }
+      } catch {}
+      return nextTheme;
+    });
+  };
+  const setDark = (dark: boolean) => setIsDark(dark);
 
   return (
-    <ThemeContext.Provider value={{ isDark, toggleTheme }}>
+    <ThemeContext.Provider value={{ isDark, toggleTheme, setDark }}>
       {children}
     </ThemeContext.Provider>
   );

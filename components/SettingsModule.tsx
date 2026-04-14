@@ -57,7 +57,7 @@ const SettingsModule: React.FC = () => {
     phone: localStorage.getItem('Dragon_company_phone') || '',
     address: localStorage.getItem('Dragon_company_address') || '',
     terms: localStorage.getItem('Dragon_company_terms') || '',
-    taxRate: localStorage.getItem('Dragon_tax_rate') || '14',
+    taxRate: (localStorage.getItem('Dragon_tax_rate') !== null && localStorage.getItem('Dragon_tax_rate') !== '') ? localStorage.getItem('Dragon_tax_rate')! : '14',
     salesCalcOrder: localStorage.getItem('Dragon_sales_calc_order') || 'discount_then_tax',
     // New settings
     salesDisplayMethod: localStorage.getItem('Dragon_sales_display_method') || 'company', // 'company' | 'sales_offices'
@@ -75,7 +75,12 @@ const SettingsModule: React.FC = () => {
     reportDailySales: localStorage.getItem('dragon_report_daily_sales') === 'true',
     reportDailyTreasury: localStorage.getItem('dragon_report_daily_treasury') === 'true',
     reportDailyAudit: localStorage.getItem('dragon_report_daily_audit') === 'true',
-    reportAuto: localStorage.getItem('dragon_report_auto') === 'true'
+    reportAuto: localStorage.getItem('dragon_report_auto') === 'true',
+    whatsappTemplates: localStorage.getItem('Dragon_wa_templates') || JSON.stringify([
+      { id: 'conf', name: 'تأكيد الأوردر', text: 'مرحباً [الاسم]، تم تأكيد طلبك رقم [رقم_الطلب] بقيمة [المبلغ]. سيصلك المندوب خلال 48 ساعة. شكراً لتعاملك معنا!' },
+      { id: 'track', name: 'متابعة الشحن', text: 'عزيزي [الاسم]، طلبك رقم [رقم_الطلب] الآن مع المندوب وفي الطريق إليك. يرجى التواجد لاستلام مبيعاتك.' },
+      { id: 'return', name: 'طلب مرتجع', text: 'مرحباً [الاسم]، بخصوص طلبك رقم [رقم_الطلب]، هل هناك أي مشكلة واجهتك؟ نحن هنا للمساعدة.' }
+    ])
   });
 
   const [otpCode, setOtpCode] = useState('');
@@ -202,7 +207,7 @@ const SettingsModule: React.FC = () => {
             phone: settings.company_phone || '',
             address: settings.company_address || '',
             terms: settings.company_terms || '',
-            taxRate: settings.tax_rate || '14',
+            taxRate: (typeof settings.tax_rate !== 'undefined' && settings.tax_rate !== null) ? settings.tax_rate : '14',
             salesCalcOrder: settings.sales_calc_order || 'discount_then_tax',
             currency: settings.currency || 'EGP',
             salesDisplayMethod: settings.sales_display_method || 'company',
@@ -219,7 +224,8 @@ const SettingsModule: React.FC = () => {
             reportDailySales: settings.report_daily_sales === 'true' || settings.report_daily_sales === '1',
             reportDailyTreasury: settings.report_daily_treasury === 'true' || settings.report_daily_treasury === '1',
             reportDailyAudit: settings.report_daily_audit === 'true' || settings.report_daily_audit === '1',
-            reportAuto: settings.report_auto === 'true' || settings.report_auto === '1'
+            reportAuto: settings.report_auto === 'true' || settings.report_auto === '1',
+            whatsappTemplates: settings.wa_templates || config.whatsappTemplates
           });
           if (settings.activation_type || settings.activation_expiry || settings.activation_account_status) {
             const isExpired = parseBool(settings.activation_is_expired);
@@ -266,6 +272,7 @@ const SettingsModule: React.FC = () => {
         report_daily_treasury: config.reportDailyTreasury.toString(),
         report_daily_audit: config.reportDailyAudit.toString(),
         report_auto: config.reportAuto.toString(),
+        wa_templates: config.whatsappTemplates,
         // new settings
         sales_display_method: config.salesDisplayMethod,
         product_source: config.productSource,
@@ -277,6 +284,22 @@ const SettingsModule: React.FC = () => {
 
     const result = await response.json();
     return result;
+  };
+
+  const updateWaTemplate = (id: string, field: string, value: string) => {
+    const temps = JSON.parse(config.whatsappTemplates);
+    const next = temps.map((t: any) => t.id === id ? { ...t, [field]: value } : t);
+    setConfig({ ...config, whatsappTemplates: JSON.stringify(next) });
+  };
+  const addWaTemplate = () => {
+    const temps = JSON.parse(config.whatsappTemplates);
+    const next = [...temps, { id: Date.now().toString(), name: 'قالب جديد', text: '' }];
+    setConfig({ ...config, whatsappTemplates: JSON.stringify(next) });
+  };
+  const deleteWaTemplate = (id: string) => {
+    const temps = JSON.parse(config.whatsappTemplates);
+    const next = temps.filter((t: any) => t.id !== id);
+    setConfig({ ...config, whatsappTemplates: JSON.stringify(next) });
   };
 
   const handleSave = async () => {
@@ -310,6 +333,7 @@ const SettingsModule: React.FC = () => {
         localStorage.setItem('dragon_report_daily_treasury', config.reportDailyTreasury ? 'true' : 'false');
         localStorage.setItem('dragon_report_daily_audit', config.reportDailyAudit ? 'true' : 'false');
         localStorage.setItem('dragon_report_auto', config.reportAuto ? 'true' : 'false');
+        localStorage.setItem('Dragon_wa_templates', config.whatsappTemplates);
 
         setIsSaved(true);
         setTimeout(() => setIsSaved(false), 3000);
@@ -990,6 +1014,72 @@ const SettingsModule: React.FC = () => {
             </div>
           </div>
 
+          {/* WhatsApp Templates Section */}
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="font-bold flex items-center gap-2 text-slate-800 dark:text-slate-100">
+                <Phone className="text-emerald-500" size={18}/> قوالب رسائل الواتساب
+              </h3>
+              <button
+                onClick={addWaTemplate}
+                className="px-4 py-1.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 rounded-xl text-xs font-bold hover:bg-emerald-100 transition-colors"
+              >
+                + إضافة قالب
+              </button>
+            </div>
+            <div className="space-y-4">
+              {(() => {
+                try {
+                  const templates = JSON.parse(config.whatsappTemplates || '[]');
+                  return templates.map((tpl: any) => (
+                    <div key={tpl.id} className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-700 relative group">
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div className="md:col-span-1">
+                          <label className="text-[10px] font-bold text-slate-400 mb-1 block">اسم القالب</label>
+                          <input
+                            type="text"
+                            value={tpl.name}
+                            onChange={e => updateWaTemplate(tpl.id, 'name', e.target.value)}
+                            className="w-full bg-white dark:bg-slate-800 border-none rounded-xl py-2 px-3 text-sm font-bold text-slate-800 dark:text-white"
+                          />
+                        </div>
+                        <div className="md:col-span-3">
+                          <label className="text-[10px] font-bold text-slate-400 mb-1 block">نص الرسالة</label>
+                          <textarea
+                            rows={2}
+                            value={tpl.text}
+                            onChange={e => updateWaTemplate(tpl.id, 'text', e.target.value)}
+                            className="w-full bg-white dark:bg-slate-800 border-none rounded-xl py-2 px-3 text-sm text-slate-700 dark:text-slate-300 resize-none"
+                          />
+                          <div className="mt-1 flex gap-2">
+                            {['[الاسم]', '[رقم_الطلب]', '[المبلغ]'].map(tag => (
+                              <span key={tag} className="text-[9px] bg-slate-200 dark:bg-slate-800 text-slate-100 dark:text-slate-500 px-1.5 py-0.5 rounded italic opacity-70">
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => deleteWaTemplate(tpl.id)}
+                        className="absolute top-2 left-2 p-1.5 text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg"
+                      >
+                        <XCircle size={14} />
+                      </button>
+                    </div>
+                  ));
+                } catch (e) {
+                  return <div className="text-xs text-rose-500">حدث خطأ في عرض القوالب.</div>;
+                }
+              })()}
+              <div className="p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/40 rounded-2xl flex items-start gap-3">
+                <AlertCircle size={16} className="text-amber-500 flex-shrink-0 mt-0.5" />
+                <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                  يمكنك استخدام الكلمات المفتاحية في نص القالب وسيتم استبدالها تلقائياً عند إرسال الرسالة.
+                </p>
+              </div>
+            </div>
+          </div>
 
           {/* Updates Section */}
           <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
@@ -1173,7 +1263,7 @@ const SettingsModule: React.FC = () => {
                     onChange={e => setConfig({ ...config, reportEmail: e.target.value, reportEmailVerified: false })}
                     className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
                   />
-                  <p className="text-[11px] text-muted">سيتم استخدام هذا البريد لإرسال التقارير اليومية.</p>
+                  <p className="text-[11px] text-muted mt-2">سيتم استخدام هذا البريد لإرسال التقارير اليومية.</p>
                   {!config.reportEmailVerified && (
                     <div className="flex flex-col gap-2">
                       <button onClick={sendReportOtp} disabled={reportOtpLoading || !config.reportEmail} className="px-3 py-2 bg-blue-600 text-white rounded">

@@ -18,12 +18,35 @@ function smtp_send_line($fp, $line) {
 }
 
 function smtp_send_mail($to, $subject, $body, $attachmentPath = null, $attachmentName = null) {
+    // Load settings from DB if available
+    require_once __DIR__ . '/apiConfig.php';
+    function getSmtpSetting($pdo_conn, $key, $default) {
+        try {
+            $stmt = $pdo_conn->prepare("SELECT setting_value FROM settings WHERE setting_key = ?");
+            $stmt->execute([$key]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($row && !empty(trim((string)$row['setting_value']))) return trim($row['setting_value']);
+        } catch (Exception $e) {}
+        return $default;
+    }
+    
+    // Connect to DB just to read SMTP settings (using API base pdo)
     $host = SMTP_HOST;
     $port = SMTP_PORT;
     $user = SMTP_USER;
     $pass = SMTP_PASS;
     $fromEmail = SMTP_FROM_EMAIL;
     $fromName = SMTP_FROM_NAME;
+
+    try {
+        $db = new PDO("mysql:host=localhost;dbname=dragon_db;charset=utf8mb4", "root", "");
+        $host = getSmtpSetting($db, 'smtp_host', $host);
+        $port = (int)getSmtpSetting($db, 'smtp_port', $port);
+        $user = getSmtpSetting($db, 'smtp_user', $user);
+        $pass = getSmtpSetting($db, 'smtp_pass', $pass);
+        $fromEmail = getSmtpSetting($db, 'smtp_from_email', $fromEmail);
+        $fromName = getSmtpSetting($db, 'smtp_from_name', $fromName);
+    } catch (Exception $e) {}
 
     $fp = stream_socket_client("tcp://{$host}:{$port}", $errno, $errstr, 20);
     if (!$fp) return false;

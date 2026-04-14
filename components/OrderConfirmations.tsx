@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Swal from 'sweetalert2';
-import { CheckSquare, MapPin, Package2, Phone, PhoneCall, Printer, RotateCcw, Save, ScanLine, ShieldCheck, Trash2, UserCheck, Users2, WalletCards, XCircle } from 'lucide-react';
+import { CheckSquare, MapPin, Package2, Phone, PhoneCall, Printer, RotateCcw, Save, ScanLine, ShieldCheck, Trash2, UserCheck, Users2, WalletCards, XCircle, MessageCircle } from 'lucide-react';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { PrintableOrders } from './PrintableOrderCard';
 
@@ -268,7 +268,8 @@ const SmallOrderCard: React.FC<{
   selectable?: boolean;
   selected?: boolean;
   onToggleSelect?: (assignment: AssignmentRow, selected: boolean) => void;
-}> = ({ assignment, badgeLabel, badgeClass, iconClass, actionIcon: ActionIcon, actionLabel, actionClass, onAction, actionDisabled = false, selectable = false, selected = false, onToggleSelect }) => {
+  onWhatsApp?: (assignment: AssignmentRow) => void;
+}> = ({ assignment, badgeLabel, badgeClass, iconClass, actionIcon: ActionIcon, actionLabel, actionClass, onAction, actionDisabled = false, selectable = false, selected = false, onToggleSelect, onWhatsApp }) => {
   const order = assignment.order || { id: assignment.order_id };
   const orderProducts = getOrderProducts(order);
 
@@ -292,8 +293,17 @@ const SmallOrderCard: React.FC<{
           </div>
           <h3 className="line-clamp-1 text-xs font-black text-slate-950 dark:text-white">{getOrderCustomerName(order)}</h3>
         </div>
-        <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-white shadow-sm ${iconClass}`}>
-          <CheckSquare size={14} />
+        <div className="flex gap-1 flex-shrink-0">
+          <button
+            onClick={() => onWhatsApp?.(assignment)}
+            className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-500 text-white shadow-sm hover:bg-emerald-600 transition-colors"
+            title="إرسال واتساب"
+          >
+            <MessageCircle size={14} />
+          </button>
+          <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-white shadow-sm ${iconClass}`}>
+            <CheckSquare size={14} />
+          </div>
         </div>
       </div>
 
@@ -470,6 +480,55 @@ const OrderConfirmations: React.FC = () => {
       }, 500);
     }
   }, [ordersToPrint]);
+  
+  const waTemplates = useMemo(() => {
+    try {
+      return JSON.parse(localStorage.getItem('Dragon_wa_templates') || '[]');
+    } catch { return []; }
+  }, []);
+
+  const openWhatsApp = (assignment: AssignmentRow) => {
+    const order = assignment.order || { id: assignment.order_id };
+    const phone = getOrderPrimaryPhone(order);
+    if (!phone) {
+      Swal.fire('تنبيه', 'لا يوجد رقم هاتف لهذا الأوردر.', 'warning');
+      return;
+    }
+
+    if (waTemplates.length === 0) {
+      // Direct opening if no templates
+      const url = `https://wa.me/2${phone}`;
+      window.open(url, '_blank');
+      return;
+    }
+
+    // Show template selector
+    Swal.fire({
+      title: 'اختر قالب الرسالة',
+      input: 'select',
+      inputOptions: waTemplates.reduce((acc: any, t: any) => {
+        acc[t.id] = t.name;
+        return acc;
+      }, {}),
+      inputPlaceholder: 'اختر القالب...',
+      showCancelButton: true,
+      confirmButtonText: 'إرسال',
+      cancelButtonText: 'إلغاء',
+    }).then((result) => {
+      if (result.isConfirmed) {
+        const tpl = waTemplates.find((t: any) => t.id === result.value);
+        if (tpl) {
+          let text = tpl.text
+            .replace(/\[الاسم\]/g, getOrderCustomerName(order))
+            .replace(/\[رقم_الطلب\]/g, getOrderNumber(order))
+            .replace(/\[المبلغ\]/g, formatCurrency(toNumber(getOrderTotal(order))));
+          
+          const url = `https://wa.me/2${phone}?text=${encodeURIComponent(text)}`;
+          window.open(url, '_blank');
+        }
+      }
+    });
+  };
 
   const selectedRep = useMemo(
     () => reps.find((rep) => Number(rep.id) === Number(selectedRepId)) || null,
@@ -1228,6 +1287,7 @@ const OrderConfirmations: React.FC = () => {
                               ? selectedActiveOrderIds.includes(Number(assignment.order_id))
                               : selectedCancelledOrderIds.includes(Number(assignment.order_id))}
                             onToggleSelect={section.key === 'active' ? handleToggleActiveOrder : handleToggleCancelledOrder}
+                            onWhatsApp={openWhatsApp}
                           />
                         ))}
                       </div>

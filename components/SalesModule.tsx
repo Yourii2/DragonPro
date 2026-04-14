@@ -105,7 +105,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
   const [isExistingCustomer, setIsExistingCustomer] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const currencySymbol = 'ج.م';
-  const defaultTaxRate = Number(localStorage.getItem('Dragon_tax_rate') || '0');
+  const [globalTaxRate, setGlobalTaxRate] = useState<number>(Number(localStorage.getItem('Dragon_tax_rate') || '0'));
   const salesCalcOrder = (localStorage.getItem('Dragon_sales_calc_order') || 'discount_then_tax') as 'discount_then_tax' | 'tax_then_discount';
 
   // State for script import
@@ -129,7 +129,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
   const [discountType, setDiscountType] = useState<RateType>('amount');
   const [discountValue, setDiscountValue] = useState<number>(0);
   const [taxType, setTaxType] = useState<RateType>('percent');
-  const [taxValue, setTaxValue] = useState<number>(isNaN(defaultTaxRate) ? 0 : defaultTaxRate);
+  const [taxValue, setTaxValue] = useState<number>(globalTaxRate);
   // Shipping for manual order
   const [shippingValue, setShippingValue] = useState<number>(0);
 
@@ -137,7 +137,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
   const [importDiscountType, setImportDiscountType] = useState<RateType>('amount');
   const [importDiscountValue, setImportDiscountValue] = useState<number>(0);
   const [importTaxType, setImportTaxType] = useState<RateType>('percent');
-  const [importTaxValue, setImportTaxValue] = useState<number>(isNaN(defaultTaxRate) ? 0 : defaultTaxRate);
+  const [importTaxValue, setImportTaxValue] = useState<number>(globalTaxRate);
   
   // Company Settings
   const [companyNameState, setCompanyNameState] = useState<string>(localStorage.getItem('Dragon_company_name') || 'اسم الشركة');
@@ -160,6 +160,18 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
           if (s.company_terms) setCompanyTermsState(s.company_terms);
           if (s.company_logo_url) setCompanyLogoState(s.company_logo_url);
           else if (s.company_logo) setCompanyLogoState(s.company_logo);
+          
+          if (typeof s.tax_rate !== 'undefined' && s.tax_rate !== null) {
+            const tr = Number(s.tax_rate);
+            if (!isNaN(tr)) {
+              setGlobalTaxRate(tr);
+              localStorage.setItem('Dragon_tax_rate', s.tax_rate.toString());
+              // If we are showing the list (not in middle of manual creation/edit), sync taxValue
+              if (view !== 'new-order' && !editingOrderId) {
+                setTaxValue(tr);
+              }
+            }
+          }
         }
       } catch (e) { console.debug('Failed to load company settings for printing', e); }
     })();
@@ -1301,47 +1313,101 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
     setView('new-order');
   };
 
-  const editOrder = (order: any) => {
+  const editOrder = async (order: any) => {
     // Map a saved order into the manual new-order form for full editing
+    
+    // 1. Ensure we have the latest products list
+    let productsList = existingProducts;
+    if (!productsList || productsList.length === 0) {
+      try {
+        const resp = await fetch(`${API_BASE_PATH}/api.php?module=products&action=getFlat`);
+        const j = await resp.json();
+        if (j.success && j.data) {
+          productsList = j.data;
+          setExistingProducts(j.data); // Update state for future use
+        }
+      } catch (e) {
+        console.error('Failed to load products for editOrder', e);
+      }
+    }
+
     const mappedItems = (order.products || []).map((p: any, idx: number) => {
-      const productId = p.productId || p.product_id || (p.product && (p.product.id || p.product.product_id)) || p.id || '';
-      const variant = existingProducts.find((ep: any) => Number(ep.id) === Number(productId));
+      let productId = p.productId || p.product_id || (p.product && (p.product.id || p.product.product_id)) || p.id || '';
+      let variant = productsList.find((ep: any) => Number(ep.id) === Number(productId));
+      
+      // If not found by id, try to match by name (fallback for imported orders)
+      if (!variant && p.name) {
+        const pName = String(p.name).trim().toLowerCase();
+        variant = productsList.find((ep: any) => String(ep.name || '').trim().toLowerCase() === pName);
+        if (variant) productId = variant.id;
+      }
+
       return {
-        id: Date.now() + idx,
+        id: Date.now() + idx + Math.random(),
         productId: productId || '',
-        _parentId: variant ? String(variant.product_id || variant.id) : '',
+        _parentId: variant ? String(variant.product_id || '') : '',
         _color: variant?.color || p.color || '',
         _size: variant?.size || p.size || '',
-        name: p.name || '',
+        name: (variant && variant.name) ? variant.name : (p.name || ''),
         color: variant?.color || p.color || '',
         size: variant?.size || p.size || '',
         qty: Number(p.quantity || p.qty || 1),
-        price: Number(p.price || p.unit_price || 0),
+        price: Number(p.price || p.unit_price || (variant ? (variant.sale_price || variant.price) : 0) || 0),
       };
     });
+
     setOrderItems(mappedItems.length ? mappedItems : [{ id: Date.now(), productId: '', _parentId: '', _color: '', _size: '', color: '', size: '', qty: 1, price: 0 }]);
+    
     // customer
     if (order.customerId || order.customer_id) setSelectedCustomerId(order.customerId || order.customer_id);
     else setSelectedCustomerId('');
-    setNewCustomer({ name: order.customerName || order.name || '', phone1: order.phone || order.phone1 || '', phone2: order.phone2 || '', governorate: order.governorate || '', address: order.address || '' });
+    
+    setNewCustomer({ 
+      name: order.customerName || order.name || '', 
+      phone1: order.phone || order.phone1 || '', 
+      phone2: order.phone2 || '', 
+      governorate: order.governorate || '', 
+      address: order.address || '' 
+    });
+    
     setNotes(order.notes || '');
     setEmployee(order.employee_raw || order.employee || '');
     setPage(order.page_raw || order.page || '');
+    
     // discounts / tax
     setDiscountType((order.discount_type || order.discountType) ? (normalizeRateType(order.discount_type || order.discountType) as RateType) : 'amount');
     setDiscountValue(Number(order.discount_value || order.discountValue || 0));
     setTaxType((order.tax_type || order.taxType) ? (normalizeRateType(order.tax_type || order.taxType) as RateType) : 'percent');
-    setTaxValue(Number(order.tax_value || order.taxValue || 0));
+    
+    // Robust tax rate handling (recognize 0 as a valid value)
+    let explicitTaxValue = null;
+    if (typeof order.tax_value !== 'undefined' && order.tax_value !== null) explicitTaxValue = Number(order.tax_value);
+    else if (typeof order.taxValue !== 'undefined' && order.taxValue !== null) explicitTaxValue = Number(order.taxValue);
+    
+    if (explicitTaxValue !== null && !isNaN(explicitTaxValue)) {
+      setTaxValue(explicitTaxValue);
+    } else {
+      setTaxValue(globalTaxRate);
+    }
+
     // shipping
     setShippingValue(Number(order.shipping || order.shippingCost || order.shipping_fees || 0));
+    
     // warehouses / sales office
     if (order.sales_office_id || order.salesOfficeId) setSelectedSalesOfficeId(order.sales_office_id || order.salesOfficeId);
     else setSelectedSalesOfficeId('');
+    
     setDefaultWarehouseId(order.warehouse_id || order.warehouseId || '');
+    
     // mark editing id and switch to form
     setEditingOrderId(Number(order.id));
+    
     // ensure warehouses/options are loaded before showing form
-    ensureWarehousesLoaded().finally(() => setView('new-order'));
+    if ((window as any)._loadDragonWarehouses) {
+      (window as any)._loadDragonWarehouses().finally(() => setView('new-order'));
+    } else {
+      setView('new-order');
+    }
   };
 
   const updateParsedProductField = (orderId: number, index: number, field: string, value: any) => {

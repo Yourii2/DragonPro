@@ -1,25 +1,22 @@
 ==================================== 
 Dragon Pro - Startup Log 
-Date: Thu 04/09/2026  7:42:59.14 
+Date: Sun 04/12/2026  1:07:48.22 
 ==================================== 
-[ 7:42:59.16] ==================================== 
-[ 7:42:59.17]    Dragon Pro - Starting Project 
-[ 7:42:59.18] ==================================== 
-[ 7:43:02.14] [1/4] Checking XAMPP status... 
-[ 7:43:02.24] [Wait] Apache is not running. Attempting to start XAMPP Control... 
-[ 7:43:07.16] [INFO] XAMPP Control Panel opened. Please start Apache manually. 
-[ 7:43:07.16] [INFO] After starting Apache, press any key to continue... 
-[ 7:43:25.29] [OK] Continuing with startup process... 
-[ 7:43:25.39] [OK] MySQL is already running. 
-[ 7:43:29.05] [OK] Node is available: v24.14.1 
-[ 7:43:29.47] [OK] npm.cmd is available: v11.11.0 
-[ 7:43:31.24] [3/4] Checking for packages... 
-[ 7:43:31.25] [OK] Packages are already installed. 
-[ 7:43:33.17] [4/4] Starting development server... 
-[ 7:43:33.21] Waiting for server to start... 
-[ 7:43:38.20] Opening browser... 
-[ 7:43:38.45] ==================================== 
-[ 7:43:38.45]   Dragon started (development mode) 
-[ 7:43:38.47] ==================================== 
-[ 7:43:38.49] Server is running at: http://localhost:3000 
-[ 7:43:38.51] To stop the server, close the development server window. 
+[ 1:07:48.25] ==================================== 
+[ 1:07:48.26]    Dragon Pro - Starting Project 
+[ 1:07:48.27] ==================================== 
+[ 1:07:51.15] [1/4] Checking XAMPP status... 
+[ 1:07:51.26] [OK] Apache is already running. 
+[ 1:07:51.34] [OK] MySQL is already running. 
+[ 1:07:54.61] [OK] Node is available: v24.14.1 
+[ 1:07:55.04] [OK] npm.cmd is available: v11.11.0 
+[ 1:07:57.12] [3/4] Checking for packages... 
+[ 1:07:57.12] [OK] Packages are already installed. 
+[ 1:07:59.21] [4/4] Starting development server... 
+[ 1:07:59.24] Waiting for server to start... 
+[ 1:08:04.38] Opening browser... 
+[ 1:08:05.45] ==================================== 
+[ 1:08:05.48]   Dragon started (development mode) 
+[ 1:08:05.99] ==================================== 
+[ 1:08:06.05] Server is running at: http://localhost:3000 
+[ 1:08:06.07] To stop the server, close the development server window. 

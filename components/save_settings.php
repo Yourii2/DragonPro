@@ -111,7 +111,8 @@ try {
         'report_daily_sales' => $input['report_daily_sales'] ?? 'false',
         'report_daily_treasury' => $input['report_daily_treasury'] ?? 'false',
         'report_daily_audit' => $input['report_daily_audit'] ?? 'false',
-        'report_auto' => $input['report_auto'] ?? 'false'
+        'report_auto' => $input['report_auto'] ?? 'false',
+        'wa_templates' => $input['wa_templates'] ?? ''
     ];
 
     // If company logo is a data URL, persist it to app_files and set company_logo_file_id

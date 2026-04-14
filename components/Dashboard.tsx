@@ -8,7 +8,7 @@ import {
   TrendingUp, Users, Package, DollarSign,
   ArrowUpRight, ArrowDownRight, ClipboardCheck, Briefcase,
   AlertTriangle, Sparkles, Award, Building2, UserCheck,
-  ShoppingBag, Activity
+  ShoppingBag, Activity, Map, AlertCircle, CheckCircle
 } from 'lucide-react';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { assetUrl } from '../services/assetUrl';
@@ -190,13 +190,12 @@ const Dashboard: React.FC = () => {
     trend.length ? trend.reduce((a: any, c: any) => c.sales > a.sales ? c : a, trend[0]) : null,
     [trend]);
 
-  const ordersByStatus: any[] = overview?.orders_by_status || [];
-  const pieData = ordersByStatus.map(r => ({ name: STATUS_LABELS[r.status] || r.status, value: r.count }));
-
   const topReps:    any[] = overview?.top_reps          || [];
   const topOffices: any[] = overview?.top_sales_offices || [];
   const topEmps:    any[] = overview?.top_employees      || [];
   const topProds:   any[] = overview?.top_products       || [];
+  const salesByGov: any[] = overview?.sales_by_gov       || [];
+  const lowStockDetails: any[] = overview?.low_stock_details || [];
 
   const tooltip_style = {
     borderRadius: '16px', border: 'none',
@@ -309,9 +308,8 @@ const Dashboard: React.FC = () => {
           isPositive={changePct !== null ? changePct >= 0 : true} icon={changePct !== null && changePct >= 0 ? ArrowUpRight : ArrowDownRight} />
       </div>
 
-      {/* Charts Section */}
-      <SectionTitle title="البيانات المالية" sub="الإيرادات والأرباح خلال الفترة المحددة" icon={TrendingUp} />
-
+      {/* Analytics Group 1 */}
+      <SectionTitle title="الأداء المالي ومصادر البيع" sub="الإيرادات حسب التاريخ وحسب صفحة البيع" icon={TrendingUp} />
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2 bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
           <div className="flex items-center justify-between mb-5">
@@ -333,40 +331,85 @@ const Dashboard: React.FC = () => {
         </div>
 
         <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
-          <h3 className="font-black text-slate-800 dark:text-slate-100 mb-5">توزيع حالات الطلبات</h3>
-          {pieData.length > 0 ? (
+          <h3 className="font-black text-slate-800 dark:text-slate-100 mb-5">توزيع المبيعات حسب المصدر (Pages)</h3>
+          {topOffices.length > 0 ? (
             <>
               <div className="h-44">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    <Pie data={pieData} cx="50%" cy="50%" innerRadius={48} outerRadius={72} paddingAngle={3} dataKey="value">
-                      {pieData.map((_: any, i: number) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                    <Pie data={topOffices} cx="50%" cy="50%" innerRadius={48} outerRadius={72} paddingAngle={3} dataKey="total_sales" nameKey="name">
+                      {topOffices.map((_: any, i: number) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
                     </Pie>
-                    <Tooltip contentStyle={tooltip_style} />
+                    <Tooltip contentStyle={tooltip_style} formatter={(v: any) => fmtCur(v, currencySymbol)} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
               <div className="mt-3 space-y-1.5">
-                {ordersByStatus.map((r: any, i: number) => (
-                  <div key={r.status} className="flex items-center justify-between text-xs">
+                {topOffices.slice(0, 5).map((r: any, i: number) => (
+                  <div key={r.id} className="flex items-center justify-between text-xs">
                     <div className="flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${STATUS_COLORS[r.status] || 'bg-slate-100 text-slate-600'}`}>
-                        {STATUS_LABELS[r.status] || r.status}
-                      </span>
+                       <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
+                      <span className="text-slate-600 dark:text-slate-300 truncate max-w-[100px]">{r.name}</span>
                     </div>
-                    <span className="font-bold text-slate-700 dark:text-slate-200">{fmt(r.count)}</span>
+                    <span className="font-bold text-slate-700 dark:text-slate-200">{fmtCur(r.total_sales, currencySymbol)}</span>
                   </div>
                 ))}
               </div>
             </>
           ) : (
-            <div className="flex items-center justify-center h-48 text-sm text-slate-400">لا توجد طلبات في هذه الفترة.</div>
+            <div className="flex items-center justify-center h-48 text-sm text-slate-400">لا توجد بيانات لمصادر البيع.</div>
           )}
         </div>
       </div>
 
-      {/* Line Chart */}
+      {/* Analytics Group 2 */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <div className="lg:col-span-2 bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-5">
+            <h3 className="font-black text-slate-800 dark:text-slate-100">المبيعات حسب المحافظات</h3>
+            <Map size={16} className="text-blue-500" />
+          </div>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={salesByGov} layout="vertical">
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={isDark ? '#334155' : '#e2e8f0'} />
+                <XAxis type="number" hide />
+                <YAxis dataKey="governorate" type="category" axisLine={false} tickLine={false} fontSize={11} width={80} tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
+                <Tooltip contentStyle={tooltip_style} formatter={(v: any) => fmtCur(v, currencySymbol)} cursor={{ fill: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(59,130,246,0.04)' }} />
+                <Bar dataKey="total" name="الإيرادات" fill="#8b5cf6" radius={[0, 6, 6, 0]} barSize={20} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-5">
+            <h3 className="font-black text-slate-800 dark:text-slate-100">قائمة نواقص المخزون</h3>
+            <AlertCircle size={16} className="text-rose-500" />
+          </div>
+          <div className="space-y-3 max-h-[250px] overflow-y-auto pr-1">
+            {lowStockDetails.length > 0 ? lowStockDetails.map((item: any) => (
+              <div key={item.id} className="p-3 bg-rose-50 dark:bg-rose-950/20 rounded-2xl border border-rose-100 dark:border-rose-900/40 flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-bold text-rose-700 dark:text-rose-400">{item.product_name}</div>
+                  <div className="text-[10px] text-rose-600/70">{item.color} - {item.size}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xs font-black text-rose-700 dark:text-rose-400">{item.q} قطعة</div>
+                  <div className="text-[9px] text-rose-400">الحد: {item.reorder_level}</div>
+                </div>
+              </div>
+            )) : (
+              <div className="text-center py-10">
+                <CheckCircle size={32} className="text-emerald-500 mx-auto mb-2 opacity-20" />
+                <div className="text-xs text-slate-400 font-bold">المخزون مكتمل حالياً</div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Daily path */}
       <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
         <div className="flex items-center justify-between mb-5">
           <h3 className="font-black text-slate-800 dark:text-slate-100">مسار الإيرادات اليومي</h3>
@@ -515,81 +558,26 @@ const Dashboard: React.FC = () => {
         )}
       </div>
 
-      {/* Alerts & Summary */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
-          <div className="flex items-center gap-2 mb-5">
-            <AlertTriangle size={16} className="text-rose-500" />
-            <h3 className="font-black text-slate-800 dark:text-slate-100">التنبيهات الذكية</h3>
-          </div>
-          <div className="space-y-3">
-            {[
-              { label: 'نقص المخزون', sub: `${lowStock} منتج أقل من الحد`, value: lowStock, high: 10, med: 3, icon: Package },
-              { label: 'طلبات معلقة', sub: `${ordersPending} طلب ينتظر`, value: ordersPending, high: 20, med: 6, icon: Briefcase },
-              { label: 'غياب اليوم', sub: `${absent} موظف`, value: absent, high: 6, med: 2, icon: Users },
-            ].map(a => {
-              const level = a.value >= a.high ? 'rose' : a.value >= a.med ? 'amber' : 'emerald';
-              const colors: any = { rose: 'bg-rose-50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/50', amber: 'bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/50', emerald: 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/50' };
-              const tColors: any = { rose: 'text-rose-700 dark:text-rose-400', amber: 'text-amber-700 dark:text-amber-400', emerald: 'text-emerald-700 dark:text-emerald-400' };
-              return (
-                <div key={a.label} className={`flex items-center gap-3 p-3 rounded-2xl border ${colors[level]}`}>
-                  <a.icon size={16} className={tColors[level]} />
-                  <div className="flex-1">
-                    <div className={`text-sm font-bold ${tColors[level]}`}>{a.label}</div>
-                    <div className={`text-[11px] ${tColors[level]} opacity-70`}>{a.sub}</div>
-                  </div>
-                  <span className={`text-xl font-black ${tColors[level]}`}>{a.value}</span>
-                </div>
-              );
-            })}
-          </div>
+      {/* Summary Footer */}
+      <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-3xl p-6 shadow-sm text-white">
+        <div className="flex items-center gap-2 mb-5">
+          <Sparkles size={16} className="text-amber-400" />
+          <h3 className="font-black">ملخص ختامي للفترة</h3>
         </div>
-
-        <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
-          <div className="flex items-center gap-2 mb-5">
-            <Building2 size={16} className="text-blue-500" />
-            <h3 className="font-black text-slate-800 dark:text-slate-100">أفضل الصفحات</h3>
-          </div>
-          {topOffices.length === 0 ? (
-            <div className="text-center text-sm text-slate-400 py-8">لا توجد بيانات.</div>
-          ) : (
-            <div className="space-y-3">
-              {topOffices.slice(0, 5).map((o: any, i: number) => (
-                <div key={o.id} className="flex items-center gap-3">
-                  <span className="text-xl w-7 text-center flex-shrink-0">{MEDAL[i] || `${i + 1}`}</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-bold text-slate-800 dark:text-slate-100 truncate">{o.name}</span>
-                      <span className="text-xs font-black text-blue-600 dark:text-blue-400 mr-2 flex-shrink-0">{fmtCur(o.total_sales, currencySymbol)}</span>
-                    </div>
-                    <div className="text-[10px] text-slate-400">{fmt(o.orders_count)} أوردر</div>
-                  </div>
-                </div>
-              ))}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-5">
+          {[
+            { label: 'إيرادات الفترة', value: loading ? '...' : fmtCur(revenue, currencySymbol) },
+            { label: 'صافي الأرباح', value: loading ? '...' : fmtCur(profit, currencySymbol) },
+            { label: 'هامش الربح', value: loading ? '...' : `${margin.toFixed(1)}%` },
+            { label: 'إجمالي الطلبات', value: loading ? '...' : fmt(ordersMonth) },
+            { label: 'أفضل يوم', value: bestDay?.name || '—' },
+            { label: 'إيرادات سابقة', value: loading ? '...' : fmtCur(prevRev, currencySymbol) },
+          ].map(s => (
+            <div key={s.label} className="border-r border-white/10 pr-4 last:border-0">
+              <span className="text-white/60 text-[10px] block mb-1">{s.label}</span>
+              <span className="font-black text-sm">{s.value}</span>
             </div>
-          )}
-        </div>
-
-        <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-3xl p-6 shadow-sm text-white">
-          <div className="flex items-center gap-2 mb-5">
-            <Sparkles size={16} className="text-amber-400" />
-            <h3 className="font-black">ملخص الفترة</h3>
-          </div>
-          <div className="space-y-3">
-            {[
-              { label: 'إيرادات الفترة', value: loading ? '...' : fmtCur(revenue, currencySymbol) },
-              { label: 'صافي الأرباح', value: loading ? '...' : fmtCur(profit, currencySymbol) },
-              { label: 'هامش الربح', value: loading ? '...' : `${margin.toFixed(1)}%` },
-              { label: 'إجمالي الطلبات', value: loading ? '...' : fmt(ordersMonth) },
-              { label: 'أفضل يوم', value: bestDay?.name || '—' },
-              { label: 'إيرادات سابقة', value: loading ? '...' : fmtCur(prevRev, currencySymbol) },
-            ].map(s => (
-              <div key={s.label} className="flex items-center justify-between py-2 border-b border-white/10 last:border-0">
-                <span className="text-white/60 text-xs">{s.label}</span>
-                <span className="font-black text-sm">{s.value}</span>
-              </div>
-            ))}
-          </div>
+          ))}
         </div>
       </div>
 

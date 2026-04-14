@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
-import { 
-  Database, 
-  Building2, 
-  UserPlus, 
-  ShieldCheck, 
-  CheckCircle2, 
-  ChevronLeft, 
+import {
+  Database,
+  Building2,
+  UserPlus,
+  ShieldCheck,
+  CheckCircle2,
+  ChevronLeft,
   ChevronRight,
   Upload,
   Globe,
@@ -113,7 +113,7 @@ const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
 
   const handleFinish = async () => {
     setLoading(true);
-    
+
     try {
       const response = await fetch(`${API_BASE_PATH}/setup.php`, {
         method: 'POST',
@@ -177,7 +177,7 @@ const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-['Cairo']" dir="rtl">
       <div className="bg-white w-full max-w-4xl rounded-[2.5rem] shadow-2xl shadow-blue-500/10 overflow-hidden flex flex-col md:flex-row">
-        
+
         {/* Sidebar - Progress */}
         <div className="bg-slate-800 md:w-80 p-8 text-white">
           <div className="flex items-center gap-3 mb-12">
@@ -186,7 +186,7 @@ const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
             </div>
             <h2 className="text-xl font-bold">معالج التثبيت</h2>
           </div>
-          
+
           <div className="space-y-6">
             {steps.map((s, i) => (
               <div key={i} className={`flex items-center gap-4 transition-all duration-300 ${step === i + 1 ? 'opacity-100' : 'opacity-40'}`}>
@@ -204,7 +204,7 @@ const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
 
         {/* Content Area */}
         <div className="flex-1 p-8 md:p-12 relative overflow-y-auto max-h-screen md:max-h-[700px]">
-          
+
           {step === 1 && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
               <div className="bg-blue-50 w-20 h-20 rounded-3xl flex items-center justify-center mb-6">
@@ -214,7 +214,7 @@ const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
               <p className="text-slate-500 leading-relaxed mb-8">
                 يسعدنا اختيارك لنظام دراجون برو لإدارة شركات المبيعات والتسويق. سيقوم هذا المعالج بمساعدتك في تهيئة النظام وربط قاعدة البيانات في دقائق معدودة.
               </p>
-              <button 
+              <button
                 onClick={nextStep}
                 className="group flex items-center gap-3 bg-blue-600 text-white px-8 py-4 rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-xl shadow-blue-500/20"
               >
@@ -232,47 +232,47 @@ const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-500 mr-2">عنوان السيرفر (Host)</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     value={formData.dbHost}
-                    onChange={(e) => setFormData({...formData, dbHost: e.target.value})}
-                    className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20" 
+                    onChange={(e) => setFormData({ ...formData, dbHost: e.target.value })}
+                    className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20"
                   />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-500 mr-2">المنفذ (Port)</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     value={formData.dbPort}
-                    onChange={(e) => setFormData({...formData, dbPort: e.target.value})}
-                    className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20" 
+                    onChange={(e) => setFormData({ ...formData, dbPort: e.target.value })}
+                    className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20"
                   />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-500 mr-2">اسم المستخدم</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     value={formData.dbUser}
-                    onChange={(e) => setFormData({...formData, dbUser: e.target.value})}
-                    className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20" 
+                    onChange={(e) => setFormData({ ...formData, dbUser: e.target.value })}
+                    className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20"
                   />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-500 mr-2">كلمة المرور</label>
-                  <input 
-                    type="password" 
+                  <input
+                    type="password"
                     value={formData.dbPass}
-                    onChange={(e) => setFormData({...formData, dbPass: e.target.value})}
-                    className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20" 
+                    onChange={(e) => setFormData({ ...formData, dbPass: e.target.value })}
+                    className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20"
                   />
                 </div>
                 <div className="md:col-span-2 space-y-1">
                   <label className="text-xs font-bold text-slate-500 mr-2">اسم قاعدة البيانات</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     value={formData.dbName}
-                    onChange={(e) => setFormData({...formData, dbName: e.target.value})}
-                    className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20" 
+                    onChange={(e) => setFormData({ ...formData, dbName: e.target.value })}
+                    className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20"
                   />
                 </div>
               </div>
@@ -282,15 +282,15 @@ const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
                 </div>
               )}
               <div className="mt-6">
-                <button 
+                <button
                   type="button"
                   onClick={handleTestDbConnection}
                   disabled={isTestingDb}
                   className="w-full flex items-center justify-center gap-2 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 px-5 py-3 rounded-2xl text-sm font-bold hover:bg-slate-200 dark:hover:bg-slate-600 transition-all disabled:opacity-50"
                 >
-                  {isTestingDb ? 
-                    <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div> جارٍ الاختبار...</> : 
-                    <><Database size={16}/> اختبار الاتصال بقاعدة البيانات</>}
+                  {isTestingDb ?
+                    <><div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"></div> جارٍ الاختبار...</> :
+                    <><Database size={16} /> اختبار الاتصال بقاعدة البيانات</>}
                 </button>
               </div>
             </div>
@@ -319,41 +319,41 @@ const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-500 mr-2">اسم الشركة / المؤسسة</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     value={formData.companyName}
-                    onChange={(e) => setFormData({...formData, companyName: e.target.value})}
-                    className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20" 
+                    onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
+                    className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20"
                   />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-500 mr-2">رقم الهاتف</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     value={formData.companyPhone}
-                    onChange={(e) => setFormData({...formData, companyPhone: e.target.value})}
-                    className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20" 
+                    onChange={(e) => setFormData({ ...formData, companyPhone: e.target.value })}
+                    className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20"
                   />
                 </div>
                 <div className="md:col-span-2 space-y-1">
                   <label className="text-xs font-bold text-slate-500 mr-2">العنوان بالكامل</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     value={formData.companyAddress}
-                    onChange={(e) => setFormData({...formData, companyAddress: e.target.value})}
-                    className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20" 
+                    onChange={(e) => setFormData({ ...formData, companyAddress: e.target.value })}
+                    className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20"
                   />
                 </div>
                 <div className="md:col-span-2 space-y-1">
                   <label className="text-xs font-bold text-slate-500 mr-2 flex items-center gap-2">
                     <FileText size={14} className="text-blue-500" /> سياسة الاستخدام / شروط الفاتورة
                   </label>
-                  <textarea 
+                  <textarea
                     rows={4}
                     value={formData.companyTerms}
-                    onChange={(e) => setFormData({...formData, companyTerms: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, companyTerms: e.target.value })}
                     placeholder="اكتب شروط الاستخدام أو سياسة الاسترجاع هنا..."
-                    className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 resize-none" 
+                    className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 resize-none"
                   ></textarea>
                 </div>
               </div>
@@ -369,7 +369,7 @@ const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-xl">
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-500 mr-2">طريقة الحصول على المنتجات</label>
-                  <select value={formData.productSource} onChange={(e) => setFormData({...formData, productSource: e.target.value})} className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20">
+                  <select value={formData.productSource} onChange={(e) => setFormData({ ...formData, productSource: e.target.value })} className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20">
                     <option value="both">من المصنع والموردين</option>
                     <option value="factory">من المصنع فقط</option>
                     <option value="suppliers">من الموردين فقط</option>
@@ -377,9 +377,9 @@ const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-500 mr-2">سعر الشراء في الاستلام والمرتجع</label>
-                  <select value={formData.purchasePriceType} onChange={(e) => setFormData({...formData, purchasePriceType: e.target.value})} className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20">
+                  <select value={formData.purchasePriceType} onChange={(e) => setFormData({ ...formData, purchasePriceType: e.target.value })} className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20">
                     <option value="full_cost">تكلفة كاملة (التكلفة الفعلية)</option>
-                    <option value="vendor_price">سعر المورد</option>
+                    <option value="vendor_price">سعر المورد (المصنعية)</option>
                   </select>
                 </div>
               </div>
@@ -395,16 +395,16 @@ const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-xl">
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-500 mr-2">طريقة العرض في المبيعات</label>
-                  <select value={formData.salesDisplayMethod} onChange={(e) => setFormData({...formData, salesDisplayMethod: e.target.value})} className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20">
-                    <option value="company">عرض أسعار الشركة</option>
-                    <option value="sales_offices">عرض حسب مراكز المبيعات</option>
+                  <select value={formData.salesDisplayMethod} onChange={(e) => setFormData({ ...formData, salesDisplayMethod: e.target.value })} className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20">
+                    <option value="company">عرض اسم الشركة</option>
+                    <option value="sales_offices">عرض مكاتب المبيعات</option>
                   </select>
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-500 mr-2">تحديد سعر البيع الأساسي</label>
-                  <select value={formData.salePriceSource} onChange={(e) => setFormData({...formData, salePriceSource: e.target.value})} className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20">
+                  <select value={formData.salePriceSource} onChange={(e) => setFormData({ ...formData, salePriceSource: e.target.value })} className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20">
                     <option value="product">سعر المنتج الافتراضي</option>
-                    <option value="order">تحديد السعر عند الطلب</option>
+                    <option value="order">تحديد السعر من الطلب</option>
                   </select>
                 </div>
               </div>
@@ -420,11 +420,11 @@ const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-xl">
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-500 mr-2">العملة الافتراضية</label>
-                  <input type="text" value={formData.currency} onChange={(e) => setFormData({...formData, currency: e.target.value})} className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20" />
+                  <input type="text" value={formData.currency} onChange={(e) => setFormData({ ...formData, currency: e.target.value })} className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20" />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-500 mr-2">نسبة الضريبة (%)</label>
-                  <input type="text" value={formData.taxRate} onChange={(e) => setFormData({...formData, taxRate: e.target.value})} className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20" />
+                  <input type="text" value={formData.taxRate} onChange={(e) => setFormData({ ...formData, taxRate: e.target.value })} className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20" />
                 </div>
               </div>
             </div>
@@ -438,29 +438,29 @@ const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
               <div className="space-y-4 max-w-md">
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-500 mr-2">الاسم الكامل للمدير</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     value={formData.adminName}
-                    onChange={(e) => setFormData({...formData, adminName: e.target.value})}
-                    className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20" 
+                    onChange={(e) => setFormData({ ...formData, adminName: e.target.value })}
+                    className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20"
                   />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-500 mr-2">اسم تسجيل الدخول</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     value={formData.adminUsername}
-                    onChange={(e) => setFormData({...formData, adminUsername: e.target.value})}
-                    className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20" 
+                    onChange={(e) => setFormData({ ...formData, adminUsername: e.target.value })}
+                    className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20"
                   />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-500 mr-2">كلمة المرور</label>
-                  <input 
-                    type="password" 
+                  <input
+                    type="password"
                     value={formData.adminPass}
-                    onChange={(e) => setFormData({...formData, adminPass: e.target.value})}
-                    className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20" 
+                    onChange={(e) => setFormData({ ...formData, adminPass: e.target.value })}
+                    className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20"
                   />
                 </div>
               </div>
@@ -473,9 +473,9 @@ const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
                 <ShieldCheck className="text-emerald-600" /> نافذة تفعيل المنتج
               </h2>
               <div className="bg-slate-50 p-6 rounded-3xl border-2 border-dashed border-slate-200 text-center mb-6">
-                 <ShieldCheck className="w-16 h-16 text-emerald-500 mx-auto mb-4" />
-                 <p className="text-sm text-slate-600 mb-2">سيتم التحقق من الترخيص تلقائياً عند إنهاء التثبيت.</p>
-                 <p className="text-xs text-slate-500">تأكد من اتصال الخادم بالإنترنت لإتمام التفعيل.</p>
+                <ShieldCheck className="w-16 h-16 text-emerald-500 mx-auto mb-4" />
+                <p className="text-sm text-slate-600 mb-2">سيتم التحقق من الترخيص تلقائياً عند إنهاء التثبيت.</p>
+                <p className="text-xs text-slate-500">تأكد من اتصال الخادم بالإنترنت لإتمام التفعيل.</p>
               </div>
             </div>
           )}
@@ -488,13 +488,13 @@ const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
               <h2 className="text-3xl font-black text-slate-900 mb-4">جاهز للانطلاق!</h2>
               {loading ? (
                 <div className="w-full max-w-xs mx-auto">
-                   <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden mb-2">
-                      <div className="h-full bg-blue-600 animate-progress"></div>
-                   </div>
-                   <p className="text-xs font-bold text-blue-600 animate-pulse">جاري بناء قاعدة البيانات...</p>
+                  <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden mb-2">
+                    <div className="h-full bg-blue-600 animate-progress"></div>
+                  </div>
+                  <p className="text-xs font-bold text-blue-600 animate-pulse">جاري بناء قاعدة البيانات...</p>
                 </div>
               ) : (
-                <button 
+                <button
                   onClick={handleFinish}
                   className="bg-blue-600 text-white px-12 py-4 rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-xl shadow-blue-500/30"
                 >
@@ -509,8 +509,8 @@ const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
               <button onClick={prevStep} className="flex items-center gap-2 text-slate-400 font-bold hover:text-slate-900 transition-colors">
                 <ChevronRight size={20} /> السابق
               </button>
-              <button 
-                onClick={nextStep} 
+              <button
+                onClick={nextStep}
                 disabled={step === 2 && !(dbTestResult && dbTestResult.success)}
                 className="bg-blue-600 text-white px-8 py-3 rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/10 disabled:bg-slate-300 disabled:shadow-none disabled:cursor-not-allowed"
               >
