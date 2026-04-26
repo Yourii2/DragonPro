@@ -54,7 +54,7 @@ const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
     salesDisplayMethod: 'company', // 'company' | 'sales_offices'
     salePriceSource: 'product', // 'product' | 'order'
     currency: 'EGP',
-    taxRate: '14'
+    taxRate: '0'
   });
 
   const formatActivationStatus = (type: string, accountStatus: string, isExpired: string | boolean) => {
@@ -168,7 +168,7 @@ const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
     { title: 'الملف التجاري', icon: <Building2 /> },
     { title: 'المنتجات', icon: <Settings /> },
     { title: 'البيع', icon: <Tag /> },
-    { title: 'العملة والضرائب', icon: <Coins /> },
+    { title: 'العملة', icon: <Coins /> },
     { title: 'حساب المدير', icon: <UserPlus /> },
     { title: 'التفعيل', icon: <ShieldCheck /> },
     { title: 'النهاية', icon: <CheckCircle2 /> },
@@ -415,16 +415,12 @@ const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
           {step === 6 && (
             <div className="animate-in fade-in slide-in-from-left-4 duration-500">
               <h2 className="text-2xl font-bold text-slate-900 mb-6 flex items-center gap-3">
-                <Coins className="text-blue-600" /> العملة والضرائب
+                <Coins className="text-blue-600" /> العملة
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-xl">
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-500 mr-2">العملة الافتراضية</label>
                   <input type="text" value={formData.currency} onChange={(e) => setFormData({ ...formData, currency: e.target.value })} className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-500 mr-2">نسبة الضريبة (%)</label>
-                  <input type="text" value={formData.taxRate} onChange={(e) => setFormData({ ...formData, taxRate: e.target.value })} className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20" />
                 </div>
               </div>
             </div>

@@ -57,12 +57,10 @@ const SettingsModule: React.FC = () => {
     phone: localStorage.getItem('Dragon_company_phone') || '',
     address: localStorage.getItem('Dragon_company_address') || '',
     terms: localStorage.getItem('Dragon_company_terms') || '',
-    taxRate: (localStorage.getItem('Dragon_tax_rate') !== null && localStorage.getItem('Dragon_tax_rate') !== '') ? localStorage.getItem('Dragon_tax_rate')! : '14',
-    salesCalcOrder: localStorage.getItem('Dragon_sales_calc_order') || 'discount_then_tax',
     // New settings
     salesDisplayMethod: localStorage.getItem('Dragon_sales_display_method') || 'company', // 'company' | 'sales_offices'
     productSource: localStorage.getItem('Dragon_product_source') || 'both', // 'factory' | 'suppliers' | 'both'
-    salePriceSource: localStorage.getItem('Dragon_default_sale_price_source') || 'product', // 'product' | 'order'
+    salePriceSource: localStorage.getItem('Dragon_sale_price_source') || 'product', // 'product' | 'order'
     deliveryMethod: (localStorage.getItem('Dragon_delivery_method') || 'reps').toString(), // 'reps' | 'direct' | 'shipping'
     purchasePriceType: localStorage.getItem('Dragon_purchase_price_type') || 'full_cost', // 'full_cost' | 'vendor_price'
     currency: localStorage.getItem('Dragon_currency') || 'EGP',
@@ -70,12 +68,12 @@ const SettingsModule: React.FC = () => {
     backupFrequency: localStorage.getItem('Dragon_backup_freq') || 'daily',
     backupEmail: localStorage.getItem('Dragon_backup_email') || '',
     backupEmailVerified: localStorage.getItem('Dragon_backup_email_verified') === 'true',
-    reportEmail: localStorage.getItem('dragon_report_email') || '',
-    reportEmailVerified: localStorage.getItem('dragon_report_email_verified') === 'true',
-    reportDailySales: localStorage.getItem('dragon_report_daily_sales') === 'true',
-    reportDailyTreasury: localStorage.getItem('dragon_report_daily_treasury') === 'true',
-    reportDailyAudit: localStorage.getItem('dragon_report_daily_audit') === 'true',
-    reportAuto: localStorage.getItem('dragon_report_auto') === 'true',
+    reportEmail: localStorage.getItem('Dragon_report_email') || '',
+    reportEmailVerified: localStorage.getItem('Dragon_report_email_verified') === 'true',
+    reportDailySales: localStorage.getItem('Dragon_report_daily_sales') === 'true',
+    reportDailyTreasury: localStorage.getItem('Dragon_report_daily_treasury') === 'true',
+    reportDailyAudit: localStorage.getItem('Dragon_report_daily_audit') === 'true',
+    reportAuto: localStorage.getItem('Dragon_report_auto') === 'true',
     whatsappTemplates: localStorage.getItem('Dragon_wa_templates') || JSON.stringify([
       { id: 'conf', name: 'تأكيد الأوردر', text: 'مرحباً [الاسم]، تم تأكيد طلبك رقم [رقم_الطلب] بقيمة [المبلغ]. سيصلك المندوب خلال 48 ساعة. شكراً لتعاملك معنا!' },
       { id: 'track', name: 'متابعة الشحن', text: 'عزيزي [الاسم]، طلبك رقم [رقم_الطلب] الآن مع المندوب وفي الطريق إليك. يرجى التواجد لاستلام مبيعاتك.' },
@@ -207,8 +205,6 @@ const SettingsModule: React.FC = () => {
             phone: settings.company_phone || '',
             address: settings.company_address || '',
             terms: settings.company_terms || '',
-            taxRate: (typeof settings.tax_rate !== 'undefined' && settings.tax_rate !== null) ? settings.tax_rate : '14',
-            salesCalcOrder: settings.sales_calc_order || 'discount_then_tax',
             currency: settings.currency || 'EGP',
             salesDisplayMethod: settings.sales_display_method || 'company',
             productSource: settings.product_source || 'both',
@@ -261,8 +257,6 @@ const SettingsModule: React.FC = () => {
         company_address: config.address,
         company_terms: config.terms,
         company_logo: logoPreview || '',
-        tax_rate: config.taxRate,
-        sales_calc_order: config.salesCalcOrder,
         currency: config.currency,
         auto_backup: config.autoBackup.toString(),
         backup_frequency: config.backupFrequency,
@@ -313,9 +307,7 @@ const SettingsModule: React.FC = () => {
         localStorage.setItem('Dragon_company_address', config.address);
         localStorage.setItem('Dragon_company_terms', config.terms);
         // save new setting locally
-        localStorage.setItem('Dragon_default_sale_price_source', config.salePriceSource || 'product');
-        localStorage.setItem('Dragon_tax_rate', config.taxRate);
-        localStorage.setItem('Dragon_sales_calc_order', config.salesCalcOrder);
+        localStorage.setItem('Dragon_sale_price_source', config.salePriceSource || 'product');
         localStorage.setItem('Dragon_currency', config.currency);
         // persist new settings locally
         localStorage.setItem('Dragon_sales_display_method', config.salesDisplayMethod);
@@ -327,12 +319,12 @@ const SettingsModule: React.FC = () => {
         localStorage.setItem('Dragon_backup_email', config.backupEmail);
         localStorage.setItem('Dragon_backup_email_verified', config.backupEmailVerified ? 'true' : 'false');
         localStorage.setItem('Dragon_company_logo', logoPreview || '');
-        localStorage.setItem('dragon_report_email', config.reportEmail);
-        localStorage.setItem('dragon_report_email_verified', config.reportEmailVerified ? 'true' : 'false');
-        localStorage.setItem('dragon_report_daily_sales', config.reportDailySales ? 'true' : 'false');
-        localStorage.setItem('dragon_report_daily_treasury', config.reportDailyTreasury ? 'true' : 'false');
-        localStorage.setItem('dragon_report_daily_audit', config.reportDailyAudit ? 'true' : 'false');
-        localStorage.setItem('dragon_report_auto', config.reportAuto ? 'true' : 'false');
+        localStorage.setItem('Dragon_report_email', config.reportEmail);
+        localStorage.setItem('Dragon_report_email_verified', config.reportEmailVerified ? 'true' : 'false');
+        localStorage.setItem('Dragon_report_daily_sales', config.reportDailySales ? 'true' : 'false');
+        localStorage.setItem('Dragon_report_daily_treasury', config.reportDailyTreasury ? 'true' : 'false');
+        localStorage.setItem('Dragon_report_daily_audit', config.reportDailyAudit ? 'true' : 'false');
+        localStorage.setItem('Dragon_report_auto', config.reportAuto ? 'true' : 'false');
         localStorage.setItem('Dragon_wa_templates', config.whatsappTemplates);
 
         setIsSaved(true);
@@ -1364,7 +1356,7 @@ const SettingsModule: React.FC = () => {
           </div>
 
           <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
-            <h3 className="font-bold flex items-center gap-2 mb-6 text-slate-800 dark:text-slate-100"><Coins className="text-amber-500" size={18}/> العملة والضرائب</h3>
+            <h3 className="font-bold flex items-center gap-2 mb-6 text-slate-800 dark:text-slate-100"><Coins className="text-amber-500" size={18}/> العملة</h3>
             <div className="space-y-4">
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-500 dark:text-slate-400">العملة الافتراضية</label>
@@ -1372,23 +1364,6 @@ const SettingsModule: React.FC = () => {
                   value={config.currency}
                   onChange={(v) => setConfig({...config, currency: v})}
                   options={[{ value: 'EGP', label: 'الجنيه المصري (EGP)' }, { value: 'SAR', label: 'الريال السعودي (SAR)' }, { value: 'USD', label: 'الدولار الأمريكي (USD)' }, { value: 'AED', label: 'الدرهم الإماراتي (AED)' }]}
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500 dark:text-slate-400">معدل الضريبة (%)</label>
-                <input
-                  type="number"
-                  value={config.taxRate}
-                  onChange={(e) => setConfig({...config, taxRate: e.target.value})}
-                  className="w-full py-3 px-4 bg-slate-50 dark:bg-slate-900 border-none rounded-2xl text-sm text-slate-900 dark:text-white"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500 dark:text-slate-400">ترتيب احتساب الخصم/الضريبة</label>
-                <CustomSelect
-                  value={config.salesCalcOrder}
-                  onChange={(v) => setConfig({...config, salesCalcOrder: v})}
-                  options={[{ value: 'discount_then_tax', label: 'خصم ثم ضريبة' }, { value: 'tax_then_discount', label: 'ضريبة ثم خصم' }]}
                 />
               </div>
             </div>

@@ -407,10 +407,19 @@ const OrderConfirmations: React.FC = () => {
   const loadData = async (preferredRepId?: number | null, options?: LoadDataOptions) => {
     setLoading(true);
     try {
-      const [repsRes, assignmentsRes] = await Promise.all([
-        fetch(`${API_BASE_PATH}/api.php?module=sales&action=getConfirmationRepSummary`).then((res) => res.json()),
-        fetch(`${API_BASE_PATH}/api.php?module=sales&action=getConfirmationAssignments`).then((res) => res.json())
-      ]);
+      const nextRepId = preferredRepId !== undefined ? preferredRepId : selectedRepId;
+
+      const promises: Promise<any>[] = [
+        fetch(`${API_BASE_PATH}/api.php?module=sales&action=getConfirmationRepSummary`).then((res) => res.json())
+      ];
+
+      if (nextRepId) {
+        promises.push(fetch(`${API_BASE_PATH}/api.php?module=sales&action=getConfirmationAssignments&rep_id=${nextRepId}`).then((res) => res.json()));
+      } else {
+        promises.push(Promise.resolve({ success: true, data: [] }));
+      }
+
+      const [repsRes, assignmentsRes] = await Promise.all(promises);
 
       const repRows: RepSummary[] = repsRes?.success ? repsRes.data || [] : [];
       const assignmentRows: AssignmentRow[] = assignmentsRes?.success ? assignmentsRes.data || [] : [];
@@ -436,11 +445,11 @@ const OrderConfirmations: React.FC = () => {
         // no-op for current auto-save flow
       }
 
-      const nextRepId = preferredRepId ?? selectedRepId;
       if (nextRepId && repRows.some((rep) => Number(rep.id) === Number(nextRepId))) {
         setSelectedRepId(Number(nextRepId));
       } else {
         setSelectedRepId(null);
+        setAssignments([]);
       }
     } catch (error) {
       console.error('Failed to load confirmation board', error);
@@ -451,25 +460,43 @@ const OrderConfirmations: React.FC = () => {
   };
 
   useEffect(() => {
+    // Initial load
     loadData();
   }, []);
 
   useEffect(() => {
-    const fetchWarehouses = async () => {
+    // When selectedRepId changes and it exists, fetch its assignments explicitly.
+    if (selectedRepId) {
+      loadData(selectedRepId, { preserveStaged: true });
+    } else {
+      setAssignments([]);
+    }
+  }, [selectedRepId]);
+
+  useEffect(() => {
+    const fetchWarehousesAndDefaults = async () => {
       try {
-        const response = await fetch(`${API_BASE_PATH}/api.php?module=warehouses&action=getAll`);
-        const result = await response.json();
-        const rows: WarehouseRow[] = result?.success ? (result.data || []) : [];
+        const [whRes, defRes] = await Promise.all([
+          fetch(`${API_BASE_PATH}/api.php?module=warehouses&action=getAll`).then(r => r.json()).catch(() => null),
+          fetch(`${API_BASE_PATH}/api.php?module=permissions&action=getUserDefaults`).then(r => r.json()).catch(() => null)
+        ]);
+        
+        const rows: WarehouseRow[] = whRes?.success ? (whRes.data || []) : [];
         setWarehouses(rows);
+        
+        const userDefaults = defRes?.success ? defRes.data : null;
+        const defaultWid = userDefaults?.default_warehouse_id ? Number(userDefaults.default_warehouse_id) : null;
+
         setSelectedWarehouseId((prev) => {
           if (prev && rows.some((row) => Number(row.id) === Number(prev))) return prev;
-          return rows.length ? Number(rows[0].id) : null;
+          if (defaultWid && rows.some((row) => Number(row.id) === defaultWid)) return defaultWid;
+          return null;
         });
       } catch (error) {
         console.error('Failed to load warehouses', error);
       }
     };
-    fetchWarehouses();
+    fetchWarehousesAndDefaults();
   }, []);
 
   useEffect(() => {
@@ -588,7 +615,7 @@ const OrderConfirmations: React.FC = () => {
       const response = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getConfirmationStockSummary`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ warehouse_id: warehouseId, order_ids: ids, include_all_reps_today: true })
+        body: JSON.stringify({ warehouse_id: warehouseId, order_ids: ids, include_all_reps_today: false })
       });
       const result = await response.json();
       if (requestId !== stockSummaryRequestRef.current) return;
@@ -654,7 +681,7 @@ const OrderConfirmations: React.FC = () => {
       const stockCheckResponse = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getConfirmationStockSummary`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ warehouse_id: selectedWarehouseId, order_ids: candidateOrderIds, include_all_reps_today: true })
+        body: JSON.stringify({ warehouse_id: selectedWarehouseId, order_ids: candidateOrderIds, include_all_reps_today: false })
       });
       const stockCheckResult = await stockCheckResponse.json();
       if (!stockCheckResult?.success) {
@@ -985,7 +1012,9 @@ const OrderConfirmations: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 bg-slate-50/50 pb-12 dark:bg-slate-900" dir="rtl">
+    <div className="space-y-0 bg-slate-50/50 pb-12 dark:bg-slate-900" dir="rtl">
+      <div className="grid gap-6 xl:grid-cols-[1fr_300px] items-start p-4 lg:p-6">
+        <div className="space-y-6 min-w-0">
       
       {/* القسم العلوي: الهيرو يمين وشريط المناديب يسار (دائماً جنب بعض) */}
       <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
@@ -1018,6 +1047,8 @@ const OrderConfirmations: React.FC = () => {
                     </option>
                   ))}
                 </select>
+
+                {/* تم نقل قائمة المناديب المسند لهم إلى اليسار */}
 
                 <label className="mb-2 mt-3 block text-xs font-black text-slate-600 dark:text-slate-300">اختر المخزن</label>
                 <select
@@ -1054,7 +1085,7 @@ const OrderConfirmations: React.FC = () => {
 
             <div className="sm:col-span-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/60">
               <div className="mb-2 flex items-center justify-between gap-2">
-                <div className="text-xs font-black text-slate-700 dark:text-slate-300">ملخص الاحتياج التراكمي للمخزون (كل المناديب اليوم)</div>
+                <div className="text-xs font-black text-slate-700 dark:text-slate-300">ملخص احتياج المخزون (للمندوب المختار)</div>
                 <div className="flex items-center gap-2">
                   <div className={`rounded-full px-3 py-1 text-xs font-black ${stockShortageCount > 0 ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-200' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200'}`}>
                     {stockShortageCount > 0 ? `عجز في ${stockShortageCount} صنف` : 'المخزون كافٍ'}
@@ -1301,6 +1332,38 @@ const OrderConfirmations: React.FC = () => {
       </div>
 
       {ordersToPrint ? <PrintableOrders orders={ordersToPrint} companyName={companySettings.name} companyPhone={companySettings.phone} companyAddress={companySettings.address} companyLogo={companySettings.logo || undefined} terms={companySettings.terms} /> : null}
+      
+        </div> {/* نهاية العمود الأيمن */}
+        
+        {/* العمود الأيسر: صندوق المناديب المسند لهم مستقل تماماً */}
+        <div className="sticky top-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+          <h3 className="mb-4 text-sm font-black text-slate-800 dark:text-slate-200 border-b border-slate-200 pb-3 dark:border-slate-700 flex items-center justify-between gap-2">
+            <div>المناديب المتاحة</div>
+            <div className="rounded-full bg-blue-100 text-blue-700 px-2 py-0.5 text-xs font-bold dark:bg-blue-900/40 dark:text-blue-300">{reps.filter(r => r.orders_count > 0).length}</div>
+          </h3>
+          <div className="max-h-[calc(100vh-140px)] overflow-y-auto custom-scrollbar space-y-3 pr-1">
+            {reps.filter(r => r.orders_count > 0).length === 0 ? (
+              <div className="text-center text-xs text-slate-500 py-8 dark:text-slate-400 border border-dashed border-slate-200 rounded-2xl dark:border-slate-700">لا يوجد مناديب بأوردرات اليوم</div>
+            ) : (
+              reps.filter(r => r.orders_count > 0).sort((a, b) => b.orders_count - a.orders_count).map(rep => (
+                <div key={`active-rep-side-${rep.id}`} className={`flex flex-col gap-2 p-3 rounded-2xl border transition-all duration-200 ${selectedRepId === rep.id ? 'bg-blue-50 border-blue-200 shadow-sm dark:bg-blue-900/30 dark:border-blue-800' : 'bg-slate-50 border-slate-200 hover:bg-white hover:shadow-sm dark:bg-slate-900/50 dark:border-slate-700 dark:hover:bg-slate-800'}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-sm font-black text-slate-900 dark:text-slate-100 line-clamp-1">{rep.name}</div>
+                    <div className="rounded-lg bg-white px-2 py-1 text-xs font-bold text-blue-600 shadow-sm border border-slate-100 dark:bg-slate-800 dark:border-slate-600 dark:text-blue-400">{rep.orders_count}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedRepId(Number(rep.id))}
+                    className={`w-full px-3 py-2 rounded-xl text-xs font-black transition-colors ${selectedRepId === rep.id ? 'bg-blue-600 text-white' : 'bg-white text-slate-700 border border-slate-200 shadow-sm hover:border-blue-300 hover:text-blue-600 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-600 dark:hover:border-blue-500 dark:hover:text-blue-400'}`}
+                  >
+                    {selectedRepId === rep.id ? 'المحدد الآن' : 'عرض الأوردرات'}
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
 
       <style>{`
         .custom-scrollbar::-webkit-scrollbar { width: 6px; }

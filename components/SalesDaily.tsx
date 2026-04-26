@@ -2494,7 +2494,6 @@ const scanBarcodeAddOrder = async () => {
                             <div>الشحن: <span className="font-black">{ship.toLocaleString()}</span></div>
                             <div className="font-black text-lg">الإجمالي: {tot.toLocaleString()}</div>
                           </div>
-                          <button onClick={() => handleRecallOrder(o)} className="text-rose-600 p-2 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-900/10 transition-colors" title="سحب من عهدة المندوب"><Trash2 size={18} /></button>
                         </div>
                       </div>
                     );
@@ -2559,15 +2558,6 @@ const scanBarcodeAddOrder = async () => {
                           <div className="flex flex-col">
                             <span className="text-[10px] text-slate-400 font-bold">الإجمالي</span>
                             <span className="font-black text-lg text-slate-800">{tot.toLocaleString()}</span>
-                          </div>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => handleRecallOrder(o)}
-                              className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 transition-colors shadow-sm"
-                              title="سحب من المندوب"
-                            >
-                              <Trash2 size={18}/>
-                            </button>
                           </div>
                         </div>
                       </div>

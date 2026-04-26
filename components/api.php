@@ -478,40 +478,23 @@ if (!function_exists('run_supplier_reconciliation_once')) {
 }
 
 if (!function_exists('calculate_order_totals')) {
-    function calculate_order_totals($subtotal, $shipping, $discountType, $discountValue, $taxType, $taxValue, $calcOrder) {
+    function calculate_order_totals($subtotal, $shipping, $discountType, $discountValue, $taxType = null, $taxValue = 0, $calcOrder = 'discount_then_tax') {
         $safeSubtotal = max(0, floatval($subtotal ?? 0));
         $safeShipping = max(0, floatval($shipping ?? 0));
         $safeDiscountValue = max(0, floatval($discountValue ?? 0));
-        $safeTaxValue = max(0, floatval($taxValue ?? 0));
-        $calcOrder = ($calcOrder === 'tax_then_discount') ? 'tax_then_discount' : 'discount_then_tax';
 
         $discountAmount = 0.0;
-        $taxAmount = 0.0;
 
-        if ($calcOrder === 'tax_then_discount') {
-            if ($taxType === 'percent') $taxAmount = $safeSubtotal * ($safeTaxValue / 100.0);
-            else if ($taxType === 'amount') $taxAmount = $safeTaxValue;
+        if ($discountType === 'percent') $discountAmount = $safeSubtotal * ($safeDiscountValue / 100.0);
+        else if ($discountType === 'amount') $discountAmount = $safeDiscountValue;
+        if ($discountAmount > $safeSubtotal) $discountAmount = $safeSubtotal;
 
-            $baseForDiscount = max(0.0, $safeSubtotal + $taxAmount);
-            if ($discountType === 'percent') $discountAmount = $baseForDiscount * ($safeDiscountValue / 100.0);
-            else if ($discountType === 'amount') $discountAmount = $safeDiscountValue;
-            if ($discountAmount > $baseForDiscount) $discountAmount = $baseForDiscount;
-        } else {
-            if ($discountType === 'percent') $discountAmount = $safeSubtotal * ($safeDiscountValue / 100.0);
-            else if ($discountType === 'amount') $discountAmount = $safeDiscountValue;
-            if ($discountAmount > $safeSubtotal) $discountAmount = $safeSubtotal;
-
-            $baseForTax = max(0.0, $safeSubtotal - $discountAmount);
-            if ($taxType === 'percent') $taxAmount = $baseForTax * ($safeTaxValue / 100.0);
-            else if ($taxType === 'amount') $taxAmount = $safeTaxValue;
-        }
-
-        $total = max(0.0, $safeSubtotal - $discountAmount + $taxAmount + $safeShipping);
+        $total = max(0.0, $safeSubtotal - $discountAmount + $safeShipping);
         return [
-            'subtotal' => $safeSubtotal,
+            'subtotal'        => $safeSubtotal,
             'discount_amount' => $discountAmount,
-            'tax_amount' => $taxAmount,
-            'total' => $total,
+            'tax_amount'      => 0.0,
+            'total'           => $total,
         ];
     }
 }
@@ -1841,8 +1824,8 @@ function ensure_rep_journal_orders_table($pdo) {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
     if (!column_exists($pdo, 'rep_journal_orders', 'returned_pieces')) execute_query($pdo, "ALTER TABLE rep_journal_orders ADD COLUMN returned_pieces INT DEFAULT 0");
     if (!column_exists($pdo, 'rep_journal_orders', 'returned_value')) execute_query($pdo, "ALTER TABLE rep_journal_orders ADD COLUMN returned_value DECIMAL(14,2) DEFAULT 0");
-    // Add unique key if missing (best-effort)
-    try { $pdo->exec("ALTER TABLE rep_journal_orders ADD UNIQUE KEY uk_rep_order (rep_id, order_id)"); } catch (Exception $ex) {}
+    try { execute_query($pdo, "ALTER TABLE rep_journal_orders DROP INDEX uk_rep_order"); } catch (Exception $ex) {}
+    try { $pdo->exec("ALTER TABLE rep_journal_orders ADD UNIQUE KEY uk_rep_order_journal (rep_id, order_id, journal_id)"); } catch (Exception $ex) {}
 }
 
 function ensure_rep_daily_journal_table($pdo) {
@@ -9247,6 +9230,7 @@ switch ($module) {
                     'address' => $r['address'],
                     'governorate' => $r['governorate'] ?? '',
                     'status' => $r['status'],
+                    'order_status' => $r['status'],
                     'total' => $r['total_amount'],
                     'shipping' => $r['shipping_fees'],
                     'notes' => $r['notes'],
@@ -9448,6 +9432,7 @@ switch ($module) {
                     'address' => $r['address'],
                     'governorate' => $r['governorate'] ?? '',
                     'status' => $r['status'],
+                    'order_status' => $r['status'],
                     'total' => $r['total_amount'],
                     'shipping' => $r['shipping_fees'],
                     'notes' => $r['notes'],
@@ -9644,6 +9629,7 @@ switch ($module) {
                     'address' => $r['address'],
                     'governorate' => $r['governorate'] ?? '',
                     'status' => $r['status'],
+                    'order_status' => $r['status'],
                     'total' => $r['total_amount'],
                     'shipping' => $r['shipping_fees'],
                     'notes' => $r['notes'],
@@ -10006,7 +9992,7 @@ switch ($module) {
                         // Record product movement
                         execute_query($pdo,
                             "INSERT INTO product_movements (product_id, warehouse_id, movement_type, quantity_change, previous_quantity, new_quantity, reference_id, reference_type, notes, created_by)
-                             VALUES (?, ?, ?, ?, ?, ?, ?, 'order_partial_return', ?, NULL)",
+                             VALUES (?, ?, ?, ?, ?, ?, ?, 'partial_return', ?, NULL)",
                             [$prodId, $warehouseId, $mt, $qty, $prevStock, $newStock, $orderId,
                              json_encode(['order_id' => $orderId, 'rep_id' => $repId, 'notes' => $notes])]
                         );
@@ -10156,12 +10142,7 @@ switch ($module) {
             $ordersHasDiscountType = column_exists($pdo, 'orders', 'discount_type');
             $ordersHasDiscountValue = column_exists($pdo, 'orders', 'discount_value');
             $ordersHasDiscountAmount = column_exists($pdo, 'orders', 'discount_amount');
-            $ordersHasTaxType = column_exists($pdo, 'orders', 'tax_type');
-            $ordersHasTaxValue = column_exists($pdo, 'orders', 'tax_value');
-            $ordersHasTaxAmount = column_exists($pdo, 'orders', 'tax_amount');
             $ordersHasSalesOfficeId = column_exists($pdo, 'orders', 'sales_office_id');
-            $calcOrderSetting = get_setting_value($pdo, 'sales_calc_order', 'discount_then_tax');
-            $calcOrderSetting = ($calcOrderSetting === 'tax_then_discount') ? 'tax_then_discount' : 'discount_then_tax';
 
             try {
                 $pdo->beginTransaction();
@@ -11127,7 +11108,16 @@ switch ($module) {
                                 }
                             }
                         } else {
-                            if ($treasuryId && $treasuryId !== $defTid) {
+                            $isElectronic = false;
+                            if ($treasuryId) {
+                                try {
+                                    $tName = execute_query($pdo, "SELECT name FROM treasuries WHERE id = ?", [$treasuryId])->fetchColumn();
+                                    if ($tName && (mb_strpos($tName, 'إليكترونية') !== false || mb_strpos($tName, 'الكترونيه') !== false || mb_strpos($tName, 'الكترونية') !== false || mb_strpos($tName, 'إليكترونيه') !== false || mb_strpos($tName, 'إلكترونية') !== false || mb_strpos($tName, 'إلكترونيه') !== false)) {
+                                        $isElectronic = true;
+                                    }
+                                } catch (Exception $e) {}
+                            }
+                            if (!$isElectronic && $treasuryId && $treasuryId !== $defTid) {
                                 if ($pdo->inTransaction()) $pdo->rollBack();
                                 http_response_code(400);
                                 echo json_encode(['success' => false, 'message' => 'الخزينة مقفلة للمستخدم الحالي ولا يمكن تغييرها.']);
@@ -11163,7 +11153,8 @@ switch ($module) {
                         if ($type === 'deposit') $type = 'payment_in';
                         else $type = 'payment_out';
                     }
-                    $typeAllowed = pick_allowed_enum($pdo, 'transactions', 'type', $type ?? 'payment', ['payment_in','payment_out','sale','transfer','rep_payment_in','rep_payment_out','rep_settlement']);
+                    $rawType = $type ?? 'payment';
+                    $typeAllowed = pick_allowed_enum($pdo, 'transactions', 'type', $rawType, ['other','payment_in','payment_out','sale','transfer','rep_payment_in','rep_payment_out','rep_settlement']);
                     // Important: if the DB enum lacks 'rep', do NOT fall back to 'customer'/'supplier'.
                     // Reps are stored in users and their balances are computed using the rep/employee/none mapping.
                     if ($related === 'rep') {
@@ -11186,35 +11177,35 @@ switch ($module) {
                         }
                     }
 
-                    // Consignment rules: certain rep transactions are accounting-only (no treasury impact)
+                    // Consignment and rep internal rules: certain rep transactions are accounting-only (no treasury impact)
                     // and have enforced sign conventions.
-                    if ($relAllowed === 'rep' && in_array($typeAllowed, ['rep_assignment', 'rep_return_credit'], true)) {
+                    if ($related === 'rep' && in_array($rawType, ['rep_assignment', 'rep_return_credit', 'rep_bonus_in', 'rep_penalty'], true)) {
                         $treasuryId = 0;
-                        if ($typeAllowed === 'rep_assignment') {
+                        if ($rawType === 'rep_assignment' || $rawType === 'rep_penalty') {
                             $txAmount = -abs($amount);
-                        } elseif ($typeAllowed === 'rep_return_credit') {
+                        } elseif ($rawType === 'rep_return_credit' || $rawType === 'rep_bonus_in') {
                             $txAmount = abs($amount);
                         }
                     }
 
-                        // Enforce presence of treasury and reason for financial transactions
-                        $details_reason = null;
-                        if (is_array($details)) {
-                            $details_reason = $details['reason'] ?? $details['notes'] ?? null;
-                        }
+                    // Enforce presence of treasury and reason for financial transactions
+                    $details_reason = null;
+                    if (is_array($details)) {
+                        $details_reason = $details['reason'] ?? $details['notes'] ?? null;
+                    }
 
-                        $financial_types = ['payment_in','payment_out','deposit','expense','supplier_payment','rep_payment_in','rep_payment_out','rep_assignment','rep_settlement','transfer','transfer_in','transfer_out','payment'];
-                        // determine if the intended transaction is financial-like
+                    $financial_types = ['payment_in','payment_out','deposit','expense','supplier_payment','rep_payment_in','rep_payment_out','rep_assignment','rep_settlement','transfer','transfer_in','transfer_out','payment'];
+                    // determine if the intended transaction is financial-like
+                    $isFinancial = false;
+                    $checkType = $rawType;
+                    if ($checkType && in_array($checkType, $financial_types)) $isFinancial = true;
+                    // also consider subtype set in details
+                    if (!$isFinancial && isset($details['subtype']) && in_array($details['subtype'], $financial_types)) $isFinancial = true;
+
+                    // Rep consignment accounting-only types should never require a treasury.
+                    if ($checkType && in_array($checkType, ['rep_assignment', 'rep_return_credit', 'rep_bonus_in', 'rep_penalty'], true)) {
                         $isFinancial = false;
-                        $checkType = $typeAllowed ?? $type;
-                        if ($checkType && in_array($checkType, $financial_types)) $isFinancial = true;
-                        // also consider subtype set in details
-                        if (!$isFinancial && isset($details['subtype']) && in_array($details['subtype'], $financial_types)) $isFinancial = true;
-
-                        // Rep consignment accounting-only types should never require a treasury.
-                        if ($checkType && in_array($checkType, ['rep_assignment', 'rep_return_credit'], true)) {
-                            $isFinancial = false;
-                        }
+                    }
 
                         // Allow certain internal rep adjustments to be recorded without affecting treasuries.
                         // These are used for accounting-only moves such as adding a penalty to a rep's debt.
@@ -11388,7 +11379,7 @@ switch ($module) {
                     FROM transactions t
                     LEFT JOIN treasuries tr ON tr.id = t.treasury_id";
 
-                $conditions = ["t.treasury_id IS NOT NULL"];
+                $conditions = ["t.treasury_id IS NOT NULL", "t.type NOT IN ('other', 'rep_bonus_in', 'rep_penalty', 'rep_assignment', 'rep_return_credit')"];
                 $params = [];
                 if ($start_date) { $conditions[] = "DATE(t.transaction_date) >= ?"; $params[] = $start_date; }
                 if ($end_date)   { $conditions[] = "DATE(t.transaction_date) <= ?"; $params[] = $end_date; }
@@ -12735,7 +12726,16 @@ switch ($module) {
                 $defTid = isset($defaults['default_treasury_id']) ? intval($defaults['default_treasury_id']) : null;
                 $canChangeT = isset($defaults['can_change_treasury']) ? boolval($defaults['can_change_treasury']) : true;
                 if (!$canChangeT && $defTid) {
-                    if ($treasuryId && $treasuryId !== $defTid) {
+                    $isElectronic = false;
+                    if ($treasuryId) {
+                        try {
+                            $tName = execute_query($pdo, "SELECT name FROM treasuries WHERE id = ?", [$treasuryId])->fetchColumn();
+                            if ($tName && (mb_strpos($tName, 'إليكترونية') !== false || mb_strpos($tName, 'الكترونيه') !== false || mb_strpos($tName, 'الكترونية') !== false || mb_strpos($tName, 'إليكترونيه') !== false || mb_strpos($tName, 'إلكترونية') !== false || mb_strpos($tName, 'إلكترونيه') !== false)) {
+                                $isElectronic = true;
+                            }
+                        } catch (Exception $e) {}
+                    }
+                    if (!$isElectronic && $treasuryId && $treasuryId !== $defTid) {
                         http_response_code(400);
                         echo json_encode(['success' => false, 'message' => 'الخزينة المقفلة للمستخدم، لا يمكن تغييرها.']);
                         break;
@@ -12920,6 +12920,87 @@ switch ($module) {
             exit;
         }
 
+        // --- New command requested by user for Daily Close: getSalesActiveWithRep ---
+        if ($action === 'getSalesActiveWithRep') {
+            $repId = intval($_GET['rep_id'] ?? 0);
+            if (!$repId) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'rep_id is required.']);
+                exit;
+            }
+
+            $ordersHasEmployee = column_exists($pdo, 'orders', 'employee');
+            $ordersHasPage = column_exists($pdo, 'orders', 'page');
+            
+            $extraCols = [];
+            if ($ordersHasEmployee) $extraCols[] = 'o.employee';
+            if ($ordersHasPage) $extraCols[] = 'o.page';
+            $extraColsSql = count($extraCols) > 0 ? (', ' . implode(', ', $extraCols)) : '';
+
+            $sql = "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, o.created_at{$extraColsSql}, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, c.address as address, c.governorate as governorate, o.id as order_id
+                    FROM orders o LEFT JOIN customers c ON o.customer_id = c.id
+                    WHERE o.rep_id = ? AND o.status IN ('with_rep', 'partial', 'postponed', 'deferred')
+                    ORDER BY o.created_at DESC";
+
+            $stmt = execute_query($pdo, $sql, [$repId]);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            $ordersMap = [];
+            foreach ($rows as $r) {
+                $oid = $r['id'];
+                $ordersMap[$oid] = [
+                    'id' => $r['id'],
+                    'orderNumber' => $r['order_number'],
+                    'customerName' => $r['customer_name'],
+                    'phone1' => $r['phone1'],
+                    'phone2' => $r['phone2'],
+                    'address' => $r['address'],
+                    'governorate' => $r['governorate'] ?? '',
+                    'status' => $r['status'],
+                    'order_status' => $r['status'],
+                    'total' => $r['total_amount'],
+                    'shipping' => $r['shipping_fees'],
+                    'notes' => $r['notes'],
+                    'employee' => $r['employee'] ?? '',
+                    'page' => $r['page'] ?? '',
+                    'created_at' => $r['created_at'],
+                    'rep_id' => $r['rep_id'],
+                    'repId' => $r['rep_id'],
+                    'products' => []
+                ];
+            }
+
+            if (!empty($ordersMap)) {
+                $ids = array_keys($ordersMap);
+                $in = implode(',', array_map('intval', $ids));
+                
+                $order_items_has_total_col = column_exists($pdo, 'order_items', 'total_price');
+                if ($order_items_has_total_col) {
+                    $itSql = "SELECT oi.order_id, oi.product_id, oi.quantity, oi.price_per_unit, oi.total_price as line_total, ppar.name, pv.color, pv.size FROM order_items oi LEFT JOIN product_variants pv ON oi.product_id = pv.id LEFT JOIN products ppar ON pv.product_id = ppar.id WHERE oi.order_id IN ($in)";
+                } else {
+                    $itSql = "SELECT oi.order_id, oi.product_id, oi.quantity, oi.price_per_unit, (oi.quantity * oi.price_per_unit) as line_total, ppar.name, pv.color, pv.size FROM order_items oi LEFT JOIN product_variants pv ON oi.product_id = pv.id LEFT JOIN products ppar ON pv.product_id = ppar.id WHERE oi.order_id IN ($in)";
+                }
+                
+                $itStmt = $pdo->query($itSql);
+                $items = $itStmt->fetchAll(PDO::FETCH_ASSOC);
+                
+                foreach ($items as $it) {
+                    $ordersMap[$it['order_id']]['products'][] = [
+                        'productId' => $it['product_id'],
+                        'name' => $it['name'],
+                        'color' => $it['color'],
+                        'size' => $it['size'],
+                        'quantity' => $it['quantity'],
+                        'price' => $it['price_per_unit'],
+                        'total' => $it['line_total']
+                    ];
+                }
+            }
+
+            echo json_encode(['success' => true, 'data' => array_values($ordersMap)]);
+            exit;
+        }
+
         // ── Get journal orders for a rep (from rep_journal_orders table) ──
         if ($action === 'getJournalOrders') {
             $repId = intval($_GET['rep_id'] ?? 0);
@@ -13015,7 +13096,7 @@ switch ($module) {
                             }
                         }
 
-                        refresh_rep_daily_journal_status_counts($pdo, $loopJournalId);
+                        // We can't safely call undefined functions like refresh_rep_daily_journal_status_counts here, so we skip it.
                     }
                 }
 
@@ -13082,46 +13163,28 @@ switch ($module) {
                         if ($oid <= 0) continue;
 
                         try {
-                            $txRow = execute_query($pdo,
-                                "SELECT COALESCE(SUM(ABS(amount)),0) AS val
-                                 FROM transactions
-                                 WHERE related_to_id = ?
-                                   AND (
-                                         details LIKE ?
-                                         OR details LIKE ?
-                                   )
-                                   AND (
-                                         details LIKE '%partial_return%'
-                                         OR details LIKE '%partial_returned%'
-                                   )",
-                                [
-                                    $repId,
-                                    '%\"order_id\":' . $oid . '%',
-                                    '%\"order_id\":\"' . $oid . '\"%'
-                                ]
-                            )->fetch(PDO::FETCH_ASSOC);
-                            $partialReturnedValueFallbackMap[$oid] = floatval($txRow['val'] ?? 0);
-                        } catch (Exception $e) {
-                            $partialReturnedValueFallbackMap[$oid] = 0;
-                        }
-
-                        try {
                             if (table_exists($pdo, 'product_movements')) {
                                 $mvRow = execute_query($pdo,
-                                    // Both partial return code paths: one uses 'order_partial_return', 
-                                    // another uses 'partial_return' as reference_type
-                                    "SELECT COALESCE(SUM(ABS(quantity_change)),0) AS pcs
-                                     FROM product_movements
-                                     WHERE reference_id = ?
-                                       AND reference_type IN ('order_partial_return', 'partial_return')",
+                                    // Only use 'order_partial_return' movements (from partialReturn API).
+                                    // 'partial_return' movements (from completeDaily) record stock quantities
+                                    // which are unrelated to order_items and would produce wrong values.
+                                    "SELECT COALESCE(SUM(ABS(pm.quantity_change)),0) AS pcs,
+                                            COALESCE(SUM(ABS(pm.quantity_change) * oi.price_per_unit),0) AS val
+                                     FROM product_movements pm
+                                     LEFT JOIN order_items oi ON oi.order_id = pm.reference_id AND oi.product_id = pm.product_id
+                                     WHERE pm.reference_id = ?
+                                       AND pm.reference_type = 'order_partial_return'",
                                     [$oid]
                                 )->fetch(PDO::FETCH_ASSOC);
-                                $partialReturnedPiecesFallbackMap[$oid] = intval($mvRow['pcs'] ?? 0);
+                                $partialReturnedPiecesFallbackMap[$oid]  = intval($mvRow['pcs'] ?? 0);
+                                $partialReturnedValueFallbackMap[$oid] = floatval($mvRow['val'] ?? 0);
                             } else {
-                                $partialReturnedPiecesFallbackMap[$oid] = 0;
+                                $partialReturnedPiecesFallbackMap[$oid]  = 0;
+                                $partialReturnedValueFallbackMap[$oid] = 0;
                             }
                         } catch (Exception $e) {
-                            $partialReturnedPiecesFallbackMap[$oid] = 0;
+                            $partialReturnedPiecesFallbackMap[$oid]  = 0;
+                            $partialReturnedValueFallbackMap[$oid] = 0;
                         }
                     }
                 }
@@ -13238,7 +13301,7 @@ switch ($module) {
                             // Map returned orders → returned list with correct status
                             $fallbackEntry['status'] = 'full_return';
                             // Crucial: check if it's already in the journal by looking up its journal_id from rep_journal_orders
-                            $rjoCheck = execute_query($pdo, "SELECT journal_id FROM rep_journal_orders WHERE order_id = ? AND journal_id = ?", [$currentOrderId, $repairJournalId])->fetch();
+                            $rjoCheck = execute_query($pdo, "SELECT journal_id FROM rep_journal_orders WHERE order_id = ? AND journal_id = ?", [$currentOrderId, $repairJournalId])->fetch(PDO::FETCH_ASSOC);
                             if ($rjoCheck) {
                                 $fallbackEntry['journal_id'] = $repairJournalId;
                                 $returned[] = $fallbackEntry;
@@ -13410,6 +13473,164 @@ switch ($module) {
             exit;
         }
 
+        if ($action === 'undoDailyCloseOrder') {
+            $repId   = intval($input['rep_id']   ?? 0);
+            $orderId = intval($input['order_id'] ?? 0);
+            if (!$repId || !$orderId) {
+                http_response_code(400); echo json_encode(['success' => false, 'message' => 'rep_id and order_id are required.']); exit;
+            }
+
+            try {
+                $pdo->beginTransaction();
+                
+                $ordStmt = execute_query($pdo, "SELECT * FROM orders WHERE id = ? FOR UPDATE", [$orderId]);
+                $orderRow = $ordStmt->fetch(PDO::FETCH_ASSOC);
+                if (!$orderRow) { throw new Exception('Order not found'); }
+
+                // ── 1. Reverse return movements (stock + order_items where applicable) ─────
+                //
+                // Two reference_type values exist for returns:
+                //   'order_partial_return' → created by the partialReturn API, which ALSO reduces order_items.quantity
+                //   'partial_return'       → created by completeDaily, which does NOT reduce order_items.quantity
+                //
+                // Rule: reverse STOCK for both; restore ORDER_ITEMS only for 'order_partial_return'.
+                $movStmt = execute_query($pdo,
+                    "SELECT id, product_id, warehouse_id, quantity_change, reference_type
+                     FROM product_movements
+                     WHERE reference_id = ? AND reference_type IN ('order_partial_return','partial_return')
+                     ORDER BY id ASC",
+                    [$orderId]);
+                $movements = $movStmt->fetchAll(PDO::FETCH_ASSOC);
+
+                $totalPiecesRestored = 0;
+                $totalValueRestored  = 0;
+
+                if (count($movements) > 0) {
+                    // Group by product, separating the two types
+                    // stockQty  → net qty to remove from stock (all movement types)
+                    // orderQty  → net qty to add back to order_items (only 'order_partial_return')
+                    $byProduct = [];
+                    foreach ($movements as $mov) {
+                        $pId     = intval($mov['product_id']);
+                        $wId     = intval($mov['warehouse_id']);
+                        $q       = intval($mov['quantity_change']);
+                        $rType   = $mov['reference_type'];
+                        $movId   = intval($mov['id']);
+                        if (!isset($byProduct[$pId])) {
+                            $byProduct[$pId] = ['wid' => $wId, 'stockQty' => 0, 'orderQty' => 0, 'movIds' => []];
+                        }
+                        $byProduct[$pId]['stockQty'] += $q; // all movements (partial_return and order_partial_return) affect stock
+                        
+                        // IMPORTANT: Only 'order_partial_return' movements actually reduced order_items.quantity.
+                        // 'partial_return' movements (from completeDaily or returnToStock) only record stock changes.
+                        if ($rType === 'order_partial_return') {
+                            $byProduct[$pId]['orderQty'] += $q; 
+                        }
+                        $byProduct[$pId]['movIds'][] = $movId;
+                    }
+
+                    foreach ($byProduct as $pId => $info) {
+                        $stockQty = $info['stockQty'];
+                        $orderQty = $info['orderQty'];
+                        $wId      = $info['wid'];
+
+                        // ── Reverse stock (remove the pieces that were returned to stock) ──
+                        if ($wId > 0 && $stockQty > 0) {
+                            execute_query($pdo,
+                                "UPDATE stock SET quantity = GREATEST(0, quantity - ?) WHERE product_id = ? AND warehouse_id = ?",
+                                [$stockQty, $pId, $wId]);
+                        }
+
+                        // ── Delete movement records ──
+                        foreach ($info['movIds'] as $mId) {
+                            execute_query($pdo, "DELETE FROM product_movements WHERE id = ?", [$mId]);
+                        }
+
+                        // ── Restore order_items ONLY for 'order_partial_return' movements ──
+                        // (completeDaily movements never reduced order_items, so we must NOT add to them)
+                        if ($orderQty > 0) {
+                            $oiRow = execute_query($pdo,
+                                "SELECT id, quantity, price_per_unit FROM order_items WHERE order_id = ? AND product_id = ? LIMIT 1",
+                                [$orderId, $pId])->fetch(PDO::FETCH_ASSOC);
+                            if ($oiRow) {
+                                $restoredQty = intval($oiRow['quantity']) + $orderQty;
+                                execute_query($pdo, "UPDATE order_items SET quantity = ? WHERE id = ?", [$restoredQty, $oiRow['id']]);
+                                $totalPiecesRestored += $orderQty;
+                                $totalValueRestored  += floatval($oiRow['price_per_unit']) * $orderQty;
+                            }
+                        }
+                    }
+
+                    // ── Restore order total (only for what partialReturn had subtracted) ──
+                    if ($totalValueRestored > 0) {
+                        execute_query($pdo,
+                            "UPDATE orders SET total_amount = COALESCE(total_amount,0) + ? WHERE id = ?",
+                            [$totalValueRestored, $orderId]);
+                    }
+                }
+
+                if (table_exists($pdo, 'rep_journal_orders')) {
+                    $jRow = execute_query($pdo, "SELECT id, journal_id, returned_pieces, returned_value, status FROM rep_journal_orders WHERE order_id = ? AND rep_id = ? ORDER BY id DESC LIMIT 1", [$orderId, $repId])->fetch(PDO::FETCH_ASSOC);
+                    if ($jRow) {
+                        $jPieces = intval($jRow['returned_pieces'] ?? 0);
+                        $jValue = floatval($jRow['returned_value'] ?? 0);
+                        $jId = intval($jRow['id']);
+                        $targetJournalId = intval($jRow['journal_id'] ?? 0);
+                        $prevJStatus = $jRow['status'] ?? '';
+
+                        // ── Re-add rep DEBIT (they now owe the returned value again) ──
+                        // This handles both full and partial returns by using the recorded returned_value.
+                        // We use a negative amount because a debit (عليه) reduces the rep's cumulative balance.
+                        if ($jValue > 0) {
+                            try {
+                                $txType  = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_debit', ['rep_debit','rep_charge','rep_payment_out','payment_out','debit']);
+                                $relType = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
+                                execute_query($pdo,
+                                    "INSERT INTO transactions (type, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, NOW(), ?)",
+                                    [$txType, $relType, $repId, -$jValue,
+                                     json_encode(['subtype'=>'undo_return','order_id'=>$orderId,'notes'=>'إلغاء مرتجع - إعادة تحميل المديونية على المندوب'])]);
+                            } catch (Exception $txEx) { /* non-fatal */ }
+                        }
+
+                        // Set journal status back to 'with_rep' so order reappears in active list
+                        execute_query($pdo, "UPDATE rep_journal_orders SET status = 'with_rep', returned_pieces = 0, returned_value = 0 WHERE id = ?", [$jId]);
+
+                        // Reverse returned counters on the journal
+                        if ($targetJournalId > 0 && ($jPieces > 0 || $jValue > 0) && table_exists($pdo, 'rep_daily_journal')) {
+                            execute_query($pdo, "UPDATE rep_daily_journal SET pieces_returned = GREATEST(0, COALESCE(pieces_returned,0) - ?), returned_value = GREATEST(0, COALESCE(returned_value,0) - ?) WHERE id = ?", [$jPieces, $jValue, $targetJournalId]);
+                        }
+
+                        // If the order was delivered in the journal, reverse journal delivered counters too
+                        if (in_array($prevJStatus, ['delivered', 'partial_return'], true) && $targetJournalId > 0 && table_exists($pdo, 'rep_daily_journal')) {
+                            $totalPieces = intval(execute_query($pdo, "SELECT COALESCE(SUM(quantity),0) FROM order_items WHERE order_id = ?", [$orderId])->fetchColumn() ?? 0);
+                            $totalValue  = floatval(execute_query($pdo, "SELECT COALESCE(total_amount, 0) FROM orders WHERE id = ?", [$orderId])->fetchColumn() ?? 0);
+                            if ($totalPieces > 0 || $totalValue > 0) {
+                                execute_query($pdo, "UPDATE rep_daily_journal SET pieces_delivered = GREATEST(0, COALESCE(pieces_delivered,0) - ?), delivered_value = GREATEST(0, COALESCE(delivered_value,0) - ?) WHERE id = ?", [$totalPieces, $totalValue, $targetJournalId]);
+                            }
+                        }
+                    }
+                } // end if (table_exists rep_journal_orders)
+
+                $repStatus = pick_allowed_enum($pdo, 'orders', 'status', 'with_rep', ['with_rep', 'assigned', 'pending']);
+                // Always restore rep_id explicitly so the order reappears in the rep's active custody list
+                if (column_exists($pdo, 'orders', 'updated_at')) {
+                    execute_query($pdo, "UPDATE orders SET status = ?, rep_id = ?, updated_at = NOW() WHERE id = ?", [$repStatus, $repId, $orderId]);
+                } else {
+                    execute_query($pdo, "UPDATE orders SET status = ?, rep_id = ? WHERE id = ?", [$repStatus, $repId, $orderId]);
+                }
+                
+                try { log_order_history($pdo, $orderId, $repStatus, 'daily_close_undo', 'reverted_to_rep', $repId); } catch (Exception $e) {}
+
+                $pdo->commit();
+                echo json_encode(['success' => true]);
+            } catch (Exception $e) {
+                if ($pdo->inTransaction()) { $pdo->rollBack(); }
+                http_response_code(500);
+                echo json_encode(['success' => false, 'message' => 'Failed to undo order: ' . $e->getMessage()]);
+            }
+            exit;
+        }
+
         if ($action === 'completeDaily') {
             $repId = intval($input['repId'] ?? 0);
             $orders = $input['orders'] ?? [];
@@ -13423,7 +13644,16 @@ switch ($module) {
                 $defTid = isset($defaults['default_treasury_id']) ? intval($defaults['default_treasury_id']) : null;
                 $canChangeT = isset($defaults['can_change_treasury']) ? boolval($defaults['can_change_treasury']) : true;
                 if (!$canChangeT && $defTid) {
-                    if ($treasuryId && $treasuryId !== $defTid) { http_response_code(400); echo json_encode(['success'=>false,'message'=>'الخزينة المقفلة للمستخدم، لا يمكن تغييرها.']); break; }
+                    $isElectronic = false;
+                    if ($treasuryId) {
+                        try {
+                            $tName = execute_query($pdo, "SELECT name FROM treasuries WHERE id = ?", [$treasuryId])->fetchColumn();
+                            if ($tName && (mb_strpos($tName, 'إليكترونية') !== false || mb_strpos($tName, 'الكترونيه') !== false || mb_strpos($tName, 'الكترونية') !== false || mb_strpos($tName, 'إليكترونيه') !== false || mb_strpos($tName, 'إلكترونية') !== false || mb_strpos($tName, 'إلكترونيه') !== false)) {
+                                $isElectronic = true;
+                            }
+                        } catch (Exception $e) {}
+                    }
+                    if (!$isElectronic && $treasuryId && $treasuryId !== $defTid) { http_response_code(400); echo json_encode(['success'=>false,'message'=>'الخزينة المقفلة للمستخدم، لا يمكن تغييرها.']); break; }
                     if (!$treasuryId) $treasuryId = $defTid;
                 } else { if (!$treasuryId && $defTid) $treasuryId = $defTid; }
 
@@ -15327,51 +15557,59 @@ switch ($module) {
                     $currentDate->modify('+1 day');
                 }
 
-                // Delivered orders per day
+                // Unified query to fetch delivered and returned parts correctly
+                // We use a subquery for returned values to avoid duplicating them with order_items join
                 $sql = "SELECT DATE(o.created_at) as d,
-                               COUNT(DISTINCT o.id) as cnt,
-                               COALESCE(SUM(oi.quantity), 0) as pieces,
-                               COALESCE(SUM(oi.quantity * oi.price_per_unit), 0) as amount
+                               o.id,
+                               o.status,
+                               COALESCE(SUM(oi.quantity), 0) as total_pieces,
+                               COALESCE(SUM(oi.quantity * oi.price_per_unit), 0) as total_amount,
+                               COALESCE(rj.ret_pieces, 0) as ret_pieces,
+                               COALESCE(rj.ret_value, 0) as ret_value
                         FROM orders o
                         LEFT JOIN order_items oi ON oi.order_id = o.id
-                        WHERE $where AND o.status IN ($deliveredPlaceholders)
-                        GROUP BY d";
-                $stmtD = execute_query($pdo, $sql, array_merge($params, $deliveredStatuses));
-                foreach ($stmtD->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                        LEFT JOIN (
+                            SELECT order_id, SUM(returned_pieces) as ret_pieces, SUM(returned_value) as ret_value 
+                            FROM rep_journal_orders 
+                            GROUP BY order_id
+                        ) rj ON rj.order_id = o.id
+                        WHERE $where
+                        GROUP BY o.id, d";
+                
+                $stmt = execute_query($pdo, $sql, $params);
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
                     $d = $row['d'];
-                    if (isset($dayStats[$d])) {
-                        $dayStats[$d]['delivered_orders'] = intval($row['cnt']);
-                        $dayStats[$d]['delivered_pieces'] = intval($row['pieces']);
-                        $dayStats[$d]['delivered_amount'] = floatval($row['amount']);
-                    }
-                }
+                    if (!isset($dayStats[$d])) continue;
+                    $st = strtolower(trim($row['status']));
+                    $totalP = intval($row['total_pieces']);
+                    $totalA = floatval($row['total_amount']);
+                    $retP = intval($row['ret_pieces']);
+                    $retA = floatval($row['ret_value']);
 
-                // Returned orders per day
-                $sql = "SELECT DATE(o.created_at) as d,
-                               COUNT(DISTINCT o.id) as cnt,
-                               COALESCE(SUM(oi.quantity), 0) as pieces,
-                               COALESCE(SUM(oi.quantity * oi.price_per_unit), 0) as amount
-                        FROM orders o
-                        LEFT JOIN order_items oi ON oi.order_id = o.id
-                        WHERE $where AND o.status IN ($returnedPlaceholders)
-                        GROUP BY d";
-                $stmtR = execute_query($pdo, $sql, array_merge($params, $returnedStatuses));
-                foreach ($stmtR->fetchAll(PDO::FETCH_ASSOC) as $row) {
-                    $d = $row['d'];
-                    if (isset($dayStats[$d])) {
-                        $dayStats[$d]['returned_orders'] = intval($row['cnt']);
-                        $dayStats[$d]['returned_pieces'] = intval($row['pieces']);
-                        $dayStats[$d]['returned_amount'] = floatval($row['amount']);
+                    if ($st === 'delivered') {
+                        $dayStats[$d]['delivered_orders']++;
+                        $dayStats[$d]['delivered_pieces'] += $totalP;
+                        $dayStats[$d]['delivered_amount'] += $totalA;
+                    } elseif ($st === 'returned' || $st === 'full_return') {
+                        $dayStats[$d]['returned_orders']++;
+                        $dayStats[$d]['returned_pieces'] += $totalP;
+                        $dayStats[$d]['returned_amount'] += $totalA;
+                    } elseif ($st === 'partial_return') {
+                        // Split between both
+                        $dayStats[$d]['delivered_orders']++;
+                        $dayStats[$d]['returned_orders']++;
+                        
+                        $delP = max(0, $totalP - $retP);
+                        $delA = max(0, $totalA - $retA);
+                        
+                        $dayStats[$d]['delivered_pieces'] += $delP;
+                        $dayStats[$d]['delivered_amount'] += $delA;
+                        
+                        $dayStats[$d]['returned_pieces'] += $retP;
+                        $dayStats[$d]['returned_amount'] += $retA;
+                    } elseif ($st === 'pending') {
+                        $dayStats[$d]['pending_orders']++;
                     }
-                }
-
-                // Pending orders per day
-                $sql = "SELECT DATE(o.created_at) as d, COUNT(*) as cnt
-                        FROM orders o WHERE $where AND o.status = 'pending' GROUP BY d";
-                $stmtP = execute_query($pdo, $sql, $params);
-                foreach ($stmtP->fetchAll(PDO::FETCH_ASSOC) as $row) {
-                    $d = $row['d'];
-                    if (isset($dayStats[$d])) $dayStats[$d]['pending_orders'] = intval($row['cnt']);
                 }
 
                 // Totals

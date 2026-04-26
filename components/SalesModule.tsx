@@ -53,37 +53,21 @@ const calculateOrderTotals = (
   subtotal: number,
   shipping: number,
   discountType: RateType | null,
-  discountValue: number,
-  taxType: RateType | null,
-  taxValue: number,
-  calcOrder: 'discount_then_tax' | 'tax_then_discount'
+  discountValue: number
 ) => {
   const safeSubtotal = Math.max(0, Number(subtotal || 0));
   const safeShipping = Math.max(0, Number(shipping || 0));
   const safeDiscountValue = Math.max(0, Number(discountValue || 0));
-  const safeTaxValue = Math.max(0, Number(taxValue || 0));
 
   let discountAmount = 0;
-  let taxAmount = 0;
 
-  if (calcOrder === 'tax_then_discount') {
-    if (taxType === 'percent') taxAmount = safeSubtotal * (safeTaxValue / 100);
-    else if (taxType === 'amount') taxAmount = safeTaxValue;
-    const baseForDiscount = Math.max(0, safeSubtotal + taxAmount);
-    if (discountType === 'percent') discountAmount = baseForDiscount * (safeDiscountValue / 100);
-    else if (discountType === 'amount') discountAmount = safeDiscountValue;
-    if (discountAmount > baseForDiscount) discountAmount = baseForDiscount;
-  } else {
-    if (discountType === 'percent') discountAmount = safeSubtotal * (safeDiscountValue / 100);
-    else if (discountType === 'amount') discountAmount = safeDiscountValue;
-    if (discountAmount > safeSubtotal) discountAmount = safeSubtotal;
-    const baseForTax = Math.max(0, safeSubtotal - discountAmount);
-    if (taxType === 'percent') taxAmount = baseForTax * (safeTaxValue / 100);
-    else if (taxType === 'amount') taxAmount = safeTaxValue;
-  }
+  if (discountType === 'percent') discountAmount = safeSubtotal * (safeDiscountValue / 100);
+  else if (discountType === 'amount') discountAmount = safeDiscountValue;
+  
+  if (discountAmount > safeSubtotal) discountAmount = safeSubtotal;
 
-  const total = Math.max(0, safeSubtotal - discountAmount + taxAmount + safeShipping);
-  return { subtotal: safeSubtotal, discountAmount, taxAmount, total };
+  const total = Math.max(0, safeSubtotal - discountAmount + safeShipping);
+  return { subtotal: safeSubtotal, discountAmount, taxAmount: 0, total };
 };
 
 // Normalize Arabic-Indic and Persian numerals to Latin digits within a string
@@ -105,8 +89,6 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
   const [isExistingCustomer, setIsExistingCustomer] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const currencySymbol = 'ج.م';
-  const [globalTaxRate, setGlobalTaxRate] = useState<number>(Number(localStorage.getItem('Dragon_tax_rate') || '0'));
-  const salesCalcOrder = (localStorage.getItem('Dragon_sales_calc_order') || 'discount_then_tax') as 'discount_then_tax' | 'tax_then_discount';
 
   // State for script import
   const [scriptText, setScriptText] = useState('');
@@ -128,16 +110,12 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
   // Sales tax/discount (manual order)
   const [discountType, setDiscountType] = useState<RateType>('amount');
   const [discountValue, setDiscountValue] = useState<number>(0);
-  const [taxType, setTaxType] = useState<RateType>('percent');
-  const [taxValue, setTaxValue] = useState<number>(globalTaxRate);
   // Shipping for manual order
   const [shippingValue, setShippingValue] = useState<number>(0);
 
   // Sales tax/discount (import defaults)
   const [importDiscountType, setImportDiscountType] = useState<RateType>('amount');
   const [importDiscountValue, setImportDiscountValue] = useState<number>(0);
-  const [importTaxType, setImportTaxType] = useState<RateType>('percent');
-  const [importTaxValue, setImportTaxValue] = useState<number>(globalTaxRate);
   
   // Company Settings
   const [companyNameState, setCompanyNameState] = useState<string>(localStorage.getItem('Dragon_company_name') || 'اسم الشركة');
@@ -160,18 +138,6 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
           if (s.company_terms) setCompanyTermsState(s.company_terms);
           if (s.company_logo_url) setCompanyLogoState(s.company_logo_url);
           else if (s.company_logo) setCompanyLogoState(s.company_logo);
-          
-          if (typeof s.tax_rate !== 'undefined' && s.tax_rate !== null) {
-            const tr = Number(s.tax_rate);
-            if (!isNaN(tr)) {
-              setGlobalTaxRate(tr);
-              localStorage.setItem('Dragon_tax_rate', s.tax_rate.toString());
-              // If we are showing the list (not in middle of manual creation/edit), sync taxValue
-              if (view !== 'new-order' && !editingOrderId) {
-                setTaxValue(tr);
-              }
-            }
-          }
         }
       } catch (e) { console.debug('Failed to load company settings for printing', e); }
     })();
@@ -288,16 +254,11 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
   const selectedOrderShipping = selectedOrder ? Number(selectedOrder.shipping || selectedOrder.shippingCost || 0) : 0;
   const selectedOrderDiscountType = normalizeRateType(selectedOrder?.discountType || selectedOrder?.discount_type);
   const selectedOrderDiscountValue = Number(selectedOrder?.discountValue || selectedOrder?.discount_value || 0);
-  const selectedOrderTaxType = normalizeRateType(selectedOrder?.taxType || selectedOrder?.tax_type);
-  const selectedOrderTaxValue = Number(selectedOrder?.taxValue || selectedOrder?.tax_value || 0);
   const selectedOrderTotals = selectedOrder
-    ? calculateOrderTotals(selectedOrderSubtotal, selectedOrderShipping, selectedOrderDiscountType, selectedOrderDiscountValue, selectedOrderTaxType, selectedOrderTaxValue, salesCalcOrder)
+    ? calculateOrderTotals(selectedOrderSubtotal, selectedOrderShipping, selectedOrderDiscountType, selectedOrderDiscountValue)
     : null;
   const selectedOrderDiscountAmount = selectedOrder
     ? (Number(selectedOrder.discountAmount || selectedOrder.discount_amount || 0) || selectedOrderTotals?.discountAmount || 0)
-    : 0;
-  const selectedOrderTaxAmount = selectedOrder
-    ? (Number(selectedOrder.taxAmount || selectedOrder.tax_amount || 0) || selectedOrderTotals?.taxAmount || 0)
     : 0;
   const selectedOrderTotal = selectedOrder
     ? (Number(selectedOrder.total || 0) || selectedOrderTotals?.total || 0)
@@ -563,12 +524,12 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       return;
     }
     // build order payload similar to import structure
-    const saleSource = (localStorage.getItem('Dragon_default_sale_price_source') || 'product').toString();
+    const saleSource = (localStorage.getItem('Dragon_sale_price_source') || 'product').toString();
     let foundMissingPrice = false;
     let foundMissingProduct = false;
     const importedProducts = orderItems.map(it => {
       let price = Number(it.price || 0);
-      if (saleSource === 'product' && it.productId) {
+      if (saleSource === 'product' && it.productId && (!price || Number(price) === 0)) {
         const matched = existingProducts.find(ep => Number(ep.id) === Number(it.productId));
         if (matched) {
           const preferredKeys = ['sale_price','salePrice','sellingPrice','selling_price','price','cost','retail_price','retailPrice','default_price','amount','value'];
@@ -610,7 +571,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
     const addr = customerObj ? (customerObj.address || '') : newCustomer.address;
 
     const subtotal = importedProducts.reduce((s, p) => s + (Number(p.quantity || 0) * Number(p.price || 0)), 0);
-    const totals = calculateOrderTotals(subtotal, shippingValue, discountType, discountValue, taxType, taxValue, salesCalcOrder);
+    const totals = calculateOrderTotals(subtotal, shippingValue, discountType, discountValue);
 
     const orderPayload = {
       orderNumber: null,
@@ -630,8 +591,6 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       total: totals.total,
       discount_type: discountType,
       discount_value: discountValue,
-      tax_type: taxType,
-      tax_value: taxValue,
       sales_office_id: (salesDisplayMethod === 'sales_offices' && !isSalesOfficeScopeNone)
         ? (selectedSalesOffice?.id || selectedSalesOfficeId || null)
         : null
@@ -991,7 +950,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
         // Extract price from parsed line; only use matched product price when
         // system setting is 'product'. When set to 'order' we REQUIRE the script
         // to include the unit price and must not auto-fill from product.
-        const salePriceSource = (localStorage.getItem('Dragon_default_sale_price_source') || 'product').toString();
+        const salePriceSource = (localStorage.getItem('Dragon_sale_price_source') || 'product').toString();
         let resolvedPrice = Number(p.price) || 0;
         if (match && salePriceSource === 'product') {
           const preferredKeys = ['sale_price','salePrice','sellingPrice','selling_price','price','cost','retail_price','retailPrice','default_price','amount','value'];
@@ -1052,7 +1011,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       Swal.fire('تنبيه', 'يرجى اختيار مكتب المبيعات قبل الحفظ.', 'warning');
       return;
     }
-    const saleSource = (localStorage.getItem('Dragon_default_sale_price_source') || 'product').toString();
+    const saleSource = (localStorage.getItem('Dragon_sale_price_source') || 'product').toString();
     /* const saleSource = (localStorage.getItem('Dragon_default_sale_price_source') || 'product').toString(); */
     // Recalculate all parsed orders first and use the updated array for validation
     const updatedParsed = recalcAllParsedOrders();
@@ -1118,8 +1077,6 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
         products: importedProductsArr,
         discount_type: importDiscountType,
         discount_value: importDiscountValue,
-        tax_type: importTaxType,
-        tax_value: importTaxValue,
         sales_office_id: (salesDisplayMethod === 'sales_offices' && !isSalesOfficeScopeNone)
           ? (selectedSalesOffice?.id || selectedSalesOfficeId || null)
           : null
@@ -1374,21 +1331,9 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
     setEmployee(order.employee_raw || order.employee || '');
     setPage(order.page_raw || order.page || '');
     
-    // discounts / tax
+    // discounts
     setDiscountType((order.discount_type || order.discountType) ? (normalizeRateType(order.discount_type || order.discountType) as RateType) : 'amount');
     setDiscountValue(Number(order.discount_value || order.discountValue || 0));
-    setTaxType((order.tax_type || order.taxType) ? (normalizeRateType(order.tax_type || order.taxType) as RateType) : 'percent');
-    
-    // Robust tax rate handling (recognize 0 as a valid value)
-    let explicitTaxValue = null;
-    if (typeof order.tax_value !== 'undefined' && order.tax_value !== null) explicitTaxValue = Number(order.tax_value);
-    else if (typeof order.taxValue !== 'undefined' && order.taxValue !== null) explicitTaxValue = Number(order.taxValue);
-    
-    if (explicitTaxValue !== null && !isNaN(explicitTaxValue)) {
-      setTaxValue(explicitTaxValue);
-    } else {
-      setTaxValue(globalTaxRate);
-    }
 
     // shipping
     setShippingValue(Number(order.shipping || order.shippingCost || order.shipping_fees || 0));
@@ -1445,7 +1390,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
         let outSize = (updated.size || '').toString();
         if (match) {
           if (match.name) outName = match.name;
-          const saleSource = (localStorage.getItem('Dragon_default_sale_price_source') || 'product').toString();
+          const saleSource = (localStorage.getItem('Dragon_sale_price_source') || 'product').toString();
           if (saleSource === 'product') {
             // Robust price extraction: prefer common price keys, then scan any numeric field
             const preferredKeys = ['sale_price','salePrice','sellingPrice','selling_price','price','cost','retail_price','retailPrice','default_price','amount','value'];
@@ -1852,9 +1797,6 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                     <div className="flex justify-between"><span>الإجمالي قبل الإضافات</span><span>{selectedOrderSubtotal.toLocaleString()} {currencySymbol}</span></div>
                     {selectedOrderDiscountAmount > 0 && (
                       <div className="flex justify-between text-rose-600"><span>الخصم</span><span>-{selectedOrderDiscountAmount.toLocaleString()} {currencySymbol}</span></div>
-                    )}
-                    {selectedOrderTaxAmount > 0 && (
-                      <div className="flex justify-between text-emerald-600"><span>الضريبة</span><span>+{selectedOrderTaxAmount.toLocaleString()} {currencySymbol}</span></div>
                     )}
                     <div className="flex justify-between"><span>الشحن</span><span>{selectedOrderShipping.toLocaleString()} {currencySymbol}</span></div>
                     <div className="flex justify-between font-black pt-2 border-t"><span>الإجمالي</span><span>{selectedOrderTotal.toLocaleString()} {currencySymbol}</span></div>
@@ -2395,26 +2337,6 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                       />
                     </div>
                   </div>
-                  {/* Tax */}
-                  <div className="bg-slate-50 rounded-2xl p-3.5">
-                    <label className="text-[11px] font-black text-slate-500 uppercase tracking-wide mb-2.5 block">الضريبة</label>
-                    <div className="flex gap-2">
-                      <CustomSelect
-                        value={taxType}
-                        onChange={v => setTaxType(v as RateType)}
-                        options={[{ value: 'percent', label: '%' }, { value: 'amount', label: 'قيمة' }]}
-                        className="text-sm"
-                      />
-                      <input
-                        type="number" min={0}
-                        value={taxValue}
-                        onChange={e => setTaxValue(Number(e.target.value || 0))}
-                        className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                        placeholder="0"
-                      />
-                    </div>
-                    <p className="text-[10px] text-slate-400 mt-1.5">الترتيب حسب إعدادات النظام.</p>
-                  </div>
                   {/* Shipping */}
                   <div className="bg-slate-50 rounded-2xl p-3.5">
                     <label className="text-[11px] font-black text-slate-500 uppercase tracking-wide mb-2.5 block">مصاريف الشحن</label>
@@ -2434,7 +2356,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                 {/* Live Totals Summary */}
                 {(() => {
                   const _sub = orderItems.reduce((s, it) => s + (it.qty * it.price), 0);
-                  const _totals = calculateOrderTotals(_sub, shippingValue, discountType, discountValue, taxType, taxValue, salesCalcOrder);
+                  const _totals = calculateOrderTotals(_sub, shippingValue, discountType, discountValue);
                   return (
                     <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-5 text-white">
                       <div className="space-y-2.5 text-sm">
@@ -2446,12 +2368,6 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                           <div className="flex justify-between items-center text-rose-400">
                             <span>الخصم</span>
                             <span className="font-bold tabular-nums">− {_totals.discountAmount.toLocaleString('ar-EG')} {currencySymbol}</span>
-                          </div>
-                        )}
-                        {_totals.taxAmount > 0 && (
-                          <div className="flex justify-between items-center text-amber-300">
-                            <span>الضريبة</span>
-                            <span className="font-bold tabular-nums">+ {_totals.taxAmount.toLocaleString('ar-EG')} {currencySymbol}</span>
                           </div>
                         )}
                         {shippingValue > 0 && (
@@ -2752,16 +2668,6 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                           }}
                           className="text-xs bg-yellow-50 hover:bg-yellow-100 border border-yellow-200 px-3 py-2 rounded-2xl font-bold text-yellow-700"
                         >تحويل الأرقام</button>
-                        <div className="flex items-center gap-2">
-                          <label className="text-xs">ضريبة</label>
-                          <CustomSelect
-                            value={importTaxType}
-                            onChange={v => setImportTaxType(v as RateType)}
-                            options={[{ value: 'percent', label: '%' }, { value: 'amount', label: 'قيمة' }]}
-                            className="w-20"
-                          />
-                          <input type="number" min={0} value={importTaxValue} onChange={e => setImportTaxValue(Number(e.target.value || 0))} className="bg-white border rounded-xl px-2 py-1 text-xs w-20" />
-                        </div>
                       </div>
                       <button onClick={handleParseScript} disabled={!scriptText || isParsing} className="bg-blue-600 text-white px-8 py-3 rounded-2xl font-black shadow-lg shadow-blue-500/20 disabled:opacity-50 flex gap-2">
                         {isParsing ? <RefreshCcw className="animate-spin" size={18}/> : <FileText size={18}/>} تحليل النص
@@ -2914,13 +2820,9 @@ const PrintableContent: React.FC<{ order: any, companyName: string, companyPhone
     const shippingVal = Number(order.shipping || order.shippingCost || 0);
     const discountType = normalizeRateType(order.discountType || order.discount_type);
     const discountValue = Number(order.discountValue || order.discount_value || 0);
-    const taxType = normalizeRateType(order.taxType || order.tax_type);
-    const taxValue = Number(order.taxValue || order.tax_value || 0);
-    const calcOrder = (localStorage.getItem('Dragon_sales_calc_order') || 'discount_then_tax') as 'discount_then_tax' | 'tax_then_discount';
 
-    const computedTotals = calculateOrderTotals(computedSubtotal, shippingVal, discountType, discountValue, taxType, taxValue, calcOrder);
+    const computedTotals = calculateOrderTotals(computedSubtotal, shippingVal, discountType, discountValue);
     const discountAmount = Number(order.discountAmount || order.discount_amount || 0) || computedTotals.discountAmount;
-    const taxAmount = Number(order.taxAmount || order.tax_amount || 0) || computedTotals.taxAmount;
     const computedTotal = (order.total && Number(order.total) > 0) ? Number(order.total) : computedTotals.total;
 
     const emptyRowsCount = 0; // no forced empty rows; let rows be dynamic based on products

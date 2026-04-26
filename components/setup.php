@@ -281,7 +281,7 @@ $stmt->execute([$input['adminName'], $input['adminUsername'], $hashed_password])
         'company_address' => $input['companyAddress'],
         'company_terms' => $input['companyTerms'],
         // use installer-provided tax & currency when available
-        'tax_rate' => isset($input['taxRate']) ? (string)$input['taxRate'] : '14',
+        'tax_rate' => isset($input['taxRate']) ? (string)$input['taxRate'] : '0',
         'currency' => isset($input['currency']) ? $input['currency'] : 'EGP',
         'auto_backup' => 'false',
         'backup_frequency' => 'daily',

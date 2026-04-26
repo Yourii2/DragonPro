@@ -138,15 +138,50 @@ try {
         }
     }
     
-    $stmt = $pdo->query("SELECT config_key, config_value FROM settings");
-    $settings = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+    // Fetch settings from both app_settings and settings tables
+    $settings = [];
+    $checkAppSettings = $pdo->query("SHOW TABLES LIKE 'app_settings'")->fetch();
+    if ($checkAppSettings) {
+        try {
+            $cols = $pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'app_settings'")->fetchAll(PDO::FETCH_COLUMN);
+            $kcol = 'name'; $vcol = 'value';
+            if (in_array('name', $cols) && in_array('value', $cols)) { $kcol = 'name'; $vcol = 'value'; }
+            elseif (in_array('k', $cols) && in_array('v', $cols)) { $kcol = 'k'; $vcol = 'v'; }
+            elseif (in_array('key', $cols) && in_array('value', $cols)) { $kcol = 'key'; $vcol = 'value'; }
+            elseif (count($cols) >= 2) { $kcol = $cols[0]; $vcol = $cols[1]; }
 
+            $rows = $pdo->query("SELECT `" . $kcol . "`, `" . $vcol . "` FROM app_settings")->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($rows as $r) { $settings[(string)$r[$kcol]] = $r[$vcol]; }
+        } catch (Exception $e) {}
+    }
+
+    $stmtLegacy = $pdo->query("SELECT config_key, config_value FROM settings");
+    $legacySettings = $stmtLegacy->fetchAll(PDO::FETCH_KEY_PAIR);
+    foreach ($legacySettings as $k => $v) {
+        if (!isset($settings[$k])) $settings[$k] = $v;
+    }
+
+    // Add activation data to settings object for frontend convenience
     $settings['activation_type'] = $activation_type;
     $settings['activation_expiry'] = $activation_expiry;
     $settings['activation_account_status'] = $activation_account_status;
     $settings['activation_is_expired'] = $activation_is_expired ? 'true' : 'false';
     $settings['activation_hwid'] = $license_hwid;
     $settings['activation_last_check'] = $license_data['activation_last_check'] ?? '';
+
+    // Handle company logo URL if applicable
+    if (!empty($settings['company_logo_file_id']) && is_numeric($settings['company_logo_file_id'])) {
+        try {
+            $checkFiles = $pdo->query("SHOW TABLES LIKE 'app_files'");
+            if ($checkFiles && $checkFiles->fetch()) {
+                $fileId = intval($settings['company_logo_file_id']);
+                $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+                $host = $_SERVER['HTTP_HOST'] ?? '';
+                $base = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? ''), '/');
+                $settings['company_logo_url'] = $proto . '://' . $host . $base . '/get_file.php?id=' . $fileId;
+            }
+        } catch (Exception $e) {}
+    }
 
     echo json_encode([
         'status' => 'ok',
