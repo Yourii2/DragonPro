@@ -97,8 +97,6 @@ try {
         'product_source' => $input['product_source'] ?? 'both',
         // New setting: delivery method
         'delivery_method' => $input['delivery_method'] ?? 'reps',
-        // New setting: default sale price source ('product' | 'order')
-        'sale_price_source' => $input['sale_price_source'] ?? 'product',
         // New setting: purchase price type used in receiving & returns ('full_cost' | 'vendor_price')
         'purchase_price_type' => $input['purchase_price_type'] ?? 'full_cost',
         'currency' => $input['currency'] ?? 'EGP',

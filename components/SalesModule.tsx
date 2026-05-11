@@ -524,12 +524,11 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       return;
     }
     // build order payload similar to import structure
-    const saleSource = (localStorage.getItem('Dragon_sale_price_source') || 'product').toString();
-    let foundMissingPrice = false;
     let foundMissingProduct = false;
     const importedProducts = orderItems.map(it => {
       let price = Number(it.price || 0);
-      if (saleSource === 'product' && it.productId && (!price || Number(price) === 0)) {
+      // Only auto-fill from product when the user left price empty (0)
+      if (it.productId && price === 0) {
         const matched = existingProducts.find(ep => Number(ep.id) === Number(it.productId));
         if (matched) {
           const preferredKeys = ['sale_price','salePrice','sellingPrice','selling_price','price','cost','retail_price','retailPrice','default_price','amount','value'];
@@ -552,17 +551,13 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
         else if (!it.productId) it.productId = matched.id;
       }
 
-      if (saleSource === 'order' && (!price || Number(price) === 0)) foundMissingPrice = true;
       return { name: it.name || '', productId: it.productId || null, quantity: Number(it.qty || 0), price, color: it.color || '', size: it.size || '' };
     });
     if (foundMissingProduct) {
       Swal.fire('خطأ', 'بعض المنتجات في الطلب اليدوي لا تطابق أي منتج موجود. عدّل أسماء المنتجات أو اختر المنتج الصحيح قبل الحفظ.', 'error');
       return;
     }
-    if (foundMissingPrice) {
-      Swal.fire('خطأ', 'بعض المنتجات لا تحتوي على سعر بيع. الرجاء إدخال السعر لكل قطعة أو اختر سعر المنتج المسجل في الإعدادات.', 'error');
-      return;
-    }
+
     const customerObj = selectedCustomerId ? (customers.find(c=>c.id===selectedCustomerId) || null) : null;
     const customerName = customerObj ? (customerObj.name || '') : newCustomer.name;
     const phone1 = customerObj ? (customerObj.phone1 || '') : newCustomer.phone1;
@@ -947,21 +942,21 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
         const missingSize = match && p.size && match.size && p.size.toString() !== match.size.toString() ? true : false;
         const missingColor = match && p.color && match.color && p.color.toString() !== match.color.toString() ? true : false;
 
-        // Extract price from parsed line; only use matched product price when
-        // system setting is 'product'. When set to 'order' we REQUIRE the script
-        // to include the unit price and must not auto-fill from product.
-        const salePriceSource = (localStorage.getItem('Dragon_sale_price_source') || 'product').toString();
+        // If the script provided a price, ALWAYS keep it.
+        // Only auto-fill from product when no price was in the script (resolvedPrice === 0).
+        const salePriceSource = 'product'; // setting removed — always behave as 'product' with script-price priority
         let resolvedPrice = Number(p.price) || 0;
-        if (match && salePriceSource === 'product') {
+        // Only auto-fill from product when no price was in the script (resolvedPrice === 0)
+        if (match && resolvedPrice === 0) {
           const preferredKeys = ['sale_price','salePrice','sellingPrice','selling_price','price','cost','retail_price','retailPrice','default_price','amount','value'];
-          let candidatePrice: any = resolvedPrice;
+          let candidatePrice: any = 0;
           for (const k of preferredKeys) {
             if (match[k] !== undefined && match[k] !== null) {
               const num = Number(String(match[k]).replace(/,/g, ''));
               if (!isNaN(num) && num > 0) { candidatePrice = num; break; }
             }
           }
-          if ((!candidatePrice || Number(candidatePrice) === 0) && typeof match === 'object') {
+          if (candidatePrice === 0 && typeof match === 'object') {
             for (const k of Object.keys(match)) {
               try {
                 const v = match[k];
@@ -973,12 +968,8 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
           resolvedPrice = Number(candidatePrice) || 0;
         }
 
-        // Determine if price is missing depending on system setting
-        let missingPrice = false;
-        if (salePriceSource === 'order') {
-          // order-provided price required
-          missingPrice = !resolvedPrice || Number(resolvedPrice) === 0;
-        }
+        // Price is never 'missing' since we removed the 'order' source requirement
+        const missingPrice = false;
 
         return { ...p, productId, missingProduct, missingSize, missingColor, missingPrice, price: resolvedPrice };
       });
@@ -1011,8 +1002,6 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       Swal.fire('تنبيه', 'يرجى اختيار مكتب المبيعات قبل الحفظ.', 'warning');
       return;
     }
-    const saleSource = (localStorage.getItem('Dragon_sale_price_source') || 'product').toString();
-    /* const saleSource = (localStorage.getItem('Dragon_default_sale_price_source') || 'product').toString(); */
     // Recalculate all parsed orders first and use the updated array for validation
     const updatedParsed = recalcAllParsedOrders();
     let newOrders: any[] = (updatedParsed || parsedOrders).map(pOrder => {
@@ -1030,9 +1019,9 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       const groupedMap: any = {};
       (pOrder.products || []).forEach((pp:any) => {
         const key = `${(pp.name||'').trim().toLowerCase()}|${(pp.size||'').trim().toLowerCase()}|${(pp.color||'').trim().toLowerCase()}`;
-        // Determine price according to system preference
+        // ✅ Only auto-fill from product when: line has no price (0)
         let linePrice = Number(pp.price) || 0;
-        if (saleSource === 'product' && pp.productId) {
+        if (pp.productId && linePrice === 0) {
           const matched = existingProducts.find((ep:any) => Number(ep.id) === Number(pp.productId));
           if (matched) {
             const preferredKeys = ['sale_price','salePrice','sellingPrice','selling_price','price','cost','retail_price','retailPrice','default_price','amount','value'];
@@ -1045,7 +1034,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
           }
         }
 
-        if (!groupedMap[key]) groupedMap[key] = { name: pp.name, size: pp.size||'', color: pp.color||'', quantity: 0, productId: pp.productId || null, missingProduct: !!pp.missingProduct, missingSize: !!pp.missingSize, missingColor: !!pp.missingColor, missingPrice: !!pp.missingPrice || (saleSource === 'order' && (!linePrice || Number(linePrice) === 0)), price: linePrice };
+        if (!groupedMap[key]) groupedMap[key] = { name: pp.name, size: pp.size||'', color: pp.color||'', quantity: 0, productId: pp.productId || null, missingProduct: !!pp.missingProduct, missingSize: !!pp.missingSize, missingColor: !!pp.missingColor, missingPrice: false, price: linePrice };
         groupedMap[key].quantity += Number(pp.quantity || 0);
         // if any entry marks missing, keep it flagged
         groupedMap[key].missingProduct = groupedMap[key].missingProduct && pp.missingProduct ? true : (groupedMap[key].missingProduct || !!pp.missingProduct);
@@ -1165,11 +1154,13 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
   const recalcParsedOrder = (orderId: number) => {
     setParsedOrders(prev => prev.map(po => {
       if (po.id !== orderId) return po;
-      const saleSource = (localStorage.getItem('Dragon_default_sale_price_source') || 'product').toString();
+      // ✅ Price from script is always preserved
+      const saleSource = 'order';
       const preferredKeys = ['sale_price','salePrice','sellingPrice','selling_price','price','cost','retail_price','retailPrice','default_price','amount','value'];
       const products = (po.products || []).map((p:any) => {
         let resolvedPrice = Number(p.price || 0) || 0;
-        if (p.productId && saleSource === 'product') {
+        // Price from script is preserved; auto-fill only when line has no price
+        if (p.productId && resolvedPrice === 0) {
           const match = existingProducts.find((ep:any) => Number(ep.id) === Number(p.productId));
           if (match) {
             for (const k of preferredKeys) {
@@ -1178,7 +1169,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                 if (!isNaN(num) && num > 0) { resolvedPrice = num; break; }
               }
             }
-            if ((!resolvedPrice || Number(resolvedPrice) === 0) && typeof match === 'object') {
+            if (resolvedPrice === 0 && typeof match === 'object') {
               for (const k of Object.keys(match)) {
                 try {
                   const v = match[k];
@@ -1203,12 +1194,14 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
 
   // Recompute prices and totals for all parsed orders and return the new array
   const recalcParsedOrdersArray = (inputArr: any[]) => {
-    const saleSource = (localStorage.getItem('Dragon_default_sale_price_source') || 'product').toString();
+    // ✅ Price from script is always preserved
+    const saleSource = 'order';
     const preferredKeys = ['sale_price','salePrice','sellingPrice','selling_price','price','cost','retail_price','retailPrice','default_price','amount','value'];
     const updated = (inputArr || []).map((po:any) => {
       const products = (po.products || []).map((p:any) => {
         let resolvedPrice = Number(p.price || 0) || 0;
-        if (p.productId && saleSource === 'product') {
+        // Price from script is preserved; auto-fill only when line has no price
+        if (p.productId && resolvedPrice === 0) {
           const match = existingProducts.find((ep:any) => Number(ep.id) === Number(p.productId));
           if (match) {
             for (const k of preferredKeys) {
@@ -1217,7 +1210,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                 if (!isNaN(num) && num > 0) { resolvedPrice = num; break; }
               }
             }
-            if ((!resolvedPrice || Number(resolvedPrice) === 0) && typeof match === 'object') {
+            if (resolvedPrice === 0 && typeof match === 'object') {
               for (const k of Object.keys(match)) {
                 try {
                   const v = match[k];
@@ -1390,39 +1383,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
         let outSize = (updated.size || '').toString();
         if (match) {
           if (match.name) outName = match.name;
-          const saleSource = (localStorage.getItem('Dragon_sale_price_source') || 'product').toString();
-          if (saleSource === 'product') {
-            // Robust price extraction: prefer common price keys, then scan any numeric field
-            const preferredKeys = ['sale_price','salePrice','sellingPrice','selling_price','price','cost','retail_price','retailPrice','default_price','amount','value'];
-            let candidatePrice: any = outPrice;
-            for (const k of preferredKeys) {
-              if (match[k] !== undefined && match[k] !== null) {
-                const num = Number(String(match[k]).replace(/,/g, ''));
-                if (!isNaN(num) && num > 0) { candidatePrice = num; break; }
-              }
-            }
-            // If still not found, scan all fields for a positive numeric value
-            if ((!candidatePrice || Number(candidatePrice) === 0) && typeof match === 'object') {
-              for (const k of Object.keys(match)) {
-                try {
-                  const v = match[k];
-                  const num = Number(String(v).replace(/,/g, ''));
-                  if (!isNaN(num) && num > 0) { candidatePrice = num; break; }
-                } catch (e) { /* ignore */ }
-              }
-            }
-            outPrice = Number(candidatePrice) || 0;
-          } else {
-            // saleSource === 'order' -> do not auto-fill price from product
-            outPrice = Number(updated.price) || 0;
-          }
-          // Do NOT auto-overwrite parsed color/size from matched product.
-          // Keep user's parsed `color` and `size` as-is to avoid unexpected modification.
-          // outColor = (match.color ?? outColor);
-          // outSize = (match.size ?? outSize);
-          if (outPrice === 0 && saleSource === 'product') console.debug('Matched product has no positive price field', match);
-        } else {
-          outPrice = Number(outPrice) || 0;
+          // ✅ Price from script is always preserved; product data is not used for pricing
         }
 
         return { ...updated, productId, missingProduct, missingSize, missingColor, name: outName, price: outPrice, color: outColor, size: outSize };

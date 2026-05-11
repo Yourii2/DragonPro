@@ -20,7 +20,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
   const [selectedWarehouseFilter, setSelectedWarehouseFilter] = useState<string>('كل المستودعات');
   const currencySymbol = 'ج.م';
   const productSource = (localStorage.getItem('Dragon_product_source') || 'both').toString();
-  const salePriceSource = (localStorage.getItem('Dragon_default_sale_price_source') || 'product').toString();
+  // sale_price_source setting has been removed — price from script is always preserved
   const purchasePriceType = (localStorage.getItem('Dragon_purchase_price_type') || 'full_cost').toString();
   const defaultReceivingItemType = productSource === 'suppliers' ? 'product_new' : 'fabric_new';
   
@@ -76,7 +76,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
   const [variantParentId, setVariantParentId] = useState<number | null>(null);
   const [variantParentName, setVariantParentName] = useState('');
   const [editingVariant, setEditingVariant] = useState<any>(null);
-  const [variantFormData, setVariantFormData] = useState({ color: '', size: '', barcode: '', cost: 0, price: 0, quantity: 0, reorderLevel: 5, warehouseId: '' });
+  const [variantFormData, setVariantFormData] = useState({ color: '', size: '', barcode: '', cost: 0, quantity: 0, reorderLevel: 5, warehouseId: '' });
   const [colorInputMode, setColorInputMode] = useState<'select' | 'custom'>('select');
   const [sizeInputMode, setSizeInputMode] = useState<'select' | 'custom'>('select');
 
@@ -862,7 +862,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
       setSizeInputMode(vSize   && !availableSizes.includes(vSize.trim())   ? 'custom' : 'select');
       setVariantFormData({
         color: vColor, size: vSize, barcode: variant.barcode || '',
-        cost: variant.cost || variant.cost_price || 0, price: variant.price || variant.sale_price || 0,
+        cost: variant.cost || variant.cost_price || 0,
         quantity: 0, reorderLevel: variant.reorderLevel || variant.reorder_level || 5,
         warehouseId: warehouses.length > 0 ? String(warehouses[0].id) : ''
       });
@@ -871,7 +871,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
       setColorInputMode('select');
       setSizeInputMode('select');
       setVariantFormData({
-        color: '', size: '', barcode: '', cost: 0, price: 0, quantity: 0, reorderLevel: 5,
+        color: '', size: '', barcode: '', cost: 0, quantity: 0, reorderLevel: 5,
         warehouseId: warehouses.length > 0 ? String(warehouses[0].id) : ''
       });
     }
@@ -1035,7 +1035,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
               updatedItem.barcode = v.barcode || '';
               updatedItem.costPrice = Number(v.cost_price || 0);
               updatedItem.newCostPrice = Number(v.cost_price || 0);
-              updatedItem.sellingPrice = Number(v.sale_price || v.price || 0);
+              updatedItem.sellingPrice = 0;
             }
             return updatedItem;
           }
@@ -1054,7 +1054,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
               updatedItem.barcode = v.barcode || '';
               updatedItem.costPrice = Number(v.cost_price || 0);
               updatedItem.newCostPrice = Number(v.cost_price || 0);
-              updatedItem.sellingPrice = Number(v.sale_price || v.price || 0);
+              updatedItem.sellingPrice = 0;
             }
             return updatedItem;
           }
@@ -1067,7 +1067,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
               updatedItem.barcode = variant.barcode || '';
               updatedItem.costPrice = Number(variant.cost_price || 0);
               updatedItem.newCostPrice = Number(variant.cost_price || 0);
-              updatedItem.sellingPrice = Number(variant.sale_price || variant.price || 0);
+              updatedItem.sellingPrice = 0;
             }
             return updatedItem;
           }
@@ -1147,7 +1147,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
           name: p.name,
           costPrice: Number(p.cost ?? 0),
           newCostPrice: Number(p.cost ?? 0),
-          sellingPrice: Number(p.price ?? 0),
+          sellingPrice: 0,
           color: p.color || '',
           size: p.size || '',
           barcode: p.barcode || ''
@@ -1843,7 +1843,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
           color: resolved.color,
           size: resolved.size,
           costPrice: Number(resolved.cost || resolved.cost_price || resolved.costPrice || 0),
-          sellingPrice: Number(resolved.price || resolved.sellingPrice || 0),
+          sellingPrice: 0,
         };
       }
     }
@@ -2245,7 +2245,6 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                        <th className="px-4 py-4 font-bold">المقاس</th>
                        <th className="px-4 py-4 font-bold">الكمية</th>
                        <th className="px-4 py-4 font-bold">الشراء</th>
-                       {salePriceSource === 'product' && <th className="px-4 py-4 font-bold">البيع</th>}
                        <th className="px-4 py-4 font-bold text-center">تحكم</th>
                      </tr>
                    </thead>
@@ -2277,7 +2276,6 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                                <span className={`px-2 py-1 rounded text-[10px] font-black ${totalStock === 0 ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-600'}`}>{totalStock}</span>
                              </td>
                              <td className="px-4 py-3 text-xs text-muted">—</td>
-                             {salePriceSource === 'product' && <td className="px-4 py-3 text-xs text-muted">—</td>}
                              <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                                <div className="flex items-center justify-center gap-1">
                                  <button onClick={() => handleOpenVariantModal(parent.id, parent.name)} className="p-1.5 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100" title="إضافة صنف جديد"><Plus size={13} /></button>
@@ -2322,7 +2320,6 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                                        <span className={`px-2 py-0.5 rounded text-[10px] font-black ${colorStock === 0 ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-600'}`}>{colorStock}</span>
                                      </td>
                                      <td className="px-4 py-2.5 text-xs text-muted">—</td>
-                                     {salePriceSource === 'product' && <td className="px-4 py-2.5 text-xs text-muted">—</td>}
                                      <td className="px-4 py-2.5" onClick={e => e.stopPropagation()}>
                                        <div className="flex items-center justify-center gap-1">
                                          <button onClick={() => handleOpenVariantModal(parent.id, parent.name)} className="p-1.5 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100" title="إضافة مقاس"><Plus size={12} /></button>
@@ -2346,7 +2343,6 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                                          <span className={`px-2 py-0.5 rounded text-[10px] font-black ${Number(v.stock) <= Number(v.reorderLevel || v.reorder_level || 0) ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-600'}`}>{v.stock ?? 0}</span>
                                        </td>
                                        <td className="px-4 py-2 text-xs">{v.cost_price || v.cost || 0} {currencySymbol}</td>
-                                       {salePriceSource === 'product' && <td className="px-4 py-2 text-xs font-bold">{v.sale_price || v.price || 0} {currencySymbol}</td>}
                                        <td className="px-4 py-2">
                                          <div className="flex items-center justify-center gap-1">
                                            <button onClick={() => openStockBarcodes(v)} className="p-1.5 bg-slate-50 text-slate-600 rounded-lg hover:bg-slate-100" title="باركود"><QrCode size={12} /></button>
@@ -2528,11 +2524,6 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                   <div>
                     <label className="block text-xs font-bold text-muted mb-1">سعر الشراء</label>
                     <input type="number" min="0" step="0.01" value={variantFormData.cost} onChange={e => setVariantFormData(p => ({...p, cost: parseFloat(e.target.value) || 0}))}
-                      className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-muted mb-1">سعر البيع</label>
-                    <input type="number" min="0" step="0.01" value={variantFormData.price} onChange={e => setVariantFormData(p => ({...p, price: parseFloat(e.target.value) || 0}))}
                       className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm" />
                   </div>
                   <div>
@@ -2761,12 +2752,6 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                     <label className="text-xs font-bold text-slate-500">سعر الشراء (التكلفة)</label>
                     <input type="number" required disabled={!!editingProduct} value={productFormData.cost} onChange={e => setProductFormData({...productFormData, cost: parseFloat(e.target.value)})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm focus:ring-2 ring-blue-500/20 disabled:opacity-50 dark:text-white"/>
                   </div>
-                  {salePriceSource === 'product' && (
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-500">سعر البيع</label>
-                      <input type="number" required value={productFormData.price} onChange={e => setProductFormData({...productFormData, price: parseFloat(e.target.value)})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm focus:ring-2 ring-blue-500/20 dark:text-white"/>
-                    </div>
-                  )}
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-slate-500">الكمية الافتتاحية</label>
                     <input type="number" required disabled={!!editingProduct} value={productFormData.quantity} onChange={e => setProductFormData({...productFormData, quantity: parseInt(e.target.value)})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm focus:ring-2 ring-blue-500/20 disabled:opacity-50 dark:text-white"/>
@@ -3189,8 +3174,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                       <td className="px-2 py-2">
                         {item.itemType === 'product_new' ? (
                           <>
-                            <input type="number" placeholder="سعر التكلفة" value={item.costPrice} onChange={e => handleReceivingItemChange(item.id, 'costPrice', parseFloat(e.target.value))} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-lg py-2 px-2 text-xs mb-1" />
-                            <input type="number" placeholder="سعر البيع" value={item.sellingPrice} onChange={e => handleReceivingItemChange(item.id, 'sellingPrice', parseFloat(e.target.value))} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-lg py-2 px-2 text-xs" />
+                            <input type="number" placeholder="سعر التكلفة" value={item.costPrice} onChange={e => handleReceivingItemChange(item.id, 'costPrice', parseFloat(e.target.value))} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-lg py-2 px-2 text-xs" />
                           </>
                         ) : (
                           <input type="number" placeholder="0" value={item.costPrice} onChange={e => handleReceivingItemChange(item.id, 'costPrice', parseFloat(e.target.value))} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-lg py-2 px-2 text-xs" />
@@ -3358,12 +3342,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                             <span className="font-bold text-emerald-700 dark:text-emerald-300">{Number(costPreview.expectedAvg || 0).toLocaleString()} {currencySymbol}</span>
                           </div>
                         </div>
-                        {item.itemType === 'product_new' && (
-                          <div className="relative w-full">
-                            <span className="text-[10px] text-slate-400 block mb-0.5">سعر البيع</span>
-                            <input type="number" placeholder="سعر البيع" value={item.sellingPrice} onChange={e => handleReceivingItemChange(item.id, 'sellingPrice', parseFloat(e.target.value))} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-2 pl-2 pr-3 text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500/20" />
-                          </div>
-                        )}
+
                       </div>
                     </div>
                     <div className="col-span-1 md:col-span-3">
