@@ -7,9 +7,96 @@ import { API_BASE_PATH } from '../services/apiConfig';
 import CustomSelect from './CustomSelect';
 import { PrintableOrders } from './PrintableOrderCard';
 
+// ------------------------------------------
+// --- Helpers for Print Close Report ---
+const _toNum = (v: any) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const _parseNumeric = (v: any) => {
+  if (v === null || typeof v === 'undefined') return 0;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+  let s = String(v || '').trim();
+  if (s === '') return 0;
+  const map: Record<string, string> = {
+    '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9',
+    '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4', '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9'
+  };
+  s = s.split('').map(ch => map[ch] || ch).join('').replace(/[\s,]+/g, '').replace(/[^0-9.\-]+/g, '');
+  const n = Number(s);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const computePieces = (order: any) => {
+  const status = String(order?.status || order?.order_status || '').toLowerCase();
+  if (status === 'returned' || status === 'full_return') return 0;
+  const items = order.products || order.order_items || order.items || [];
+  if (Array.isArray(items) && items.length > 0) return items.reduce((s: number, p: any) => s + _toNum(p.quantity ?? p.qty ?? 0), 0);
+  return _toNum(order.pieces_count) || _toNum(order.total_pieces) || 0;
+};
+
+const computeOrderValueWithoutShipping = (order: any) => {
+  const items = order?.products || order?.items || order?.order_items || [];
+  if (items && Array.isArray(items) && items.length > 0) {
+    let sum = 0;
+    items.forEach((item: any) => {
+      const p = parseFloat(item.price_per_unit || item.price) || 0;
+      const q = Number(item.quantity || item.qty) || 0;
+      sum += p * q;
+    });
+    return sum;
+  }
+  return (parseFloat(order?.total_amount) || 0) - (parseFloat(order?.shipping_fees) || 0);
+};
+
+const computeReturnedPieces = (order: any) => {
+  const directVal = _toNum(order?.returned_pieces) || _toNum(order?.returned_pieces_fallback);
+  if (directVal > 0) return directVal;
+  const status = String(order?.status || order?.order_status || '').toLowerCase();
+  if (status === 'returned' || status === 'full_return') {
+    const items = order.products || order.order_items || order.items || [];
+    if (Array.isArray(items) && items.length > 0) {
+      const fromItems = items.reduce((s: number, p: any) => s + _toNum(p.quantity ?? p.qty ?? 0), 0);
+      if (fromItems > 0) return fromItems;
+    }
+    return _toNum(order?.pieces_count) || _toNum(order?.total_pieces) || 0;
+  }
+  const items = order.products || order.order_items || order.items || [];
+  if (Array.isArray(items) && items.length > 0) {
+    return items.reduce((s: number, p: any) => s + _toNum(p.returned_quantity ?? p.returnedPieces ?? 0), 0);
+  }
+  return 0;
+};
+
+const computeReturnedOrderValue = (order: any) => {
+  const status = String(order?.status || order?.order_status || '').toLowerCase();
+  const items = order.products || order.order_items || order.items || [];
+  if (Array.isArray(items) && items.length > 0) {
+    let returnedVal = 0;
+    let foundAnyRq = false;
+    items.forEach((item: any) => {
+      const rq = _toNum(item.returned_quantity ?? item.returnedPieces ?? 0);
+      if (rq > 0) foundAnyRq = true;
+      const p = _parseNumeric(item.price_per_unit ?? item.price ?? 0);
+      returnedVal += rq * p;
+    });
+    if (foundAnyRq && returnedVal > 0) return returnedVal;
+  }
+  if (status === 'returned' || status === 'full_return') {
+    return computeOrderValueWithoutShipping(order);
+  }
+  return Math.max(_toNum(order?.returned_value), _toNum(order?.returned_value_fallback), 0);
+};
+
+const computeDeliveredNetPieces = (order: any) => computePieces(order);
+const computeDeliveredNetValue = (order: any) => computeOrderValueWithoutShipping(order);
+// ------------------------------------------
+
 interface RepresentativesModuleProps {
   initialView?: string;
 }
+// ... (باقي الكود بتاعك زي ما هو بدون تعديل) ...
 
 const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialView }) => {
   const [view, setView] = useState<'list' | 'custody' | 'transactions' | 'rep-cycle' | 'rep-performance'>(
@@ -1249,6 +1336,606 @@ ${prodRows.length > 0 ? `<h3>البضاعة المستلمة — جميع الم
     setWaybillPrintOrders(normalised);
   };
 
+  const printCloseReport = async (row: any) => {
+    const repTargetId = row.rep_id || selectedRepId;
+    const repName = representatives.find((r: any) => Number(r.id) === Number(repTargetId))?.name || '';
+    let dateStr = row.journal_date || row.opened_at || row.created_at || new Date().toISOString();
+    const dateOnly = String(dateStr).slice(0, 10);
+    const journalId = row.id;
+    
+    try {
+      // 1. جلب الأوردرات المرتبطة بهذه اليومية
+      const ordersRes = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getJournalOrders&rep_id=${encodeURIComponent(repTargetId)}&journal_ids=${journalId}`).then(r => r.json()).catch(() => null);
+
+      let rawDelivered: any[] = [];
+      let rawReturned: any[] = [];
+      let deferredList: any[] = [];
+
+      if (ordersRes && ordersRes.success) {
+        rawDelivered = ordersRes.delivered || [];
+        rawReturned = ordersRes.returned || [];
+        const rawDeferred = ordersRes.deferred || [];
+        deferredList = rawDeferred.filter((o: any) => String(o.journal_id || o.journalId) === String(journalId));
+      } else {
+        const journalOrdersMeta = _parseJournalOrders(row);
+        const allIds = journalOrdersMeta.map((x: any) => x.id).filter(Boolean);
+        if (allIds.length > 0) {
+          const allOrders = await _fetchOrdersByIds(allIds);
+          rawDelivered = allOrders.filter(o => computeDeliveredNetPieces(o) > 0);
+          rawReturned = allOrders.filter(o => computeReturnedPieces(o) > 0);
+          deferredList = allOrders.filter((o: any) => {
+            const st = String(o.status || '').toLowerCase();
+            return st === 'deferred' || st === 'deferred_order' || st === 'deferred_orders' || st === 'with_rep' || st === 'postponed';
+          });
+        }
+      }
+
+      // 2. دمج الأوردرات لضمان حساب المرتجع الجزئي (نفس منطق SalesDailyClose)
+      const uniqOrdersById = (arr: any[]) => {
+        const seen = new Set<string>();
+        const out: any[] = [];
+        for (const it of (arr || [])) {
+          const id = String(it?.order_id ?? it?.id ?? '');
+          if (!id || seen.has(id)) continue;
+          seen.add(id);
+          out.push(it);
+        }
+        return out;
+      };
+
+      const finalDeliveredList = uniqOrdersById([
+        ...rawDelivered,
+        ...rawReturned.filter(o => computeDeliveredNetPieces(o) > 0)
+      ]);
+
+      const finalReturnedList = uniqOrdersById([
+        ...rawReturned,
+        ...rawDelivered.filter(o => computeReturnedPieces(o) > 0)
+      ]);
+
+      // 3. دوال الحسابات والإجماليات
+      const sum = (arr: any[], fn: (o: any) => number) => arr.reduce((s, x) => s + fn(x), 0);
+
+      const delivFullList = finalDeliveredList.filter((o: any) => computeReturnedPieces(o) === 0);
+      const delivPartialList = finalDeliveredList.filter((o: any) => computeReturnedPieces(o) > 0);
+
+      const delivFullCount = delivFullList.length;
+      const delivFullPieces = sum(delivFullList, computeDeliveredNetPieces);
+      const delivFullAmount = sum(delivFullList, computeDeliveredNetValue);
+
+      const delivPartialCount = delivPartialList.length;
+      const delivPartialPieces = sum(delivPartialList, computeDeliveredNetPieces);
+      const delivPartialAmount = sum(delivPartialList, computeDeliveredNetValue);
+
+      const returnFullList = finalReturnedList.filter((o: any) => computeDeliveredNetPieces(o) === 0);
+      const returnPartialList = finalReturnedList.filter((o: any) => computeDeliveredNetPieces(o) > 0);
+
+      const returnFullCount = returnFullList.length;
+      const returnFullPieces = sum(returnFullList, computeReturnedPieces);
+      const returnFullAmount = sum(returnFullList, computeReturnedOrderValue);
+
+      const returnPartialCount = returnPartialList.length;
+      const returnPartialPieces = sum(returnPartialList, computeReturnedPieces);
+      const returnPartialAmount = sum(returnPartialList, computeReturnedOrderValue);
+
+      const deferredCount = deferredList.length;
+      const deferredPiecesSum = sum(deferredList, computePieces);
+      const deferredAmountSum = sum(deferredList, computeOrderValueWithoutShipping);
+
+      // 4. الحسابات المالية 
+      const openingBalance = Number(row.prev_balance ?? 0);
+      const paidAmount = Number(row.payment_amount ?? 0);
+      const settlementDirection = row.payment_action || 'collect';
+      const currentBalance = Number(row.balance_after_payment ?? 0);
+      
+      const totalRequiredBeforeClose = openingBalance;
+      const estimatedRemaining = currentBalance;
+
+      // 5. بناء جداول التقرير
+      const delivHTML = finalDeliveredList.map((o: any) => {
+        const isPartial = computeReturnedPieces(o) > 0 && computeDeliveredNetPieces(o) > 0;
+        return `<tr>
+          <td style="padding:4px;border:1px solid #ccc;text-align:right;">#${o.orderNumber || o.order_number || o.id} ${isPartial ? '<span style="font-size:10px;color:#d97706;">(جزئي)</span>' : ''}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:right;">${o.customerName || o.customer_name || o.name || ''}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:center;">${computeDeliveredNetPieces(o)}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:center;">${Number(computeDeliveredNetValue(o)).toLocaleString()}</td>
+        </tr>`;
+      }).join('');
+
+      const retHTML = finalReturnedList.map((o: any) => {
+        const isPartial = computeReturnedPieces(o) > 0 && computeDeliveredNetPieces(o) > 0;
+        return `<tr>
+          <td style="padding:4px;border:1px solid #ccc;text-align:right;">#${o.orderNumber || o.order_number || o.id} ${isPartial ? '<span style="font-size:10px;color:#d97706;">(جزئي)</span>' : ''}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:right;">${o.customerName || o.customer_name || o.name || ''}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:center;">${computeReturnedPieces(o)}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:center;">${Number(computeReturnedOrderValue(o)).toLocaleString()}</td>
+        </tr>`;
+      }).join('');
+
+      const defHTML = (deferredList || []).map((o: any) => {
+        return `<tr>
+          <td style="padding:4px;border:1px solid #ccc;text-align:right;">#${o.orderNumber || o.order_number || o.id}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:right;">${o.customerName || o.customer_name || o.name || ''}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:center;">${computePieces(o)}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:center;">${Number(computeOrderValueWithoutShipping(o)).toLocaleString()}</td>
+        </tr>`;
+      }).join('');
+
+      const deliveredPiecesTotal = delivFullPieces + delivPartialPieces;
+      const returnedPiecesTotal = returnFullPieces + returnPartialPieces;
+      const totalReceived = delivFullAmount + delivPartialAmount;
+      const totalPaid = returnFullAmount + returnPartialAmount;
+
+      const html = `
+        <html dir="rtl" lang="ar">
+        <head>
+          <title>تقرير إغلاق اليومية</title>
+          <style>
+            body { font-family: Tahoma, Arial, sans-serif; font-size: 13px; margin: 20px; line-height: 1.5; direction: rtl; }
+            .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 10px; }
+            .flex { display: flex; justify-content: space-between; margin-bottom: 15px; gap: 10px; flex-wrap: wrap; }
+            .box { border: 1px solid #000; padding: 10px; border-radius: 5px; flex: 1; min-width: 200px; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: 12px; }
+            th { background: #eee; padding: 8px; border: 1px solid #ccc; text-align: right; font-weight: bold; }
+            td { padding: 8px; border: 1px solid #ccc; text-align: right; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h2 style="margin: 0 0 5px;">تقرير إغلاق اليومية — ${repName}</h2>
+            <div>التاريخ: <span dir="ltr">${dateOnly}</span> | كود اليومية: ${row.daily_code || '---'}</div>
+          </div>
+
+          <div style="margin-bottom:12px;border:1px solid #ddd;padding:10px;border-radius:6px;background:#fafafa;">
+            <div style="font-weight:bold;margin-bottom:8px;">ملخص قبل الإغلاق</div>
+            <table style="width:100%;border-collapse:collapse;font-size:12px;">
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;width:60%;">اجمالى المبلغ المطلوب قبل اغلاق اليومية</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${totalRequiredBeforeClose.toLocaleString()} ج.م</td></tr>
+
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات التسليم الكامل</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${delivFullCount} طلب</td></tr>
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع التسليم الكامل</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${delivFullPieces}</td></tr>
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ التسليم الكامل</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${delivFullAmount.toLocaleString()} ج.م</td></tr>
+
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات الارجاع الكلي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${returnFullCount} طلب</td></tr>
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع الارتجاع الكلى</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${returnFullPieces}</td></tr>
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ الارتجاع الكلى</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${returnFullAmount.toLocaleString()} ج.م</td></tr>
+
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات التسليم الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${delivPartialCount} طلب</td></tr>
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع التسليم الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${delivPartialPieces}</td></tr>
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ التسليم الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${delivPartialAmount.toLocaleString()} ج.م</td></tr>
+
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات الارجاع الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${returnPartialCount} طلب</td></tr>
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع الارتجاع الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${returnPartialPieces}</td></tr>
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ الارتجاع الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${returnPartialAmount.toLocaleString()} ج.م</td></tr>
+
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات النزول</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${deferredCount} طلب</td></tr>
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع النزول</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${deferredPiecesSum}</td></tr>
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ النزول</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${deferredAmountSum.toLocaleString()} ج.م</td></tr>
+
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">المبلغ المتبقى</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${estimatedRemaining.toLocaleString()} ج.م</td></tr>
+            </table>
+          </div>
+
+          <div class="flex">
+            <div class="box" style="margin-right:0;">
+              <strong>ملخص الحساب:</strong><br/>
+              الحساب قبل الإغلاق: <span dir="ltr">${totalRequiredBeforeClose.toLocaleString()} ج.م</span><br/>
+              طريقة التسوية: <strong>${settlementDirection === 'collect' ? 'تحصيل من المندوب' : 'دفع للمندوب'}</strong><br/>
+              المبلغ المدفوع للتقفيل: <span dir="ltr">${paidAmount.toLocaleString()} ج.م</span><br/><br/>
+              <div style="background:#f1f1f1; padding:5px;"><strong>المتبقي:</strong> <span dir="ltr">${estimatedRemaining.toLocaleString()} ج.م</span></div>
+            </div>
+          </div>
+
+          ${finalDeliveredList.length > 0 ? `
+          <h4 style="margin-bottom:5px;">جدول تفاصيل التسليم (${finalDeliveredList.length} طلب) — القطع: ${deliveredPiecesTotal} — إجمالي: ${Number(totalReceived).toLocaleString()}</h4>
+          <table>
+            <tr><th>رقم الأوردر</th><th>العميل</th><th style="text-align:center;">القطع</th><th style="text-align:center;">القيمة</th></tr>
+            ${delivHTML}
+          </table>
+          ` : ''}
+
+          ${finalReturnedList.length > 0 ? `
+          <h4 style="margin-bottom:5px;">جدول تفاصيل المرتجع (${finalReturnedList.length} طلب) — القطع: ${returnedPiecesTotal} — إجمالي: ${Number(totalPaid).toLocaleString()}</h4>
+          <table>
+            <tr><th>رقم الأوردر</th><th>العميل</th><th style="text-align:center;">القطع</th><th style="text-align:center;">القيمة</th></tr>
+            ${retHTML}
+          </table>
+          ` : ''}
+
+          ${deferredList.length > 0 ? `
+          <h4 style="margin-bottom:5px;">جدول تفاصيل النزول (${deferredList.length} طلب) — القطع: ${deferredPiecesSum} — إجمالي: ${Number(deferredAmountSum).toLocaleString()}</h4>
+          <table>
+            <tr><th>رقم الأوردر</th><th>العميل</th><th style="text-align:center;">القطع</th><th style="text-align:center;">القيمة</th></tr>
+            ${defHTML}
+          </table>
+          ` : ''}
+
+          <div style="margin-top:30px;padding:15px;border:2px solid #000;text-align:center;background:#f5f5f5;">
+            <div style="font-weight:bold;font-size:14px;margin-bottom:10px;">الحالة النهائية للحساب</div>
+            <div style="font-size:18px;font-weight:bold;direction:ltr;color:#1b5e20;">
+              ${Math.abs(currentBalance).toLocaleString()} ج.م 
+              <span>${currentBalance > 0 ? 'له' : currentBalance < 0 ? 'عليه' : ''}</span>
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+      
+      const w = window.open('', '_blank', 'toolbar=0,location=0,menubar=0,scrollbars=1,width=960,height=720');
+      if (!w) { 
+        Swal.fire('تنبيه', 'يرجى السماح بفتح النوافذ المنبثقة', 'warning'); 
+        return; 
+      }
+      w.document.write(html);
+      w.document.close();
+      w.focus();
+      setTimeout(() => w.print(), 500);
+    } catch (e) {
+      console.error('Print close report error', e);
+      Swal.fire('خطأ', 'فشل تحميل أو طباعة التقرير', 'error');
+    }
+  };
+ /*  const printCloseReport = async (row: any) => {
+    console.log('DEBUG printCloseReport called with row:', row);
+    const repTargetId = row.rep_id || selectedRepId;
+    console.log('DEBUG resolved repTargetId:', repTargetId);
+    const repName = representatives.find((r: any) => Number(r.id) === Number(repTargetId))?.name || '';
+    
+    // Get the date from the row - extract just the date part
+    let dateStr = row.journal_date || row.opened_at || row.created_at || new Date().toISOString();
+    const dateOnly = String(dateStr).slice(0, 10); // Ensure YYYY-MM-DD format
+    
+    // Fetch summary data for this date and rep
+    try {
+      // Fetch rep balance information
+      let repRes: any = { success: false, data: [] };
+      try {
+        const repResp = await fetch(`${API_BASE_PATH}/api.php?module=users&action=getAllWithBalance&related_to_type=rep&rep_id=${repTargetId}`);
+        if (!repResp.ok) {
+          const t = await repResp.text().catch(() => null);
+          console.error('getAllWithBalance failed', repResp.status, t);
+        } else {
+          repRes = await repResp.json().catch(() => ({ success: false, data: [] }));
+        }
+      } catch (e) {
+        console.error('getAllWithBalance fetch error', e);
+      }
+        console.log('DEBUG getAllWithBalance result:', repRes);
+        try { (window as any).__REP_DEBUG = (window as any).__REP_DEBUG || {}; (window as any).__REP_DEBUG.repRes = repRes; } catch (e) {}
+      const repUser = Array.isArray(repRes.data) ? repRes.data[0] : repRes.data;
+      const currentBalance = Number(repUser?.balance ?? repUser?.current_balance ?? 0);
+      
+      // Fetch sales active with rep to calculate totals
+      let custodyRes: any = { success: false, data: [] };
+      try {
+        const cResp = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getSalesActiveWithRep&rep_id=${encodeURIComponent(repTargetId)}`);
+        if (!cResp.ok) {
+          const t2 = await cResp.text().catch(() => null);
+          console.error('getSalesActiveWithRep failed', cResp.status, t2);
+        } else {
+          custodyRes = await cResp.json().catch(() => ({ success: false, data: [] }));
+        }
+      } catch (e) {
+        console.error('getSalesActiveWithRep fetch error', e);
+      }
+      console.log('DEBUG getSalesActiveWithRep result:', custodyRes);
+      try { (window as any).__REP_DEBUG = (window as any).__REP_DEBUG || {}; (window as any).__REP_DEBUG.custodyRes = custodyRes; } catch (e) {}
+      const allOrders = Array.isArray(custodyRes.data) ? custodyRes.data : [];
+      console.log('DEBUG allOrders length:', allOrders.length, 'allOrders sample:', Array.isArray(allOrders) ? allOrders.slice(0,5) : allOrders);
+      try { (window as any).__REP_DEBUG.allOrders = Array.isArray(allOrders) ? allOrders.slice(0,200) : allOrders; } catch (e) {}
+      
+      // Get journal info
+      let journalRes: any = { success: false, data: [] };
+      try {
+        // Fetch all journals for this rep and select by daily code or id (more reliable than date)
+        const jResp = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getRepDailyJournal&rep_id=${repTargetId}`);
+        if (!jResp.ok) {
+          const t3 = await jResp.text().catch(() => null);
+          console.error('getRepDailyJournal failed', jResp.status, t3);
+        } else {
+          journalRes = await jResp.json().catch(() => ({ success: false, data: [] }));
+        }
+      } catch (e) {
+        console.error('getRepDailyJournal fetch error', e);
+      }
+      const journalData = (Array.isArray(journalRes.data) && journalRes.data.length > 0) ? (
+        // prefer exact id match, then daily_code match, then fall back to first
+        (journalRes.data.find((j: any) => Number(j.id) === Number(row.id))
+          || journalRes.data.find((j: any) => String(j.daily_code || '').trim() === String(row.daily_code || '').trim())
+          || journalRes.data[0])
+      ) : null;
+      console.log('DEBUG getRepDailyJournal result:', journalRes);
+      try { (window as any).__REP_DEBUG = (window as any).__REP_DEBUG || {}; (window as any).__REP_DEBUG.journalRes = journalRes; } catch (e) {}
+      
+      // Calculate order statistics (use product-level quantities/prices when present)
+      const getOrderPieces = (o: any) => {
+        const items = o.products || o.order_items || o.items || [];
+        if (Array.isArray(items) && items.length > 0) return items.reduce((s: number, p: any) => s + Number(p.quantity ?? p.qty ?? 0), 0);
+        return Number(o.qty_sum ?? o.delivered_pieces ?? o.pieces_count ?? 0);
+      };
+
+      const getOrderReturnedPieces = (o: any) => {
+        const items = o.products || o.order_items || o.items || [];
+        if (Array.isArray(items) && items.length > 0) return items.reduce((s: number, p: any) => s + Number(p.returned_quantity ?? p.returned_qty ?? 0), 0);
+        return Number(o.returned_pieces ?? o.returned_quantity ?? 0);
+      };
+
+      const deliveredOrders = allOrders.filter((o: any) => {
+        const pieces = getOrderPieces(o);
+        const returnedPieces = getOrderReturnedPieces(o);
+        return pieces > 0 && returnedPieces === 0;
+      });
+      console.log('DEBUG deliveredOrders count:', deliveredOrders.length, 'sample:', deliveredOrders.slice(0,5));
+      try { (window as any).__REP_DEBUG.deliveredOrders = deliveredOrders.slice(0,200); } catch (e) {}
+
+      const returnedOrders = allOrders.filter((o: any) => {
+        const returnedPieces = getOrderReturnedPieces(o);
+        const status = String(o.status || o.order_status || '').toLowerCase();
+        return returnedPieces > 0 || status === 'full_return' || status === 'partial_return' || status === 'returned' || Number(o.returned_value ?? 0) > 0;
+      });
+      console.log('DEBUG returnedOrders count:', returnedOrders.length, 'sample:', returnedOrders.slice(0,5));
+      try { (window as any).__REP_DEBUG.returnedOrders = returnedOrders.slice(0,200); } catch (e) {}
+
+      const totalReceived = Number(deliveredOrders.reduce((sum: number, o: any) => {
+        const items = o.products || o.order_items || o.items || [];
+        if (Array.isArray(items) && items.length > 0) {
+          return sum + items.reduce((s: number, p: any) => s + (Number(p.quantity ?? p.qty ?? 0) * Number(p.price ?? p.price_per_unit ?? p.unit_price ?? 0)), 0);
+        }
+        const qty = Number(o.qty_sum ?? 0);
+        const price = Number(o.price ?? o.unit_price ?? 0);
+        return sum + (qty * price);
+      }, 0));
+
+      const totalPaid = Number(returnedOrders.reduce((sum: number, o: any) => {
+        const items = o.products || o.order_items || o.items || [];
+        if (Array.isArray(items) && items.length > 0) {
+          return sum + items.reduce((s: number, p: any) => s + (Number(p.returned_quantity ?? p.returned_qty ?? 0) * Number(p.price ?? p.price_per_unit ?? p.unit_price ?? 0)), 0);
+        }
+        const returnedVal = Number(o.returned_value ?? 0);
+        return sum + returnedVal;
+      }, 0));
+      
+      const openingBalance = currentBalance + totalPaid - totalReceived;
+      
+      let returnedOrdersCount = { total: 0, full: 0, partial: 0 };
+      let returnedPieces = 0;
+      
+      returnedOrders.forEach((o: any) => {
+        returnedOrdersCount.total++;
+        if (o.status === 'full_return') returnedOrdersCount.full++;
+        if (o.status === 'partial_return') returnedOrdersCount.partial++;
+        returnedPieces += getOrderReturnedPieces(o);
+      });
+
+      // Additional aggregates to match SalesDailyClose report
+      const delivFullList = deliveredOrders.filter((o: any) => getOrderReturnedPieces(o) === 0);
+      const delivPartialList = deliveredOrders.filter((o: any) => getOrderReturnedPieces(o) > 0);
+
+      const returnFullList = returnedOrders.filter((o: any) => getOrderPieces(o) === 0);
+      const returnPartialList = returnedOrders.filter((o: any) => getOrderPieces(o) > 0);
+
+      const sum = (arr: any[], fn: (o: any) => number) => arr.reduce((s, x) => s + fn(x), 0);
+
+      const delivFullCount = delivFullList.length;
+      const delivFullPieces = sum(delivFullList, (o:any) => getOrderPieces(o));
+      const delivFullAmount = sum(delivFullList, (o:any) => {
+        const items = o.products || o.order_items || o.items || [];
+        if (Array.isArray(items) && items.length > 0) return items.reduce((s:number, p:any) => s + (Number(p.quantity ?? p.qty ?? 0) * Number(p.price ?? p.price_per_unit ?? p.unit_price ?? 0)), 0);
+        return Number(o.qty_sum ?? 0) * Number(o.price ?? o.unit_price ?? 0);
+      });
+
+      const delivPartialCount = delivPartialList.length;
+      const delivPartialPieces = sum(delivPartialList, (o:any) => getOrderPieces(o));
+      const delivPartialAmount = sum(delivPartialList, (o:any) => {
+        const items = o.products || o.order_items || o.items || [];
+        if (Array.isArray(items) && items.length > 0) return items.reduce((s:number, p:any) => s + (Number(p.quantity ?? p.qty ?? 0) * Number(p.price ?? p.price_per_unit ?? p.unit_price ?? 0)), 0);
+        return Number(o.qty_sum ?? 0) * Number(o.price ?? o.unit_price ?? 0);
+      });
+
+      const returnFullCount = returnFullList.length;
+      const returnFullPieces = sum(returnFullList, (o:any) => getOrderReturnedPieces(o));
+      const returnFullAmount = sum(returnFullList, (o:any) => {
+        const items = o.products || o.order_items || o.items || [];
+        if (Array.isArray(items) && items.length > 0) return items.reduce((s:number, p:any) => s + (Number(p.returned_quantity ?? p.returned_qty ?? 0) * Number(p.price ?? p.price_per_unit ?? p.unit_price ?? 0)), 0);
+        return Number(o.returned_value ?? (Number(o.returned_pieces ?? 0) * Number(o.price ?? o.unit_price ?? 0)));
+      });
+
+      const returnPartialCount = returnPartialList.length;
+      const returnPartialPieces = sum(returnPartialList, (o:any) => getOrderReturnedPieces(o));
+      const returnPartialAmount = sum(returnPartialList, (o:any) => {
+        const items = o.products || o.order_items || o.items || [];
+        if (Array.isArray(items) && items.length > 0) return items.reduce((s:number, p:any) => s + (Number(p.returned_quantity ?? p.returned_qty ?? 0) * Number(p.price ?? p.price_per_unit ?? p.unit_price ?? 0)), 0);
+        return Number(o.returned_value ?? (Number(o.returned_pieces ?? 0) * Number(o.price ?? o.unit_price ?? 0)));
+      });
+
+      const deferredList = allOrders.filter((o:any) => String(o.status || '').toLowerCase() === 'deferred' || String(o.status || '').toLowerCase() === 'deferred_order' || String(o.status || '').toLowerCase() === 'deferred_orders');
+      const deferredCount = deferredList.length;
+      const deferredPiecesSum = sum(deferredList, (o:any) => Number(o.qty_sum ?? o.pieces_count ?? 0));
+      const deferredAmountSum = sum(deferredList, (o:any) => Number(o.qty_sum ?? 0) * Number(o.price ?? o.unit_price ?? 0));
+
+      const totalRequiredBeforeClose = openingBalance;
+      const estimatedRemaining = currentBalance;
+
+      // Prepare row HTML for delivered/returned/deferred lists (match SalesDailyClose formatting)
+      const delivHTML = deliveredOrders.map((o: any) => {
+        const orderNum = o.orderNumber || o.order_number || o.id || '';
+        const cust = o.customerName || o.customer_name || o.name || '';
+        const pieces = Number(o.qty_sum ?? o.delivered_pieces ?? o.pieces_count ?? 0);
+        const value = Number(o.price ?? o.unit_price ?? o.total_amount ?? 0) * pieces;
+        const isPartial = (Number(o.returned_pieces ?? o.returned_quantity ?? 0) > 0) && pieces > 0;
+        return `<tr>
+          <td style="padding:4px;border:1px solid #ccc;text-align:right;">#${orderNum} ${isPartial ? '<span style="font-size:10px;color:#d97706;">(جزئي)</span>' : ''}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:right;">${cust}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:center;">${pieces}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:center;">${Number(value).toLocaleString()}</td>
+        </tr>`;
+      }).join('');
+
+      const retHTML = returnedOrders.map((o: any) => {
+        const orderNum = o.orderNumber || o.order_number || o.id || '';
+        const cust = o.customerName || o.customer_name || o.name || '';
+        const pieces = Number(o.returned_pieces ?? o.returned_quantity ?? o.qty_sum ?? 0);
+        const value = Number(((o.returned_value ?? (pieces * Number(o.price ?? o.unit_price ?? 0))) || 0));
+        const isPartial = (Number(o.returned_pieces ?? o.returned_quantity ?? 0) > 0) && (Number(o.qty_sum ?? 0) > 0);
+        return `<tr>
+          <td style="padding:4px;border:1px solid #ccc;text-align:right;">#${orderNum} ${isPartial ? '<span style="font-size:10px;color:#d97706;">(جزئي)</span>' : ''}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:right;">${cust}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:center;">${pieces}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:center;">${Number(value).toLocaleString()}</td>
+        </tr>`;
+      }).join('');
+
+      const defHTML = (deferredList || []).map((o: any) => {
+        const orderNum = o.orderNumber || o.order_number || o.id || '';
+        const cust = o.customerName || o.customer_name || o.name || '';
+        const pieces = Number(o.qty_sum ?? o.pieces_count ?? 0);
+        const value = Number(o.price ?? o.unit_price ?? o.total_amount ?? 0) * pieces;
+        return `<tr>
+          <td style="padding:4px;border:1px solid #ccc;text-align:right;">#${orderNum}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:right;">${cust}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:center;">${pieces}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:center;">${Number(value).toLocaleString()}</td>
+        </tr>`;
+      }).join('');
+
+      // Map variables to match SalesDailyClose template names
+      const deliveredPiecesTotal = sum(deliveredOrders, (o:any) => Number(o.qty_sum ?? o.delivered_pieces ?? o.pieces_count ?? 0));
+      const deliveredValueTotal = totalReceived;
+
+      const pRepName = repName;
+      const pDate = dateOnly;
+      const pTotal = currentBalance;
+      const pAmount = 0;
+      const pTreasury = 'مدفوعات إليكترونية';
+      const repTxType = 'none';
+      const repTxAmount = 0;
+      const repTxReason = '';
+
+      // Generate HTML report (template identical to SalesDailyClose)
+      const html = `
+        <html dir="rtl" lang="ar">
+        <head>
+          <title>تقرير إغلاق اليومية</title>
+          <style>
+            body { font-family: Tahoma, Arial, sans-serif; font-size: 13px; margin: 20px; line-height: 1.5; direction: rtl; }
+            .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 10px; }
+            .flex { display: flex; justify-content: space-between; margin-bottom: 15px; gap: 10px; flex-wrap: wrap; }
+            .box { border: 1px solid #000; padding: 10px; border-radius: 5px; flex: 1; min-width: 200px; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: 12px; }
+            th { background: #eee; padding: 8px; border: 1px solid #ccc; text-align: right; font-weight: bold; }
+            td { padding: 8px; border: 1px solid #ccc; text-align: right; }
+            .page-break { page-break-after: always; }
+            .section-title { font-weight: bold; margin: 15px 0 8px 0; font-size: 14px; border-bottom: 1px solid #ddd; padding-bottom: 5px; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h2 style="margin: 0 0 5px;">تقرير إغلاق اليومية — ${repName}</h2>
+            <div>التاريخ: <span dir="ltr">${dateOnly}</span></div>
+          </div>
+
+          <div class="flex">
+            <div class="box" style="background:#e8f5e9;">
+              <div style="font-weight:bold;margin-bottom:8px;color:#2e7d32;">رصيد الافتتاح</div>
+              <div style="font-size:16px;font-weight:bold;color:#1b5e20;direction:ltr;">${openingBalance.toLocaleString()} ج.م</div>
+            </div>
+            <div class="box" style="background:#e3f2fd;">
+              <div style="font-weight:bold;margin-bottom:8px;color:#1565c0;">إجمالي المقبوضات</div>
+              <div style="font-size:16px;font-weight:bold;color:#0d47a1;direction:ltr;">${totalReceived.toLocaleString()} ج.م</div>
+            </div>
+            <div class="box" style="background:#ffebee;">
+              <div style="font-weight:bold;margin-bottom:8px;color:#c62828;">إجمالي المدفوعات</div>
+              <div style="font-size:16px;font-weight:bold;color:#b71c1c;direction:ltr;">${totalPaid.toLocaleString()} ج.م</div>
+            </div>
+            <div class="box" style="background:#fff3e0;">
+              <div style="font-weight:bold;margin-bottom:8px;color:#e65100;">الرصيد الحالي</div>
+              <div style="font-size:16px;font-weight:bold;color:#bf360c;direction:ltr;">${currentBalance.toLocaleString()} ج.م</div>
+            </div>
+          </div>
+
+          <div style="margin-bottom:12px;border:1px solid #ddd;padding:10px;border-radius:6px;background:#fafafa;">
+            <div style="font-weight:bold;margin-bottom:8px;">ملخص قبل الإغلاق</div>
+            <table style="width:100%;border-collapse:collapse;font-size:12px;">
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;width:60%;">اجمالى المبلغ المطلوب قبل اغلاق اليومية</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${totalRequiredBeforeClose.toLocaleString()} ${'ج.م'}</td></tr>
+
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات التسليم الكامل</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${delivFullCount} طلب</td></tr>
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع التسليم الكامل</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${delivFullPieces}</td></tr>
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ التسليم الكامل</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${delivFullAmount.toLocaleString()} ${'ج.م'}</td></tr>
+
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات الارجاع الكلي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${returnFullCount} طلب</td></tr>
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع الارتجاع الكلى</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${returnFullPieces}</td></tr>
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ الارتجاع الكلى</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${returnFullAmount.toLocaleString()} ${'ج.م'}</td></tr>
+
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات التسليم الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${delivPartialCount} طلب</td></tr>
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع التسليم الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${delivPartialPieces}</td></tr>
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ التسليم الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${delivPartialAmount.toLocaleString()} ${'ج.م'}</td></tr>
+
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات الارجاع الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${returnPartialCount} طلب</td></tr>
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع الارتجاع الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${returnPartialPieces}</td></tr>
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ الارتجاع الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${returnPartialAmount.toLocaleString()} ${'ج.م'}</td></tr>
+
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات النزول</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${deferredCount} طلب</td></tr>
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع النزول</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${deferredPiecesSum}</td></tr>
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ النزول</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${deferredAmountSum.toLocaleString()} ${'ج.م'}</td></tr>
+
+              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">المبلغ المتبقى</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${estimatedRemaining.toLocaleString()} ${'ج.م'}</td></tr>
+            </table>
+          </div>
+
+          
+
+          ${deliveredOrders.length > 0 ? `
+          <h4 style="margin-bottom:5px;">جدول تفاصيل التسليم (${deliveredOrders.length} طلب) — القطع: ${deliveredPiecesTotal} — إجمالي: ${Number(deliveredValueTotal).toLocaleString()}</h4>
+          <table>
+            <tr><th>رقم الأوردر</th><th>العميل</th><th style="text-align:center;">القطع</th><th style="text-align:center;">القيمة</th></tr>
+            ${delivHTML}
+          </table>
+          ` : ''}
+
+          ${returnedOrders.length > 0 ? `
+          <h4 style="margin-bottom:5px;">جدول تفاصيل المرتجع (${returnedOrders.length} طلب) — القطع: ${returnedPieces} — إجمالي: ${Number(totalPaid).toLocaleString()}</h4>
+          <table>
+            <tr><th>رقم الأوردر</th><th>العميل</th><th style="text-align:center;">القطع</th><th style="text-align:center;">القيمة</th></tr>
+            ${retHTML}
+          </table>
+          ` : ''}
+
+          ${deferredList.length > 0 ? `
+          <h4 style="margin-bottom:5px;">جدول تفاصيل النزول (${deferredList.length} طلب) — القطع: ${deferredPiecesSum} — إجمالي: ${Number(deferredAmountSum).toLocaleString()}</h4>
+          <table>
+            <tr><th>رقم الأوردر</th><th>العميل</th><th style="text-align:center;">القطع</th><th style="text-align:center;">القيمة</th></tr>
+            ${defHTML}
+          </table>
+          ` : ''}
+
+         
+
+          <div style="margin-top:30px;padding:15px;border:2px solid #000;text-align:center;background:#f5f5f5;">
+            <div style="font-weight:bold;font-size:14px;margin-bottom:10px;">الحالة النهائية للحساب</div>
+            <div style="font-size:18px;font-weight:bold;direction:ltr;color:#1b5e20;">
+              ${Math.abs(currentBalance).toLocaleString()} ج.م 
+              <span>${currentBalance > 0 ? 'له' : currentBalance < 0 ? 'عليه' : ''}</span>
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+      
+      // Open in new window and print
+      const w = window.open('', '_blank', 'toolbar=0,location=0,menubar=0,scrollbars=1,width=960,height=720');
+      if (!w) { 
+        Swal.fire('تنبيه', 'يرجى السماح بفتح النوافذ المنبثقة', 'warning'); 
+        return; 
+      }
+      w.document.write(html);
+      w.document.close();
+      w.focus();
+      setTimeout(() => w.print(), 500);
+    } catch (e) {
+      console.error('Print close report error', e);
+      Swal.fire('خطأ', 'فشل تحميل أو طباعة التقرير', 'error');
+    }
+  }; */
+
   const fetchRepTransactions = async () => {
     try {
       const r = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=getByRelated&related_to_type=rep&related_to_id=${selectedRepId}`);
@@ -1292,7 +1979,7 @@ ${prodRows.length > 0 ? `<h3>البضاعة المستلمة — جميع الم
       ? 'rep_payment_out'
       : (direction === 'in' ? 'rep_payment_in' : 'rep_payment_out');
 
-    const payload = {
+    const payload: any = {
       type: txType,
       related_to_type: 'rep',
       related_to_id: selectedRepId,
@@ -1301,11 +1988,13 @@ ${prodRows.length > 0 ? `<h3>البضاعة المستلمة — جميع الم
       direction,
       details: isFine
         ? { notes: paymentForm.note, subtype: 'rep_penalty' }
-        : { notes: paymentForm.note }
+        : { notes: paymentForm.note },
+      title: '',
+      memo: ''
     };
     // include human-friendly title and memo so transaction lists can show descriptive names
-    payload['title'] = getTxLabelEnhanced(payload.type, payload.details);
-    payload['memo'] = paymentForm.note || '';
+    payload.title = getTxLabelEnhanced(payload.type, payload.details);
+    payload.memo = paymentForm.note || '';
 
     try {
       const res = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=create`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
@@ -2438,6 +3127,13 @@ ${prodRows.length > 0 ? `<h3>البضاعة المستلمة — جميع الم
                         className="flex items-center justify-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-black transition-colors whitespace-nowrap"
                       >
                         <Box className="w-3.5 h-3.5" /> عرض و طباعة بوالص التسليم
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => printCloseReport(row)}
+                        className="flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-black transition-colors whitespace-nowrap"
+                      >
+                        <FileText className="w-3.5 h-3.5" /> عرض و طباعة تقرير الإغلاق
                       </button>
                     </div>
                   </div>

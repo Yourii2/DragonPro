@@ -44,6 +44,9 @@ const SRMModule: React.FC = () => {
     const [openingBalance, setOpeningBalance] = useState(0);
     const [ledgerStartDate, setLedgerStartDate] = useState('');
     const [ledgerEndDate, setLedgerEndDate] = useState('');
+    const [isSaving, setIsSaving] = useState(false);
+    const [isRecordingPayment, setIsRecordingPayment] = useState(false);
+    const [isCreatingReceiving, setIsCreatingReceiving] = useState(false);
 
     const [treasuries, setTreasuries] = useState<any[]>([]);
     const [warehouses, setWarehouses] = useState<any[]>([]);
@@ -143,8 +146,9 @@ const SRMModule: React.FC = () => {
   // --- دالة الحفظ المعدلة لتحديث الشاشة فوراً ---
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name) return;
+    if (!formData.name || isSaving) return;
         (async () => {
+            setIsSaving(true);
             try {
                 if (editingSupplier) {
                     const response = await fetch(`${API_BASE_PATH}/api.php?module=suppliers&action=update`, {
@@ -179,6 +183,8 @@ const SRMModule: React.FC = () => {
             } catch (err) {
                 console.error('Supplier save error:', err);
                 Swal.fire('خطأ في الاتصال', 'فشل الاتصال بالخادم. يرجى التحقق من الاتصال.', 'error');
+            } finally {
+                setIsSaving(false);
             }
         })();
   };
@@ -246,7 +252,7 @@ const SRMModule: React.FC = () => {
   };
 
   const handleRecordPayment = async () => {
-      if (!selectedSupplier) return;
+      if (!selectedSupplier || isRecordingPayment) return;
       const amount = Number(paymentAmount || 0);
       const treasuryId = Number(paymentTreasuryId || 0);
       if (!amount || !treasuryId) {
@@ -254,6 +260,7 @@ const SRMModule: React.FC = () => {
           return;
       }
 
+      setIsRecordingPayment(true);
       try {
           const response = await fetch(`${API_BASE_PATH}/api.php?module=suppliers&action=recordPayment`, {
               method: 'POST',
@@ -279,6 +286,8 @@ const SRMModule: React.FC = () => {
       } catch (err) {
           console.error('Payment error:', err);
           Swal.fire('خطأ في الاتصال', 'فشل الاتصال بالخادم.', 'error');
+      } finally {
+          setIsRecordingPayment(false);
       }
   };
 
@@ -306,7 +315,7 @@ const SRMModule: React.FC = () => {
   const handleCreateReceiving = async () => {
       const supplierId = Number(receiveSupplierId || 0);
       const warehouseId = Number(receiveWarehouseId || 0);
-      if (!supplierId || !warehouseId || receiveItems.length === 0) {
+      if (!supplierId || !warehouseId || receiveItems.length === 0 || isCreatingReceiving) {
           Swal.fire('بيانات ناقصة', 'يرجى اختيار المورد والمخزن وإضافة صنف واحد على الأقل.', 'warning');
           return;
       }
@@ -327,6 +336,7 @@ const SRMModule: React.FC = () => {
       const paidAmount = Number(receivePaidAmount || 0);
       const treasuryId = Number(receiveTreasuryId || 0);
 
+      setIsCreatingReceiving(true);
       try {
           const response = await fetch(`${API_BASE_PATH}/api.php?module=receivings&action=create`, {
               method: 'POST',
@@ -344,7 +354,7 @@ const SRMModule: React.FC = () => {
           if (result.success) {
               let barcodeMsg = '';
               if (Array.isArray(result.new_barcodes) && result.new_barcodes.length > 0) {
-                  barcodeMsg = '\n\nباركودات الأصناف الجديدة:\n' + result.new_barcodes.map(b => `${b.name} (${b.type}): ${b.barcode}`).join('\n');
+                  barcodeMsg = '\n\nباركودات الأصناف الجديدة:\n' + result.new_barcodes.map((b: any) => `${b.name} (${b.type}): ${b.barcode}`).join('\n');
               }
               Swal.fire('تم الإنشاء', 'تم حفظ فاتورة الشراء وتحديث المخزون.' + barcodeMsg, 'success');
               setIsReceiveModalOpen(false);
@@ -361,6 +371,8 @@ const SRMModule: React.FC = () => {
       } catch (err) {
           console.error('Receiving error:', err);
           Swal.fire('خطأ في الاتصال', 'فشل الاتصال بالخادم.', 'error');
+      } finally {
+          setIsCreatingReceiving(false);
       }
   };
 
@@ -935,9 +947,10 @@ const SRMModule: React.FC = () => {
               </div>
               <button 
                 type="submit"
-                className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black shadow-xl shadow-blue-500/30 hover:bg-blue-700 transition-all flex items-center justify-center gap-2"
+                disabled={isSaving}
+                className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black shadow-xl shadow-blue-500/30 hover:bg-blue-700 transition-all flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                <Save size={18} /> {editingSupplier ? 'حفظ التعديلات' : 'إضافة المورد'}
+                <Save size={18} /> {isSaving ? 'جارٍ الحفظ...' : editingSupplier ? 'حفظ التعديلات' : 'إضافة المورد'}
               </button>
             </form>
           </div>
@@ -997,7 +1010,7 @@ const SRMModule: React.FC = () => {
                                 <label className="text-xs font-bold text-slate-500 mr-2">ملاحظات</label>
                                 <input type="text" value={paymentNotes} onChange={e => setPaymentNotes(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm" />
                             </div>
-                            <button onClick={handleRecordPayment} className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-black shadow-xl shadow-emerald-500/30 hover:bg-emerald-700 transition-all">تسجيل السداد</button>
+                            <button onClick={handleRecordPayment} disabled={isRecordingPayment} className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-black shadow-xl shadow-emerald-500/30 hover:bg-emerald-700 transition-all disabled:opacity-60 disabled:cursor-not-allowed">{isRecordingPayment ? 'جارٍ التسجيل...' : 'تسجيل السداد'}</button>
                         </div>
                     </div>
                 </div>
@@ -1119,8 +1132,8 @@ const SRMModule: React.FC = () => {
                             </div>
 
                             <div className="flex justify-between items-center">
-                                <button onClick={addReceiveItem} className="text-blue-600 font-bold">+ إضافة صنف</button>
-                                <button onClick={handleCreateReceiving} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-bold">حفظ الفاتورة</button>
+                                <button onClick={addReceiveItem} disabled={isCreatingReceiving} className="text-blue-600 font-bold disabled:opacity-60">+ إضافة صنف</button>
+                                <button onClick={handleCreateReceiving} disabled={isCreatingReceiving} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-bold disabled:opacity-60 disabled:cursor-not-allowed">{isCreatingReceiving ? 'جارٍ الحفظ...' : 'حفظ الفاتورة'}</button>
                             </div>
                         </div>
                     </div>

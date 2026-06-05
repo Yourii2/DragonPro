@@ -1,9 +1,20 @@
-# TODO: Fix TypeScript errors in SalesUpdateStatus.tsx
+# TODO
 
-## Steps:
-- [x] Step 1: Update `returnItems` state type to include `lineId`, `color?`, `size?`
-- [x] Step 2: Fix `partialWarehouse` value prop for CustomSelect to ensure string type
-- [x] Step 3: Verify no new errors introduced
-- [x] Step 4: attempt_completion
+## الخطوة 1: وضع آلية منع التكرار في الواجهة (Frontend)
+- [ ] إنشاء helper موحّد لقفل تنفيذ نفس الإجراء أثناء وجود request شغال.
+- [ ] تطبيق الـ helper على كل أزرار/Forms التي تعمل POST/تعدّل بيانات (create/update/delete/confirm/close/save...).
 
-Current progress: Completed
+## الخطوة 2: منع التكرار على السيرفر (Backend)
+- [ ] إضافة Idempotency-Key processing داخل components/api.php (module/action endpoints التي تعمل معاملات).
+- [ ] إنشاء جدول لتخزين keys الخاصة بكل عملية (user_id + idempotency_key + module + action + status).
+- [ ] رفض request المتكرر لنفس key وإرجاع response/نجاح سابق.
+
+## الخطوة 3: ربط الواجهة بالـ Idempotency-Key
+- [ ] من الـ frontend، إرسال `X-Idempotency-Key` لكل request مع body/params.
+
+## الخطوة 4: التأكد من endpoints المهمة
+- [ ] التركيز على endpoints الأكثر حساسية: sales close/confirmDeliveryNote، معاملات inventory/treasury، attendance bulk عمليات، CRM create/update/delete…
+
+## الخطوة 5: الاختبار
+- [ ] تجربة الضغط المتكرر على الأزرار في الشاشات الأساسية والتأكد عدم تكرار المعاملة.
+

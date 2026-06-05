@@ -367,7 +367,7 @@ const SalesDailyClose: React.FC = () => {
       if (fullIds.length > 0) {
         await Promise.all(fullIds.map(id => fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: Number(id), status: 'delivered', repId: Number(selectedRepId) })
+          body: JSON.stringify({ id: Number(id), status: 'delivered', rep_Id: Number(selectedRepId) })
         }).catch(() => null)));
       }
 
@@ -387,7 +387,7 @@ const SalesDailyClose: React.FC = () => {
         // Also mark remaining portion as delivered in orders table
         await Promise.all(partialIds.map(id => fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: Number(id), status: 'delivered', repId: Number(selectedRepId) })
+          body: JSON.stringify({ id: Number(id), status: 'delivered', rep_Id: Number(selectedRepId) })
         }).catch(() => null)));
       }
 
@@ -479,7 +479,7 @@ const SalesDailyClose: React.FC = () => {
       });
       await fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: oid, status: 'with_rep', repId: Number(selectedRepId) })
+        body: JSON.stringify({ id: oid, status: 'with_rep', rep_Id: Number(selectedRepId) })
       });
       await loadRepData(selectedRepId);
     } catch (e) {
@@ -669,6 +669,39 @@ const SalesDailyClose: React.FC = () => {
       </tr>`;
     }).join('');
 
+    // --- Aggregated summaries requested by user ---
+    const totalRequiredBeforeClose = repBalance;
+
+    const delivFullList = finalDeliveredList.filter(o => computeDeliveredNetPieces(o) > 0 && computeReturnedPieces(o) === 0);
+    const delivPartialList = finalDeliveredList.filter(o => computeDeliveredNetPieces(o) > 0 && computeReturnedPieces(o) > 0);
+
+    const returnFullList = finalReturnedList.filter(o => computeReturnedPieces(o) > 0 && computeDeliveredNetPieces(o) === 0);
+    const returnPartialList = finalReturnedList.filter(o => computeReturnedPieces(o) > 0 && computeDeliveredNetPieces(o) > 0);
+
+    const sum = (arr: any[], fn: (o: any) => number) => arr.reduce((s, x) => s + fn(x), 0);
+
+    const delivFullCount = delivFullList.length;
+    const delivFullPieces = sum(delivFullList, computeDeliveredNetPieces);
+    const delivFullAmount = sum(delivFullList, computeDeliveredNetValue);
+
+    const delivPartialCount = delivPartialList.length;
+    const delivPartialPieces = sum(delivPartialList, computeDeliveredNetPieces);
+    const delivPartialAmount = sum(delivPartialList, computeDeliveredNetValue);
+
+    const returnFullCount = returnFullList.length;
+    const returnFullPieces = sum(returnFullList, computeReturnedPieces);
+    const returnFullAmount = sum(returnFullList, computeReturnedOrderValue);
+
+    const returnPartialCount = returnPartialList.length;
+    const returnPartialPieces = sum(returnPartialList, computeReturnedPieces);
+    const returnPartialAmount = sum(returnPartialList, computeReturnedOrderValue);
+
+    const deferredCount = deferredOrders.length;
+    const deferredPiecesSum = deferredPieces;
+    const deferredAmountSum = deferredValue;
+
+    const estimatedRemaining = settlementDirection === 'collect' ? (repBalance + paidAmount) : (repBalance - paidAmount);
+
     const html = `
       <html dir="rtl" lang="ar">
       <head>
@@ -688,6 +721,35 @@ const SalesDailyClose: React.FC = () => {
         <div class="header">
           <h2 style="margin: 0 0 5px;">إغلاق يومية المندوب : ${pRepName}</h2>
           <div>تاريخ الإغلاق: <span dir="ltr">${pDate}</span> | رقم اليومية: ${openDailyInfo?.daily_code || '---'}</div>
+        </div>
+
+        <div style="margin-bottom:12px;border:1px solid #ddd;padding:10px;border-radius:6px;background:#fafafa;">
+          <div style="font-weight:bold;margin-bottom:8px;">ملخص قبل الإغلاق</div>
+          <table style="width:100%;border-collapse:collapse;font-size:12px;">
+            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;width:60%;">اجمالى المبلغ المطلوب قبل اغلاق اليومية</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${money(totalRequiredBeforeClose)} ${currencySymbol}</td></tr>
+
+            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات التسليم الكامل</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${delivFullCount} طلب</td></tr>
+            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع التسليم الكامل</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${delivFullPieces}</td></tr>
+            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ التسليم الكامل</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${money(delivFullAmount)} ${currencySymbol}</td></tr>
+
+            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات الارجاع الكلي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${returnFullCount} طلب</td></tr>
+            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع الارتجاع الكلى</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${returnFullPieces}</td></tr>
+            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ الارتجاع الكلى</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${money(returnFullAmount)} ${currencySymbol}</td></tr>
+
+            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات التسليم الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${delivPartialCount} طلب</td></tr>
+            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع التسليم الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${delivPartialPieces}</td></tr>
+            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ التسليم الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${money(delivPartialAmount)} ${currencySymbol}</td></tr>
+
+            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات الارجاع الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${returnPartialCount} طلب</td></tr>
+            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع الارتجاع الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${returnPartialPieces}</td></tr>
+            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ الارتجاع الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${money(returnPartialAmount)} ${currencySymbol}</td></tr>
+
+            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات النزول</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${deferredCount} طلب</td></tr>
+            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع النزول</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${deferredPiecesSum}</td></tr>
+            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ النزول</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${money(deferredAmountSum)} ${currencySymbol}</td></tr>
+
+            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">المبلغ المتبقى</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${money(estimatedRemaining)} ${currencySymbol}</td></tr>
+          </table>
         </div>
 
         <div class="flex">

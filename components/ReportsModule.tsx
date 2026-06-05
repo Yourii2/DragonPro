@@ -636,31 +636,44 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-2xl border dark:border-slate-700">
               <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-4">المبيعات حسب المنتج</h4>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={salesByProduct}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#334155" : "#e2e8f0"} />
-                    <XAxis dataKey="name" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
-                    <YAxis tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
-                    <Tooltip contentStyle={{ borderRadius: '12px', background: isDark ? '#1e293b' : 'white', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} itemStyle={{ color: isDark ? '#f1f5f9' : '#1e293b' }} />
-                    <Bar dataKey="sales" name="إجمالي المبيعات" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+              <div style={{ width: '100%', height: '300px' }}>
+  <ResponsiveContainer width="100%" height="100%">
+    <BarChart data={salesByProduct}>
+      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#334155" : "#e2e8f0"} />
+      <XAxis dataKey="name" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
+      <YAxis tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
+      <Tooltip 
+        contentStyle={{ borderRadius: '12px', background: isDark ? '#1e293b' : 'white', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} 
+        itemStyle={{ color: isDark ? '#f1f5f9' : '#1e293b' }} 
+      />
+      <Bar dataKey="sales" name="إجمالي المبيعات" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+    </BarChart>
+  </ResponsiveContainer>
+</div>
             </div>
             <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-2xl border dark:border-slate-700">
               <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-4">إجمالي المبيعات اليومية</h4>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={dailySales}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#334155" : "#e2e8f0"} />
-                    <XAxis dataKey="date" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
-                    <YAxis tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
-                    <Tooltip contentStyle={{ borderRadius: '12px', background: isDark ? '#1e293b' : 'white', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} itemStyle={{ color: isDark ? '#f1f5f9' : '#1e293b' }} />
-                    <Line type="monotone" dataKey="total" name="المبيعات" stroke="#8884d8" strokeWidth={2} activeDot={{ r: 6 }} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
+              <div style={{ width: '100%', height: '300px' }}>
+  <ResponsiveContainer width="100%" height="100%">
+    <LineChart data={dailySales}>
+      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#334155" : "#e2e8f0"} />
+      <XAxis dataKey="date" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
+      <YAxis tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
+      <Tooltip 
+        contentStyle={{ borderRadius: '12px', background: isDark ? '#1e293b' : 'white', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} 
+        itemStyle={{ color: isDark ? '#f1f5f9' : '#1e293b' }} 
+      />
+      <Line 
+        type="monotone" 
+        dataKey="total" 
+        name="المبيعات" 
+        stroke="#8884d8" 
+        strokeWidth={2} 
+        activeDot={{ r: 6 }} 
+      />
+    </LineChart>
+  </ResponsiveContainer>
+</div>
             </div>
           </div>
 
@@ -737,31 +750,44 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-2xl border dark:border-slate-700">
               <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2"><Warehouse size={16} className="text-slate-400" /> مستويات المخزون حسب المستودع</h4>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={inventoryStockByWarehouse}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#334155" : "#e2e8f0"} />
-                    <XAxis dataKey="name" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
-                    <YAxis tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
-                    <Tooltip contentStyle={{ borderRadius: '12px', background: isDark ? '#1e293b' : 'white', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} itemStyle={{ color: isDark ? '#f1f5f9' : '#1e293b' }} />
-                    <Bar dataKey="quantity" name="الكمية" fill="#60a5fa" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+              <div style={{ width: '100%', height: '300px' }}>
+  <ResponsiveContainer width="100%" height="100%">
+    <BarChart data={inventoryStockByWarehouse}>
+      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#334155" : "#e2e8f0"} />
+      <XAxis dataKey="name" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
+      <YAxis tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
+      <Tooltip 
+        contentStyle={{ borderRadius: '12px', background: isDark ? '#1e293b' : 'white', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} 
+        itemStyle={{ color: isDark ? '#f1f5f9' : '#1e293b' }} 
+      />
+      <Bar dataKey="quantity" name="الكمية" fill="#60a5fa" radius={[4, 4, 0, 0]} />
+    </BarChart>
+  </ResponsiveContainer>
+</div>
             </div>
             <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-2xl border dark:border-slate-700">
               <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2"><ArrowLeftRight size={16} className="text-slate-400" /> حركة المخزون</h4>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={inventoryMovement}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#334155" : "#e2e8f0"} />
-                    <XAxis dataKey="date" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
-                    <YAxis tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
-                    <Tooltip contentStyle={{ borderRadius: '12px', background: isDark ? '#1e293b' : 'white', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} itemStyle={{ color: isDark ? '#f1f5f9' : '#1e293b' }} />
-                    <Line type="monotone" dataKey="quantity" name="الكمية المحركة" stroke="#fbbf24" strokeWidth={2} activeDot={{ r: 6 }} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
+              <div style={{ width: '100%', height: '300px' }}>
+  <ResponsiveContainer width="100%" height="100%">
+    <LineChart data={inventoryMovement}>
+      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#334155" : "#e2e8f0"} />
+      <XAxis dataKey="date" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
+      <YAxis tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
+      <Tooltip 
+        contentStyle={{ borderRadius: '12px', background: isDark ? '#1e293b' : 'white', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} 
+        itemStyle={{ color: isDark ? '#f1f5f9' : '#1e293b' }} 
+      />
+      <Line 
+        type="monotone" 
+        dataKey="quantity" 
+        name="الكمية المحركة" 
+        stroke="#fbbf24" 
+        strokeWidth={2} 
+        activeDot={{ r: 6 }} 
+      />
+    </LineChart>
+  </ResponsiveContainer>
+</div>
             </div>
           </div>
 
@@ -836,22 +862,32 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-2xl border dark:border-slate-700">
               <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2"><Coins size={16} className="text-slate-400" /> أرصدة الخزائن (تاريخي)</h4>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={treasuryBalanceHistory}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#334155" : "#e2e8f0"} />
-                    <XAxis dataKey="date" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
-                    <YAxis tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
-                    <Tooltip contentStyle={{ borderRadius: '12px', background: isDark ? '#1e293b' : 'white', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} itemStyle={{ color: isDark ? '#f1f5f9' : '#1e293b' }} />
-                    <Line type="monotone" dataKey="balance" name="الرصيد" stroke="#10b981" strokeWidth={2} activeDot={{ r: 6 }} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
+              <div style={{ width: '100%', height: '300px' }}>
+  <ResponsiveContainer width="100%" height="100%">
+    <LineChart data={treasuryBalanceHistory}>
+      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#334155" : "#e2e8f0"} />
+      <XAxis dataKey="date" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
+      <YAxis tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
+      <Tooltip 
+        contentStyle={{ borderRadius: '12px', background: isDark ? '#1e293b' : 'white', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} 
+        itemStyle={{ color: isDark ? '#f1f5f9' : '#1e293b' }} 
+      />
+      <Line 
+        type="monotone" 
+        dataKey="balance" 
+        name="الرصيد" 
+        stroke="#10b981" 
+        strokeWidth={2} 
+        activeDot={{ r: 6 }} 
+      />
+    </LineChart>
+  </ResponsiveContainer>
+</div>
             </div>
             <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-2xl border dark:border-slate-700">
               <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2"><Receipt size={16} className="text-slate-400" /> المصروفات حسب الفئة</h4>
               <div className="h-64 flex items-center justify-center">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minHeight={300}>
                   <PieChart>
                     <Pie
                       data={expenseCategories}
@@ -862,7 +898,7 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
                       fill="#8884d8"
                       dataKey="value"
                       nameKey="name"
-                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                      label={(p: any) => `${p.name} ${((p.percent ?? 0) * 100).toFixed(0)}%`}
                     >
 
                     </Pie>
@@ -1031,33 +1067,52 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-2xl border dark:border-slate-700">
               <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-4">المبيعات الشهرية</h4>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={compareChart}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#334155" : "#e2e8f0"} />
-                    <XAxis dataKey="month" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
-                    <YAxis tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
-                    <Tooltip contentStyle={{ borderRadius: '12px', background: isDark ? '#1e293b' : 'white', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} itemStyle={{ color: isDark ? '#f1f5f9' : '#1e293b' }} />
-                    <Line type="monotone" dataKey="sales" name={String(compareData?.year || '')} stroke="#2563eb" strokeWidth={2} />
-                    <Line type="monotone" dataKey="sales_prev" name={String(compareData?.prev_year || '')} stroke="#94a3b8" strokeWidth={2} strokeDasharray="4 4" />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
+              <div style={{ width: '100%', height: '300px' }}>
+  <ResponsiveContainer width="100%" height="100%">
+    <LineChart data={compareChart}>
+      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#334155" : "#e2e8f0"} />
+      <XAxis dataKey="month" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
+      <YAxis tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
+      <Tooltip 
+        contentStyle={{ borderRadius: '12px', background: isDark ? '#1e293b' : 'white', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} 
+        itemStyle={{ color: isDark ? '#f1f5f9' : '#1e293b' }} 
+      />
+      <Line 
+        type="monotone" 
+        dataKey="sales" 
+        name={String(compareData?.year || '')} 
+        stroke="#2563eb" 
+        strokeWidth={2} 
+      />
+      <Line 
+        type="monotone" 
+        dataKey="sales_prev" 
+        name={String(compareData?.prev_year || '')} 
+        stroke="#94a3b8" 
+        strokeWidth={2} 
+        strokeDasharray="4 4" 
+      />
+    </LineChart>
+  </ResponsiveContainer>
+</div>
             </div>
             <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-2xl border dark:border-slate-700">
               <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-4">الأرباح مقابل المصروفات</h4>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={compareChart}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#334155" : "#e2e8f0"} />
-                    <XAxis dataKey="month" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
-                    <YAxis tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
-                    <Tooltip contentStyle={{ borderRadius: '12px', background: isDark ? '#1e293b' : 'white', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} itemStyle={{ color: isDark ? '#f1f5f9' : '#1e293b' }} />
-                    <Bar dataKey="profit" name="الأرباح" fill="#10b981" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="expense" name="المصروفات" fill="#ef4444" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+             <div style={{ width: '100%', height: '300px' }}>
+  <ResponsiveContainer width="100%" height="100%">
+    <BarChart data={compareChart}>
+      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#334155" : "#e2e8f0"} />
+      <XAxis dataKey="month" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
+      <YAxis tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
+      <Tooltip 
+        contentStyle={{ borderRadius: '12px', background: isDark ? '#1e293b' : 'white', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} 
+        itemStyle={{ color: isDark ? '#f1f5f9' : '#1e293b' }} 
+      />
+      <Bar dataKey="profit" name="الأرباح" fill="#10b981" radius={[4, 4, 0, 0]} />
+      <Bar dataKey="expense" name="المصروفات" fill="#ef4444" radius={[4, 4, 0, 0]} />
+    </BarChart>
+  </ResponsiveContainer>
+</div>
             </div>
           </div>
         </ReportSection>

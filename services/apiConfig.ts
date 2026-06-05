@@ -1,4 +1,3 @@
-
 function getApiBasePath(): string {
   // This function dynamically determines the absolute base path for the API.
   // It assumes the project is either in a subfolder of the web root (e.g., /DragonPro)
@@ -15,18 +14,13 @@ function getApiBasePath(): string {
   // Otherwise the browser will fetch raw .php source from the Vite static server.
   const isLikelyDevServer = !!(window.location.port && window.location.port !== '80' && window.location.port !== '443');
 
-  // In dev, we rely on Vite's proxy (vite.config.ts) to forward /components/* to Apache.
-  // This avoids CORS issues and removes the need to guess the Apache project folder from the Vite URL.
+  // في بيئة التطوير المحلية، يتم توجيه الطلبات مباشرة إلى مسار المشروع على سيرفر Apache لمنع أخطاء 404
   if (isLikelyDevServer) {
-    return `${window.location.origin}/components`;
+    return `http://localhost/DragonPro/components`;
   }
 
   // Production (or Apache-served dev): derive the directory that the SPA is running under.
   // This supports nested installs like /clients/Nexus/ as well as root installs.
-  // Examples:
-  // - http://host/Nexus/        -> /Nexus/components
-  // - http://host/clients/Nexus/ -> /clients/Nexus/components
-  // - http://host/             -> /components
   const appDirPath = new URL('./', window.location.href).pathname; // always ends with '/'
   return `${window.location.origin}${appDirPath}components`;
 }
@@ -39,7 +33,7 @@ const buildCandidateApiBases = (initialBase: string): string[] => {
     initialBase,
     `${origin}/components`,
     `${origin}/Nexus/components`,
-    `${origin}/Dragon/components`,
+    `http://localhost/DragonPro/components`,
     firstSegment ? `${origin}/${firstSegment}/components` : '',
   ].filter(Boolean).map((x) => x.replace(/\/$/, ''));
   return Array.from(new Set(candidates));

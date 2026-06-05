@@ -270,7 +270,7 @@ const Dashboard: React.FC = () => {
 
       {/* KPI Row 1 */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard title="إيرادات المسلَّمة" gradient="bg-gradient-to-br from-blue-600 to-blue-800"
+        <KpiCard title="إجمالي المبيعات" gradient="bg-gradient-to-br from-blue-600 to-blue-800"
           value={loading ? '...' : fmtCur(revenue, currencySymbol)}
           sub={changePct !== null ? `${Math.abs(changePct).toFixed(1)}%` : undefined}
           isPositive={changePct !== null ? changePct >= 0 : true} icon={DollarSign} />
@@ -278,7 +278,7 @@ const Dashboard: React.FC = () => {
           value={loading ? '...' : fmtCur(profit, currencySymbol)}
           sub={loading ? undefined : `هامش ${margin.toFixed(1)}%`}
           isPositive={profit >= 0} icon={TrendingUp} />
-        <KpiCard title="أوردرات مسلَّمة" gradient="bg-gradient-to-br from-emerald-500 to-green-700"
+        <KpiCard title="أوردرات مسلَّمة وجزئية" gradient="bg-gradient-to-br from-emerald-500 to-green-700"
           value={loading ? '...' : fmt(ordersDelivered)}
           sub={loading ? undefined : `معلق: ${fmt(ordersPending)}`}
           isPositive={ordersPending < 10} icon={ClipboardCheck} />
@@ -316,34 +316,48 @@ const Dashboard: React.FC = () => {
             <h3 className="font-black text-slate-800 dark:text-slate-100">إيرادات وأرباح الفترة</h3>
             <span className="text-[11px] text-slate-500 bg-slate-100 dark:bg-slate-700 px-3 py-1 rounded-full">يومي</span>
           </div>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={trend} barGap={4}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? '#334155' : '#e2e8f0'} />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} fontSize={11} tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
-                <YAxis axisLine={false} tickLine={false} fontSize={11} orientation="right" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
-                <Tooltip contentStyle={tooltip_style} itemStyle={{ fontWeight: 700 }} cursor={{ fill: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(59,130,246,0.04)' }} />
-                <Bar dataKey="sales" name="الإيرادات" fill="#3b82f6" radius={[6, 6, 0, 0]} barSize={18} />
-                <Bar dataKey="profit" name="الأرباح" fill="#10b981" radius={[6, 6, 0, 0]} barSize={18} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          <div style={{ width: '100%', height: '300px' }}> 
+  <ResponsiveContainer width="100%" height="100%">
+    <BarChart data={trend} barGap={4}>
+      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? '#334155' : '#e2e8f0'} />
+      <XAxis dataKey="name" axisLine={false} tickLine={false} fontSize={11} tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
+      <YAxis axisLine={false} tickLine={false} fontSize={11} orientation="right" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
+      <Tooltip contentStyle={tooltip_style} itemStyle={{ fontWeight: 700 }} cursor={{ fill: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(59,130,246,0.04)' }} />
+      <Bar dataKey="sales" name="الإيرادات" fill="#3b82f6" radius={[6, 6, 0, 0]} barSize={18} />
+      <Bar dataKey="profit" name="الأرباح" fill="#10b981" radius={[6, 6, 0, 0]} barSize={18} />
+    </BarChart>
+  </ResponsiveContainer>
+</div>
         </div>
 
         <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
           <h3 className="font-black text-slate-800 dark:text-slate-100 mb-5">توزيع المبيعات حسب المصدر (Pages)</h3>
           {topOffices.length > 0 ? (
             <>
-              <div className="h-44">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={topOffices} cx="50%" cy="50%" innerRadius={48} outerRadius={72} paddingAngle={3} dataKey="total_sales" nameKey="name">
-                      {topOffices.map((_: any, i: number) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
-                    </Pie>
-                    <Tooltip contentStyle={tooltip_style} formatter={(v: any) => fmtCur(v, currencySymbol)} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
+             <div style={{ width: '100%', height: '300px' }}>
+  <ResponsiveContainer width="100%" height="100%">
+    <PieChart>
+      <Pie 
+        data={topOffices} 
+        cx="50%" 
+        cy="50%" 
+        innerRadius={48} 
+        outerRadius={72} 
+        paddingAngle={3} 
+        dataKey="total_sales" 
+        nameKey="name"
+      >
+        {topOffices.map((_: any, i: number) => (
+          <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+        ))}
+      </Pie>
+      <Tooltip 
+        contentStyle={tooltip_style} 
+        formatter={(v: any) => fmtCur(v, currencySymbol)} 
+      />
+    </PieChart>
+  </ResponsiveContainer>
+</div>
               <div className="mt-3 space-y-1.5">
                 {topOffices.slice(0, 5).map((r: any, i: number) => (
                   <div key={r.id} className="flex items-center justify-between text-xs">
@@ -369,17 +383,17 @@ const Dashboard: React.FC = () => {
             <h3 className="font-black text-slate-800 dark:text-slate-100">المبيعات حسب المحافظات</h3>
             <Map size={16} className="text-blue-500" />
           </div>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={salesByGov} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={isDark ? '#334155' : '#e2e8f0'} />
-                <XAxis type="number" hide />
-                <YAxis dataKey="governorate" type="category" axisLine={false} tickLine={false} fontSize={11} width={80} tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
-                <Tooltip contentStyle={tooltip_style} formatter={(v: any) => fmtCur(v, currencySymbol)} cursor={{ fill: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(59,130,246,0.04)' }} />
-                <Bar dataKey="total" name="الإيرادات" fill="#8b5cf6" radius={[0, 6, 6, 0]} barSize={20} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+         <div style={{ width: '100%', height: '300px' }}>
+  <ResponsiveContainer width="100%" height="100%">
+    <BarChart data={salesByGov} layout="vertical">
+      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={isDark ? '#334155' : '#e2e8f0'} />
+      <XAxis type="number" hide />
+      <YAxis dataKey="governorate" type="category" axisLine={false} tickLine={false} fontSize={11} width={80} tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
+      <Tooltip contentStyle={tooltip_style} formatter={(v: any) => fmtCur(v, currencySymbol)} cursor={{ fill: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(59,130,246,0.04)' }} />
+      <Bar dataKey="total" name="الإيرادات" fill="#8b5cf6" radius={[0, 6, 6, 0]} barSize={20} />
+    </BarChart>
+  </ResponsiveContainer>
+</div>
         </div>
 
         <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
@@ -415,20 +429,34 @@ const Dashboard: React.FC = () => {
           <h3 className="font-black text-slate-800 dark:text-slate-100">مسار الإيرادات اليومي</h3>
           <span className="text-[11px] bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 px-3 py-1 rounded-full font-bold">ديناميكي</span>
         </div>
-        <div className="h-56">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={trend}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? '#334155' : '#e2e8f0'} />
-              <XAxis dataKey="name" axisLine={false} tickLine={false} fontSize={11} tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
-              <YAxis axisLine={false} tickLine={false} fontSize={11} orientation="right" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
-              <Tooltip contentStyle={tooltip_style} />
-              <Line type="monotone" dataKey="sales" name="الإيرادات" stroke="#3b82f6" strokeWidth={3}
-                dot={{ r: 4, fill: '#3b82f6', strokeWidth: 2, stroke: isDark ? '#0f172a' : '#fff' }} activeDot={{ r: 7 }} />
-              <Line type="monotone" dataKey="profit" name="الأرباح" stroke="#10b981" strokeWidth={3}
-                dot={{ r: 4, fill: '#10b981', strokeWidth: 2, stroke: isDark ? '#0f172a' : '#fff' }} activeDot={{ r: 7 }} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
+        <div style={{ width: '100%', height: '300px' }}>
+  <ResponsiveContainer width="100%" height="100%">
+    <LineChart data={trend}>
+      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? '#334155' : '#e2e8f0'} />
+      <XAxis dataKey="name" axisLine={false} tickLine={false} fontSize={11} tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
+      <YAxis axisLine={false} tickLine={false} fontSize={11} orientation="right" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
+      <Tooltip contentStyle={tooltip_style} />
+      <Line 
+        type="monotone" 
+        dataKey="sales" 
+        name="الإيرادات" 
+        stroke="#3b82f6" 
+        strokeWidth={3}
+        dot={{ r: 4, fill: '#3b82f6', strokeWidth: 2, stroke: isDark ? '#0f172a' : '#fff' }} 
+        activeDot={{ r: 7 }} 
+      />
+      <Line 
+        type="monotone" 
+        dataKey="profit" 
+        name="الأرباح" 
+        stroke="#10b981" 
+        strokeWidth={3}
+        dot={{ r: 4, fill: '#10b981', strokeWidth: 2, stroke: isDark ? '#0f172a' : '#fff' }} 
+        activeDot={{ r: 7 }} 
+      />
+    </LineChart>
+  </ResponsiveContainer>
+</div>
       </div>
 
       {/* Leaderboards */}

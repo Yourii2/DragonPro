@@ -1,0 +1,412 @@
+    case 'dashboard':
+        try {
+            $action = $_GET['action'] ?? 'overview';
+            if ($action !== 'overview') {
+                http_response_code(404);
+                echo json_encode(['success' => false, 'message' => 'Unknown dashboard action.']);
+                break;
+            }
+
+            $today = date('Y-m-d');
+            $rangeStart = $_GET['start_date'] ?? '';
+            $rangeEnd = $_GET['end_date'] ?? '';
+
+            if (!$rangeStart || !$rangeEnd) {
+                $rangeStart = date('Y-m-01');
+                $rangeEnd = date('Y-m-t');
+            }
+
+            $rangeStartObj = new DateTime($rangeStart);
+            $rangeEndObj = new DateTime($rangeEnd);
+            if ($rangeEndObj < $rangeStartObj) {
+                $tmp = $rangeStartObj;
+                $rangeStartObj = $rangeEndObj;
+                $rangeEndObj = $tmp;
+            }
+            $rangeStart = $rangeStartObj->format('Y-m-d');
+            $rangeEnd = $rangeEndObj->format('Y-m-d');
+
+            $rangeDays = $rangeStartObj->diff($rangeEndObj)->days + 1;
+            $prevEndObj = clone $rangeStartObj;
+            $prevEndObj->modify('-1 day');
+            $prevStartObj = clone $prevEndObj;
+            $prevStartObj->modify('-' . ($rangeDays - 1) . ' day');
+            $prevStart = $prevStartObj->format('Y-m-d');
+            $prevEnd = $prevEndObj->format('Y-m-d');
+
+            $revRangeStmt = execute_query($pdo, "SELECT COALESCE(SUM(total_amount),0) as total FROM orders WHERE DATE(created_at) BETWEEN ? AND ? AND status IN ('delivered', 'partial')", [$rangeStart, $rangeEnd]);
+            $revenueRange = floatval($revRangeStmt->fetchColumn() ?? 0);
+
+            $revPrevStmt = execute_query($pdo, "SELECT COALESCE(SUM(total_amount),0) as total FROM orders WHERE DATE(created_at) BETWEEN ? AND ? AND status IN ('delivered', 'partial')", [$prevStart, $prevEnd]);
+            $revenuePrev = floatval($revPrevStmt->fetchColumn() ?? 0);
+
+            $ordersRangeStmt = execute_query($pdo, "SELECT COUNT(*) FROM orders WHERE DATE(created_at) BETWEEN ? AND ? AND status IN ('delivered', 'partial', 'returned')", [$rangeStart, $rangeEnd]);
+            $ordersRange = intval($ordersRangeStmt->fetchColumn() ?? 0);
+
+            // Delivered / returned / pending counts
+            $ordersDeliveredStmt = execute_query($pdo, "SELECT COUNT(*) FROM orders WHERE DATE(created_at) BETWEEN ? AND ? AND status IN ('delivered', 'partial')", [$rangeStart, $rangeEnd]);
+            $ordersDelivered = intval($ordersDeliveredStmt->fetchColumn() ?? 0);
+            $ordersReturnedStmt = execute_query($pdo, "SELECT COUNT(*) FROM orders WHERE DATE(created_at) BETWEEN ? AND ? AND status = 'returned'", [$rangeStart, $rangeEnd]);
+            $ordersReturned = intval($ordersReturnedStmt->fetchColumn() ?? 0);
+
+            $ordersPendingStmt = execute_query($pdo, "SELECT COUNT(*) FROM orders WHERE status = 'pending'");
+            $ordersPending = intval($ordersPendingStmt->fetchColumn() ?? 0);
+
+            $customersStmt = execute_query($pdo, "SELECT COUNT(*) FROM customers");
+            $customersCount = intval($customersStmt->fetchColumn() ?? 0);
+
+            $employeesStmt = execute_query($pdo, "SELECT COUNT(*) FROM employees WHERE status = 'active'");
+            $employeesCount = intval($employeesStmt->fetchColumn() ?? 0);
+
+            $stockStmt = execute_query($pdo, "SELECT COALESCE(SUM(quantity),0) FROM stock");
+            $stockUnits = intval($stockStmt->fetchColumn() ?? 0);
+
+            $lowStockCount = 0;
+            $lowStockDetails = [];
+            try {
+                $lsStmt = execute_query($pdo, "
+                    SELECT pv.id, pp.name as product_name, pv.color, pv.size, pv.reorder_level, COALESCE(SUM(s.quantity),0) as q 
+                    FROM product_variants pv 
+                    JOIN products pp ON pp.id = pv.product_id
+                    LEFT JOIN stock s ON pv.id = s.product_id 
+                    WHERE COALESCE(pv.is_archived,0)=0 
+                    GROUP BY pv.id 
+                    HAVING q <= pv.reorder_level
+                    LIMIT 20
+                ");
+                $lowStockDetails = $lsStmt->fetchAll(PDO::FETCH_ASSOC);
+                $lowStockCount = count($lowStockDetails);
+            } catch (Exception $e) {
+                $lowStockCount = 0;
+                $lowStockDetails = [];
+            }
+
+            $salesByGov = [];
+            try {
+                $govStmt = execute_query($pdo, "
+                    SELECT c.governorate, COUNT(o.id) as count, SUM(o.total_amount) as total 
+                    FROM orders o
+                    JOIN customers c ON c.id = o.customer_id
+                    WHERE DATE(o.created_at) BETWEEN ? AND ?
+                      AND o.status IN ('delivered', 'partial')
+                    GROUP BY c.governorate
+                    ORDER BY total DESC
+                ", [$rangeStart, $rangeEnd]);
+                $salesByGov = $govStmt->fetchAll(PDO::FETCH_ASSOC);
+            } catch (Exception $e) {
+                $salesByGov = [];
+            }
+
+            $profitRange = 0;
+            try {
+                $profitStmt = execute_query(
+                    $pdo,
+                    "SELECT COALESCE(SUM((oi.price_per_unit - pv.cost_price) * oi.quantity),0) as profit
+                     FROM order_items oi
+                     JOIN orders o ON o.id = oi.order_id
+                     JOIN product_variants pv ON pv.id = oi.product_id
+                     WHERE DATE(o.created_at) BETWEEN ? AND ?
+                       AND o.status IN ('delivered', 'partial')",
+                    [$rangeStart, $rangeEnd]
+                );
+                $profitRange = floatval($profitStmt->fetchColumn() ?? 0);
+            } catch (Exception $e) {
+                $profitRange = 0;
+            }
+
+            $profitPrev = 0;
+            try {
+                $profitPrevStmt = execute_query(
+                    $pdo,
+                    "SELECT COALESCE(SUM((oi.price_per_unit - pv.cost_price) * oi.quantity),0) as profit
+                     FROM order_items oi
+                     JOIN orders o ON o.id = oi.order_id
+                     JOIN product_variants pv ON pv.id = oi.product_id
+                     WHERE DATE(o.created_at) BETWEEN ? AND ?
+                       AND o.status IN ('delivered', 'partial')",
+                    [$prevStart, $prevEnd]
+                );
+                $profitPrev = floatval($profitPrevStmt->fetchColumn() ?? 0);
+            } catch (Exception $e) {
+                $profitPrev = 0;
+            }
+
+            $attendanceToday = ['present' => 0, 'absent' => 0];
+            try {
+                $attStmt = execute_query(
+                    $pdo,
+                    "SELECT
+                        SUM(CASE WHEN status IN ('present','late') THEN 1 ELSE 0 END) as present,
+                        SUM(CASE WHEN status = 'absent' THEN 1 ELSE 0 END) as absent
+                     FROM attendance_daily_summary
+                     WHERE work_date = ?",
+                    [$today]
+                );
+                $attRow = $attStmt->fetch(PDO::FETCH_ASSOC);
+                if ($attRow) {
+                    $attendanceToday['present'] = intval($attRow['present'] ?? 0);
+                    $attendanceToday['absent'] = intval($attRow['absent'] ?? 0);
+                }
+            } catch (Exception $e) {
+                $attendanceToday = ['present' => 0, 'absent' => 0];
+            }
+
+            $salesByDate = [];
+            $profitByDate = [];
+            try {
+                $salesStmt = execute_query(
+                    $pdo,
+                    "SELECT DATE(created_at) as d, COALESCE(SUM(total_amount),0) as total FROM orders WHERE DATE(created_at) BETWEEN ? AND ? AND status IN ('delivered', 'partial') GROUP BY d",
+                    [$rangeStart, $rangeEnd]
+                );
+                foreach ($salesStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                    $salesByDate[$row['d']] = floatval($row['total'] ?? 0);
+                }
+            } catch (Exception $e) {
+                $salesByDate = [];
+            }
+
+            try {
+                $profitStmt = execute_query(
+                    $pdo,
+                    "SELECT DATE(o.created_at) as d, COALESCE(SUM((oi.price_per_unit - pv.cost_price) * oi.quantity),0) as profit
+                     FROM order_items oi
+                     JOIN orders o ON o.id = oi.order_id
+                     JOIN product_variants pv ON pv.id = oi.product_id
+                     WHERE DATE(o.created_at) BETWEEN ? AND ?
+                       AND o.status IN ('delivered', 'partial')
+                     GROUP BY d",
+                    [$rangeStart, $rangeEnd]
+                );
+                foreach ($profitStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                    $profitByDate[$row['d']] = floatval($row['profit'] ?? 0);
+                }
+            } catch (Exception $e) {
+                $profitByDate = [];
+            }
+
+            $trend = [];
+            $cursor = clone $rangeStartObj;
+            while ($cursor <= $rangeEndObj) {
+                $d = $cursor->format('Y-m-d');
+                $trend[] = [
+                    'date' => $d,
+                    'sales' => floatval($salesByDate[$d] ?? 0),
+                    'profit' => floatval($profitByDate[$d] ?? 0)
+                ];
+                $cursor->modify('+1 day');
+            }
+
+            $changePct = null;
+            if ($revenuePrev > 0) {
+                $changePct = (($revenueRange - $revenuePrev) / $revenuePrev) * 100;
+            }
+
+            $latestOrderDate = null;
+            try {
+                $latestOrderDateRaw = execute_query($pdo, "SELECT MAX(DATE(created_at)) FROM orders")->fetchColumn();
+                if ($latestOrderDateRaw) {
+                    $latestOrderDate = (new DateTime((string)$latestOrderDateRaw))->format('Y-m-d');
+                }
+            } catch (Exception $e) {
+                $latestOrderDate = null;
+            }
+
+            // ── Top Representatives ────────────────────────────────────
+            $topReps = [];
+            try {
+                $repNameExpr = "CONCAT('مندوب #', o.rep_id)";
+                $repJoins = [];
+                if (table_exists($pdo, 'representatives')) {
+                    $repJoins[] = 'LEFT JOIN representatives rep ON rep.id = o.rep_id';
+                    $repNameExpr = "COALESCE(NULLIF(TRIM(rep.name), ''), $repNameExpr)";
+                }
+                if (table_exists($pdo, 'users')) {
+                    $repJoins[] = 'LEFT JOIN users rep_user ON rep_user.id = o.rep_id';
+                    $repNameExpr = "COALESCE(NULLIF(TRIM(rep_user.name), ''), $repNameExpr)";
+                }
+
+                $repSql = "SELECT o.rep_id AS id,
+                                  $repNameExpr AS name,
+                                  COUNT(o.id) AS orders_count,
+                                  COALESCE(SUM(o.total_amount),0) AS total_sales
+                           FROM orders o
+                           " . implode("\n", $repJoins) . "
+                           WHERE DATE(o.created_at) BETWEEN ? AND ?
+                             AND o.status IN ('delivered', 'partial')
+                             AND o.rep_id IS NOT NULL AND o.rep_id > 0
+                           GROUP BY o.rep_id, name
+                           ORDER BY total_sales DESC, orders_count DESC
+                           LIMIT 10";
+
+                $trStmt = execute_query($pdo, $repSql, [$rangeStart, $rangeEnd]);
+                $topReps = $trStmt->fetchAll(PDO::FETCH_ASSOC);
+                foreach ($topReps as &$r) {
+                    $r['id'] = intval($r['id'] ?? 0);
+                    $r['name'] = trim((string)($r['name'] ?? ''));
+                    $r['total_sales'] = floatval($r['total_sales'] ?? 0);
+                    $r['orders_count'] = intval($r['orders_count'] ?? 0);
+                }
+                unset($r);
+            } catch (Exception $e) { $topReps = []; }
+
+            // ── Top Pages (from orders.page) ───────────────────────────
+            $topSalesOffices = [];
+            try {
+               if (column_exists($pdo, 'orders', 'page')) {
+                    $toStmt = execute_query($pdo,
+                        "SELECT TRIM(o.page) AS id,
+                                TRIM(o.page) AS name,
+                                COUNT(o.id) AS orders_count,
+                                COALESCE(SUM(o.total_amount),0) AS total_sales
+                         FROM orders o
+                         WHERE DATE(o.created_at) BETWEEN ? AND ?
+                           AND o.status IN ('delivered', 'partial')
+                           AND o.page IS NOT NULL
+                           AND TRIM(o.page) <> ''
+                         GROUP BY TRIM(o.page)
+                         ORDER BY total_sales DESC, orders_count DESC
+                         LIMIT 10",
+                        [$rangeStart, $rangeEnd]
+                    );
+                    $topSalesOffices = $toStmt->fetchAll(PDO::FETCH_ASSOC);
+                } elseif (table_exists($pdo, 'sales_offices') && column_exists($pdo, 'orders', 'sales_office_id')) {
+                    $toStmt = execute_query($pdo,
+                        "SELECT so.id, so.name,
+                                COUNT(o.id) as orders_count,
+                                COALESCE(SUM(o.total_amount),0) as total_sales
+                         FROM orders o
+                         JOIN sales_offices so ON so.id = o.sales_office_id
+                         WHERE DATE(o.created_at) BETWEEN ? AND ?
+                           AND o.status IN ('delivered', 'partial')
+                         GROUP BY so.id, so.name
+                         ORDER BY total_sales DESC, orders_count DESC
+                         LIMIT 10",
+                        [$rangeStart, $rangeEnd]
+                    );
+                    $topSalesOffices = $toStmt->fetchAll(PDO::FETCH_ASSOC);
+                }
+
+                foreach ($topSalesOffices as &$r) {
+                    $r['id'] = (string)($r['id'] ?? $r['name'] ?? '');
+                    $r['name'] = trim((string)($r['name'] ?? ''));
+                    $r['total_sales'] = floatval($r['total_sales'] ?? 0);
+                    $r['orders_count'] = intval($r['orders_count'] ?? 0);
+                }
+                unset($r);
+            } catch (Exception $e) { $topSalesOffices = []; }
+
+            // ── Top Employees (from orders.employee) ──────────────────
+            $topEmployees = [];
+            try {
+                if (column_exists($pdo, 'orders', 'employee')) {
+                    $teStmt = execute_query($pdo,
+                        "SELECT TRIM(o.employee) AS id,
+                                TRIM(o.employee) AS name,
+                                COUNT(o.id) AS orders_count,
+                                COALESCE(SUM(o.total_amount),0) AS total_sales
+                         FROM orders o
+                         WHERE DATE(o.created_at) BETWEEN ? AND ?
+                           AND o.status IN ('delivered', 'partial')
+                           AND o.employee IS NOT NULL
+                           AND TRIM(o.employee) <> ''
+                         GROUP BY TRIM(o.employee)
+                         ORDER BY total_sales DESC, orders_count DESC
+                         LIMIT 10",
+                        [$rangeStart, $rangeEnd]
+                    );
+                    $topEmployees = $teStmt->fetchAll(PDO::FETCH_ASSOC);
+                }
+
+                foreach ($topEmployees as &$r) {
+                    $r['id'] = (string)($r['id'] ?? $r['name'] ?? '');
+                    $r['name'] = trim((string)($r['name'] ?? ''));
+                    $r['total_sales'] = floatval($r['total_sales'] ?? 0);
+                    $r['orders_count'] = intval($r['orders_count'] ?? 0);
+                }
+                unset($r);
+            } catch (Exception $e) { $topEmployees = []; }
+
+            // ── Top Products ──────────────────────────────────────────
+            $topProducts = [];
+            try {
+                $tpStmt = execute_query($pdo,
+                    "SELECT pp.name as product_name,
+                            pv.color, pv.size,
+                            SUM(oi.quantity) as qty_sold,
+                            COALESCE(SUM(oi.quantity * oi.price_per_unit),0) as revenue
+                     FROM order_items oi
+                     JOIN orders o ON o.id = oi.order_id
+                     JOIN product_variants pv ON pv.id = oi.product_id
+                     JOIN products pp ON pp.id = pv.product_id
+                     WHERE DATE(o.created_at) BETWEEN ? AND ?
+                       AND o.status IN ('delivered', 'partial')
+                     GROUP BY pp.id, pp.name, pv.color, pv.size
+                     ORDER BY qty_sold DESC
+                     LIMIT 10",
+                    [$rangeStart, $rangeEnd]
+                );
+                $topProducts = $tpStmt->fetchAll(PDO::FETCH_ASSOC);
+                foreach ($topProducts as &$r) {
+                    $r['qty_sold'] = intval($r['qty_sold']);
+                    $r['revenue']  = floatval($r['revenue']);
+                }
+                unset($r);
+            } catch (Exception $e) { $topProducts = []; }
+
+            // ── Orders by Status ──────────────────────────────────────
+            $ordersByStatus = [];
+            try {
+                $osStmt = execute_query($pdo,
+                    "SELECT status, COUNT(*) as cnt, COALESCE(SUM(total_amount),0) as total
+                     FROM orders
+                     WHERE DATE(created_at) BETWEEN ? AND ?
+                     GROUP BY status",
+                    [$rangeStart, $rangeEnd]
+                );
+                foreach ($osStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                    $ordersByStatus[] = [
+                        'status' => $row['status'],
+                        'count'  => intval($row['cnt']),
+                        'total'  => floatval($row['total'])
+                    ];
+                }
+            } catch (Exception $e) { $ordersByStatus = []; }
+
+            echo json_encode([
+                'success' => true,
+                'data' => [
+                    'revenue_month'     => $revenueRange,
+                    'profit_month'      => $profitRange,
+                    'orders_month'      => $ordersRange,
+                    'orders_pending'    => $ordersPending,
+                    'customers_count'   => $customersCount,
+                    'employees_count'   => $employeesCount,
+                    'stock_units'       => $stockUnits,
+                    'low_stock_count'   => $lowStockCount,
+                    'attendance_today'  => $attendanceToday,
+                    'trend'             => $trend,
+                    'revenue_change_pct'=> $changePct,
+                    'prev_revenue'      => $revenuePrev,
+                    'prev_profit'       => $profitPrev,
+                    'range_start'       => $rangeStart,
+                    'range_end'         => $rangeEnd,
+                    'latest_order_date' => $latestOrderDate,
+                    'prev_range_start'  => $prevStart,
+                    'prev_range_end'    => $prevEnd,
+                    'top_reps'          => $topReps,
+                    'top_sales_offices' => $topSalesOffices,
+                    'top_employees'     => $topEmployees,
+                    'top_products'      => $topProducts,
+                    'orders_by_status'  => $ordersByStatus,
+                    'orders_delivered'  => $ordersDelivered,
+                    'orders_returned'   => $ordersReturned,
+                    'low_stock_details' => $lowStockDetails,
+                    'sales_by_gov'      => $salesByGov,
+                ]
+            ]);
+        } catch (Exception $e) {
+            http_response_code(500);
+            echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+        }
+        break;

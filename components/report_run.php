@@ -146,7 +146,7 @@ if ($reportDailySales) {
         $receivedStmt->execute([$repId, $today]);
         $receivedRow = $receivedStmt->fetch(PDO::FETCH_ASSOC);
 
-        $deliveredStmt = $pdo->prepare("SELECT COUNT(DISTINCT o.id) as order_count, COALESCE(SUM(oi.quantity),0) as pieces FROM orders o LEFT JOIN order_items oi ON oi.order_id = o.id WHERE o.rep_id = ? AND o.status = 'delivered' AND DATE($ordersDateExpr) = ?");
+        $deliveredStmt = $pdo->prepare("SELECT COUNT(DISTINCT o.id) as order_count, COALESCE(SUM(oi.quantity),0) as pieces FROM orders o LEFT JOIN order_items oi ON oi.order_id = o.id WHERE o.rep_id = ? AND o.status IN ('delivered', 'partial') AND DATE($ordersDateExpr) = ?");
         $deliveredStmt->execute([$repId, $today]);
         $deliveredRow = $deliveredStmt->fetch(PDO::FETCH_ASSOC);
 
@@ -210,7 +210,7 @@ if ($reportDailyTreasury) {
 
     $endBalance = $startBalance + array_reduce($txns, function($sum, $t){ return $sum + floatval($t['amount'] ?? 0); }, 0.0);
 
-    $deliveredStmt = $pdo->prepare("SELECT COUNT(*) as order_count, COALESCE(SUM(o.total_amount),0) as amount FROM orders o WHERE o.status = 'delivered' AND DATE($ordersDateExpr) = ?");
+    $deliveredStmt = $pdo->prepare("SELECT COUNT(*) as order_count, COALESCE(SUM(o.total_amount),0) as amount FROM orders o WHERE o.status IN ('delivered', 'partial') AND DATE($ordersDateExpr) = ?");
     $deliveredStmt->execute([$today]);
     $deliveredRow = $deliveredStmt->fetch(PDO::FETCH_ASSOC);
 
@@ -218,7 +218,7 @@ if ($reportDailyTreasury) {
     $returnedStmt->execute([$today]);
     $returnedRow = $returnedStmt->fetch(PDO::FETCH_ASSOC);
 
-    $deliveredPiecesStmt = $pdo->prepare("SELECT COALESCE(SUM(oi.quantity),0) as pieces FROM orders o LEFT JOIN order_items oi ON oi.order_id = o.id WHERE o.status = 'delivered' AND DATE($ordersDateExpr) = ?");
+    $deliveredPiecesStmt = $pdo->prepare("SELECT COALESCE(SUM(oi.quantity),0) as pieces FROM orders o LEFT JOIN order_items oi ON oi.order_id = o.id WHERE o.status IN ('delivered', 'partial') AND DATE($ordersDateExpr) = ?");
     $deliveredPiecesStmt->execute([$today]);
     $deliveredPieces = floatval($deliveredPiecesStmt->fetchColumn() ?? 0);
 
