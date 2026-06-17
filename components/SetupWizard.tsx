@@ -34,6 +34,8 @@ const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [dbTestResult, setDbTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [isTestingDb, setIsTestingDb] = useState(false);
+  const [isRestoreMode, setIsRestoreMode] = useState(false);
+  const [backupFile, setBackupFile] = useState<File | null>(null);
 
   const [formData, setFormData] = useState({
     dbHost: 'localhost',
@@ -108,6 +110,70 @@ const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
       Swal.fire({ icon: 'error', title: 'خطأ فادح', text: message });
     } finally {
       setIsTestingDb(false);
+    }
+  };
+
+  const handleBackupFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setBackupFile(e.target.files[0]);
+    }
+  };
+
+  const handleRestoreBackup = async () => {
+    if (!backupFile) return;
+    setLoading(true);
+
+    const formDataObj = new FormData();
+    formDataObj.append('dbHost', formData.dbHost);
+    formDataObj.append('dbPort', formData.dbPort);
+    formDataObj.append('dbUser', formData.dbUser);
+    formDataObj.append('dbPass', formData.dbPass);
+    formDataObj.append('dbName', formData.dbName);
+    formDataObj.append('backup', backupFile);
+
+    try {
+      const response = await fetch(`${API_BASE_PATH}/setup_restore.php`, {
+        method: 'POST',
+        body: formDataObj
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || 'فشلت عملية استعادة النسخة الاحتياطية.');
+      }
+
+      // Save credentials and settings
+      localStorage.setItem('Dragon_installed', 'true');
+      localStorage.setItem('Dragon_company_name', result.companyName || '');
+      localStorage.setItem('Dragon_company_logo', result.companyLogo || '');
+      if (result.activation) {
+        localStorage.setItem('Dragon_activation', JSON.stringify({
+          status: formatActivationStatus(result.activation.type, result.activation.account_status, result.activation.is_expired),
+          expiry: result.activation.expiry || 'غير محدد',
+          account_status: result.activation.account_status || 'Active',
+          is_expired: result.activation.is_expired || 'false'
+        }));
+      }
+
+      Swal.fire({
+        icon: 'success',
+        title: 'تمت الاستعادة بنجاح',
+        text: 'تم استرجاع قاعدة البيانات وتفعيل النظام بنجاح. سيتم تحويلك الآن.',
+        timer: 2500,
+        showConfirmButton: false
+      }).then(() => {
+        onComplete();
+      });
+
+    } catch (error: any) {
+      Swal.fire({
+        icon: 'error',
+        title: 'فشلت الاستعادة',
+        text: error.message,
+      });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -293,7 +359,36 @@ const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
                     <><Database size={16} /> اختبار الاتصال بقاعدة البيانات</>}
                 </button>
               </div>
+
+              {dbTestResult && dbTestResult.success && (
+                <div className="mt-6 p-5 bg-blue-50/50 rounded-3xl border border-blue-100 space-y-4 animate-in fade-in">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-sm font-bold text-blue-900">استرجاع نسخة احتياطية؟</h4>
+                      <p className="text-[11px] text-blue-500">رفع ملف SQL لتخطي بقية خطوات التثبيت مباشرة.</p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input type="checkbox" className="sr-only peer" checked={isRestoreMode} onChange={(e) => setIsRestoreMode(e.target.checked)} />
+                      <div className="w-11 h-6 bg-slate-200 rounded-full peer peer-checked:bg-blue-600 after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:-translate-x-full"></div>
+                    </label>
+                  </div>
+                  {isRestoreMode && (
+                    <div className="space-y-3 pt-3 border-t border-blue-100/50">
+                      <input type="file" accept=".sql" onChange={handleBackupFileChange} className="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-100 file:text-blue-700 hover:file:bg-blue-200" />
+                      <button
+                        type="button"
+                        onClick={handleRestoreBackup}
+                        disabled={loading || !backupFile}
+                        className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white px-5 py-3 rounded-2xl text-sm font-bold hover:bg-blue-700 transition-all disabled:opacity-50"
+                      >
+                        {loading ? 'جاري استعادة النسخة وتفعيل الترخيص...' : 'رفع واستعادة النسخة الاحتياطية'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
+
           )}
 
           {step === 3 && (

@@ -317,7 +317,7 @@ const Dashboard: React.FC = () => {
             <span className="text-[11px] text-slate-500 bg-slate-100 dark:bg-slate-700 px-3 py-1 rounded-full">يومي</span>
           </div>
           <div style={{ width: '100%', height: '300px' }}> 
-  <ResponsiveContainer width="100%" height="100%">
+  <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1} initialDimension={{ width: 1, height: 1 }}>
     <BarChart data={trend} barGap={4}>
       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? '#334155' : '#e2e8f0'} />
       <XAxis dataKey="name" axisLine={false} tickLine={false} fontSize={11} tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
@@ -335,7 +335,7 @@ const Dashboard: React.FC = () => {
           {topOffices.length > 0 ? (
             <>
              <div style={{ width: '100%', height: '300px' }}>
-  <ResponsiveContainer width="100%" height="100%">
+  <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1} initialDimension={{ width: 1, height: 1 }}>
     <PieChart>
       <Pie 
         data={topOffices} 
@@ -384,7 +384,7 @@ const Dashboard: React.FC = () => {
             <Map size={16} className="text-blue-500" />
           </div>
          <div style={{ width: '100%', height: '300px' }}>
-  <ResponsiveContainer width="100%" height="100%">
+  <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1} initialDimension={{ width: 1, height: 1 }}>
     <BarChart data={salesByGov} layout="vertical">
       <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={isDark ? '#334155' : '#e2e8f0'} />
       <XAxis type="number" hide />
@@ -430,7 +430,7 @@ const Dashboard: React.FC = () => {
           <span className="text-[11px] bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 px-3 py-1 rounded-full font-bold">ديناميكي</span>
         </div>
         <div style={{ width: '100%', height: '300px' }}>
-  <ResponsiveContainer width="100%" height="100%">
+  <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1} initialDimension={{ width: 1, height: 1 }}>
     <LineChart data={trend}>
       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? '#334155' : '#e2e8f0'} />
       <XAxis dataKey="name" axisLine={false} tickLine={false} fontSize={11} tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />

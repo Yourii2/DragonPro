@@ -1,20 +1,38 @@
 <?php
-// Simple settings API for storing app settings and files in MySQL
-// endpoints: ?action=get, ?action=update, ?action=upload_logo, ?action=get_file&id=NN
+// CORS
+$origin = trim((string)($_SERVER['HTTP_ORIGIN'] ?? ''));
+if ($origin !== '') {
+    header('Access-Control-Allow-Origin: ' . $origin);
+    header('Access-Control-Allow-Credentials: true');
+    header('Vary: Origin');
+}
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
+header('Content-Type: application/json');
 
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    exit(0);
+}
 
 require_once __DIR__ . '/../config.php';
+
+// License Guard
+require_once __DIR__ . '/activation_utils.php';
+$license_check = check_license_validity();
+if ($license_check['status'] !== 'ok') {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'status' => $license_check['status'], 'message' => $license_check['message']]);
+    exit;
+}
 
 try {
     $pdo = new PDO("mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4", DB_USER, DB_PASS);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 } catch (PDOException $e) {
-    header('Content-Type: application/json');
+    http_response_code(500);
     echo json_encode(['success' => false, 'message' => 'DB connection failed: ' . $e->getMessage()]);
     exit;
 }
-
-header('Content-Type: application/json');
 
 $action = isset($_GET['action']) ? $_GET['action'] : null;
 try {

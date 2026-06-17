@@ -11,12 +11,17 @@ header('Content-Type: application/json');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit(0); }
 
-if (!file_exists(__DIR__ . '/../config.php')) {
-    http_response_code(500);
-    echo json_encode(['success' => false, 'message' => 'Configuration file not found. Please run setup.']);
+require_once __DIR__ . '/../config.php';
+
+// License Guard
+require_once __DIR__ . '/activation_utils.php';
+$license_check = check_license_validity();
+if ($license_check['status'] !== 'ok') {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'status' => $license_check['status'], 'message' => $license_check['message']]);
     exit;
 }
-require_once __DIR__ . '/../config.php';
+
 
 try {
     $pdo = new PDO("mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4", DB_USER, DB_PASS);

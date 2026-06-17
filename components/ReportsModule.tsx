@@ -44,6 +44,12 @@ import Swal from 'sweetalert2';
 import DailyReport from './DailyReport';
 import TotalsReport from './TotalsReport';
 import ProductDeliveryTable from './ProductDeliveryTable';
+import AccountingReports from './AccountingReports';
+import ReportInventoryHealth from './ReportInventoryHealth';
+import ReportCashFlow from './ReportCashFlow';
+import ReportOutstandingBalances from './ReportOutstandingBalances';
+import ReportReturnsAnalysis from './ReportReturnsAnalysis';
+import ReportInventoryValuation from './ReportInventoryValuation';
 import { useTheme } from './ThemeContext';
 import CustomSelect from './CustomSelect';
 
@@ -617,13 +623,29 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
           <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">تحليلات شاملة لأداء المؤسسة</p>
         </div>
         <div className="flex bg-white dark:bg-slate-800 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-x-auto max-w-full">
+          <button onClick={() => setActiveSubTab('accounting')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'accounting' ? 'bg-violet-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Coins size={16} /> الأرباح والخسائر</button>
           <button onClick={() => setActiveSubTab('sales')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'sales' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><ShoppingCart size={16} /> المبيعات</button>
           <button onClick={() => setActiveSubTab('totals')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'totals' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><FileText size={16} /> ملخص الفترة</button>
           <button onClick={() => setActiveSubTab('product-report')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'product-report' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><ShoppingCart size={16} /> تقرير منتجات</button>
           <button onClick={() => setActiveSubTab('reps')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'reps' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><UserCheck size={16} /> أداء المناديب</button>
           <button onClick={() => setActiveSubTab('compare')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'compare' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><BarChart3 size={16} /> المقارنات</button>
+          <button onClick={() => setActiveSubTab('inventory-health')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'inventory-health' ? 'bg-orange-500 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Package size={16} /> المخزون الراكد</button>
+          <button onClick={() => setActiveSubTab('cash-flow')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'cash-flow' ? 'bg-emerald-500 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Wallet size={16} /> التدفق النقدي</button>
+          <button onClick={() => setActiveSubTab('outstanding-balances')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'outstanding-balances' ? 'bg-rose-500 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><CreditCard size={16} /> أعمار الديون</button>
+          <button onClick={() => setActiveSubTab('returns-analysis')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'returns-analysis' ? 'bg-pink-500 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><ArrowLeftRight size={16} /> تحليل المرتجعات</button>
+          <button onClick={() => setActiveSubTab('inventory-valuation')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'inventory-valuation' ? 'bg-indigo-500 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Warehouse size={16} /> تقييم المخزون</button>
         </div>
       </div>
+
+      {activeSubTab === 'accounting' && (
+        <AccountingReports />
+      )}
+
+      {activeSubTab === 'inventory-health' && <ReportInventoryHealth />}
+      {activeSubTab === 'cash-flow' && <ReportCashFlow />}
+      {activeSubTab === 'outstanding-balances' && <ReportOutstandingBalances />}
+      {activeSubTab === 'returns-analysis' && <ReportReturnsAnalysis />}
+      {activeSubTab === 'inventory-valuation' && <ReportInventoryValuation />}
 
       {activeSubTab === 'sales' && (
         <ReportSection
@@ -637,7 +659,7 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
             <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-2xl border dark:border-slate-700">
               <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-4">المبيعات حسب المنتج</h4>
               <div style={{ width: '100%', height: '300px' }}>
-  <ResponsiveContainer width="100%" height="100%">
+  <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1} initialDimension={{ width: 1, height: 1 }}>
     <BarChart data={salesByProduct}>
       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#334155" : "#e2e8f0"} />
       <XAxis dataKey="name" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
@@ -654,7 +676,7 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
             <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-2xl border dark:border-slate-700">
               <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-4">إجمالي المبيعات اليومية</h4>
               <div style={{ width: '100%', height: '300px' }}>
-  <ResponsiveContainer width="100%" height="100%">
+  <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1} initialDimension={{ width: 1, height: 1 }}>
     <LineChart data={dailySales}>
       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#334155" : "#e2e8f0"} />
       <XAxis dataKey="date" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
@@ -751,7 +773,7 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
             <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-2xl border dark:border-slate-700">
               <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2"><Warehouse size={16} className="text-slate-400" /> مستويات المخزون حسب المستودع</h4>
               <div style={{ width: '100%', height: '300px' }}>
-  <ResponsiveContainer width="100%" height="100%">
+  <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1} initialDimension={{ width: 1, height: 1 }}>
     <BarChart data={inventoryStockByWarehouse}>
       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#334155" : "#e2e8f0"} />
       <XAxis dataKey="name" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
@@ -768,7 +790,7 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
             <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-2xl border dark:border-slate-700">
               <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2"><ArrowLeftRight size={16} className="text-slate-400" /> حركة المخزون</h4>
               <div style={{ width: '100%', height: '300px' }}>
-  <ResponsiveContainer width="100%" height="100%">
+  <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1} initialDimension={{ width: 1, height: 1 }}>
     <LineChart data={inventoryMovement}>
       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#334155" : "#e2e8f0"} />
       <XAxis dataKey="date" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
@@ -863,7 +885,7 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
             <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-2xl border dark:border-slate-700">
               <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2"><Coins size={16} className="text-slate-400" /> أرصدة الخزائن (تاريخي)</h4>
               <div style={{ width: '100%', height: '300px' }}>
-  <ResponsiveContainer width="100%" height="100%">
+  <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1} initialDimension={{ width: 1, height: 1 }}>
     <LineChart data={treasuryBalanceHistory}>
       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#334155" : "#e2e8f0"} />
       <XAxis dataKey="date" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
@@ -887,7 +909,7 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
             <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-2xl border dark:border-slate-700">
               <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2"><Receipt size={16} className="text-slate-400" /> المصروفات حسب الفئة</h4>
               <div className="h-64 flex items-center justify-center">
-                <ResponsiveContainer width="100%" height="100%" minHeight={300}>
+                <ResponsiveContainer width="100%" height="100%" minHeight={300} initialDimension={{ width: 1, height: 1 }}>
                   <PieChart>
                     <Pie
                       data={expenseCategories}
@@ -1068,7 +1090,7 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
             <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-2xl border dark:border-slate-700">
               <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-4">المبيعات الشهرية</h4>
               <div style={{ width: '100%', height: '300px' }}>
-  <ResponsiveContainer width="100%" height="100%">
+  <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1} initialDimension={{ width: 1, height: 1 }}>
     <LineChart data={compareChart}>
       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#334155" : "#e2e8f0"} />
       <XAxis dataKey="month" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
@@ -1099,7 +1121,7 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
             <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-2xl border dark:border-slate-700">
               <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-4">الأرباح مقابل المصروفات</h4>
              <div style={{ width: '100%', height: '300px' }}>
-  <ResponsiveContainer width="100%" height="100%">
+  <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1} initialDimension={{ width: 1, height: 1 }}>
     <BarChart data={compareChart}>
       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#334155" : "#e2e8f0"} />
       <XAxis dataKey="month" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />

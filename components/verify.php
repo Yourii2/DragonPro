@@ -91,6 +91,12 @@ if ($activationResult['success']) {
 }
 
 // 4. Verify activation status
+$license_check = check_license_validity();
+if ($license_check['status'] !== 'ok') {
+    echo json_encode(['status' => $license_check['status'], 'message' => $license_check['message']]);
+    exit;
+}
+
 $activation_type = $license_data['activation_type'] ?? '';
 $activation_expiry = $license_data['activation_expiry'] ?? '';
 $activation_account_status = $license_data['activation_account_status'] ?? 'Active';
@@ -103,18 +109,6 @@ if (!empty($activation_expiry)) {
     }
 }
 
-$activation_type_norm = strtolower(trim((string)$activation_type));
-$is_trial = $activation_type_norm === 'trial';
-
-if (strtolower($activation_account_status) === 'blocked') {
-    echo json_encode(['status' => 'activation_blocked', 'message' => 'تم حظر هذا الترخيص.']);
-    exit;
-}
-
-if ($is_trial && $activation_is_expired) {
-    echo json_encode(['status' => 'activation_expired', 'message' => 'انتهت صلاحية الترخيص التجريبي.']);
-    exit;
-}
 
 // 4. If all checks pass, return system status
 require_once $config_path;
@@ -123,20 +117,39 @@ try {
     $pdo = new PDO("mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4", DB_USER, DB_PASS);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    if ($activation_updated) {
-        $upsert = $pdo->prepare("INSERT INTO settings (config_key, config_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE config_value = VALUES(config_value)");
-        $activationSettings = [
-            'activation_type' => $activation_type,
-            'activation_expiry' => $activation_expiry,
-            'activation_account_status' => $activation_account_status,
-            'activation_is_expired' => $activation_is_expired ? 'true' : 'false',
-            'activation_last_check' => $license_data['activation_last_check'] ?? date('Y-m-d H:i:s'),
-            'activation_hwid' => $license_hwid
-        ];
-        foreach ($activationSettings as $key => $value) {
-            $upsert->execute([$key, $value]);
+    // Always synchronize the database settings table with the current decrypted license details
+    $upsert = $pdo->prepare("INSERT INTO settings (config_key, config_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE config_value = VALUES(config_value)");
+    
+    $checkAppSettings = $pdo->query("SHOW TABLES LIKE 'app_settings'")->fetch();
+    $upsertApp = null;
+    if ($checkAppSettings) {
+        try {
+            $cols = $pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'app_settings'")->fetchAll(PDO::FETCH_COLUMN);
+            $kcol = 'name'; $vcol = 'value';
+            if (in_array('name', $cols) && in_array('value', $cols)) { $kcol = 'name'; $vcol = 'value'; }
+            elseif (in_array('k', $cols) && in_array('v', $cols)) { $kcol = 'k'; $vcol = 'v'; }
+            elseif (in_array('key', $cols) && in_array('value', $cols)) { $kcol = 'key'; $vcol = 'value'; }
+            elseif (count($cols) >= 2) { $kcol = $cols[0]; $vcol = $cols[1]; }
+
+            $upsertApp = $pdo->prepare("INSERT INTO app_settings (`" . $kcol . "`, `" . $vcol . "`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `" . $vcol . "` = VALUES(`" . $vcol . "`)");
+        } catch (Exception $e) {}
+    }
+
+    $activationSettings = [
+        'activation_type' => $activation_type,
+        'activation_expiry' => $activation_expiry,
+        'activation_account_status' => $activation_account_status,
+        'activation_is_expired' => $activation_is_expired ? 'true' : 'false',
+        'activation_last_check' => $license_data['activation_last_check'] ?? date('Y-m-d H:i:s'),
+        'activation_hwid' => $license_hwid
+    ];
+    foreach ($activationSettings as $key => $value) {
+        $upsert->execute([$key, $value]);
+        if ($upsertApp) {
+            $upsertApp->execute([$key, $value]);
         }
     }
+
     
     // Fetch settings from both app_settings and settings tables
     $settings = [];

@@ -18,9 +18,45 @@ try {
 
 $settings = [];
 try {
-    $stmt = $pdo->query("SELECT config_key, config_value FROM settings");
-    $settings = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
-} catch (Exception $e) { $settings = []; }
+    function detectAppSettingsCols($pdo) {
+        try {
+            $check = $pdo->query("SHOW TABLES LIKE 'app_settings'")->fetch();
+            if (!$check) return null;
+            $cols = $pdo->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'app_settings'")->fetchAll(PDO::FETCH_COLUMN);
+            if (in_array('name', $cols) && in_array('value', $cols)) return ['name','value'];
+            if (in_array('k', $cols) && in_array('v', $cols)) return ['k','v'];
+            if (in_array('key', $cols) && in_array('value', $cols)) return ['key','value'];
+            if (count($cols) >= 2) return [$cols[0], $cols[1]];
+            return null;
+        } catch (Exception $e) {
+            return null;
+        }
+    }
+
+    $check = $pdo->query("SHOW TABLES LIKE 'app_settings'")->fetch();
+    if ($check) {
+        $appCols = detectAppSettingsCols($pdo);
+        if ($appCols) {
+            list($kcol, $vcol) = $appCols;
+            $stmt = $pdo->query("SELECT `" . $kcol . "`, `" . $vcol . "` FROM app_settings");
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($rows as $r) {
+                $settings[(string)$r[$kcol]] = $r[$vcol];
+            }
+        } else {
+            $stmt = $pdo->query("SELECT name, value FROM app_settings");
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($rows as $r) {
+                $settings[$r['name']] = $r['value'];
+            }
+        }
+    } else {
+        $stmt = $pdo->query("SELECT config_key, config_value FROM settings");
+        $settings = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+    }
+} catch (Exception $e) {
+    $settings = [];
+}
 
 $auto = isset($settings['report_auto']) && ($settings['report_auto'] === 'true' || $settings['report_auto'] === '1');
 if (!$auto) {
@@ -29,7 +65,7 @@ if (!$auto) {
 }
 
 $email = $settings['report_email'] ?? '';
-$verified = ($settings['report_email_verified'] ?? 'false') === 'true';
+$verified = ($settings['report_email_verified'] ?? 'false') === 'true' || ($settings['report_email_verified'] ?? 'false') === '1';
 if (!$email || !$verified) {
     echo "Report email not verified.\n";
     exit(0);

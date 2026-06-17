@@ -115,6 +115,12 @@ echo.
 call :Log "===================================="
 call :Log "  Dragon started (development mode)"
 call :Log "===================================="
+
+if exist "C:\xampp\php\php.exe" (
+    call :Log "Verifying daily report/backup scheduler..."
+    "C:\xampp\php\php.exe" "%~dp0components\auto_register_scheduler.php" >> %LOGFILE% 2>&1
+)
+
 goto :EndSuccess
 
 

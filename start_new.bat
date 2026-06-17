@@ -156,6 +156,11 @@ call :Log "===================================="
 call :Log "Server is running at: http://localhost:3000"
 call :Log "To stop the server, close the development server window."
 
+if exist "C:\xampp\php\php.exe" (
+    call :Log "Verifying daily report/backup scheduler..."
+    "C:\xampp\php\php.exe" "%~dp0components\auto_register_scheduler.php" >> %LOGFILE% 2>&1
+)
+
 echo.
 echo Press any key to close this window...
 pause >nul

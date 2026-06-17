@@ -13,12 +13,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit(0);
 }
 
-if (!file_exists(__DIR__ . '/../config.php')) {
-    http_response_code(500);
-    echo json_encode(['success' => false, 'message' => 'Configuration file not found. Please run setup.']);
+require_once __DIR__ . '/../config.php';
+
+// License Guard
+require_once __DIR__ . '/activation_utils.php';
+$license_check = check_license_validity();
+if ($license_check['status'] !== 'ok') {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'status' => $license_check['status'], 'message' => $license_check['message']]);
     exit;
 }
-require_once __DIR__ . '/../config.php';
+
 
 try {
     $pdo = new PDO("mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4", DB_USER, DB_PASS);
@@ -171,6 +176,11 @@ try {
         // execute prepared statement which was built to target either app_settings or settings
         $stmt->execute([$key, is_scalar($value) ? (string)$value : json_encode($value)]);
     }
+
+    // Attempt to register/update scheduled task immediately
+    try {
+        @shell_exec("C:\\xampp\\php\\php.exe " . escapeshellarg(__DIR__ . '/auto_register_scheduler.php'));
+    } catch (Exception $e) {}
 
     echo json_encode(['success' => true, 'message' => 'Settings saved successfully.']);
 } catch (PDOException $e) {

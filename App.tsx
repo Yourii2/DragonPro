@@ -29,6 +29,7 @@ import BarcodePrintPage from './components/BarcodePrintPage';
 import { API_BASE_PATH, testConnection } from './services/apiConfig';
 import Swal from 'sweetalert2';
 import { useTheme } from './components/ThemeContext';
+import TrialExpiredPage from './components/TrialExpiredPage';
 
 const migrateStorageKeys = () => {
   if (typeof window === 'undefined') return;
@@ -80,7 +81,7 @@ const migrateStorageKeys = () => {
 };
 
 const App: React.FC = () => {
-  const [appStatus, setAppStatus] = useState<'loading' | 'not_installed' | 'error' | 'ready'>('loading');
+  const [appStatus, setAppStatus] = useState<'loading' | 'not_installed' | 'error' | 'ready' | 'trial_expired'>('loading');
   const [errorMessage, setErrorMessage] = useState('');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [activeSlug, setActiveSlug] = useState('dashboard');
@@ -137,8 +138,10 @@ const App: React.FC = () => {
 
       if (result.status === 'not_installed') {
         setAppStatus('not_installed');
-      } else if (result.status === 'activation_blocked' || result.status === 'activation_expired') {
-        setErrorMessage(result.message || 'ترخيص غير صالح.');
+      } else if (result.status === 'activation_expired') {
+        setAppStatus('trial_expired');
+      } else if (result.status === 'activation_blocked') {
+        setErrorMessage(result.message || 'تم حظر هذا الترخيص.');
         setAppStatus('error');
       } else if (result.status === 'invalid_device' || result.status === 'tampered') {
         setErrorMessage(result.message || 'تعذر التحقق من الترخيص.');
@@ -248,6 +251,10 @@ const App: React.FC = () => {
 
   if (appStatus === 'not_installed') {
     return <SetupWizard onComplete={() => setAppStatus('ready')} />;
+  }
+
+  if (appStatus === 'trial_expired') {
+    return <TrialExpiredPage />;
   }
 
   if (appStatus === 'error') {

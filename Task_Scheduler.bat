@@ -3,7 +3,8 @@ setlocal
 
 rem Adjust PHP path if needed.
 set "PHP_EXE=C:\xampp\php\php.exe"
-set "BASE_DIR=C:\xampp\htdocs\Dragon"
+set "BASE_DIR=%~dp0"
+if "%BASE_DIR:~-1%"=="\" set "BASE_DIR=%BASE_DIR:~0,-1%"
 set "LOG_DIR=%BASE_DIR%\logs"
 set "LOG_FILE=%LOG_DIR%\task_scheduler.log"
 

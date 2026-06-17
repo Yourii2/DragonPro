@@ -185,9 +185,17 @@ export const MENU_ITEMS = [
     icon: <BarChart3 className="w-5 h-5" />,
     slug: 'reports',
     subItems: [
-      { label: 'تقرير المبيعات', slug: 'sales' },
+      { label: 'الأرباح والخسائر', slug: 'accounting' },
+      { label: 'المبيعات', slug: 'sales' },
+      { label: 'ملخص الفترة', slug: 'totals' },
       { label: 'تقرير منتجات', slug: 'product-report' },
-      { label: 'ملخص الفتره', slug: 'totals' },
+      { label: 'أداء المناديب', slug: 'reps' },
+      { label: 'المقارنات', slug: 'compare' },
+      { label: 'المخزون الراكد', slug: 'inventory-health' },
+      { label: 'التدفق النقدي', slug: 'cash-flow' },
+      { label: 'أعمار الديون', slug: 'outstanding-balances' },
+      { label: 'تحليل المرتجعات', slug: 'returns-analysis' },
+      { label: 'تقييم المخزون', slug: 'inventory-valuation' }
     ]
   },
   {

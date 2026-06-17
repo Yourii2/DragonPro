@@ -1,6 +1,7 @@
 // Polyfill bridge: proxy selected localStorage keys to server-side DB via components/settings.php
 const PREFIXES = ['Dragon_', 'Nexus_', 'nexus_'];
-const API = (window as any).API_BASE_PATH || '';
+import { API_BASE_PATH } from './apiConfig';
+const API = API_BASE_PATH || '';
 
 const originalGet = window.localStorage.getItem.bind(window.localStorage);
 const originalSet = window.localStorage.setItem.bind(window.localStorage);
@@ -18,7 +19,7 @@ function keyToSettingName(key: string) {
 
 async function init() {
   try {
-    const r = await fetch((API ? API + '/' : '') + 'components/settings.php?action=get', { credentials: 'include' });
+    const r = await fetch((API ? API + '/' : '') + 'settings.php?action=get', { credentials: 'include' });
     const j = await r.json();
     if (j && j.success && j.data) {
       cache = {};
@@ -52,7 +53,7 @@ window.localStorage.setItem = function(key: string, value: string) {
     if (name) {
       cache[name] = value;
       // persist to server (fire-and-forget)
-      fetch((API ? API + '/' : '') + 'components/settings.php?action=update', {
+      fetch((API ? API + '/' : '') + 'settings.php?action=update', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -70,7 +71,7 @@ window.localStorage.removeItem = function(key: string) {
     if (name) {
       delete cache[name];
       // clear on server
-      fetch((API ? API + '/' : '') + 'components/settings.php?action=update', {
+      fetch((API ? API + '/' : '') + 'settings.php?action=update', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },

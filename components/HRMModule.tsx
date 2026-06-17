@@ -745,7 +745,6 @@ const HRMModule: React.FC<HRMModuleProps> = ({ initialView }) => {
           <button onClick={() => setView('salaries')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${view === 'salaries' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><CreditCard size={16}/> الرواتب</button>
           <button onClick={() => setView('transactions')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${view === 'transactions' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><UserCheck size={16}/> معاملات الموظف</button>
           <button onClick={() => setView('salary-report')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${view === 'salary-report' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><FileText size={16}/> تقرير الرواتب</button>
-          <button onClick={() => setView('attendance')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${view === 'attendance' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Calendar size={16}/> البصمه</button>
         </div>
       </div>
 

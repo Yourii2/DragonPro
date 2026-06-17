@@ -119,3 +119,73 @@ function call_activation_service($hwid, $phone, $company) {
 
     return ['success' => true, 'data' => $data];
 }
+
+function check_license_validity() {
+    $config_path = __DIR__ . '/../config.php';
+    $license_path = __DIR__ . '/../Dragon.lic';
+
+    if (!file_exists($config_path) || !file_exists($license_path)) {
+        return ['status' => 'not_installed', 'message' => 'النظام غير مثبت بعد.'];
+    }
+
+    require_once __DIR__ . '/encryption.php';
+    $encrypted_data = @file_get_contents($license_path);
+    if ($encrypted_data === false || $encrypted_data === '') {
+        return ['status' => 'tampered', 'message' => 'ملف الترخيص غير موجود أو تالف.'];
+    }
+
+    $decrypted_json = decrypt_data($encrypted_data);
+    if ($decrypted_json === false) {
+        return ['status' => 'tampered', 'message' => 'ملف الترخيص تالف أو تم العبث به.'];
+    }
+
+    $license_data = json_decode($decrypted_json, true);
+    if (!is_array($license_data)) {
+        return ['status' => 'tampered', 'message' => 'ملف الترخيص تالف أو تم العبث به.'];
+    }
+
+    $activation_type = $license_data['activation_type'] ?? '';
+    $activation_expiry = $license_data['activation_expiry'] ?? '';
+    $activation_account_status = $license_data['activation_account_status'] ?? 'Active';
+    $activation_is_expired = ($license_data['activation_is_expired'] ?? 'false') === 'true';
+
+    // Verify expiration timestamp if present
+    if (!empty($activation_expiry)) {
+        $expiry_ts = strtotime($activation_expiry);
+        if ($expiry_ts !== false && time() > $expiry_ts) {
+            $activation_is_expired = true;
+        }
+    }
+
+    $activation_type_norm = strtolower(trim((string)$activation_type));
+    $is_trial = $activation_type_norm === 'trial';
+
+    // 1. Account status check
+    if (strtolower(trim((string)$activation_account_status)) === 'blocked') {
+        return ['status' => 'activation_blocked', 'message' => 'تم حظر هذا الترخيص.'];
+    }
+
+    // 2. Clock tampering check (prevent bypassing by setting clock back)
+    $last_check_raw = $license_data['activation_last_check'] ?? '';
+    if (!empty($last_check_raw)) {
+        $last_check_ts = strtotime($last_check_raw);
+        // Allow a small grace period of 5 minutes (300 seconds) for clock drift
+        if ($last_check_ts !== false && time() < ($last_check_ts - 300)) {
+            return ['status' => 'tampered', 'message' => 'تم العبث بتاريخ النظام أو ملف الترخيص.'];
+        }
+    }
+
+    // 3. Trial expiration check
+    if ($is_trial) {
+        if (empty($activation_expiry)) {
+            return ['status' => 'activation_expired', 'message' => 'انتهت صلاحية الترخيص التجريبي.'];
+        }
+        $expiry_ts = strtotime($activation_expiry);
+        if ($expiry_ts === false || time() > $expiry_ts || $activation_is_expired) {
+            return ['status' => 'activation_expired', 'message' => 'انتهت صلاحية الترخيص التجريبي.'];
+        }
+    }
+
+    return ['status' => 'ok', 'license_data' => $license_data];
+}
+
