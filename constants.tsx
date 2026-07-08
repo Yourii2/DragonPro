@@ -195,7 +195,9 @@ export const MENU_ITEMS = [
       { label: 'التدفق النقدي', slug: 'cash-flow' },
       { label: 'أعمار الديون', slug: 'outstanding-balances' },
       { label: 'تحليل المرتجعات', slug: 'returns-analysis' },
-      { label: 'تقييم المخزون', slug: 'inventory-valuation' }
+      { label: 'تقييم المخزون', slug: 'inventory-valuation' },
+      { label: 'الغرامات و الحافز', slug: 'fines-incentives' },
+      { label: 'المصروفات', slug: 'expenses' }
     ]
   },
   {

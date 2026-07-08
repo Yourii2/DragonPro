@@ -29,7 +29,8 @@ import {
   ChevronUp,
   Monitor,
   Wifi,
-  WifiOff
+  WifiOff,
+  Share2
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
@@ -78,7 +79,12 @@ const SettingsModule: React.FC = () => {
       { id: 'conf', name: 'تأكيد الأوردر', text: 'مرحباً [الاسم]، تم تأكيد طلبك رقم [رقم_الطلب] بقيمة [المبلغ]. سيصلك المندوب خلال 48 ساعة. شكراً لتعاملك معنا!' },
       { id: 'track', name: 'متابعة الشحن', text: 'عزيزي [الاسم]، طلبك رقم [رقم_الطلب] الآن مع المندوب وفي الطريق إليك. يرجى التواجد لاستلام مبيعاتك.' },
       { id: 'return', name: 'طلب مرتجع', text: 'مرحباً [الاسم]، بخصوص طلبك رقم [رقم_الطلب]، هل هناك أي مشكلة واجهتك؟ نحن هنا للمساعدة.' }
-    ])
+    ]),
+    whatsappAccessToken: '',
+    whatsappPhoneId: '',
+    whatsappVerifyToken: 'dragon_meta_verify_token',
+    externalApiToken: '',
+    telegramBotToken: ''
   });
 
   const [otpCode, setOtpCode] = useState('');
@@ -221,7 +227,12 @@ const SettingsModule: React.FC = () => {
             reportDailyTreasury: settings.report_daily_treasury === 'true' || settings.report_daily_treasury === '1',
             reportDailyAudit: settings.report_daily_audit === 'true' || settings.report_daily_audit === '1',
             reportAuto: settings.report_auto === 'true' || settings.report_auto === '1',
-            whatsappTemplates: settings.wa_templates || config.whatsappTemplates
+            whatsappTemplates: settings.wa_templates || config.whatsappTemplates,
+            whatsappAccessToken: settings.whatsapp_access_token || '',
+            whatsappPhoneId: settings.whatsapp_phone_id || '',
+            whatsappVerifyToken: settings.whatsapp_verify_token || 'dragon_meta_verify_token',
+            externalApiToken: settings.external_api_token || '',
+            telegramBotToken: settings.telegram_bot_token || ''
           });
           if (settings.activation_type || settings.activation_expiry || settings.activation_account_status) {
             const isExpired = parseBool(settings.activation_is_expired);
@@ -267,17 +278,65 @@ const SettingsModule: React.FC = () => {
         report_daily_audit: config.reportDailyAudit.toString(),
         report_auto: config.reportAuto.toString(),
         wa_templates: config.whatsappTemplates,
-        // new settings
         sales_display_method: config.salesDisplayMethod,
         product_source: config.productSource,
         delivery_method: config.deliveryMethod,
-
-        purchase_price_type: config.purchasePriceType
+        purchase_price_type: config.purchasePriceType,
+        whatsapp_access_token: config.whatsappAccessToken,
+        whatsapp_phone_id: config.whatsappPhoneId,
+        whatsapp_verify_token: config.whatsappVerifyToken,
+        external_api_token: config.externalApiToken,
+        telegram_bot_token: config.telegramBotToken
       })
     });
 
     const result = await response.json();
     return result;
+  };
+
+  const [telegramActivating, setTelegramActivating] = useState(false);
+
+  const activateTelegramWebhook = async () => {
+    if (!config.telegramBotToken) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'تنصيب التليجرام',
+        text: 'يرجى إدخال توكن البوت (Telegram Bot Token) أولاً قبل محاولة التفعيل.',
+        confirmButtonText: 'حسناً'
+      });
+      return;
+    }
+
+    setTelegramActivating(true);
+    try {
+      const response = await fetch(`${API_BASE_PATH}/telegram_webhook.php?action=setup&token=${encodeURIComponent(config.telegramBotToken)}`);
+      const result = await response.json();
+      if (result.ok) {
+        await saveSettingsToServer(false);
+        Swal.fire({
+          icon: 'success',
+          title: 'تم تفعيل وحفظ البوت بنجاح!',
+          text: 'تم ربط البوت بنظام DragonPro وحفظ التوكن تلقائياً. يمكنك الآن البدء بإرسال الطلبات إليه.',
+          confirmButtonText: 'رائع'
+        });
+      } else {
+        Swal.fire({
+          icon: 'error',
+          title: 'فشل الربط',
+          text: result.description || 'حدث خطأ أثناء ربط البوت بتليجرام. يرجى التحقق من صحة التوكن.',
+          confirmButtonText: 'حسناً'
+        });
+      }
+    } catch (e) {
+      Swal.fire({
+        icon: 'error',
+        title: 'خطأ في الاتصال',
+        text: 'تعذر الاتصال بخوادم تليجرام. يرجى التحقق من اتصالك بالإنترنت.',
+        confirmButtonText: 'حسناً'
+      });
+    } finally {
+      setTelegramActivating(false);
+    }
   };
 
   const updateWaTemplate = (id: string, field: string, value: string) => {
@@ -993,6 +1052,195 @@ const SettingsModule: React.FC = () => {
                     disabled={!config.autoBackup}
                     options={[{ value: 'hourly', label: 'كل ساعة عمل' }, { value: 'daily', label: 'يومياً (منتصف الليل)' }, { value: 'weekly', label: 'أسبوعياً (كل جمعة)' }]}
                   />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* External Integration Section */}
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
+            <h3 className="font-bold flex items-center gap-2 mb-6 text-slate-800 dark:text-slate-100">
+              <Share2 className="text-indigo-500" size={18}/> إعدادات الربط التلقائي والـ API
+            </h3>
+            
+            <div className="space-y-6">
+              {/* 1. ربط المتجر الخارجي */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-700">
+                <h4 className="text-xs font-black text-slate-700 dark:text-slate-300 mb-3">ربط المتجر الخارجي (WooCommerce / Shopify):</h4>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 mb-1 block">رابط الاستدعاء للطلب (Callback URL)</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        readOnly
+                        value={`${API_BASE_PATH}/api_external.php?action=create_order`}
+                        className="w-full bg-white dark:bg-slate-800 border-none rounded-xl py-2 px-3 text-xs font-mono text-slate-600 dark:text-slate-400 select-all"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(`${API_BASE_PATH}/api_external.php?action=create_order`, 'رابط الاستدعاء')}
+                        className="px-3 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-xl text-xs font-bold transition-colors hover:bg-indigo-100"
+                      >
+                        نسخ
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 mb-1 block">مفتاح الحماية الخارجي (API Key / Token)</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={config.externalApiToken}
+                        onChange={e => setConfig({...config, externalApiToken: e.target.value})}
+                        placeholder="سيتم توليده تلقائياً عند الحفظ إذا تركته فارغاً"
+                        className="w-full bg-white dark:bg-slate-800 border-none rounded-xl py-2 px-3 text-xs font-mono text-slate-700 dark:text-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(config.externalApiToken, 'مفتاح الحماية')}
+                        className="px-3 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-xl text-xs font-bold transition-colors hover:bg-indigo-100"
+                      >
+                        نسخ
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. ربط بوابة واتساب ميتا */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-700">
+                <h4 className="text-xs font-black text-slate-700 dark:text-slate-300 mb-3">ربط الواتساب السحابي (WhatsApp Business Cloud API - Meta):</h4>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="md:col-span-2">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 mb-1 block">رابط الاستدعاء للويب هوك بميتا (Webhook Callback URL)</label>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            readOnly
+                            value={`${API_BASE_PATH}/whatsapp_webhook.php`}
+                            className="w-full bg-white dark:bg-slate-800 border-none rounded-xl py-2 px-3 text-xs font-mono text-slate-600 dark:text-slate-400 select-all"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => copyToClipboard(`${API_BASE_PATH}/whatsapp_webhook.php`, 'رابط الويب هوك')}
+                            className="px-3 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-xl text-xs font-bold transition-colors hover:bg-indigo-100"
+                          >
+                            نسخ
+                          </button>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 mb-1 block">رمز التحقق للويب هوك (Verify Token)</label>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={config.whatsappVerifyToken}
+                            onChange={e => setConfig({...config, whatsappVerifyToken: e.target.value})}
+                            className="w-full bg-white dark:bg-slate-800 border-none rounded-xl py-2 px-3 text-xs font-mono text-slate-700 dark:text-white"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => copyToClipboard(config.whatsappVerifyToken, 'رمز التحقق')}
+                            className="px-3 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-xl text-xs font-bold transition-colors hover:bg-indigo-100"
+                          >
+                            نسخ
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 mb-1 block">رقم معرّف الهاتف الخاص بميتا (Phone Number ID)</label>
+                    <input
+                      type="text"
+                      value={config.whatsappPhoneId}
+                      onChange={e => setConfig({...config, whatsappPhoneId: e.target.value})}
+                      placeholder="أدخل الـ Phone Number ID من حساب ميتا"
+                      className="w-full bg-white dark:bg-slate-800 border-none rounded-xl py-2.5 px-3 text-xs font-mono text-slate-700 dark:text-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 mb-1 block">رمز الوصول الدائم الخاص بالواتساب (Permanent Access Token)</label>
+                    <input
+                      type="text"
+                      value={config.whatsappAccessToken}
+                      onChange={e => setConfig({...config, whatsappAccessToken: e.target.value})}
+                      placeholder="أدخل الـ Access Token من حساب ميتا"
+                      className="w-full bg-white dark:bg-slate-800 border-none rounded-xl py-2.5 px-3 text-xs font-mono text-slate-700 dark:text-white"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Telegram Bot Integration Section */}
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
+            <h3 className="font-bold flex items-center gap-2 mb-6 text-slate-800 dark:text-slate-100">
+              <Share2 className="text-sky-500" size={18}/> ربط بوت التليجرام (Telegram Bot Integration)
+            </h3>
+            
+            <div className="space-y-6">
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-700">
+                <h4 className="text-xs font-black text-slate-700 dark:text-slate-300 mb-2">إعداد البوت والويب هوك للتليجرام:</h4>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-4 leading-relaxed">
+                  يمكنك إنشاء بوت تليجرام مجاني تماماً خلال ثوانٍ. ابحث عن البوت الرسمي <strong>@BotFather</strong> على تليجرام وأرسل له الأمر <code>/newbot</code> لإنشاء البوت والحصول على التوكن.
+                </p>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 mb-1 block">توكن بوت التليجرام الخاص بك (Telegram Bot Token)</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={config.telegramBotToken}
+                        onChange={e => setConfig({...config, telegramBotToken: e.target.value})}
+                        placeholder="أدخل الـ API Token الخاص بالبوت هنا (مثال: 123456:ABC-def...)"
+                        className="w-full bg-white dark:bg-slate-800 border-none rounded-xl py-2.5 px-3 text-xs font-mono text-slate-700 dark:text-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={activateTelegramWebhook}
+                        disabled={telegramActivating}
+                        className="px-4 bg-sky-500 hover:bg-sky-600 disabled:bg-sky-400 text-white rounded-xl text-xs font-bold transition-all whitespace-nowrap"
+                      >
+                        {telegramActivating ? 'جارٍ الربط...' : 'تفعيل البوت تلقائياً'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 mb-1 block">رابط الاستدعاء للويب هوك (Webhook URL)</label>
+                      <input
+                        type="text"
+                        readOnly
+                        value={`${API_BASE_PATH}/telegram_webhook.php`}
+                        className="w-full bg-slate-100 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-xs font-mono text-slate-500 select-all"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 mb-1 block">حالة تفعيل الويب هوك</label>
+                      <div className="py-2.5 px-3 rounded-xl bg-slate-100 dark:bg-slate-900 text-xs font-bold flex items-center gap-2">
+                        {config.telegramBotToken ? (
+                          <>
+                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                            <span className="text-emerald-600">البوت مهيأ (اضغط تفعيل لربط الويب هوك)</span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
+                            <span className="text-rose-500">غير مفعل (أدخل التوكن للبدء)</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

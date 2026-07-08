@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Swal from 'sweetalert2';
-import { CheckSquare, MapPin, Package2, Phone, PhoneCall, Printer, RotateCcw, Save, ScanLine, ShieldCheck, Trash2, UserCheck, Users2, WalletCards, XCircle, MessageCircle } from 'lucide-react';
+import { CheckCircle2, CheckSquare, Lock, MapPin, Package2, Phone, PhoneCall, PhoneOff, Printer, RotateCcw, Save, ScanLine, ShieldCheck, Trash2, UserCheck, Users2, WalletCards, XCircle, MessageCircle } from 'lucide-react';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { PrintableOrders } from './PrintableOrderCard';
 
@@ -56,11 +56,11 @@ type AssignmentRow = {
   order: OrderRow;
 };
 
-type DecisionType = 'cancel';
+type DecisionType = 'confirm' | 'close' | 'no_answer' | 'cancel' | 'assign';
 
 type StagedDecisionRow = {
   assignment: AssignmentRow;
-  decision: DecisionType;
+  decision: DecisionType | 'current';
 };
 
 type LoadDataOptions = {
@@ -149,8 +149,14 @@ const getOrderCustomerName = (order: OrderRow) => order.customerName || order.cu
 
 const getOrderProducts = (order: OrderRow) => Array.isArray(order.products) ? order.products : [];
 
-const getDecisionLabel = (decision: DecisionType) => {
+const getDecisionLabel = (decision: string) => {
   switch (decision) {
+    case 'confirm':
+      return 'مؤكدة';
+    case 'close':
+      return 'مغلقة';
+    case 'no_answer':
+      return 'لا يرد';
     case 'cancel':
       return 'ملغية';
     default:
@@ -269,7 +275,8 @@ const SmallOrderCard: React.FC<{
   selected?: boolean;
   onToggleSelect?: (assignment: AssignmentRow, selected: boolean) => void;
   onWhatsApp?: (assignment: AssignmentRow) => void;
-}> = ({ assignment, badgeLabel, badgeClass, iconClass, actionIcon: ActionIcon, actionLabel, actionClass, onAction, actionDisabled = false, selectable = false, selected = false, onToggleSelect, onWhatsApp }) => {
+  onUpdateDecision?: (assignment: AssignmentRow, decision: 'confirm' | 'close' | 'no_answer' | 'cancel' | 'assign') => void;
+}> = ({ assignment, badgeLabel, badgeClass, iconClass, actionIcon: ActionIcon, actionLabel, actionClass, onAction, actionDisabled = false, selectable = false, selected = false, onToggleSelect, onWhatsApp, onUpdateDecision }) => {
   const order = assignment.order || { id: assignment.order_id };
   const orderProducts = getOrderProducts(order);
 
@@ -344,6 +351,50 @@ const SmallOrderCard: React.FC<{
           <span className="truncate">المندوب: {assignment.rep_name || '-'}</span>
           <span>{formatDateTime(assignment.assigned_at)}</span>
         </div>
+        {onUpdateDecision ? (
+          <div className="mt-2 grid grid-cols-4 gap-1">
+            <button
+              type="button"
+              onClick={() => onUpdateDecision(assignment, 'confirm')}
+              disabled={actionDisabled}
+              title="مؤكد"
+              className="inline-flex items-center justify-center gap-1 rounded-xl bg-emerald-500 px-1 py-2 text-[10px] font-black text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <CheckCircle2 size={12} />
+              مؤكد
+            </button>
+            <button
+              type="button"
+              onClick={() => onUpdateDecision(assignment, 'close')}
+              disabled={actionDisabled}
+              title="مغلق"
+              className="inline-flex items-center justify-center gap-1 rounded-xl bg-slate-500 px-1 py-2 text-[10px] font-black text-white transition hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Lock size={12} />
+              مغلق
+            </button>
+            <button
+              type="button"
+              onClick={() => onUpdateDecision(assignment, 'no_answer')}
+              disabled={actionDisabled}
+              title="لا يرد"
+              className="inline-flex items-center justify-center gap-1 rounded-xl bg-amber-500 px-1 py-2 text-[10px] font-black text-white transition hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <PhoneOff size={12} />
+              لا يرد
+            </button>
+            <button
+              type="button"
+              onClick={() => onAction(assignment)}
+              disabled={actionDisabled}
+              title="إلغاء"
+              className="inline-flex items-center justify-center gap-1 rounded-xl bg-rose-500 px-1 py-2 text-[10px] font-black text-white transition hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <XCircle size={12} />
+              إلغاء
+            </button>
+          </div>
+        ) : (
         <button
           type="button"
           onClick={() => onAction(assignment)}
@@ -353,6 +404,7 @@ const SmallOrderCard: React.FC<{
           <ActionIcon size={13} />
           {actionLabel}
         </button>
+        )}
       </div>
     </div>
   );
@@ -368,6 +420,7 @@ const OrderConfirmations: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [assignBarcode, setAssignBarcode] = useState('');
   const [cancelBarcode, setCancelBarcode] = useState('');
+  const [scanDecision, setScanDecision] = useState<'confirm' | 'close' | 'no_answer' | 'cancel'>('cancel');
   const [ordersToPrint, setOrdersToPrint] = useState<any[] | null>(null);
   const [selectedActiveOrderIds, setSelectedActiveOrderIds] = useState<number[]>([]);
   const [selectedCancelledOrderIds, setSelectedCancelledOrderIds] = useState<number[]>([]);
@@ -587,6 +640,21 @@ const OrderConfirmations: React.FC = () => {
     [cancelledAssignments]
   );
 
+  const confirmedAssignments = useMemo(
+    () => selectedRepOrders.filter((assignment) => String(assignment.status || '').toLowerCase() === 'confirmed'),
+    [selectedRepOrders]
+  );
+
+  const closedAssignments = useMemo(
+    () => selectedRepOrders.filter((assignment) => String(assignment.status || '').toLowerCase() === 'closed'),
+    [selectedRepOrders]
+  );
+
+  const noAnswerAssignments = useMemo(
+    () => selectedRepOrders.filter((assignment) => String(assignment.status || '').toLowerCase() === 'no_answer'),
+    [selectedRepOrders]
+  );
+
   useEffect(() => {
     const cancelledIds = new Set(cancelledAssignments.map((assignment) => Number(assignment.order_id)));
     setSelectedCancelledOrderIds((prev) => prev.filter((id) => cancelledIds.has(Number(id))));
@@ -736,12 +804,30 @@ const OrderConfirmations: React.FC = () => {
     return assignment;
   };
 
-  const handleDecisionBarcode = async (decision: 'cancel') => {
+  const handleDecisionBarcode = async (decision: 'cancel' | 'confirm' | 'close' | 'no_answer') => {
     const barcode = cancelBarcode.trim();
-    if (!requireSelectedRep() || !barcode) return;
+    if (!requireSelectedRep()) return;
+    if (!barcode) {
+      Swal.fire('تنبيه', 'الرجاء كتابة أو مسح باركود الأوردر أولاً.', 'warning');
+      return;
+    }
+
+    // Verify if order exists in the representative's active assigned orders list
+    const match = activeSelectedRepOrders.find(
+      (item) =>
+        String(item.order_id) === barcode ||
+        String(item.order?.orderNumber || '').trim() === barcode ||
+        String(item.order?.order_number || '').trim() === barcode ||
+        String(item.order?.id) === barcode
+    );
+
+    if (!match) {
+      Swal.fire('تنبيه', 'هذا الأوردر غير مسند للمندوب المختار حالياً.', 'warning');
+      return;
+    }
+
     setSubmitting(true);
     try {
-      await resolveAssignmentByBarcode(barcode);
       const response = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateOrderConfirmationDecision`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -755,7 +841,32 @@ const OrderConfirmations: React.FC = () => {
       await loadData(selectedRepId);
       await refreshStockSummary([]);
       setCancelBarcode('');
-      Swal.fire('تم', 'تم إلغاء الأوردر وحفظ الحالة تلقائياً.', 'success');
+      const labels: Record<string, string> = { confirm: 'مؤكد', close: 'مغلق', no_answer: 'لا يرد', cancel: 'ملغي' };
+      Swal.fire('تم', `تم تسجيل حالة "${labels[decision] || decision}" للأوردر.`, 'success');
+    } catch (error: any) {
+      Swal.fire('تنبيه', error?.message || 'تعذر تحديث الأوردر.', 'warning');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleQuickDecision = async (assignment: AssignmentRow, decision: 'confirm' | 'close' | 'no_answer' | 'cancel' | 'assign') => {
+    if (!requireSelectedRep()) return;
+    const order = assignment.order || { id: assignment.order_id };
+    const orderNum = getOrderNumber(order);
+    setSubmitting(true);
+    try {
+      const response = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateOrderConfirmationDecision`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rep_id: selectedRepId, barcode: String(assignment.order_id), decision })
+      });
+      const result = await response.json();
+      if (!result?.success) {
+        throw new Error(result?.message || `تعذر حفظ حالة الأوردر #${orderNum}.`);
+      }
+      await loadData(selectedRepId);
+      await refreshStockSummary([]);
     } catch (error: any) {
       Swal.fire('تنبيه', error?.message || 'تعذر تحديث الأوردر.', 'warning');
     } finally {
@@ -1160,19 +1271,79 @@ const OrderConfirmations: React.FC = () => {
               inputRef={assignInputRef}
             />
 
-            <ScanPanel
-              title="2. إلغاء أوردر"
-              description="إذا تعذر التنفيذ أو تم الرفض، امسح الباركود هنا لإلغاء الأوردر فوراً من نفس المسار."
-              placeholder="باركود الإلغاء"
-              value={cancelBarcode}
-              onChange={setCancelBarcode}
-              onSubmit={() => handleDecisionBarcode('cancel')}
-              disabled={submitting || !selectedRepId || !cancelBarcode.trim()}
-              icon={XCircle}
-              iconClass="bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-200"
-              buttonClass="bg-rose-600 hover:bg-rose-700"
-              buttonLabel="إلغاء الأوردر"
-            />
+            <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 dark:border-slate-700 dark:bg-slate-800">
+              <div className="relative">
+                <div className="mb-4 flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-base font-black text-black dark:text-white">2. تحديث حالة الأوردر</div>
+                    <div className="mt-1 text-xs leading-6 text-black dark:text-slate-400">اختر الحالة أولاً، ثم امسح باركود الأوردر.</div>
+                  </div>
+                  <div className="rounded-2xl p-3 shadow-sm bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-200">
+                    <ShieldCheck className="h-5 w-5" />
+                  </div>
+                </div>
+
+                {/* 1. اختيار الحالة أولاً */}
+                <div className="mb-4">
+                  <label className="mb-2 block text-xs font-black text-slate-600 dark:text-slate-300">الحالة المراد تطبيقها:</label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {(['confirm', 'close', 'no_answer', 'cancel'] as const).map((dec) => {
+                      const isActive = scanDecision === dec;
+                      const labels: Record<string, string> = { confirm: 'مؤكد', close: 'مغلق', no_answer: 'لا يرد', cancel: 'ملغي' };
+                      
+                      // Active color classes
+                      const activeClasses: Record<string, string> = {
+                        confirm: 'bg-emerald-500 text-white border-emerald-500 ring-2 ring-emerald-300 dark:ring-emerald-800',
+                        close: 'bg-slate-500 text-white border-slate-500 ring-2 ring-slate-300 dark:ring-slate-700',
+                        no_answer: 'bg-amber-500 text-white border-amber-500 ring-2 ring-amber-300 dark:ring-amber-800',
+                        cancel: 'bg-rose-500 text-white border-rose-500 ring-2 ring-rose-300 dark:ring-rose-800',
+                      };
+                      
+                      // Inactive classes
+                      const inactiveClasses = 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100 dark:bg-slate-900 dark:text-slate-300 dark:border-slate-700';
+
+                      return (
+                        <button
+                          key={dec}
+                          type="button"
+                          onClick={() => setScanDecision(dec)}
+                          className={`py-3 text-xs font-black rounded-xl border transition-all ${isActive ? activeClasses[dec] : inactiveClasses}`}
+                        >
+                          {labels[dec]}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 2. حقل مسح الباركود */}
+                <div className="space-y-3">
+                  <label className="block text-xs font-black text-slate-600 dark:text-slate-300">امسح الباركود أو اكتبه هنا:</label>
+                  <input
+                    value={cancelBarcode}
+                    onChange={(event) => setCancelBarcode(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        handleDecisionBarcode(scanDecision);
+                      }
+                    }}
+                    placeholder="باركود الأوردر..."
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-base font-bold text-black outline-none transition placeholder:text-black/55 focus:border-blue-500 focus:bg-white dark:border-slate-600 dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-500"
+                  />
+
+                  {/* زر التحديث الفعلي */}
+                  <button
+                    type="button"
+                    onClick={() => handleDecisionBarcode(scanDecision)}
+                    disabled={submitting}
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-black py-3 rounded-2xl transition-all shadow-md flex items-center justify-center gap-2 text-sm"
+                  >
+                    تطبيق الحالة المختارة
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1192,64 +1363,36 @@ const OrderConfirmations: React.FC = () => {
               <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-black dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
                 اختر مندوباً من القائمة الجانبية لتظهر قائمة الأوردرات هنا.
               </div>
-            ) : activeSelectedRepOrders.length === 0 && cancelledOrders.length === 0 ? (
+            ) : activeSelectedRepOrders.length === 0 && cancelledOrders.length === 0 && confirmedAssignments.length === 0 && closedAssignments.length === 0 && noAnswerAssignments.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-black dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
                 لا توجد أوردرات حالية مع هذا المندوب.
               </div>
             ) : (
               <div className="grid gap-4 xl:grid-cols-2">
-                {[
-                  {
-                    key: 'active' as const,
-                    title: 'الأوردرات الحالية مع المندوب',
-                    items: activeSelectedRepOrders.map((assignment) => ({ assignment, decision: 'current' as const })),
-                    emptyText: 'لا توجد أوردرات حالية مع هذا المندوب.',
-                    badgeLabel: 'نشط الآن',
-                    badgeClass: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200',
-                    iconClass: 'bg-blue-600',
-                    actionLabel: 'حذف من القائمة',
-                    actionClass: 'bg-rose-600 hover:bg-rose-700',
-                    actionIcon: Trash2,
-                    onAction: handleRemoveCurrentOrder
-                  },
-                  {
-                    key: 'cancelled' as const,
-                    title: 'أوردرات ملغية',
-                    items: cancelledOrders,
-                    emptyText: 'لا توجد أوردرات ملغية حالياً.',
-                    badgeLabel: 'ملغية',
-                    badgeClass: 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-200',
-                    iconClass: 'bg-rose-600',
-                    actionLabel: 'استرجاع الأوردر',
-                    actionClass: 'bg-emerald-600 hover:bg-emerald-700',
-                    actionIcon: RotateCcw,
-                    onAction: handleRestoreCancelledOrder
-                  },
-                ].map((section) => (
-                  <div key={section.title} className="rounded-3xl border border-slate-200 bg-slate-50/60 p-3 dark:border-slate-700 dark:bg-slate-900/40">
-                    <div className="mb-3 flex items-center justify-between">
-                      <h3 className="text-base font-black text-black dark:text-white">{section.title}</h3>
-                      <div className="flex items-center gap-2">
-                        {section.key === 'active' && section.items.length > 0 ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => handleToggleSelectAllActiveOrders(true)}
-                              disabled={submitting || loading}
-                              className="inline-flex items-center gap-1 rounded-xl border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[11px] font-black text-blue-700 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-200"
-                            >
-                              <CheckSquare className="h-3.5 w-3.5" />
-                              تحديد الكل
-                            </button>
-                            <button
-                              type="button"
-                              onClick={handlePrintSelectedOrders}
-                              disabled={selectedActiveOrderIds.length === 0 || submitting || loading}
-                              className="inline-flex items-center gap-1 rounded-xl bg-blue-600 px-2.5 py-1.5 text-[11px] font-black text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              <Printer className="h-3.5 w-3.5" />
-                              طباعة المحدد
-                            </button>
+                {/* العمود الأول: الأوردرات النشطة مع أزرار القرار السريع */}
+                <div className="rounded-3xl border border-slate-200 bg-slate-50/60 p-3 dark:border-slate-700 dark:bg-slate-900/40">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h3 className="text-base font-black text-black dark:text-white">الأوردرات الحالية مع المندوب</h3>
+                    <div className="flex items-center gap-2">
+                      {activeSelectedRepOrders.length > 0 ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleSelectAllActiveOrders(true)}
+                            disabled={submitting || loading}
+                            className="inline-flex items-center gap-1 rounded-xl border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[11px] font-black text-blue-700 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-200"
+                          >
+                            تحديد الكل
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleSelectAllActiveOrders(false)}
+                            disabled={submitting || loading}
+                            className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-black text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                          >
+                            إلغاء التحديد
+                          </button>
+                          {selectedActiveOrderIds.length > 0 ? (
                             <button
                               type="button"
                               onClick={handleRemoveSelectedOrders}
@@ -1259,72 +1402,112 @@ const OrderConfirmations: React.FC = () => {
                               <Trash2 className="h-3.5 w-3.5" />
                               حذف المحدد
                             </button>
-                          </>
-                        ) : null}
-                        {section.key === 'cancelled' && section.items.length > 0 ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => handleToggleSelectAllCancelledOrders(true)}
-                              disabled={submitting || loading}
-                              className="inline-flex items-center gap-1 rounded-xl border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] font-black text-rose-700 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200"
-                            >
-                              <CheckSquare className="h-3.5 w-3.5" />
-                              تحديد الكل
-                            </button>
-                            <button
-                              type="button"
-                              onClick={handlePrintSelectedCancelledOrders}
-                              disabled={selectedCancelledOrderIds.length === 0 || submitting || loading}
-                              className="inline-flex items-center gap-1 rounded-xl bg-blue-600 px-2.5 py-1.5 text-[11px] font-black text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              <Printer className="h-3.5 w-3.5" />
-                              طباعة المحدد
-                            </button>
-                            <button
-                              type="button"
-                              onClick={handleRestoreSelectedCancelledOrders}
-                              disabled={selectedCancelledOrderIds.length === 0 || submitting || loading}
-                              className="inline-flex items-center gap-1 rounded-xl bg-emerald-600 px-2.5 py-1.5 text-[11px] font-black text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              <RotateCcw className="h-3.5 w-3.5" />
-                              استرجاع المحدد
-                            </button>
-                          </>
-                        ) : null}
-                        <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-black dark:bg-slate-800 dark:text-slate-200">{section.items.length}</span>
-                      </div>
+                          ) : null}
+                        </>
+                      ) : null}
+                      <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-black dark:bg-slate-800 dark:text-slate-200">{activeSelectedRepOrders.length}</span>
                     </div>
-                    {section.items.length === 0 ? (
-                      <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-5 text-center text-sm text-black dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
-                        {section.emptyText}
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        {section.items.map(({ assignment, decision }) => (
-                          <SmallOrderCard
-                            key={`${decision}-${assignment.id}`}
-                            assignment={assignment}
-                            badgeLabel={section.badgeLabel}
-                            badgeClass={section.badgeClass}
-                            iconClass={section.iconClass}
-                            actionLabel={section.actionLabel}
-                            actionClass={section.actionClass}
-                            actionIcon={section.actionIcon}
-                            onAction={section.onAction}
-                            actionDisabled={submitting || loading}
-                            selectable={section.key === 'active' || section.key === 'cancelled'}
-                            selected={section.key === 'active'
-                              ? selectedActiveOrderIds.includes(Number(assignment.order_id))
-                              : selectedCancelledOrderIds.includes(Number(assignment.order_id))}
-                            onToggleSelect={section.key === 'active' ? handleToggleActiveOrder : handleToggleCancelledOrder}
-                            onWhatsApp={openWhatsApp}
-                          />
-                        ))}
-                      </div>
-                    )}
                   </div>
-                ))}
+                  {activeSelectedRepOrders.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-5 text-center text-sm text-black dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
+                      لا توجد أوردرات نشطة حالياً.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {activeSelectedRepOrders.map((assignment) => (
+                        <SmallOrderCard
+                          key={`active-${assignment.id}`}
+                          assignment={assignment}
+                          badgeLabel="نشط الآن"
+                          badgeClass="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200"
+                          iconClass="bg-blue-600"
+                          actionLabel="إلغاء"
+                          actionClass="bg-rose-600 hover:bg-rose-700"
+                          actionIcon={XCircle}
+                          onAction={handleRemoveCurrentOrder}
+                          actionDisabled={submitting || loading}
+                          selectable={true}
+                          selected={selectedActiveOrderIds.includes(Number(assignment.order_id))}
+                          onToggleSelect={handleToggleActiveOrder}
+                          onWhatsApp={openWhatsApp}
+                          onUpdateDecision={handleQuickDecision}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* العمود الثاني: الأوردرات المعالجة بتبويبات */}
+                <div className="rounded-3xl border border-slate-200 bg-slate-50/60 p-3 dark:border-slate-700 dark:bg-slate-900/40">
+                  <div className="mb-3">
+                    <h3 className="text-base font-black text-black dark:text-white mb-2">نتائج تأكيد الأوردرات</h3>
+                    {/* تبويبات الحالات */}
+                    {(() => {
+                      const tabs = [
+                        { key: 'confirmed', label: 'مؤكدة', count: confirmedAssignments.length, badgeClass: 'bg-emerald-500 text-white', tabActiveClass: 'bg-emerald-600 text-white border-emerald-600', tabInactiveClass: 'bg-white text-emerald-700 border-emerald-200 dark:bg-slate-800 dark:text-emerald-300' },
+                        { key: 'closed', label: 'مغلقة', count: closedAssignments.length, badgeClass: 'bg-slate-500 text-white', tabActiveClass: 'bg-slate-600 text-white border-slate-600', tabInactiveClass: 'bg-white text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300' },
+                        { key: 'no_answer', label: 'لا يرد', count: noAnswerAssignments.length, badgeClass: 'bg-amber-500 text-white', tabActiveClass: 'bg-amber-500 text-white border-amber-500', tabInactiveClass: 'bg-white text-amber-700 border-amber-200 dark:bg-slate-800 dark:text-amber-300' },
+                        { key: 'cancelled', label: 'ملغية', count: cancelledOrders.length, badgeClass: 'bg-rose-500 text-white', tabActiveClass: 'bg-rose-600 text-white border-rose-600', tabInactiveClass: 'bg-white text-rose-700 border-rose-200 dark:bg-slate-800 dark:text-rose-300' },
+                      ];
+                      const [activeTab, setActiveTab] = React.useState<string>('confirmed');
+                      const activeTabData = tabs.find(t => t.key === activeTab) || tabs[0];
+                      const getTabAssignments = (key: string) => {
+                        if (key === 'confirmed') return confirmedAssignments;
+                        if (key === 'closed') return closedAssignments;
+                        if (key === 'no_answer') return noAnswerAssignments;
+                        if (key === 'cancelled') return cancelledAssignments;
+                        return [];
+                      };
+                      const currentItems = getTabAssignments(activeTab);
+
+                      return (
+                        <>
+                          <div className="flex flex-wrap gap-1.5 mb-3">
+                            {tabs.map(tab => (
+                              <button
+                                key={tab.key}
+                                type="button"
+                                onClick={() => setActiveTab(tab.key)}
+                                className={`inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-[11px] font-black transition-colors ${activeTab === tab.key ? tab.tabActiveClass : tab.tabInactiveClass}`}
+                              >
+                                {tab.label}
+                                <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-black ${activeTab === tab.key ? 'bg-white/20 text-white' : tab.badgeClass}`}>{tab.count}</span>
+                              </button>
+                            ))}
+                          </div>
+
+                          {/* أوردرات التبويب النشط */}
+                          {currentItems.length === 0 ? (
+                            <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-5 text-center text-sm text-black dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
+                              لا توجد أوردرات {activeTabData.label} حالياً.
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              {currentItems.map((assignment) => (
+                                <SmallOrderCard
+                                  key={`${activeTab}-${assignment.id}`}
+                                  assignment={assignment}
+                                  badgeLabel={activeTabData.label}
+                                  badgeClass={activeTab === 'confirmed' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200' : activeTab === 'closed' ? 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200' : activeTab === 'no_answer' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200' : 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-200'}
+                                  iconClass={activeTab === 'confirmed' ? 'bg-emerald-600' : activeTab === 'closed' ? 'bg-slate-600' : activeTab === 'no_answer' ? 'bg-amber-500' : 'bg-rose-600'}
+                                  actionLabel={activeTab === 'cancelled' ? 'استرجاع الأوردر' : 'إعادة للنشط'}
+                                  actionClass={activeTab === 'cancelled' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-blue-600 hover:bg-blue-700'}
+                                  actionIcon={RotateCcw}
+                                  onAction={activeTab === 'cancelled' ? handleRestoreCancelledOrder : (a) => handleQuickDecision(a, 'assign')}
+                                  actionDisabled={submitting || loading}
+                                  selectable={activeTab === 'cancelled'}
+                                  selected={activeTab === 'cancelled' ? selectedCancelledOrderIds.includes(Number(assignment.order_id)) : false}
+                                  onToggleSelect={activeTab === 'cancelled' ? handleToggleCancelledOrder : undefined}
+                                  onWhatsApp={openWhatsApp}
+                                />
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
               </div>
             )}
           </div>

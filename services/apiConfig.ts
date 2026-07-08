@@ -10,16 +10,14 @@ function getApiBasePath(): string {
   const override = envBase || globalOverride || storedOverride;
   if (override) return override.replace(/\/$/, '');
 
-  // If we're running under Vite (non-standard port), PHP endpoints should still be served by Apache (usually port 80).
-  // Otherwise the browser will fetch raw .php source from the Vite static server.
-  const isLikelyDevServer = !!(window.location.port && window.location.port !== '80' && window.location.port !== '443');
-
-  // في بيئة التطوير المحلية، يتم توجيه الطلبات مباشرة إلى مسار المشروع على سيرفر Apache لمنع أخطاء 404
-  if (isLikelyDevServer) {
-    return `http://localhost/DragonPro/components`;
+  // If running in development (Vite dev server or CF Tunnel pointing to Vite),
+  // route requests via Vite's local dev server proxy to avoid CORS and Private Network Access issues.
+  const isDev = !!(import.meta as any).env?.DEV;
+  if (isDev) {
+    return `${window.location.origin}/components`;
   }
 
-  // Production (or Apache-served dev): derive the directory that the SPA is running under.
+  // Production (or Apache-served build): derive the directory that the SPA is running under.
   // This supports nested installs like /clients/Nexus/ as well as root installs.
   const appDirPath = new URL('./', window.location.href).pathname; // always ends with '/'
   return `${window.location.origin}${appDirPath}components`;
@@ -56,19 +54,26 @@ const setResolvedApiBasePath = (value: string) => {
 const tryResolveApiBasePath = async () => {
   if (typeof window === 'undefined') return;
   const candidates = buildCandidateApiBases(API_BASE_PATH);
-  for (const candidate of candidates) {
+  // Run all checks in parallel with a 3-second timeout to avoid sequential blocking
+  await Promise.all(candidates.map(async (candidate) => {
     try {
-      const response = await fetch(`${candidate}/test.php`, { credentials: 'include' });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+      const response = await fetch(`${candidate}/test.php`, { 
+        credentials: 'include',
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
       const text = await response.text();
       const json = JSON.parse(text);
       if (json && json.status === 'success') {
         setResolvedApiBasePath(candidate);
-        return;
       }
-    } catch {
-      // try next candidate
+    } catch (e) {
+      // ignore failures
     }
-  }
+  }));
 };
 
 export { API_BASE_PATH };
@@ -112,7 +117,10 @@ if (typeof window !== 'undefined' && (window as any).fetch) {
       // ignore rewrite errors
     }
 
-    const newInit = Object.assign({}, init || {}, { credentials: (init && init.credentials) || 'include' });
+    const isExternal = typeof input === 'string' && (input.startsWith('http://') || input.startsWith('https://')) && !input.startsWith(window.location.origin) && !input.startsWith(API_BASE_PATH);
+    const newInit = isExternal
+      ? init
+      : Object.assign({}, init || {}, { credentials: (init && init.credentials) || 'include' });
     return _origFetch(nextInput, newInit as RequestInit);
   };
 }

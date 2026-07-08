@@ -744,6 +744,48 @@ if (!function_exists('ensure_orders_status_has_cancelled')) {
     }
 }
 
+if (!function_exists('ensure_orders_status_has_new_confirmation_statuses')) {
+    function ensure_orders_status_has_new_confirmation_statuses($pdo) {
+        if (!($pdo instanceof PDO)) return;
+        if (!table_exists($pdo, 'orders') || !column_exists($pdo, 'orders', 'status')) return;
+
+        $col = execute_query($pdo, "SHOW COLUMNS FROM `orders` LIKE 'status'")->fetch(PDO::FETCH_ASSOC);
+        if (!$col) return;
+
+        $type = strtolower((string)($col['Type'] ?? ''));
+        if (strpos($type, 'enum(') !== 0) return;
+
+        $options = [];
+        if (preg_match_all("/'((?:\\\\'|[^'])*)'/", $type, $m)) {
+            foreach ($m[1] as $opt) {
+                $options[] = str_replace("\\\\'", "'", $opt);
+            }
+        }
+        
+        $needed = ['confirmed', 'closed', 'no_answer'];
+        $missing = array_diff($needed, $options);
+        if (empty($missing)) return;
+
+        $options = array_merge($options, $missing);
+        $enumSql = implode(',', array_map(function ($v) {
+            return "'" . str_replace("'", "\\'", (string)$v) . "'";
+        }, $options));
+
+        $isNullable = strtoupper((string)($col['Null'] ?? 'YES')) === 'YES';
+        $nullSql = $isNullable ? 'NULL' : 'NOT NULL';
+
+        $default = $col['Default'] ?? null;
+        $defaultSql = '';
+        if ($default !== null && in_array((string)$default, $options, true)) {
+            $defaultSql = " DEFAULT '" . str_replace("'", "\\'", (string)$default) . "'";
+        } elseif (!$isNullable && !empty($options)) {
+            $defaultSql = " DEFAULT '" . str_replace("'", "\\'", (string)$options[0]) . "'";
+        }
+
+        execute_query($pdo, "ALTER TABLE `orders` MODIFY COLUMN `status` ENUM($enumSql) $nullSql$defaultSql");
+    }
+}
+
 if (!function_exists('user_is_admin')) {
     function user_is_admin($pdo, $user_id) {
         if (!$user_id) return false;
@@ -1949,13 +1991,15 @@ function ensure_order_confirmation_assignments_table($pdo) {
     static $checked = false;
     if ($checked) return;
     try {
-        $pdo->query("SELECT assigned_by, notes, status, assigned_at, updated_at FROM order_confirmation_assignments LIMIT 1");
+        $pdo->query("SELECT assigned_by, notes, status, assigned_at, updated_at, warehouse_id FROM order_confirmation_assignments LIMIT 1");
+        ensure_orders_status_has_new_confirmation_statuses($pdo);
         $checked = true;
     } catch (Exception $e) {
         execute_query($pdo, "CREATE TABLE IF NOT EXISTS order_confirmation_assignments (
             id INT AUTO_INCREMENT PRIMARY KEY,
             order_id INT NOT NULL,
             rep_id INT NOT NULL,
+            warehouse_id INT NULL,
             assigned_by INT NULL,
             notes TEXT NULL,
             status VARCHAR(32) NOT NULL DEFAULT 'assigned',
@@ -1965,12 +2009,14 @@ function ensure_order_confirmation_assignments_table($pdo) {
             KEY idx_order_confirmation_rep_status (rep_id, status),
             KEY idx_order_confirmation_status (status)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        if (!column_exists($pdo, 'order_confirmation_assignments', 'warehouse_id')) execute_query($pdo, "ALTER TABLE order_confirmation_assignments ADD COLUMN warehouse_id INT NULL");
         if (!column_exists($pdo, 'order_confirmation_assignments', 'assigned_by')) execute_query($pdo, "ALTER TABLE order_confirmation_assignments ADD COLUMN assigned_by INT NULL");
         if (!column_exists($pdo, 'order_confirmation_assignments', 'notes')) execute_query($pdo, "ALTER TABLE order_confirmation_assignments ADD COLUMN notes TEXT NULL");
         if (!column_exists($pdo, 'order_confirmation_assignments', 'status')) execute_query($pdo, "ALTER TABLE order_confirmation_assignments ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'assigned'");
         if (!column_exists($pdo, 'order_confirmation_assignments', 'assigned_at')) execute_query($pdo, "ALTER TABLE order_confirmation_assignments ADD COLUMN assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
         if (!column_exists($pdo, 'order_confirmation_assignments', 'updated_at')) execute_query($pdo, "ALTER TABLE order_confirmation_assignments ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
         try { $pdo->exec("ALTER TABLE order_confirmation_assignments ADD UNIQUE KEY uk_order_confirmation_order (order_id)"); } catch (Exception $ex) {}
+        ensure_orders_status_has_new_confirmation_statuses($pdo);
         $checked = true;
     }
 }
@@ -2205,6 +2251,7 @@ function confirmation_validate_stock_for_orders(PDO $pdo, int $warehouseId, arra
 
     $productIds = array_values(array_unique(array_map(function($r){ return intval($r['product_id'] ?? 0); }, $requirements)));
     $stockByProduct = [];
+    $reservedByProduct = [];
     if (!empty($productIds)) {
         $placeholders = implode(',', array_fill(0, count($productIds), '?'));
         $params = array_merge([$warehouseId], $productIds);
@@ -2218,6 +2265,33 @@ function confirmation_validate_stock_for_orders(PDO $pdo, int $warehouseId, arra
         foreach ($stockRows as $stockRow) {
             $stockByProduct[intval($stockRow['product_id'] ?? 0)] = intval($stockRow['quantity'] ?? 0);
         }
+
+        // Fetch reserved quantities from other confirmed orders
+        $excludeCond = "";
+        $excludeParams = [];
+        if (!empty($orderIds)) {
+            $excludeCond = "AND oca.order_id NOT IN (" . implode(',', array_fill(0, count($orderIds), '?')) . ")";
+            $excludeParams = $orderIds;
+        }
+
+        $sqlReserved = "
+            SELECT 
+                oi.product_id, 
+                COALESCE(SUM(oi.quantity),0) AS reserved_qty
+            FROM order_items oi
+            JOIN order_confirmation_assignments oca ON oi.order_id = oca.order_id
+            WHERE oca.status IN ('assigned', 'confirmed')
+              AND oi.product_id IN ($placeholders)
+              AND (oca.warehouse_id IS NULL OR oca.warehouse_id = ?)
+              $excludeCond
+            GROUP BY oi.product_id
+        ";
+        
+        $paramsReserved = array_merge($productIds, [$warehouseId], $excludeParams);
+        $reservedRows = execute_query($pdo, $sqlReserved, $paramsReserved)->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($reservedRows as $rRow) {
+            $reservedByProduct[intval($rRow['product_id'] ?? 0)] = intval($rRow['reserved_qty'] ?? 0);
+        }
     }
 
     $items = [];
@@ -2225,7 +2299,10 @@ function confirmation_validate_stock_for_orders(PDO $pdo, int $warehouseId, arra
     foreach ($requirements as $req) {
         $pid = intval($req['product_id'] ?? 0);
         $requiredQty = intval($req['required_qty'] ?? 0);
-        $availableQty = intval($stockByProduct[$pid] ?? 0);
+        $physicalQty = intval($stockByProduct[$pid] ?? 0);
+        $reservedQty = intval($reservedByProduct[$pid] ?? 0);
+
+        $availableQty = max(0, $physicalQty - $reservedQty);
         $shortageQty = max(0, $requiredQty - $availableQty);
 
         $row = [
@@ -11708,7 +11785,7 @@ switch ($module) {
                 confirmation_clear_old_assignments($pdo);
 
                 $repId = intval($_GET['rep_id'] ?? 0);
-                $where = ["oca.status IN ('assigned','cancelled')", 'o.id IS NOT NULL', 'DATE(oca.assigned_at) = CURDATE()'];
+                $where = ["oca.status <> 'unassigned'", 'o.id IS NOT NULL', 'DATE(oca.assigned_at) = CURDATE()'];
                 $params = [];
                 if ($repId > 0) {
                     $where[] = 'oca.rep_id = ?';
@@ -12005,24 +12082,25 @@ switch ($module) {
                     break;
                 }
 
-                $assignedBy = isset($_SESSION['user_id']) ? intval($_SESSION['user_id']) : null;
-                $pdo->beginTransaction();
-                foreach ($validOrderIds as $orderId) {
-                    execute_query(
-                        $pdo,
-                        "INSERT INTO order_confirmation_assignments (order_id, rep_id, assigned_by, notes, status, assigned_at, updated_at)
-                         VALUES (?, ?, ?, ?, 'assigned', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                         ON DUPLICATE KEY UPDATE
-                            rep_id = VALUES(rep_id),
-                            assigned_by = VALUES(assigned_by),
-                            notes = VALUES(notes),
-                            status = 'assigned',
-                            assigned_at = CURRENT_TIMESTAMP,
-                            updated_at = CURRENT_TIMESTAMP",
-                        [$orderId, $repId, $assignedBy, $notes !== '' ? $notes : null]
-                    );
-                }
-                $pdo->commit();
+                 $assignedBy = isset($_SESSION['user_id']) ? intval($_SESSION['user_id']) : null;
+                 $pdo->beginTransaction();
+                 foreach ($validOrderIds as $orderId) {
+                     execute_query(
+                         $pdo,
+                         "INSERT INTO order_confirmation_assignments (order_id, rep_id, warehouse_id, assigned_by, notes, status, assigned_at, updated_at)
+                          VALUES (?, ?, ?, ?, ?, 'assigned', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                          ON DUPLICATE KEY UPDATE
+                             rep_id = VALUES(rep_id),
+                             warehouse_id = VALUES(warehouse_id),
+                             assigned_by = VALUES(assigned_by),
+                             notes = VALUES(notes),
+                             status = 'assigned',
+                             assigned_at = CURRENT_TIMESTAMP,
+                             updated_at = CURRENT_TIMESTAMP",
+                         [$orderId, $repId, $warehouseId ?: null, $assignedBy, $notes !== '' ? $notes : null]
+                     );
+                 }
+                 $pdo->commit();
 
                 echo json_encode([
                     'success' => true,
@@ -12101,20 +12179,21 @@ switch ($module) {
                 $input['order_ids'] = [$orderId];
                 $input['notes'] = trim((string)($input['notes'] ?? ''));
 
-                $assignedBy = isset($_SESSION['user_id']) ? intval($_SESSION['user_id']) : null;
-                execute_query(
-                    $pdo,
-                    "INSERT INTO order_confirmation_assignments (order_id, rep_id, assigned_by, notes, status, assigned_at, updated_at)
-                     VALUES (?, ?, ?, ?, 'assigned', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                     ON DUPLICATE KEY UPDATE
-                        rep_id = VALUES(rep_id),
-                        assigned_by = VALUES(assigned_by),
-                        notes = VALUES(notes),
-                        status = 'assigned',
-                        assigned_at = CURRENT_TIMESTAMP,
-                        updated_at = CURRENT_TIMESTAMP",
-                    [$orderId, $repId, $assignedBy, trim((string)($input['notes'] ?? '')) ?: null]
-                );
+                 $assignedBy = isset($_SESSION['user_id']) ? intval($_SESSION['user_id']) : null;
+                 execute_query(
+                     $pdo,
+                     "INSERT INTO order_confirmation_assignments (order_id, rep_id, warehouse_id, assigned_by, notes, status, assigned_at, updated_at)
+                      VALUES (?, ?, ?, ?, ?, 'assigned', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                      ON DUPLICATE KEY UPDATE
+                         rep_id = VALUES(rep_id),
+                         warehouse_id = VALUES(warehouse_id),
+                         assigned_by = VALUES(assigned_by),
+                         notes = VALUES(notes),
+                         status = 'assigned',
+                         assigned_at = CURRENT_TIMESTAMP,
+                         updated_at = CURRENT_TIMESTAMP",
+                     [$orderId, $repId, $warehouseId ?: null, $assignedBy, trim((string)($input['notes'] ?? '')) ?: null]
+                 );
 
                 echo json_encode([
                     'success' => true,
@@ -12137,7 +12216,7 @@ switch ($module) {
                 $repId = intval($input['rep_id'] ?? 0);
                 $barcode = trim((string)($input['barcode'] ?? ''));
                 $decision = strtolower(trim((string)($input['decision'] ?? '')));
-                if ($repId <= 0 || $barcode === '' || !in_array($decision, ['confirm', 'postpone', 'cancel'], true)) {
+                if ($repId <= 0 || $barcode === '' || !in_array($decision, ['confirm', 'postpone', 'cancel', 'close', 'no_answer', 'assign'], true)) {
                     http_response_code(400);
                     echo json_encode(['success' => false, 'message' => 'يجب تحديد المندوب وإدخال الباركود واختيار إجراء صحيح.']);
                     break;
@@ -12152,7 +12231,7 @@ switch ($module) {
 
                 $orderId = intval($order['id'] ?? 0);
                 $assignment = confirmation_fetch_assignment_row($pdo, $orderId);
-                if (!$assignment || ($assignment['status'] ?? '') !== 'assigned') {
+                if (!$assignment || ($assignment['status'] ?? '') === 'unassigned') {
                     http_response_code(404);
                     echo json_encode(['success' => false, 'message' => 'هذا الأوردر غير موجود حالياً في قائمة التأكيد.']);
                     break;
@@ -12163,17 +12242,33 @@ switch ($module) {
                     break;
                 }
 
+                $nextAssignmentStatus = 'assigned';
+                $successMessage = '';
+                $nextOrderStatus = null;
+
                 if ($decision === 'confirm') {
-                    // تأكيد: لا يغير حالة الأوردر — فقط تسجيل قرار التأكيد في جدول التكليفات
                     $nextAssignmentStatus = 'confirmed';
+                    $nextOrderStatus = 'confirmed';
                     $successMessage = 'تم تأكيد الأوردر بنجاح.';
                 } elseif ($decision === 'postpone') {
-                    // تأجيل: لا يغير حالة الأوردر — فقط تسجيل قرار التأجيل في جدول التكليفات
                     $nextAssignmentStatus = 'postponed';
+                    $nextOrderStatus = 'postponed';
                     $successMessage = 'تم تأجيل الأوردر بنجاح.';
+                } elseif ($decision === 'close') {
+                    $nextAssignmentStatus = 'closed';
+                    $nextOrderStatus = 'closed';
+                    $successMessage = 'تم إغلاق الأوردر بنجاح.';
+                } elseif ($decision === 'no_answer') {
+                    $nextAssignmentStatus = 'no_answer';
+                    $nextOrderStatus = 'no_answer';
+                    $successMessage = 'تم تسجيل حالة لا يرد للأوردر.';
+                } elseif ($decision === 'assign') {
+                    $nextAssignmentStatus = 'assigned';
+                    $nextOrderStatus = 'pending';
+                    $successMessage = 'تم إرجاع الأوردر إلى قيد التأكيد النشط.';
                 } else {
-                    // إلغاء: يغير حالة الأوردر إلى ملغي فقط
                     $nextAssignmentStatus = 'cancelled';
+                    $nextOrderStatus = 'cancelled';
                     $successMessage = 'تم إلغاء الأوردر بنجاح.';
                 }
 
@@ -12184,23 +12279,20 @@ switch ($module) {
                     $pdo,
                     "UPDATE order_confirmation_assignments
                      SET status = ?, updated_at = CURRENT_TIMESTAMP
-                     WHERE order_id = ? AND rep_id = ? AND status = 'assigned'",
+                     WHERE order_id = ? AND rep_id = ? AND status <> 'unassigned'",
                     [$nextAssignmentStatus, $orderId, $repId]
                 );
 
-                if ($decision === 'cancel') {
-                    // فقط في حالة الإلغاء يتم تغيير حالة الأوردر
-                    ensure_orders_status_has_cancelled($pdo);
-                    $cancelStatus = 'cancelled';
+                if ($nextOrderStatus !== null) {
                     $updateSql = "UPDATE orders SET status = ?";
-                    $updateParams = [$cancelStatus];
+                    $updateParams = [$nextOrderStatus];
                     if (column_exists($pdo, 'orders', 'updated_at')) {
                         $updateSql .= ", updated_at = NOW()";
                     }
                     $updateSql .= " WHERE id = ?";
                     $updateParams[] = $orderId;
                     execute_query($pdo, $updateSql, $updateParams);
-                    $responseOrderStatus = $cancelStatus;
+                    $responseOrderStatus = $nextOrderStatus;
                 }
 
                 $pdo->commit();
@@ -14053,8 +14145,28 @@ switch ($module) {
                         $prevQty = 0;
                         if ($row = $sstmt->fetch(PDO::FETCH_ASSOC)) {
                             $prevQty = intval($row['quantity']);
-                            if ($prevQty < $qty) {
-                                throw new Exception('Insufficient stock for product #' . $pid);
+                            
+                            $excludeCond = "";
+                            $excludeParams = [];
+                            if (!empty($orders)) {
+                                $excludeCond = "AND oca.order_id NOT IN (" . implode(',', array_fill(0, count($orders), '?')) . ")";
+                                $excludeParams = $orders;
+                            }
+                            $sqlReserved = "
+                                SELECT COALESCE(SUM(oi.quantity),0) AS reserved_qty
+                                FROM order_items oi
+                                JOIN order_confirmation_assignments oca ON oi.order_id = oca.order_id
+                                WHERE oca.status IN ('assigned', 'confirmed')
+                                  AND oi.product_id = ?
+                                  AND (oca.warehouse_id IS NULL OR oca.warehouse_id = ?)
+                                  $excludeCond
+                            ";
+                            $paramsReserved = array_merge([$pid, $warehouseId], $excludeParams);
+                            $reservedQty = intval(execute_query($pdo, $sqlReserved, $paramsReserved)->fetchColumn());
+
+                            $availableQty = max(0, $prevQty - $reservedQty);
+                            if ($availableQty < $qty) {
+                                throw new Exception('Insufficient stock for product #' . $pid . ' (Available: ' . $availableQty . ', Required: ' . $qty . ')');
                             }
                             $newQty = $prevQty - $qty;
                             execute_query($pdo, "UPDATE stock SET quantity = ? WHERE product_id = ? AND warehouse_id = ?", [$newQty, $pid, $warehouseId]);
@@ -14125,9 +14237,9 @@ switch ($module) {
                     // Also allow reassigning returned/pending orders even if they still carry an old rep_id
                     // from a previous assignment (e.g. the order was returned but rep_id was not cleared).
                     if (column_exists($pdo, 'orders', 'updated_at')) {
-                        $pdo->exec("UPDATE orders SET rep_id = $repId, status = '$withRepAllowed', updated_at = NOW() WHERE id IN ($inIds) AND (rep_id IS NULL OR rep_id = $repId OR status IN ('returned', 'pending'))");
+                        $pdo->exec("UPDATE orders SET rep_id = $repId, status = '$withRepAllowed', updated_at = NOW() WHERE id IN ($inIds) AND (rep_id IS NULL OR rep_id = $repId OR status IN ('returned', 'pending', 'postponed', 'confirmed', 'no_answer'))");
                     } else {
-                        $pdo->exec("UPDATE orders SET rep_id = $repId, status = '$withRepAllowed' WHERE id IN ($inIds) AND (rep_id IS NULL OR rep_id = $repId OR status IN ('returned', 'pending'))");
+                        $pdo->exec("UPDATE orders SET rep_id = $repId, status = '$withRepAllowed' WHERE id IN ($inIds) AND (rep_id IS NULL OR rep_id = $repId OR status IN ('returned', 'pending', 'postponed', 'confirmed', 'no_answer'))");
                     }
                     // Log history for each newly assigned order
                     foreach ($orders as $oid) {
@@ -16248,6 +16360,219 @@ switch ($module) {
             } catch (Exception $e) {
                 http_response_code(500);
                 echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+            }
+        } elseif ($action === 'fines_incentives') {
+            try {
+                $params = [$start_date, $end_date];
+                $dtParams = [$start_date, $end_date . ' 23:59:59'];
+
+                // 1. Get employees fines/bonuses
+                $empRows = [];
+                if (table_exists($pdo, 'employee_transactions') && table_exists($pdo, 'employees')) {
+                    $stmt = execute_query($pdo, "
+                        SELECT 
+                            et.id,
+                            'employee' AS role,
+                            e.name AS person_name,
+                            et.type AS tx_type,
+                            et.amount AS amount,
+                            et.date AS tx_date,
+                            et.notes AS notes
+                        FROM employee_transactions et
+                        JOIN employees e ON et.employee_id = e.id
+                        WHERE et.type IN ('bonus', 'penalty')
+                          AND et.date BETWEEN ? AND ?
+                    ", $params);
+                    $empRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                }
+
+                // 2. Get workers fines/bonuses
+                $workerRows = [];
+                if (table_exists($pdo, 'worker_transactions') && table_exists($pdo, 'workers')) {
+                    $stmt = execute_query($pdo, "
+                        SELECT 
+                            wt.id,
+                            'worker' AS role,
+                            w.name AS person_name,
+                            wt.type AS tx_type,
+                            wt.amount AS amount,
+                            wt.date AS tx_date,
+                            wt.notes AS notes
+                        FROM worker_transactions wt
+                        JOIN workers w ON wt.worker_id = w.id
+                        WHERE wt.type IN ('bonus', 'penalty')
+                          AND wt.date BETWEEN ? AND ?
+                    ", $params);
+                    $workerRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                }
+
+                // 3. Get representatives fines/bonuses from transactions table
+                $repRows = [];
+                if (table_exists($pdo, 'transactions') && table_exists($pdo, 'users')) {
+                    $stmt = execute_query($pdo, "
+                        SELECT 
+                            t.id,
+                            u.name AS person_name,
+                            t.amount,
+                            t.type,
+                            t.related_to_type,
+                            DATE(t.transaction_date) AS tx_date,
+                            t.details
+                        FROM transactions t
+                        JOIN users u ON t.related_to_id = u.id
+                        WHERE t.transaction_date BETWEEN ? AND ?
+                    ", $dtParams);
+                    $rawReps = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                    foreach($rawReps as $r) {
+                        $details = json_decode($r['details'] ?? '{}', true) ?: [];
+                        $isRepFineOrIncentive = false;
+                        
+                        $subtype = $details['subtype'] ?? '';
+                        $title = $details['title'] ?? '';
+                        $reason = $details['reason'] ?? $details['notes'] ?? '';
+                        $txType = $r['type'];
+                        
+                        if (in_array($txType, ['rep_bonus_in', 'rep_penalty'], true) ||
+                            in_array($subtype, ['rep_bonus_in', 'rep_penalty'], true) ||
+                            ($r['related_to_type'] === 'rep' && (mb_strpos($title, 'حافز') !== false || mb_strpos($title, 'غرامة') !== false)) ||
+                            (mb_strpos($title, 'حافز للمندوب') !== false || mb_strpos($title, 'غرامة للمندوب') !== false)
+                        ) {
+                            $isRepFineOrIncentive = true;
+                        }
+                        
+                        if ($isRepFineOrIncentive) {
+                            $mappedType = 'penalty';
+                            if ($txType === 'rep_bonus_in' || $subtype === 'rep_bonus_in' || mb_strpos($title, 'حافز') !== false || floatval($r['amount']) >= 0) {
+                                $mappedType = 'bonus';
+                            }
+                            
+                            $repRows[] = [
+                                'id' => $r['id'],
+                                'role' => 'rep',
+                                'person_name' => $r['person_name'],
+                                'tx_type' => $mappedType,
+                                'amount' => abs(floatval($r['amount'])),
+                                'tx_date' => $r['tx_date'],
+                                'notes' => $reason ?: ($title ?: ($details['notes'] ?? ''))
+                            ];
+                        }
+                    }
+                }
+
+                // Merge all and sort by date descending
+                $all = array_merge($empRows, $workerRows, $repRows);
+                usort($all, function($a, $b) {
+                    return strcmp($b['tx_date'], $a['tx_date']);
+                });
+
+                // Calculate summary KPIs
+                $total_bonuses = 0;
+                $total_penalties = 0;
+                foreach($all as $row) {
+                    $amt = floatval($row['amount']);
+                    if ($row['tx_type'] === 'bonus') {
+                        $total_bonuses += $amt;
+                    } else {
+                        $total_penalties += $amt;
+                    }
+                }
+
+                echo json_encode([
+                    'success' => true,
+                    'data' => [
+                        'list' => $all,
+                        'total_bonuses' => $total_bonuses,
+                        'total_penalties' => $total_penalties,
+                        'net_amount' => $total_bonuses - $total_penalties
+                    ]
+                ]);
+            } catch (Exception $e) {
+                http_response_code(500);
+                echo json_encode(['success' => false, 'message' => 'Fines & Incentives failed: ' . $e->getMessage()]);
+            }
+        } elseif ($action === 'expenses_report') {
+            try {
+                $dtParams = [$start_date, $end_date . ' 23:59:59'];
+                
+                $sql = "
+                    SELECT 
+                        t.id,
+                        t.transaction_date AS date,
+                        t.type,
+                        t.details,
+                        t.amount,
+                        tr.name AS treasury_name
+                    FROM transactions t
+                    LEFT JOIN treasuries tr ON t.treasury_id = tr.id
+                    WHERE t.amount < 0 
+                      AND (t.type = 'expense' OR JSON_UNQUOTE(JSON_EXTRACT(t.details, '$.subtype')) = 'expense')
+                      AND t.transaction_date BETWEEN ? AND ?
+                    ORDER BY t.transaction_date DESC
+                ";
+                
+                $stmt = execute_query($pdo, $sql, $dtParams);
+                $rawRecords = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                
+                $list = [];
+                $categoryTotals = [
+                    'rent' => 0.0,
+                    'utilities' => 0.0,
+                    'transport' => 0.0,
+                    'maintenance' => 0.0,
+                    'hospitality' => 0.0,
+                    'supplies' => 0.0,
+                    'other' => 0.0
+                ];
+                
+                foreach($rawRecords as $rec) {
+                    $details = json_decode($rec['details'] ?? '{}', true) ?: [];
+                    $amount = abs(floatval($rec['amount']));
+                    $notes = $details['notes'] ?? $details['note'] ?? $details['reason'] ?? '';
+                    
+                    // Categorize based on keywords in notes/description
+                    $category = 'other'; // default "أخرى"
+                    
+                    $notesLower = mb_strtolower($notes);
+                    if (mb_strpos($notesLower, 'إيجار') !== false || mb_strpos($notesLower, 'ايجار') !== false) {
+                        $category = 'rent';
+                    } elseif (mb_strpos($notesLower, 'كهرباء') !== false || mb_strpos($notesLower, 'مياه') !== false || mb_strpos($notesLower, 'ميه') !== false || mb_strpos($notesLower, 'غاز') !== false || mb_strpos($notesLower, 'نت') !== false || mb_strpos($notesLower, 'انترنت') !== false || mb_strpos($notesLower, 'تليفون') !== false || mb_strpos($notesLower, 'هاتف') !== false || mb_strpos($notesLower, 'شحن موبايل') !== false || mb_strpos($notesLower, 'رصيد') !== false) {
+                        $category = 'utilities';
+                    } elseif (mb_strpos($notesLower, 'بنزين') !== false || mb_strpos($notesLower, 'نقل') !== false || mb_strpos($notesLower, 'شحن') !== false || mb_strpos($notesLower, 'سفر') !== false || mb_strpos($notesLower, 'مواصلات') !== false || mb_strpos($notesLower, 'عربيه') !== false || mb_strpos($notesLower, 'سيارة') !== false || mb_strpos($notesLower, 'سياره') !== false) {
+                        $category = 'transport';
+                    } elseif (mb_strpos($notesLower, 'صيانة') !== false || mb_strpos($notesLower, 'تصليح') !== false || mb_strpos($notesLower, 'صيانه') !== false || mb_strpos($notesLower, 'تصليح') !== false) {
+                        $category = 'maintenance';
+                    } elseif (mb_strpos($notesLower, 'شاي') !== false || mb_strpos($notesLower, 'سكر') !== false || mb_strpos($notesLower, 'ضيافة') !== false || mb_strpos($notesLower, 'ضيافه') !== false || mb_strpos($notesLower, 'اكل') !== false || mb_strpos($notesLower, 'طعام') !== false || mb_strpos($notesLower, 'غداء') !== false || mb_strpos($notesLower, 'بوفيه') !== false || mb_strpos($notesLower, 'فطور') !== false || mb_strpos($notesLower, 'قهوة') !== false || mb_strpos($notesLower, 'مشروبات') !== false) {
+                        $category = 'hospitality';
+                    } elseif (mb_strpos($notesLower, 'أدوات') !== false || mb_strpos($notesLower, 'ادوات') !== false || mb_strpos($notesLower, 'قرطاسية') !== false || mb_strpos($notesLower, 'ورق') !== false || mb_strpos($notesLower, 'اقلام') !== false || mb_strpos($notesLower, 'أقلام') !== false || mb_strpos($notesLower, 'مطبوعات') !== false || mb_strpos($notesLower, 'دفاتر') !== false) {
+                        $category = 'supplies';
+                    } else {
+                        $category = 'other';
+                    }
+                    
+                    $categoryTotals[$category] += $amount;
+                    
+                    $list[] = [
+                        'id' => $rec['id'],
+                        'date' => $rec['date'],
+                        'type' => $rec['type'],
+                        'category' => $category,
+                        'notes' => $notes ?: $rec['type'],
+                        'amount' => $amount,
+                        'treasury_name' => $rec['treasury_name'] ?? 'غير محدد'
+                    ];
+                }
+                
+                echo json_encode([
+                    'success' => true,
+                    'data' => [
+                        'list' => $list,
+                        'totals' => $categoryTotals,
+                        'total_expenses' => array_sum($categoryTotals)
+                    ]
+                ]);
+            } catch (Exception $e) {
+                http_response_code(500);
+                echo json_encode(['success' => false, 'message' => 'Expenses report failed: ' . $e->getMessage()]);
             }
         }
         break;

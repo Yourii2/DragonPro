@@ -115,7 +115,12 @@ try {
         'report_daily_treasury' => $input['report_daily_treasury'] ?? 'false',
         'report_daily_audit' => $input['report_daily_audit'] ?? 'false',
         'report_auto' => $input['report_auto'] ?? 'false',
-        'wa_templates' => $input['wa_templates'] ?? ''
+        'wa_templates' => $input['wa_templates'] ?? '',
+        'whatsapp_access_token' => $input['whatsapp_access_token'] ?? '',
+        'whatsapp_phone_id' => $input['whatsapp_phone_id'] ?? '',
+        'whatsapp_verify_token' => $input['whatsapp_verify_token'] ?? '',
+        'external_api_token' => $input['external_api_token'] ?? '',
+        'telegram_bot_token' => $input['telegram_bot_token'] ?? ''
     ];
 
     // If company logo is a data URL, persist it to app_files and set company_logo_file_id

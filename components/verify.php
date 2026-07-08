@@ -93,7 +93,14 @@ if ($activationResult['success']) {
 // 4. Verify activation status
 $license_check = check_license_validity();
 if ($license_check['status'] !== 'ok') {
-    echo json_encode(['status' => $license_check['status'], 'message' => $license_check['message']]);
+    $response = ['status' => $license_check['status'], 'message' => $license_check['message']];
+    // Include client info so the user can share it with support
+    $response['client_info'] = [
+        'device_code' => $server_hwid ?? ($license_data['hwid'] ?? ''),
+        'company_name' => $license_data['company_name'] ?? '',
+        'company_phone' => $license_data['company_phone'] ?? ''
+    ];
+    echo json_encode($response);
     exit;
 }
 

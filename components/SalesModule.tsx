@@ -83,6 +83,22 @@ const normalizeNumbers = (input: any): string => {
   return s.split('').map(ch => map[ch] || ch).join('');
 };
 
+const formatOrderTime = (dateStr?: string | null): string => {
+  if (!dateStr) return '';
+  try {
+    const isoStr = dateStr.replace(' ', 'T');
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) {
+      const d2 = new Date(dateStr);
+      if (isNaN(d2.getTime())) return '';
+      return d2.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' - ' + d2.toLocaleDateString([], { month: '2-digit', day: '2-digit' });
+    }
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' - ' + d.toLocaleDateString([], { month: '2-digit', day: '2-digit' });
+  } catch {
+    return '';
+  }
+};
+
 const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
   const [view, setView] = useState<string>(initialView || 'new-order');
   const [orderItems, setOrderItems] = useState<OrderItem[]>([{ id: 1, productId: '', color: '', size: '', qty: 1, price: 0 }]);
@@ -167,6 +183,8 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
   const [orders, setOrders] = useState<any[]>([]);
   const [statusFilter, setStatusFilter] = useState<string>('pending');
   const [dateFilter, setDateFilter] = useState<string>('all');
+  const [timeFromFilter, setTimeFromFilter] = useState<string>('');
+  const [timeToFilter, setTimeToFilter] = useState<string>('');
   const [reps, setReps] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
 
@@ -237,6 +255,10 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
     const rawDate = o.created_at || o.createdAt || o.date || '';
     const orderDateStr = rawDate ? String(rawDate).slice(0, 10) : '';
     const matchesDate = dateFilter === 'all' || !dateFilter || orderDateStr === dateFilter;
+    // Time filter (HH:MM)
+    const orderTimeStr = rawDate ? String(rawDate).slice(11, 16) : '';
+    const matchesTimeFrom = !timeFromFilter || !orderTimeStr || orderTimeStr >= timeFromFilter;
+    const matchesTimeTo = !timeToFilter || !orderTimeStr || orderTimeStr <= timeToFilter;
     const phoneA = o.phone || o.phone1 || '';
     const phoneB = o.phone2 || '';
     const term = searchTerm.toLowerCase();
@@ -245,7 +267,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       phoneA.includes(searchTerm) ||
       phoneB.includes(searchTerm) ||
       (o.orderNumber || '').toLowerCase().includes(term);
-    return matchesStatus && matchesSearch && matchesDate;
+    return matchesStatus && matchesSearch && matchesDate && matchesTimeFrom && matchesTimeTo;
   });
 
   const selectedOrderSubtotal = selectedOrder
@@ -272,6 +294,9 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       case 'delivered': return <span className="bg-emerald-100 text-emerald-700 px-2 py-1 rounded-lg text-[10px] font-bold">تم التسليم</span>;
       case 'returned': return <span className="bg-rose-100 text-rose-700 px-2 py-1 rounded-lg text-[10px] font-bold">مرتجع</span>;
       case 'cancelled': return <span className="bg-rose-200 text-rose-800 px-2 py-1 rounded-lg text-[10px] font-bold">ملغي</span>;
+      case 'confirmed': return <span className="bg-emerald-100 text-emerald-700 px-2 py-1 rounded-lg text-[10px] font-bold">مؤكد</span>;
+      case 'closed': return <span className="bg-slate-200 text-slate-800 px-2 py-1 rounded-lg text-[10px] font-bold">مغلق</span>;
+      case 'no_answer': return <span className="bg-amber-100 text-amber-800 px-2 py-1 rounded-lg text-[10px] font-bold">لا يرد</span>;
       default: return <span className="bg-slate-100 text-slate-700 px-2 py-1 rounded-lg text-[10px] font-bold">{status}</span>;
     }
   };
@@ -2389,7 +2414,10 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                     { value: 'in_delivery', label: 'قيد التسليم' },
                     { value: 'delivered', label: 'تم التسليم' },
                     { value: 'returned', label: 'مرتجع' },
-                    { value: 'cancelled', label: 'ملغي' }
+                    { value: 'cancelled', label: 'ملغي' },
+                    { value: 'confirmed', label: 'مؤكد' },
+                    { value: 'closed', label: 'مغلق' },
+                    { value: 'no_answer', label: 'لا يرد' }
                   ]}
                   className="text-sm font-bold min-w-[180px]"
                 />
@@ -2402,6 +2430,31 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                     className="border rounded px-2 py-2 text-sm bg-white text-slate-700 appearance-none"
                   />
                   <button onClick={() => setDateFilter('all')} className="text-xs text-blue-600 px-2">الكل</button>
+                </div>
+                <div className="flex items-center gap-1.5 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                  <label className="text-xs font-bold text-slate-500 shrink-0">من</label>
+                  <input
+                    type="time"
+                    value={timeFromFilter}
+                    onChange={e => setTimeFromFilter(e.target.value)}
+                    className="w-24 border-none bg-transparent text-sm text-slate-700 outline-none focus:ring-0"
+                  />
+                  <span className="text-xs text-slate-400">–</span>
+                  <label className="text-xs font-bold text-slate-500 shrink-0">إلى</label>
+                  <input
+                    type="time"
+                    value={timeToFilter}
+                    onChange={e => setTimeToFilter(e.target.value)}
+                    className="w-24 border-none bg-transparent text-sm text-slate-700 outline-none focus:ring-0"
+                  />
+                  {(timeFromFilter || timeToFilter) ? (
+                    <button
+                      onClick={() => { setTimeFromFilter(''); setTimeToFilter(''); }}
+                      className="text-[10px] font-bold text-rose-500 hover:text-rose-700 shrink-0 px-1"
+                      title="مسح فلتر الوقت"
+                    >✕</button>
+                  ) : null}
                 </div>
                 <button 
                   onClick={toggleSelectAll}
@@ -2449,7 +2502,12 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                         {/* Header */}
                         <div className="flex justify-between items-start mb-4 pl-10">
                             <div>
-                                <span className="inline-block bg-slate-100 text-slate-600 font-mono text-[10px] px-2 py-1 rounded-lg mb-1">{order.orderNumber}</span>
+                                <span className="inline-block bg-slate-100 text-slate-600 font-mono text-[10px] px-2 py-1 rounded-lg mb-1 mr-2">{order.orderNumber}</span>
+                                {(order.created_at || order.createdAt || order.date) && (
+                                  <span className="inline-block bg-blue-50 text-blue-600 font-mono text-[10px] px-2 py-1 rounded-lg mb-1" title="وقت الإضافة">
+                                    🕒 {formatOrderTime(order.created_at || order.createdAt || order.date)}
+                                  </span>
+                                )}
                                 <h3 className="font-bold text-slate-800 text-sm line-clamp-1">{order.customerName}</h3>
                             </div>
                             <div className="flex flex-col items-end gap-1">

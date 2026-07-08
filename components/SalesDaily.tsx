@@ -141,6 +141,22 @@ const StatCard: React.FC<{ label: string; value: React.ReactNode; hint?: string;
   </div>
 );
 
+const formatOrderTime = (dateStr?: string | null): string => {
+  if (!dateStr) return '';
+  try {
+    const isoStr = dateStr.replace(' ', 'T');
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) {
+      const d2 = new Date(dateStr);
+      if (isNaN(d2.getTime())) return '';
+      return d2.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' - ' + d2.toLocaleDateString([], { month: '2-digit', day: '2-digit' });
+    }
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' - ' + d.toLocaleDateString([], { month: '2-digit', day: '2-digit' });
+  } catch {
+    return '';
+  }
+};
+
 const SalesDaily: React.FC = () => {
       // عرض الأوردرات: قائمة أو بطاقات
       const [todayViewMode, setTodayViewMode] = useState<'list' | 'card'>('list');
@@ -294,8 +310,18 @@ const SalesDaily: React.FC = () => {
         const jrCancelled = await prCancelled.json().catch(() => ({ success: false }));
         const listCancelled = jrCancelled.success ? (jrCancelled.data || []) : [];
 
+        // سحب المؤكد من تأكيد الأوردرات
+        const prConfirmed = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=confirmed`);
+        const jrConfirmed = await prConfirmed.json().catch(() => ({ success: false }));
+        const listConfirmed = jrConfirmed.success ? (jrConfirmed.data || []) : [];
+
+        // سحب لا يرد من تأكيد الأوردرات
+        const prNoAnswer = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=no_answer`);
+        const jrNoAnswer = await prNoAnswer.json().catch(() => ({ success: false }));
+        const listNoAnswer = jrNoAnswer.success ? (jrNoAnswer.data || []) : [];
+
         // دمجهم مع بعض
-        setPendingOrdersList([...listPending, ...listReturned, ...listPostponed, ...listCancelled]);
+        setPendingOrdersList([...listPending, ...listReturned, ...listPostponed, ...listCancelled, ...listConfirmed, ...listNoAnswer]);
       } catch (e) {
         console.debug('Failed to load orders lists', e);
       }
@@ -433,15 +459,19 @@ const SalesDaily: React.FC = () => {
   // Called after completeDaily so newly-assigned orders (now with_rep) disappear immediately.
   const refreshPendingOrdersList = async () => {
     try {
-      const [rPending, rReturned, rCancelled] = await Promise.all([
+      const [rPending, rReturned, rCancelled, rConfirmed, rNoAnswer] = await Promise.all([
         fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=pending`).then(r => r.json()).catch(() => ({ success: false })),
         fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=returned`).then(r => r.json()).catch(() => ({ success: false })),
-        fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=cancelled`).then(r => r.json()).catch(() => ({ success: false }))
+        fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=cancelled`).then(r => r.json()).catch(() => ({ success: false })),
+        fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=confirmed`).then(r => r.json()).catch(() => ({ success: false })),
+        fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=no_answer`).then(r => r.json()).catch(() => ({ success: false }))
       ]);
       const listPending  = rPending.success  ? (rPending.data  || []) : [];
       const listReturned = rReturned.success ? (rReturned.data || []) : [];
       const listCancelled = rCancelled.success ? (rCancelled.data || []) : [];
-      setPendingOrdersList([...listPending, ...listReturned, ...listCancelled]);
+      const listConfirmed = rConfirmed.success ? (rConfirmed.data || []) : [];
+      const listNoAnswer = rNoAnswer.success ? (rNoAnswer.data || []) : [];
+      setPendingOrdersList([...listPending, ...listReturned, ...listCancelled, ...listConfirmed, ...listNoAnswer]);
     } catch (e) {
       console.debug('refreshPendingOrdersList failed', e);
     }
@@ -2319,7 +2349,7 @@ const scanBarcodeAddOrder = async () => {
                 <div className="flex gap-2 ml-auto">
                   <button onClick={() => setTodayViewMode('list')} className={`p-2 rounded ${todayViewMode==='list'?'bg-blue-100 text-blue-700':'bg-slate-100'}`} title="عرض كقائمة"><LayoutList size={18} /></button>
                   <button onClick={() => setTodayViewMode('card')} className={`p-2 rounded ${todayViewMode==='card'?'bg-blue-100 text-blue-700':'bg-slate-100'}`} title="عرض كبطاقات"><LayoutGrid size={18} /></button>
-                  <button onClick={() => setTodaySortAsc(v=>!v)} className="p-2 rounded bg-slate-100" title="تبديل ترتيب الفرز"><ArrowDownAZ size={18} style={{display: todaySortAsc?'inline':'none'}} /><ArrowUpAZ size={18} style={{display: !todaySortAsc?'inline':'none'}} /></button>
+                  <button onClick={() => setTodaySortAsc(v=>!v)} className="p-2 rounded bg-slate-100" title={todaySortAsc ? 'من الأقدم إضافةً إلى الأحدث (اضغط للعكس)' : 'من الأحدث إضافةً إلى الأقدم (اضغط للعكس)'}><ArrowDownAZ size={18} style={{display: todaySortAsc?'inline':'none'}} /><ArrowUpAZ size={18} style={{display: !todaySortAsc?'inline':'none'}} /></button>
                 </div>
               </div>
               <div className="text-sm text-slate-500">
@@ -2330,7 +2360,7 @@ const scanBarcodeAddOrder = async () => {
             {todayViewMode === 'list' ? (
               <div className="divide-y max-h-[420px] overflow-auto">
                 {todayOrdersCount === 0 && <div className="p-6 text-center text-slate-400">لم يتم اختيار اوردرات اليوم بعد</div>}
-                {todayOrdersUnique.slice().sort((a, b) => todaySortAsc ? (a.id - b.id) : (b.id - a.id)).map((o: any) => {
+                {(todaySortAsc ? todayOrdersUnique.slice() : todayOrdersUnique.slice().reverse()).map((o: any) => {
                   const sub = orderSubtotal(o);
                   const ship = parseNumeric(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0);
                   const tot = orderTotal(o);
@@ -2357,7 +2387,7 @@ const scanBarcodeAddOrder = async () => {
            ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg gap-5 max-h-[440px] overflow-auto p-2">
                 {todayOrdersCount === 0 && <div className="col-span-full p-6 text-center text-slate-400">لم يتم اختيار اوردرات اليوم بعد</div>}
-                {todayOrdersUnique.slice().sort((a, b) => todaySortAsc ? (a.id - b.id) : (b.id - a.id)).map((o: any) => {
+                {(todaySortAsc ? todayOrdersUnique.slice() : todayOrdersUnique.slice().reverse()).map((o: any) => {
                   const tot = orderTotal(o);
                   return (
                     <div key={o.id} className="relative group bg-white p-0 rounded-3xl border border-slate-200 shadow-sm transition-all duration-300 hover:shadow-xl hover:-translate-y-1">
@@ -2365,7 +2395,12 @@ const scanBarcodeAddOrder = async () => {
                         {/* Header */}
                         <div className="flex justify-between items-start mb-4">
                           <div>
-                            <span className="inline-block bg-slate-100 text-slate-600 font-mono text-[10px] px-2 py-1 rounded-lg mb-1">{o.orderNumber ?? o.order_number ?? o.id}</span>
+                            <span className="inline-block bg-slate-100 text-slate-600 font-mono text-[10px] px-2 py-1 rounded-lg mb-1 mr-2">{o.orderNumber ?? o.order_number ?? o.id}</span>
+                            {(o.created_at || o.createdAt || o.date) && (
+                              <span className="inline-block bg-blue-50 text-blue-600 font-mono text-[10px] px-2 py-1 rounded-lg mb-1" title="وقت الإضافة">
+                                🕒 {formatOrderTime(o.created_at || o.createdAt || o.date)}
+                              </span>
+                            )}
                             <h3 className="font-bold text-slate-800 text-sm line-clamp-1">{o.customerName ?? o.customer_name ?? ''}</h3>
                           </div>
                           <div className="flex flex-col items-end gap-1">
@@ -2477,7 +2512,7 @@ const scanBarcodeAddOrder = async () => {
               </div>
               {assignedViewMode === 'list' ? (
                 <div className="divide-y max-h-[320px] overflow-auto">
-                  {assignedOrders.slice().sort((a, b) => assignedSortAsc ? (a.id - b.id) : (b.id - a.id)).map((o: any) => {
+                  {(assignedSortAsc ? assignedOrders.slice() : assignedOrders.slice().reverse()).map((o: any) => {
                     const sub = orderSubtotal(o);
                     const ship = parseNumeric(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0);
                     const tot = orderTotal(o);
@@ -2501,7 +2536,7 @@ const scanBarcodeAddOrder = async () => {
                 </div>
              ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg gap-5 max-h-[340px] overflow-auto p-2">
-                  {assignedOrders.slice().sort((a, b) => assignedSortAsc ? (a.id - b.id) : (b.id - a.id)).map((o: any) => {
+                  {(assignedSortAsc ? assignedOrders.slice() : assignedOrders.slice().reverse()).map((o: any) => {
                     const tot = orderTotal(o);
                     return (
                       <div key={o.id} className="relative group bg-white p-0 rounded-3xl border border-slate-200 shadow-sm transition-all duration-300 hover:shadow-xl hover:-translate-y-1">
@@ -2509,7 +2544,12 @@ const scanBarcodeAddOrder = async () => {
                           {/* Header */}
                           <div className="flex justify-between items-start mb-4">
                             <div>
-                              <span className="inline-block bg-slate-100 text-slate-600 font-mono text-[10px] px-2 py-1 rounded-lg mb-1">{o.orderNumber ?? o.order_number ?? o.id}</span>
+                              <span className="inline-block bg-slate-100 text-slate-600 font-mono text-[10px] px-2 py-1 rounded-lg mb-1 mr-2">{o.orderNumber ?? o.order_number ?? o.id}</span>
+                              {(o.created_at || o.createdAt || o.date) && (
+                                <span className="inline-block bg-blue-50 text-blue-600 font-mono text-[10px] px-2 py-1 rounded-lg mb-1" title="وقت الإضافة">
+                                  🕒 {formatOrderTime(o.created_at || o.createdAt || o.date)}
+                                </span>
+                              )}
                               <h3 className="font-bold text-slate-800 text-sm line-clamp-1">{o.customerName ?? o.customer_name ?? ''}</h3>
                             </div>
                             <div className="flex flex-col items-end gap-1">

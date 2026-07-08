@@ -54,7 +54,7 @@ export default defineConfig(({ mode }) => {
         protocol: 'wss',
         clientPort: 443,
       }, */
-      /* proxy: {
+      proxy: {
         // Dev-only: proxy only PHP endpoints under /components to Apache.
         // Use a regex key so TS/TSX module requests (e.g. /components/*.tsx)
         // are NOT proxied and remain served by Vite.
@@ -74,7 +74,7 @@ export default defineConfig(({ mode }) => {
             });
           },
         }
-      }, */
+      },
     },
     preview: {
       port: 3000,

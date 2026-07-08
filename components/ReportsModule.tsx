@@ -50,6 +50,8 @@ import ReportCashFlow from './ReportCashFlow';
 import ReportOutstandingBalances from './ReportOutstandingBalances';
 import ReportReturnsAnalysis from './ReportReturnsAnalysis';
 import ReportInventoryValuation from './ReportInventoryValuation';
+import ReportFinesIncentives from './ReportFinesIncentives';
+import ReportExpenses from './ReportExpenses';
 import { useTheme } from './ThemeContext';
 import CustomSelect from './CustomSelect';
 
@@ -634,6 +636,8 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
           <button onClick={() => setActiveSubTab('outstanding-balances')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'outstanding-balances' ? 'bg-rose-500 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><CreditCard size={16} /> أعمار الديون</button>
           <button onClick={() => setActiveSubTab('returns-analysis')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'returns-analysis' ? 'bg-pink-500 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><ArrowLeftRight size={16} /> تحليل المرتجعات</button>
           <button onClick={() => setActiveSubTab('inventory-valuation')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'inventory-valuation' ? 'bg-indigo-500 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Warehouse size={16} /> تقييم المخزون</button>
+          <button onClick={() => setActiveSubTab('fines-incentives')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'fines-incentives' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Coins size={16} /> الغرامات و الحافز</button>
+          <button onClick={() => setActiveSubTab('expenses')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'expenses' ? 'bg-rose-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Receipt size={16} /> المصروفات</button>
         </div>
       </div>
 
@@ -646,6 +650,8 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
       {activeSubTab === 'outstanding-balances' && <ReportOutstandingBalances />}
       {activeSubTab === 'returns-analysis' && <ReportReturnsAnalysis />}
       {activeSubTab === 'inventory-valuation' && <ReportInventoryValuation />}
+      {activeSubTab === 'fines-incentives' && <ReportFinesIncentives />}
+      {activeSubTab === 'expenses' && <ReportExpenses />}
 
       {activeSubTab === 'sales' && (
         <ReportSection
