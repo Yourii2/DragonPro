@@ -534,6 +534,10 @@ function send_telegram_reply($token, $chatId, $text) {
 // ----------------------------------------
 function query_telegram_order_status($pdo, $botToken, $chatId, $orderQuery) {
     try {
+        $orderQuery = trim($orderQuery);
+        if ($orderQuery === '') return;
+
+        // 1. First attempt: Search by exact order number or internal ID
         $stmt = $pdo->prepare("
             SELECT o.*, c.name as customer_name, c.phone1, c.phone2, c.governorate, c.address,
                    u.name as rep_name
@@ -546,69 +550,117 @@ function query_telegram_order_status($pdo, $botToken, $chatId, $orderQuery) {
         $stmt->execute([$orderQuery, $orderQuery]);
         $order = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        if (!$order) {
-            send_telegram_reply($botToken, $chatId, "🔍 *لم يتم العثور على أوردر بالرقم:* `" . $orderQuery . "`\n\nيرجى التأكد من الرقم وإعادة المحاولة.");
+        if ($order) {
+            render_single_order_details($pdo, $botToken, $chatId, $order);
             return;
         }
 
-        // Get items inside this order
-        $stmtItems = $pdo->prepare("
-            SELECT oi.quantity, oi.price_per_unit, pv.name as product_name
-            FROM order_items oi
-            LEFT JOIN product_variants pv ON oi.product_id = pv.id
-            WHERE oi.order_id = ?
+        // 2. Second attempt: Search by customer name or phone number
+        $search = '%' . $orderQuery . '%';
+        $stmt = $pdo->prepare("
+            SELECT o.*, c.name as customer_name, c.phone1, c.phone2, c.governorate, c.address,
+                   u.name as rep_name
+            FROM orders o
+            LEFT JOIN customers c ON o.customer_id = c.id
+            LEFT JOIN users u ON o.rep_id = u.id
+            WHERE c.name LIKE ? OR c.phone1 = ? OR c.phone2 = ? OR c.phone1 LIKE ? OR c.phone2 LIKE ?
+            ORDER BY o.id DESC
+            LIMIT 10
         ");
-        $stmtItems->execute([$order['id']]);
-        $items = $stmtItems->fetchAll(PDO::FETCH_ASSOC);
+        $stmt->execute([$search, $orderQuery, $orderQuery, $search, $search]);
+        $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        $statusAr = get_arabic_status($order['status']);
-        if (strtolower($order['status']) !== 'pending' && !empty($order['rep_name'])) {
-            $statusAr .= " (" . $order['rep_name'] . ")";
+        if (empty($orders)) {
+            send_telegram_reply($botToken, $chatId, "🔍 *لم يتم العثور على أي أوردر بالرقم، الاسم أو الهاتف:* `" . $orderQuery . "`\n\nيرجى التأكد من البيانات والمحاولة مرة أخرى.");
+            return;
         }
-        $subtotal = 0;
 
-        $replyText = "🔍 *تفاصيل الأوردر رقم:* `" . ($order['order_number'] ?? $order['id']) . "`\n\n" .
-                     "👤 *العميل:* " . ($order['customer_name'] ?? 'غير محدد') . "\n" .
-                     "📞 *الهاتف:* " . ($order['phone1'] ?? '') . ($order['phone2'] ? " , " . $order['phone2'] : "") . "\n" .
-                     "📍 *العنوان:* " . ($order['governorate'] ? $order['governorate'] . " - " : "") . ($order['address'] ?? '') . "\n\n" .
-                     "🛍️ *المنتجات:*\n";
-
-        if (!empty($items)) {
-            foreach ($items as $item) {
-                $lineTotal = floatval($item['quantity']) * floatval($item['price_per_unit']);
-                $subtotal += $lineTotal;
-                $replyText .= "• " . ($item['product_name'] ?? 'منتج غير معروف') . " (x" . $item['quantity'] . ") - " . $lineTotal . " ج.م\n";
-            }
+        if (count($orders) === 1) {
+            // Only one order match found, render its full details directly
+            render_single_order_details($pdo, $botToken, $chatId, $orders[0]);
         } else {
-            $replyText .= "• لا توجد منتجات مسجلة.\n";
-            $subtotal = floatval($order['total_amount']) - floatval($order['shipping_fees']);
-        }
+            // Multiple orders match, render a list summary
+            $replyText = "🔍 *نتائج البحث عن:* `" . $orderQuery . "`\n" .
+                         "👥 تم العثور على *" . count($orders) . "* طلبات:\n\n";
 
-        $replyText .= "\n💵 *إجمالي المنتجات:* " . $subtotal . " ج.م\n" .
-                      "🚚 *الشحن:* " . floatval($order['shipping_fees']) . " ج.م\n" .
-                      "💰 *الإجمالي المطلوب:* " . floatval($order['total_amount']) . " ج.م\n\n" .
-                      "-----------------------------------------\n" .
-                      "📊 *الحالة الحالية:* *" . $statusAr . "*\n" .
-                      "🕒 *تاريخ الإضافة:* " . $order['created_at'] . "\n";
+            foreach ($orders as $o) {
+                $statusAr = get_arabic_status($o['status']);
+                if (strtolower($o['status']) !== 'pending' && !empty($o['rep_name'])) {
+                    $statusAr .= " (" . $o['rep_name'] . ")";
+                }
 
-        if ($order['employee']) {
-            $replyText .= "✍️ *الموظف:* " . $order['employee'] . "\n";
-        }
-        if ($order['page']) {
-            $replyText .= "🌐 *الصفحة:* " . $order['page'] . "\n";
-        }
-        if ($order['rep_name']) {
-            $replyText .= "🚴 *المندوب:* " . $order['rep_name'] . "\n";
-        }
-        if ($order['notes']) {
-            $replyText .= "\n📝 *الملاحظات:* " . $order['notes'] . "\n";
-        }
+                $replyText .= "• أوردر: `" . ($o['order_number'] ?? $o['id']) . "` 👤 *" . $o['customer_name'] . "*\n" .
+                              "   👈 الحالة: " . $statusAr . " | 💰 الإجمالي: " . floatval($o['total_amount']) . " ج.م\n" .
+                              "   📅 التاريخ: " . $o['created_at'] . "\n\n";
+            }
 
-        send_telegram_reply($botToken, $chatId, $replyText);
+            $replyText .= "💡 *للتفاصيل الكاملة، أرسل رقم الأوردر مباشرة (مثال: `" . ($orders[0]['order_number'] ?? $orders[0]['id']) . "`)*";
+            send_telegram_reply($botToken, $chatId, $replyText);
+        }
 
     } catch (Exception $e) {
         send_telegram_reply($botToken, $chatId, "❌ حدث خطأ أثناء الاستعلام عن الأوردر.");
     }
+}
+
+// ----------------------------------------
+// Function: Helper to Render Single Order Details
+// ----------------------------------------
+function render_single_order_details($pdo, $botToken, $chatId, $order) {
+    // Get items inside this order
+    $stmtItems = $pdo->prepare("
+        SELECT oi.quantity, oi.price_per_unit, pv.name as product_name
+        FROM order_items oi
+        LEFT JOIN product_variants pv ON oi.product_id = pv.id
+        WHERE oi.order_id = ?
+    ");
+    $stmtItems->execute([$order['id']]);
+    $items = $stmtItems->fetchAll(PDO::FETCH_ASSOC);
+
+    $statusAr = get_arabic_status($order['status']);
+    if (strtolower($order['status']) !== 'pending' && !empty($order['rep_name'])) {
+        $statusAr .= " (" . $order['rep_name'] . ")";
+    }
+    $subtotal = 0;
+
+    $replyText = "🔍 *تفاصيل الأوردر رقم:* `" . ($order['order_number'] ?? $order['id']) . "`\n\n" .
+                 "👤 *العميل:* " . ($order['customer_name'] ?? 'غير محدد') . "\n" .
+                 "📞 *الهاتف:* " . ($order['phone1'] ?? '') . ($order['phone2'] ? " , " . $order['phone2'] : "") . "\n" .
+                 "📍 *العنوان:* " . ($order['governorate'] ? $order['governorate'] . " - " : "") . ($order['address'] ?? '') . "\n\n" .
+                 "🛍️ *المنتجات:*\n";
+
+    if (!empty($items)) {
+        foreach ($items as $item) {
+            $lineTotal = floatval($item['quantity']) * floatval($item['price_per_unit']);
+            $subtotal += $lineTotal;
+            $replyText .= "• " . ($item['product_name'] ?? 'منتج غير معروف') . " (x" . $item['quantity'] . ") - " . $lineTotal . " ج.م\n";
+        }
+    } else {
+        $replyText .= "• لا توجد منتجات مسجلة.\n";
+        $subtotal = floatval($order['total_amount']) - floatval($order['shipping_fees']);
+    }
+
+    $replyText .= "\n💵 *إجمالي المنتجات:* " . $subtotal . " ج.م\n" .
+                  "🚚 *الشحن:* " . floatval($order['shipping_fees']) . " ج.م\n" .
+                  "💰 *الإجمالي المطلوب:* " . floatval($order['total_amount']) . " ج.م\n\n" .
+                  "-----------------------------------------\n" .
+                  "📊 *الحالة الحالية:* *" . $statusAr . "*\n" .
+                  "🕒 *تاريخ الإضافة:* " . $order['created_at'] . "\n";
+
+    if ($order['employee']) {
+        $replyText .= "✍️ *الموظف:* " . $order['employee'] . "\n";
+    }
+    if ($order['page']) {
+        $replyText .= "🌐 *الصفحة:* " . $order['page'] . "\n";
+    }
+    if ($order['rep_name']) {
+        $replyText .= "🚴 *المندوب:* " . $order['rep_name'] . "\n";
+    }
+    if ($order['notes']) {
+        $replyText .= "\n📝 *الملاحظات:* " . $order['notes'] . "\n";
+    }
+
+    send_telegram_reply($botToken, $chatId, $replyText);
 }
 
 // ----------------------------------------
