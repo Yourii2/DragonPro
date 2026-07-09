@@ -195,30 +195,47 @@ if (isset($update['message'])) {
         // Welcome and template guide
         if ($text === '/start' || $text === '/help' || mb_stripos($text, 'مساعدة') !== false) {
             send_telegram_reply($botToken, $chatId, 
-                "مرحباً بك يا " . $senderName . " في نظام إدارة الطلبات DragonPro! 👋\n\n" .
-                "أنا البوت الذكي لاستلام الطلبات وتوثيقها تلقائياً.\n\n" .
-                "📝 لإرسال طلب جديد، يرجى كتابته وإرساله بالصيغة التالية تماماً:\n\n" .
+                "مرحباً بك يا *" . $senderName . "* في نظام إدارة الطلبات DragonPro! 👋\n\n" .
+                "أنا البوت الذكي لاستلام الطلبات والاستعلام عنها تلقائياً.\n\n" .
+                "📝 *أولاً: لإرسال طلب جديد:* يرجى كتابته بالصيغة التالية تماماً:\n\n" .
                 "طلب جديد\n" .
                 "الاسم: محمد أحمد\n" .
                 "الهاتف: 01002003004\n" .
                 "المحافظة: القاهرة\n" .
                 "العنوان: مصر الجديدة، شارع الثورة\n" .
-                "المنتج: جاكت بامب\n" .
-                "الكمية: 2\n" .
-                "السعر: 150\n" .
-                "ملاحظات: يرجى الاتصال قبل الوصول"
+                "تفاصيل المنتج:\n" .
+                "الكميه 1 الاسم دبدوب اللون كاروهات المقاس 8 السعر 250\n" .
+                "الكميه 2 الاسم جاكيت اللون اسود المقاس 10 السعر 350\n" .
+                "الشحن: 50\n" .
+                "الموظف: أحمد\n" .
+                "البيدج: صفحة الفيس بوك\n" .
+                "ملاحظات: يرجى الاتصال قبل الوصول\n\n" .
+                "-----------------------------------------\n" .
+                "🔍 *ثانياً: للاستعلام عن حالة أوردر:* أرسل فقط:\n" .
+                "`استعلام [رقم الأوردر]`\n" .
+                "أو أرسل رقم الأوردر مباشرة (مثال: `105` أو `WOO_9988`)"
             );
         }
         // Order parsing
         elseif (mb_stripos($text, 'طلب جديد') !== false) {
             parse_and_create_telegram_order($pdo, $botToken, $chatId, $text, $senderName);
         }
+        // Order status query matching prefixes: استعلام, حالة, حاله, وضع, status, info
+        elseif (preg_match('/^(?:استعلام|حالة|حاله|وضع|status|info)\s+(.+)/ui', $text, $match)) {
+            $orderQuery = trim($match[1]);
+            query_telegram_order_status($pdo, $botToken, $chatId, $orderQuery);
+        }
+        // Order status query directly (if it looks like a clean order number, length 3-25 alphanumeric/underscores)
+        elseif (preg_match('/^[a-z0-9_-]{3,25}$/i', $text)) {
+            query_telegram_order_status($pdo, $botToken, $chatId, $text);
+        }
         // Unknown command
         else {
             send_telegram_reply($botToken, $chatId, 
                 "⚠️ عذراً، لم أفهم رسالتك.\n\n" .
-                "لإرسال طلب جديد، يجب أن تبدأ الرسالة بكلمة *طلب جديد* وتتبع النموذج المعتمد.\n" .
-                "أرسل كلمة *مساعدة* لعرض النموذج."
+                "• لإرسال طلب جديد، يجب أن تبدأ الرسالة بكلمة *طلب جديد* وتتبع النموذج المعتمد.\n" .
+                "• للاستعلام عن أوردر، أرسل: *استعلام [رقم الأوردر]* أو رقم الأوردر مباشرة.\n\n" .
+                "أرسل كلمة *مساعدة* لعرض الصيغة بالتفصيل."
             );
         }
     }
@@ -510,4 +527,106 @@ function send_telegram_reply($token, $chatId, $text) {
     $response = curl_exec($ch);
     curl_close($ch);
     return true;
+}
+
+// ----------------------------------------
+// Function: Query Order Status from DB
+// ----------------------------------------
+function query_telegram_order_status($pdo, $botToken, $chatId, $orderQuery) {
+    try {
+        $stmt = $pdo->prepare("
+            SELECT o.*, c.name as customer_name, c.phone1, c.phone2, c.governorate, c.address,
+                   u.name as rep_name
+            FROM orders o
+            LEFT JOIN customers c ON o.customer_id = c.id
+            LEFT JOIN users u ON o.rep_id = u.id
+            WHERE o.order_number = ? OR o.id = ?
+            LIMIT 1
+        ");
+        $stmt->execute([$orderQuery, $orderQuery]);
+        $order = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$order) {
+            send_telegram_reply($botToken, $chatId, "🔍 *لم يتم العثور على أوردر بالرقم:* `" . $orderQuery . "`\n\nيرجى التأكد من الرقم وإعادة المحاولة.");
+            return;
+        }
+
+        // Get items inside this order
+        $stmtItems = $pdo->prepare("
+            SELECT oi.quantity, oi.price_per_unit, pv.name as product_name
+            FROM order_items oi
+            LEFT JOIN product_variants pv ON oi.product_id = pv.id
+            WHERE oi.order_id = ?
+        ");
+        $stmtItems->execute([$order['id']]);
+        $items = $stmtItems->fetchAll(PDO::FETCH_ASSOC);
+
+        $statusAr = get_arabic_status($order['status']);
+        if (strtolower($order['status']) !== 'pending' && !empty($order['rep_name'])) {
+            $statusAr .= " (" . $order['rep_name'] . ")";
+        }
+        $subtotal = 0;
+
+        $replyText = "🔍 *تفاصيل الأوردر رقم:* `" . ($order['order_number'] ?? $order['id']) . "`\n\n" .
+                     "👤 *العميل:* " . ($order['customer_name'] ?? 'غير محدد') . "\n" .
+                     "📞 *الهاتف:* " . ($order['phone1'] ?? '') . ($order['phone2'] ? " , " . $order['phone2'] : "") . "\n" .
+                     "📍 *العنوان:* " . ($order['governorate'] ? $order['governorate'] . " - " : "") . ($order['address'] ?? '') . "\n\n" .
+                     "🛍️ *المنتجات:*\n";
+
+        if (!empty($items)) {
+            foreach ($items as $item) {
+                $lineTotal = floatval($item['quantity']) * floatval($item['price_per_unit']);
+                $subtotal += $lineTotal;
+                $replyText .= "• " . ($item['product_name'] ?? 'منتج غير معروف') . " (x" . $item['quantity'] . ") - " . $lineTotal . " ج.م\n";
+            }
+        } else {
+            $replyText .= "• لا توجد منتجات مسجلة.\n";
+            $subtotal = floatval($order['total_amount']) - floatval($order['shipping_fees']);
+        }
+
+        $replyText .= "\n💵 *إجمالي المنتجات:* " . $subtotal . " ج.م\n" .
+                      "🚚 *الشحن:* " . floatval($order['shipping_fees']) . " ج.م\n" .
+                      "💰 *الإجمالي المطلوب:* " . floatval($order['total_amount']) . " ج.م\n\n" .
+                      "-----------------------------------------\n" .
+                      "📊 *الحالة الحالية:* *" . $statusAr . "*\n" .
+                      "🕒 *تاريخ الإضافة:* " . $order['created_at'] . "\n";
+
+        if ($order['employee']) {
+            $replyText .= "✍️ *الموظف:* " . $order['employee'] . "\n";
+        }
+        if ($order['page']) {
+            $replyText .= "🌐 *الصفحة:* " . $order['page'] . "\n";
+        }
+        if ($order['rep_name']) {
+            $replyText .= "🚴 *المندوب:* " . $order['rep_name'] . "\n";
+        }
+        if ($order['notes']) {
+            $replyText .= "\n📝 *الملاحظات:* " . $order['notes'] . "\n";
+        }
+
+        send_telegram_reply($botToken, $chatId, $replyText);
+
+    } catch (Exception $e) {
+        send_telegram_reply($botToken, $chatId, "❌ حدث خطأ أثناء الاستعلام عن الأوردر.");
+    }
+}
+
+// ----------------------------------------
+// Helper: Map status to Arabic label
+// ----------------------------------------
+function get_arabic_status($status) {
+    switch (strtolower($status)) {
+        case 'pending': return 'قيد الانتظار ⏳';
+        case 'with_rep': return 'مع المندوب 🚴';
+        case 'delivered': return 'تم التسليم بنجاح ✅';
+        case 'returned': return 'مرتجع بالكامل ❌';
+        case 'partial': return 'مرتجع جزئي ⚠️';
+        case 'postponed': return 'مؤجل 📅';
+        case 'cancelled': return 'ملغي 🚫';
+        case 'confirmed': return 'تم التأكيد 👍';
+        case 'closed': return 'مغلق 🔒';
+        case 'no_answer': return 'لا يرد 📞';
+        case 'in_delivery': return 'مع شركة الشحن 🚚';
+        default: return $status;
+    }
 }
