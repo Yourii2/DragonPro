@@ -148,19 +148,19 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
 
   const computeOrderSubtotal = (o:any) => {
     if (!o) return 0;
+    // Prioritize DB-level total/shipping to accurately account for discounts
+    if (o.total_amount !== undefined && o.shipping_fees !== undefined) return Number(o.total_amount || 0) - Number(o.shipping_fees || 0);
+    if (o.total !== undefined && o.shipping !== undefined) return Number(o.total || 0) - Number(o.shipping || 0);
+    
     if (o.subTotal !== undefined) return Number(o.subTotal || 0);
     if (o.sub_total !== undefined) return Number(o.sub_total || 0);
-    // prefer order_items if present
+    // fallback to products list if no total info
     if (o.order_items && Array.isArray(o.order_items) && o.order_items.length>0) {
       return o.order_items.reduce((s:any,it:any) => s + (Number(it.quantity||it.qty||0) * Number(it.price||it.sale_price||it.unit_price||0)), 0);
     }
-    // fallback to products list
     if (o.products && Array.isArray(o.products) && o.products.length>0) {
       return o.products.reduce((s:any,p:any) => s + (Number(p.quantity||p.qty||0) * Number(p.price||p.sale_price||0)), 0);
     }
-    // if total includes shipping, subtract shipping if present
-    if (o.total_amount !== undefined && o.shipping_fees !== undefined) return Number(o.total_amount || 0) - Number(o.shipping_fees || 0);
-    if (o.total !== undefined && o.shipping !== undefined) return Number(o.total || 0) - Number(o.shipping || 0);
     return Number(o.total_amount || o.total || 0);
   };
 

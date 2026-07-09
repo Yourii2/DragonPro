@@ -41,16 +41,6 @@ const computePieces = (order: any) => {
 };
 
 const computeOrderValueWithoutShipping = (order: any) => {
-  const items = order?.products || order?.items || order?.order_items || [];
-  if (items && Array.isArray(items) && items.length > 0) {
-    let sum = 0;
-    items.forEach((item: any) => {
-      const p = parseFloat(item.price_per_unit || item.price) || 0;
-      const q = Number(item.quantity || item.qty) || 0;
-      sum += p * q;
-    });
-    return sum;
-  }
   return (parseFloat(order?.total_amount) || 0) - (parseFloat(order?.shipping_fees) || 0);
 };
 

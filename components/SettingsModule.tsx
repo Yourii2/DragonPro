@@ -206,34 +206,34 @@ const SettingsModule: React.FC = () => {
         const result = await response.json();
         if (result.success && result.data) {
           const settings = result.data;
-          setConfig({
-            name: settings.company_name || '',
-            phone: settings.company_phone || '',
-            address: settings.company_address || '',
-            terms: settings.company_terms || '',
-            currency: settings.currency || 'EGP',
-            salesDisplayMethod: settings.sales_display_method || 'company',
-            productSource: settings.product_source || 'both',
-
-            deliveryMethod: settings.delivery_method || 'reps',
-            purchasePriceType: settings.purchase_price_type || 'full_cost',
-            autoBackup: settings.auto_backup === 'true',
-            backupFrequency: settings.backup_frequency || 'daily',
-            backupEmail: settings.backup_email || '',
-            backupEmailVerified: settings.backup_email_verified === 'true',
-            reportEmail: settings.report_email || '',
-            reportEmailVerified: settings.report_email_verified === 'true',
-            reportDailySales: settings.report_daily_sales === 'true' || settings.report_daily_sales === '1',
-            reportDailyTreasury: settings.report_daily_treasury === 'true' || settings.report_daily_treasury === '1',
-            reportDailyAudit: settings.report_daily_audit === 'true' || settings.report_daily_audit === '1',
-            reportAuto: settings.report_auto === 'true' || settings.report_auto === '1',
-            whatsappTemplates: settings.wa_templates || config.whatsappTemplates,
-            whatsappAccessToken: settings.whatsapp_access_token || '',
-            whatsappPhoneId: settings.whatsapp_phone_id || '',
-            whatsappVerifyToken: settings.whatsapp_verify_token || 'dragon_meta_verify_token',
-            externalApiToken: settings.external_api_token || '',
-            telegramBotToken: settings.telegram_bot_token || ''
-          });
+          setConfig(prev => ({
+            ...prev,
+            name: settings.company_name || prev.name,
+            phone: settings.company_phone || prev.phone,
+            address: settings.company_address || prev.address,
+            terms: settings.company_terms || prev.terms,
+            currency: settings.currency || prev.currency,
+            salesDisplayMethod: settings.sales_display_method || prev.salesDisplayMethod,
+            productSource: settings.product_source || prev.productSource,
+            deliveryMethod: settings.delivery_method || prev.deliveryMethod,
+            purchasePriceType: settings.purchase_price_type || prev.purchasePriceType,
+            autoBackup: settings.auto_backup !== undefined ? settings.auto_backup === 'true' : prev.autoBackup,
+            backupFrequency: settings.backup_frequency || prev.backupFrequency,
+            backupEmail: settings.backup_email || prev.backupEmail,
+            backupEmailVerified: settings.backup_email_verified !== undefined ? settings.backup_email_verified === 'true' : prev.backupEmailVerified,
+            reportEmail: settings.report_email || prev.reportEmail,
+            reportEmailVerified: settings.report_email_verified !== undefined ? settings.report_email_verified === 'true' : prev.reportEmailVerified,
+            reportDailySales: settings.report_daily_sales !== undefined ? (settings.report_daily_sales === 'true' || settings.report_daily_sales === '1') : prev.reportDailySales,
+            reportDailyTreasury: settings.report_daily_treasury !== undefined ? (settings.report_daily_treasury === 'true' || settings.report_daily_treasury === '1') : prev.reportDailyTreasury,
+            reportDailyAudit: settings.report_daily_audit !== undefined ? (settings.report_daily_audit === 'true' || settings.report_daily_audit === '1') : prev.reportDailyAudit,
+            reportAuto: settings.report_auto !== undefined ? (settings.report_auto === 'true' || settings.report_auto === '1') : prev.reportAuto,
+            whatsappTemplates: settings.wa_templates || prev.whatsappTemplates,
+            whatsappAccessToken: settings.whatsapp_access_token || prev.whatsappAccessToken,
+            whatsappPhoneId: settings.whatsapp_phone_id || prev.whatsappPhoneId,
+            whatsappVerifyToken: settings.whatsapp_verify_token || prev.whatsappVerifyToken,
+            externalApiToken: settings.external_api_token || prev.externalApiToken,
+            telegramBotToken: settings.telegram_bot_token || prev.telegramBotToken
+          }));
           if (settings.activation_type || settings.activation_expiry || settings.activation_account_status) {
             const isExpired = parseBool(settings.activation_is_expired);
             setActivation({
