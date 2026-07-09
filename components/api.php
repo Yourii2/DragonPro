@@ -9462,8 +9462,10 @@ switch ($module) {
             if ($ordersHasPage) $extraCols[] = 'o.page';
             $extraColsSql = count($extraCols) > 0 ? (', ' . implode(', ', $extraCols)) : '';
 
-            $sql = "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, o.created_at{$extraColsSql}, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, c.address as address, c.governorate as governorate, o.id as order_id
-                FROM orders o LEFT JOIN customers c ON o.customer_id = c.id";
+            $sql = "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, o.created_at{$extraColsSql}, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, c.address as address, c.governorate as governorate, o.id as order_id, u.name as rep_name
+                FROM orders o 
+                LEFT JOIN customers c ON o.customer_id = c.id
+                LEFT JOIN users u ON o.rep_id = u.id";
             if ($statusFilter) {
                 $sql .= " WHERE o.status = '" . str_replace("'", "\'", $statusFilter) . "'";
             }
@@ -9500,6 +9502,8 @@ switch ($module) {
                     'created_at' => $r['created_at'],
                     'rep_id' => $r['rep_id'],
                     'repId' => $r['rep_id'],
+                    'rep_name' => $r['rep_name'],
+                    'repName' => $r['rep_name'],
                     'employee' => $r['employee'] ?? null,
                     'page' => $r['page'] ?? null,
                     'products' => []
