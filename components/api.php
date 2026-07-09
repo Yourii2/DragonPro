@@ -10210,7 +10210,7 @@ switch ($module) {
                     [$orderId]
                 )->fetchAll(PDO::FETCH_ASSOC);
 
-                $totalReturnedValue  = 0.0;
+                $totalReturnedValue  = max(0, floatval($orderRow['total_amount'] ?? 0) - floatval($orderRow['shipping_fees'] ?? 0));
                 $totalReturnedPieces = 0;
                 $repId = intval($orderRow['rep_id'] ?? 0);
                 $notes = 'full_return';
@@ -10223,7 +10223,6 @@ switch ($module) {
                     $prodId  = intval($oi['product_id'] ?? 0);
                     if ($qty <= 0 || $prodId <= 0) continue;
 
-                    $totalReturnedValue  += $qty * $price;
                     $totalReturnedPieces += $qty;
 
                     // Do not zero out order_items quantity on full return so the original invoice is preserved
@@ -10752,22 +10751,9 @@ switch ($module) {
                         $ordStmt = execute_query($pdo, "SELECT id, total_amount, shipping_fees, rep_id FROM orders WHERE id = ? LIMIT 1", [$id]);
                         $orderRow = $ordStmt->fetch(PDO::FETCH_ASSOC);
 
-                        // compute subtotal (exclude shipping) from order_items when possible
-                        $orderSubtotal = 0;
-                        if (column_exists($pdo, 'order_items', 'quantity')) {
-                            if (column_exists($pdo, 'order_items', 'total_price')) {
-                                $itStmt = execute_query($pdo, "SELECT COALESCE(SUM(total_price),0) as s FROM order_items WHERE order_id = ?", [$id]);
-                                $itRow = $itStmt->fetch(PDO::FETCH_ASSOC);
-                                $orderSubtotal = floatval($itRow['s'] ?? 0);
-                            } else {
-                                $itStmt = execute_query($pdo, "SELECT COALESCE(SUM(quantity * price_per_unit),0) as s FROM order_items WHERE order_id = ?", [$id]);
-                                $itRow = $itStmt->fetch(PDO::FETCH_ASSOC);
-                                $orderSubtotal = floatval($itRow['s'] ?? 0);
-                            }
-                        } else {
-                            $orderSubtotal = floatval((isset($orderRow['total_amount']) ? $orderRow['total_amount'] : 0) - (isset($orderRow['shipping_fees']) ? $orderRow['shipping_fees'] : 0));
-                            if ($orderSubtotal < 0) $orderSubtotal = 0;
-                        }
+                        // compute subtotal (exclude shipping) from order to accurately reflect debt after discounts
+                        $orderSubtotal = floatval(($orderRow['total_amount'] ?? 0) - ($orderRow['shipping_fees'] ?? 0));
+                        if ($orderSubtotal < 0) $orderSubtotal = 0;
 
                         $repForTx = null;
                         if ($repIdProvided) $repForTx = $repId;
