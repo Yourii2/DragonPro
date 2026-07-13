@@ -202,17 +202,17 @@ const SettingsModule: React.FC = () => {
     // Fetch company settings from database
     const fetchSettings = async () => {
       try {
-        const response = await fetch(`${API_BASE_PATH}/get_settings.php`);
+        const response = await fetch(`${API_BASE_PATH}/get_settings.php?_t=${Date.now()}`);
         const result = await response.json();
         if (result.success && result.data) {
           const settings = result.data;
           setConfig(prev => ({
             ...prev,
-            name: settings.company_name || prev.name,
-            phone: settings.company_phone || prev.phone,
-            address: settings.company_address || prev.address,
-            terms: settings.company_terms || prev.terms,
-            currency: settings.currency || prev.currency,
+            name: settings.company_name ?? prev.name,
+            phone: settings.company_phone ?? prev.phone,
+            address: settings.company_address ?? prev.address,
+            terms: settings.company_terms ?? prev.terms,
+            currency: settings.currency ?? prev.currency,
             salesDisplayMethod: settings.sales_display_method || prev.salesDisplayMethod,
             productSource: settings.product_source || prev.productSource,
             deliveryMethod: settings.delivery_method || prev.deliveryMethod,
