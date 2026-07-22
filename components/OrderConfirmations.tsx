@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Swal from 'sweetalert2';
-import { CheckCircle2, CheckSquare, Lock, MapPin, Package2, Phone, PhoneCall, PhoneOff, Printer, RotateCcw, Save, ScanLine, ShieldCheck, Trash2, UserCheck, Users2, WalletCards, XCircle, MessageCircle } from 'lucide-react';
+import { ArrowDownAZ, ArrowUpAZ, CheckCircle2, CheckSquare, Lock, MapPin, Package2, Phone, PhoneCall, PhoneOff, Printer, RotateCcw, Save, ScanLine, ShieldCheck, Trash2, UserCheck, Users2, WalletCards, XCircle, MessageCircle } from 'lucide-react';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { PrintableOrders } from './PrintableOrderCard';
 
@@ -429,6 +429,7 @@ const OrderConfirmations: React.FC = () => {
   const [stockSummaryRows, setStockSummaryRows] = useState<StockSummaryRow[]>([]);
   const [stockSummaryLoading, setStockSummaryLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<string>('confirmed');
+  const [activeSortAsc, setActiveSortAsc] = useState(false);
 
   const [companySettings, setCompanySettings] = useState<any>({
     name: localStorage.getItem('Dragon_company_name') || 'اسم الشركة',
@@ -1379,6 +1380,14 @@ const OrderConfirmations: React.FC = () => {
                         <>
                           <button
                             type="button"
+                            onClick={() => setActiveSortAsc(v => !v)}
+                            className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-black text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                            title={activeSortAsc ? 'من الأقدم إلى الأحدث' : 'من الأحدث إلى الأقدم'}
+                          >
+                            {activeSortAsc ? <ArrowDownAZ size={14} /> : <ArrowUpAZ size={14} />}
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => handleToggleSelectAllActiveOrders(true)}
                             disabled={submitting || loading}
                             className="inline-flex items-center gap-1 rounded-xl border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[11px] font-black text-blue-700 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-200"
@@ -1415,7 +1424,7 @@ const OrderConfirmations: React.FC = () => {
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {activeSelectedRepOrders.map((assignment) => (
+                      {(activeSortAsc ? activeSelectedRepOrders.slice() : activeSelectedRepOrders.slice().reverse()).map((assignment) => (
                         <SmallOrderCard
                           key={`active-${assignment.id}`}
                           assignment={assignment}

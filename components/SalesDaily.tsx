@@ -162,7 +162,7 @@ const SalesDaily: React.FC = () => {
       const [todayViewMode, setTodayViewMode] = useState<'list' | 'card'>('list');
       const [assignedViewMode, setAssignedViewMode] = useState<'list' | 'card'>('list');
       // ترتيب الأوردرات: تصاعدي/تنازلي
-      const [todaySortAsc, setTodaySortAsc] = useState(true);
+      const [todaySortAsc, setTodaySortAsc] = useState(false);
       const [assignedSortAsc, setAssignedSortAsc] = useState(true);
     // طريقة الدفع: كاش أو مدفوعات إليكترونية
     const [paymentMethod, setPaymentMethod] = useState<'cash' | 'electronic'>('cash');
