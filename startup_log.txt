@@ -1,24 +1,24 @@
 ==================================== 
 Dragon Pro - Startup Log 
-Date: Fri 07/10/2026 19:59:54.13 
+Date: Wed 07/22/2026  3:57:55.21 
 ==================================== 
-[19:59:54.14] ==================================== 
-[19:59:54.15]    Dragon Pro - Starting Project 
-[19:59:54.16] ==================================== 
-[19:59:57.20] [1/4] Checking XAMPP status... 
-[19:59:57.32] [OK] Apache is already running. 
-[19:59:57.41] [OK] MySQL is already running. 
-[19:59:59.75] [OK] Node is available: v24.14.1 
-[20:00:00.24] [OK] npm.cmd is available: v11.11.0 
-[20:00:02.15] [3/4] Checking for packages... 
-[20:00:02.16] [OK] Packages are already installed. 
-[20:00:04.19] [4/4] Starting development server... 
-[20:00:04.22] Waiting for server to start... 
-[20:00:09.36] Opening browser... 
-[20:00:10.37] ==================================== 
-[20:00:10.60]   Dragon started (development mode) 
-[20:00:10.61] ==================================== 
-[20:00:10.62] Server is running at: http://localhost:3000 
-[20:00:10.62] To stop the server, close the development server window. 
-[20:00:11.06] Verifying daily report/backup scheduler... 
+[ 3:57:55.24] ==================================== 
+[ 3:57:55.24]    Dragon Pro - Starting Project 
+[ 3:57:55.25] ==================================== 
+[ 3:57:58.12] [1/4] Checking XAMPP status... 
+[ 3:57:58.24] [OK] Apache is already running. 
+[ 3:57:58.33] [OK] MySQL is already running. 
+[ 3:58:00.93] [OK] Node is available: v24.14.1 
+[ 3:58:01.45] [OK] npm.cmd is available: v11.11.0 
+[ 3:58:03.21] [3/4] Checking for packages... 
+[ 3:58:03.22] [OK] Packages are already installed. 
+[ 3:58:05.12] [4/4] Starting development server... 
+[ 3:58:05.14] Waiting for server to start... 
+[ 3:58:10.20] Opening browser... 
+[ 3:58:10.36] ==================================== 
+[ 3:58:10.37]   Dragon started (development mode) 
+[ 3:58:10.39] ==================================== 
+[ 3:58:10.40] Server is running at: http://localhost:3000 
+[ 3:58:10.41] To stop the server, close the development server window. 
+[ 3:58:10.42] Verifying daily report/backup scheduler... 
 Daily email reports or backups are not fully configured (make sure email is verified and auto-send/backup options are checked). Scheduler task will not be registered.

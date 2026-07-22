@@ -197,7 +197,8 @@ export const MENU_ITEMS = [
       { label: 'تحليل المرتجعات', slug: 'returns-analysis' },
       { label: 'تقييم المخزون', slug: 'inventory-valuation' },
       { label: 'الغرامات و الحافز', slug: 'fines-incentives' },
-      { label: 'المصروفات', slug: 'expenses' }
+      { label: 'المصروفات', slug: 'expenses' },
+      { label: 'بضائع عهده المندوب', slug: 'rep-custody' }
     ]
   },
   {
