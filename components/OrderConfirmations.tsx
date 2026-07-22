@@ -428,6 +428,7 @@ const OrderConfirmations: React.FC = () => {
   const stockSummaryRequestRef = useRef(0);
   const [stockSummaryRows, setStockSummaryRows] = useState<StockSummaryRow[]>([]);
   const [stockSummaryLoading, setStockSummaryLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<string>('confirmed');
 
   const [companySettings, setCompanySettings] = useState<any>({
     name: localStorage.getItem('Dragon_company_name') || 'اسم الشركة',
@@ -1449,7 +1450,6 @@ const OrderConfirmations: React.FC = () => {
                         { key: 'no_answer', label: 'لا يرد', count: noAnswerAssignments.length, badgeClass: 'bg-amber-500 text-white', tabActiveClass: 'bg-amber-500 text-white border-amber-500', tabInactiveClass: 'bg-white text-amber-700 border-amber-200 dark:bg-slate-800 dark:text-amber-300' },
                         { key: 'cancelled', label: 'ملغية', count: cancelledOrders.length, badgeClass: 'bg-rose-500 text-white', tabActiveClass: 'bg-rose-600 text-white border-rose-600', tabInactiveClass: 'bg-white text-rose-700 border-rose-200 dark:bg-slate-800 dark:text-rose-300' },
                       ];
-                      const [activeTab, setActiveTab] = React.useState<string>('confirmed');
                       const activeTabData = tabs.find(t => t.key === activeTab) || tabs[0];
                       const getTabAssignments = (key: string) => {
                         if (key === 'confirmed') return confirmedAssignments;
