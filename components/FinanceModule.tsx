@@ -40,6 +40,8 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
   const [txFromDate, setTxFromDate] = useState<string>(() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10); });
   const [txToDate, setTxToDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
   const [txTreasuryId, setTxTreasuryId] = useState<string>('');
+  const [txEmployee, setTxEmployee] = useState<string>('');
+  const [txTypeFilter, setTxTypeFilter] = useState<string>('');
   const [userDefaults, setUserDefaults] = useState<any>(null);
   const [accounts, setAccounts] = useState<any[]>([]);
   const [journalEntries, setJournalEntries] = useState<any[]>([]);
@@ -228,13 +230,7 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
     }
   };
 
-  const visibleTransactions = useMemo(() => {
-    return (transactions || []).filter((tx: any) => {
-      // Only show transactions linked to a treasury (treasury_id must be present and non-null)
-      const hasTreasury = tx.treasury_id !== null && tx.treasury_id !== undefined && String(tx.treasury_id).trim() !== '';
-      return hasTreasury;
-    });
-  }, [transactions]);
+  // visibleTransactions moved below
 
   const printTxReport = () => {
     const rows = visibleTransactions.map(tx => `
@@ -655,6 +651,33 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
     return getTransactionNotes(tx.details);
     };
 
+  const uniqueEmployees = useMemo(() => {
+    const emps = new Set<string>();
+    (transactions || []).forEach((tx: any) => {
+      if (tx.created_by_name) emps.add(tx.created_by_name);
+    });
+    return Array.from(emps);
+  }, [transactions]);
+
+  const uniqueTypes = useMemo(() => {
+    const types = new Set<string>();
+    (transactions || []).forEach((tx: any) => {
+      const label = getTxDisplayLabel(tx);
+      if (label) types.add(label);
+    });
+    return Array.from(types);
+  }, [transactions]);
+
+  const visibleTransactions = useMemo(() => {
+    return (transactions || []).filter((tx: any) => {
+      const hasTreasury = tx.treasury_id !== null && tx.treasury_id !== undefined && String(tx.treasury_id).trim() !== '';
+      if (!hasTreasury) return false;
+      if (txEmployee && tx.created_by_name !== txEmployee) return false;
+      if (txTypeFilter && getTxDisplayLabel(tx) !== txTypeFilter) return false;
+      return true;
+    });
+  }, [transactions, txEmployee, txTypeFilter]);
+
   const printTreasuryReport = () => {
     if (!selectedTreasury) return;
     const printWindow = window.open('', '_blank');
@@ -963,6 +986,22 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
                 >
                   <option value="">جميع الخزائن</option>
                   {treasuries.map((t: any) => <option key={t.id} value={String(t.id)}>{t.name}</option>)}
+                </select>
+                <select
+                  value={txEmployee}
+                  onChange={e => setTxEmployee(e.target.value)}
+                  className="bg-white dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm text-slate-700 dark:text-white"
+                >
+                  <option value="">كل الموظفين</option>
+                  {uniqueEmployees.map(emp => <option key={emp} value={emp}>{emp}</option>)}
+                </select>
+                <select
+                  value={txTypeFilter}
+                  onChange={e => setTxTypeFilter(e.target.value)}
+                  className="bg-white dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm text-slate-700 dark:text-white"
+                >
+                  <option value="">كل المعاملات</option>
+                  {uniqueTypes.map(type => <option key={type} value={type}>{type}</option>)}
                 </select>
                 <button onClick={() => fetchAllTransactions(txFromDate, txToDate, txTreasuryId)} className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-black">تحديث</button>
                 <button onClick={printTxReport} title="طباعة" className="px-3 py-2 bg-slate-700 text-white rounded-xl text-sm font-black flex items-center gap-1"><Printer size={15}/> طباعة</button>
