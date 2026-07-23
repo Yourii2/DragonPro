@@ -34,17 +34,29 @@ const ReportRepCustody: React.FC = () => {
       try {
         const [ordersRes, repsRes] = await Promise.all([
           fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll`).then(r => r.json()).catch(() => null),
-          fetch(`${API_BASE_PATH}/api.php?module=reps&action=getAll`).then(r => r.json()).catch(() => null)
+          fetch(`${API_BASE_PATH}/api.php?module=users&action=getAllWithBalance&related_to_type=rep`).then(r => r.json()).catch(() => null)
         ]);
 
-        if (ordersRes && ordersRes.success) {
-          // Filter only orders with status 'with_rep'
-          const withRepOrders = (ordersRes.data || []).filter((o: any) => o.status === 'with_rep');
-          setOrders(withRepOrders);
+        if (repsRes && repsRes.success) {
+          const repsList = Array.isArray(repsRes.data) ? repsRes.data : [];
+          setReps(repsList);
+        } else if (repsRes && Array.isArray(repsRes)) {
+          setReps(repsRes);
         }
 
-        if (repsRes && repsRes.success) {
-          setReps(repsRes.data || []);
+        if (ordersRes && ordersRes.success) {
+          const allOrders = ordersRes.data || [];
+          const closedStatuses = ['delivered', 'completed', 'settled', 'closed', 'returned', 'full_return', 'cancelled'];
+          
+          const custodyOrders = allOrders.filter((o: any) => {
+            const repId = o.rep_id ?? o.representative_id ?? o.repId ?? o.user_id;
+            const hasRep = repId !== undefined && repId !== null && String(repId).trim() !== '' && String(repId) !== '0';
+            const status = String(o.status || '').toLowerCase();
+            const isClosed = closedStatuses.includes(status);
+            return hasRep && !isClosed;
+          });
+
+          setOrders(custodyOrders);
         }
       } catch (error) {
         console.error("Failed to load rep custody data", error);
@@ -57,43 +69,97 @@ const ReportRepCustody: React.FC = () => {
     fetchData();
   }, []);
 
+  const parseProductDetails = (rawName: string, rawColor?: string, rawSize?: string, rawBarcode?: string) => {
+    let name = (rawName || '').trim();
+    let color = (rawColor && String(rawColor).trim() !== '' && String(rawColor).trim() !== '—') ? String(rawColor).trim() : '';
+    let size = (rawSize && String(rawSize).trim() !== '' && String(rawSize).trim() !== '—') ? String(rawSize).trim() : '';
+    let barcode = (rawBarcode && String(rawBarcode).trim() !== '' && String(rawBarcode).trim() !== '—') ? String(rawBarcode).trim() : '';
+
+    // If color is missing, extract it from formatted string like "اسم المنتج - اللون: اسود"
+    if (!color && name.includes('اللون:')) {
+      const match = name.match(/اللون:\s*([^\-\–\—\n\r]+)/);
+      if (match && match[1]) {
+        color = match[1].trim();
+      }
+    }
+
+    // If size is missing, extract it from formatted string like "اسم المنتج - المقاس: 8"
+    if (!size && name.includes('المقاس:')) {
+      const match = name.match(/المقاس:\s*([^\-\–\—\n\r]+)/);
+      if (match && match[1]) {
+        size = match[1].trim();
+      }
+    }
+
+    // Clean product name by removing embedded "- اللون: ..." and "- المقاس: ..."
+    if (name.includes('اللون:') || name.includes('المقاس:')) {
+      name = name
+        .replace(/\s*[\-\–\—]?\s*اللون:\s*([^\-\–\—\n\r]+)/gi, '')
+        .replace(/\s*[\-\–\—]?\s*المقاس:\s*([^\-\–\—\n\r]+)/gi, '')
+        .replace(/[\-\–\—\s]+$/, '')
+        .trim();
+    }
+
+    return {
+      productName: name || 'منتج غير معروف',
+      color: color || '—',
+      size: size || '—',
+      barcode: barcode || '—'
+    };
+  };
+
   const custodyData = useMemo(() => {
-    const dataMap: { [productName: string]: { quantity: number; reps: Set<string> } } = {};
+    const dataMap: { [key: string]: { productName: string; color: string; size: string; barcode: string; quantity: number; reps: Set<string> } } = {};
 
     orders.forEach(order => {
+      const repIdStr = String(order.rep_id ?? order.representative_id ?? order.repId ?? order.user_id ?? '');
       // If a specific rep is selected, skip orders not matching
-      if (selectedRepId && String(order.rep_id) !== selectedRepId) return;
+      if (selectedRepId && repIdStr !== selectedRepId) return;
 
-      let items: OrderItem[] = [];
-      try {
-        if (order.items_json) {
-          items = JSON.parse(order.items_json);
+      let items: any[] = [];
+      if (Array.isArray(order.products)) {
+        items = order.products;
+      } else if (Array.isArray(order.order_items)) {
+        items = order.order_items;
+      } else if (Array.isArray(order.items)) {
+        items = order.items;
+      } else {
+        const jsonStr = order.items_json || order.products_json || (typeof order.products === 'string' ? order.products : null) || (typeof order.items === 'string' ? order.items : null);
+        if (jsonStr) {
+          try {
+            const parsed = JSON.parse(jsonStr);
+            if (Array.isArray(parsed)) items = parsed;
+          } catch (e) {}
         }
-      } catch (e) {
-        console.warn(`Failed to parse items for order ${order.id}`);
       }
 
-      const repName = reps.find(r => String(r.id) === String(order.rep_id))?.name || `مندوب #${order.rep_id}`;
+      const matchedRep = reps.find(r => String(r.id) === repIdStr);
+      const repName = matchedRep?.name || order.rep_name || order.representative_name || (repIdStr ? `مندوب #${repIdStr}` : 'غير محدد');
 
       items.forEach(item => {
-        const pName = item.name || item.product_name || 'منتج غير معروف';
-        const qty = Number(item.quantity || item.qty || 0);
+        const rawName = item.name || item.product_name || item.title || item.productName || item.product_title || 'منتج غير معروف';
+        const rawColor = item.color || item.product_color || item.variant_color;
+        const rawSize = item.size || item.product_size || item.variant_size;
+        const rawBarcode = item.barcode || item.sku || item.code || item.product_barcode;
+        const qty = Number(item.quantity ?? item.qty ?? item.count ?? item.pieces ?? 0);
 
         if (qty > 0) {
-          if (!dataMap[pName]) {
-            dataMap[pName] = { quantity: 0, reps: new Set() };
+          const { productName, color, size, barcode } = parseProductDetails(rawName, rawColor, rawSize, rawBarcode);
+          const key = `${productName}___${color}___${size}___${barcode}`;
+
+          if (!dataMap[key]) {
+            dataMap[key] = { productName, color, size, barcode, quantity: 0, reps: new Set() };
           }
-          dataMap[pName].quantity += qty;
-          dataMap[pName].reps.add(repName);
+          dataMap[key].quantity += qty;
+          dataMap[key].reps.add(repName);
         }
       });
     });
 
-    return Object.entries(dataMap).map(([productName, data]) => ({
-      productName,
-      quantity: data.quantity,
+    return Object.values(dataMap).map(data => ({
+      ...data,
       repsArr: Array.from(data.reps)
-    })).sort((a, b) => b.quantity - a.quantity); // Sort by highest quantity first
+    })).sort((a, b) => b.quantity - a.quantity);
 
   }, [orders, selectedRepId, reps]);
 
@@ -115,7 +181,7 @@ const ReportRepCustody: React.FC = () => {
             h1 { text-align: center; color: #1e40af; margin-bottom: 5px; }
             .header-info { text-align: center; font-size: 14px; color: #666; margin-bottom: 20px; }
             table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { border: 1px solid #ccc; padding: 10px; text-align: right; }
+            th, td { border: 1px solid #ccc; padding: 8px 10px; text-align: right; font-size: 13px; }
             th { background-color: #f3f4f6; color: #1f2937; }
             .totals { margin-top: 20px; font-weight: bold; font-size: 18px; text-align: left; }
             @media print { body { -webkit-print-color-adjust: exact; } }
@@ -127,20 +193,28 @@ const ReportRepCustody: React.FC = () => {
           <table>
             <thead>
               <tr>
+                <th>#</th>
                 <th>اسم المنتج</th>
+                <th>اللون</th>
+                <th>المقاس</th>
+                <th>الباركود</th>
                 <th>إجمالي القطع في العهدة</th>
                 ${!selectedRepId ? '<th>المناديب المسند لهم</th>' : ''}
               </tr>
             </thead>
             <tbody>
-              ${custodyData.map(item => `
+              ${custodyData.map((item, idx) => `
                 <tr>
+                  <td>${idx + 1}</td>
                   <td>${item.productName}</td>
+                  <td>${item.color}</td>
+                  <td>${item.size}</td>
+                  <td>${item.barcode}</td>
                   <td>${item.quantity}</td>
                   ${!selectedRepId ? `<td>${item.repsArr.join('، ')}</td>` : ''}
                 </tr>
               `).join('')}
-              ${custodyData.length === 0 ? `<tr><td colspan="${!selectedRepId ? 3 : 2}" style="text-align: center;">لا توجد بضائع في العهدة</td></tr>` : ''}
+              ${custodyData.length === 0 ? `<tr><td colspan="${!selectedRepId ? 7 : 6}" style="text-align: center;">لا توجد بضائع في العهدة</td></tr>` : ''}
             </tbody>
           </table>
           <div class="totals">إجمالي القطع الكلي: ${totalItems}</div>
@@ -156,11 +230,11 @@ const ReportRepCustody: React.FC = () => {
   };
 
   const handleExportCSV = () => {
-    const headers = ['اسم المنتج', 'إجمالي القطع في العهدة'];
+    const headers = ['اسم المنتج', 'اللون', 'المقاس', 'الباركود', 'إجمالي القطع في العهدة'];
     if (!selectedRepId) headers.push('المناديب المسند لهم');
 
     const rows = custodyData.map(item => {
-      const row = [item.productName, String(item.quantity)];
+      const row = [item.productName, item.color, item.size, item.barcode, String(item.quantity)];
       if (!selectedRepId) row.push(item.repsArr.join(' - '));
       return row;
     });
@@ -189,7 +263,7 @@ const ReportRepCustody: React.FC = () => {
             </div>
             <div>
               <h3 className="text-lg font-black text-slate-900 dark:text-white">بضائع عهدة المندوب</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-1">البضائع المتوفرة حالياً في عهدة المناديب غير المسلمة للعملاء</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-1">تفاصيل البضائع المتوفرة حالياً في عهدة المناديب (الأصناف، الألوان، المقاسات)</p>
             </div>
           </div>
           
@@ -228,7 +302,7 @@ const ReportRepCustody: React.FC = () => {
               <div className="text-3xl font-black text-slate-800 dark:text-white">{totalItems.toLocaleString()}</div>
             </div>
             <div className="bg-emerald-50 dark:bg-emerald-900/20 p-5 rounded-2xl border border-emerald-100 dark:border-emerald-800/30 text-right">
-              <div className="text-emerald-600 dark:text-emerald-400 text-sm font-bold mb-2">أنواع المنتجات (أصناف)</div>
+              <div className="text-emerald-600 dark:text-emerald-400 text-sm font-bold mb-2">أنواع الأصناف والأنواع</div>
               <div className="text-3xl font-black text-slate-800 dark:text-white">{custodyData.length.toLocaleString()}</div>
             </div>
             <div className="bg-purple-50 dark:bg-purple-900/20 p-5 rounded-2xl border border-purple-100 dark:border-purple-800/30 text-right">
@@ -243,21 +317,43 @@ const ReportRepCustody: React.FC = () => {
             <table className="w-full text-right text-sm">
               <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400">
                 <tr>
-                  <th className="px-6 py-4 font-bold">اسم المنتج</th>
-                  <th className="px-6 py-4 font-bold">الكمية في العهدة</th>
+                  <th className="px-4 py-4 font-bold">#</th>
+                  <th className="px-6 py-4 font-bold">اسم المنتج / الصنف</th>
+                  <th className="px-4 py-4 font-bold text-center">اللون</th>
+                  <th className="px-4 py-4 font-bold text-center">المقاس</th>
+                  <th className="px-4 py-4 font-bold text-center">الباركود</th>
+                  <th className="px-6 py-4 font-bold text-center">الكمية في العهدة</th>
                   {!selectedRepId && <th className="px-6 py-4 font-bold">موزعة مع (المناديب)</th>}
                 </tr>
               </thead>
               <tbody className="divide-y dark:divide-slate-700 text-slate-700 dark:text-slate-300">
                 {isLoading ? (
                   <tr>
-                    <td colSpan={3} className="px-6 py-10 text-center font-bold text-slate-400">جاري تحميل البيانات...</td>
+                    <td colSpan={!selectedRepId ? 7 : 6} className="px-6 py-10 text-center font-bold text-slate-400">جاري تحميل البيانات...</td>
                   </tr>
                 ) : custodyData.length > 0 ? (
                   custodyData.map((item, index) => (
                     <tr key={index} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                      <td className="px-6 py-4 font-black">{item.productName}</td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-4 text-xs font-bold text-slate-400">{index + 1}</td>
+                      <td className="px-6 py-4 font-black text-slate-800 dark:text-white">{item.productName}</td>
+                      <td className="px-4 py-4 text-center text-xs font-bold">
+                        {item.color !== '—' ? (
+                          <span className="bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                            {item.color}
+                          </span>
+                        ) : <span className="text-slate-400">—</span>}
+                      </td>
+                      <td className="px-4 py-4 text-center text-xs font-bold">
+                        {item.size !== '—' ? (
+                          <span className="bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-lg text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                            {item.size}
+                          </span>
+                        ) : <span className="text-slate-400">—</span>}
+                      </td>
+                      <td className="px-4 py-4 text-center text-xs font-mono font-bold text-slate-500">
+                        {item.barcode !== '—' ? item.barcode : '—'}
+                      </td>
+                      <td className="px-6 py-4 text-center">
                         <span className="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-3 py-1 rounded-full font-bold">
                           {item.quantity} قطعة
                         </span>
@@ -275,7 +371,7 @@ const ReportRepCustody: React.FC = () => {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={3} className="px-6 py-10 text-center font-bold text-slate-400">لا توجد بضائع مسجلة في العهدة حالياً.</td>
+                    <td colSpan={!selectedRepId ? 7 : 6} className="px-6 py-10 text-center font-bold text-slate-400">لا توجد بضائع مسجلة في العهدة حالياً.</td>
                   </tr>
                 )}
               </tbody>

@@ -238,7 +238,7 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
       let totalReturned = 0;
       let totalPartialReturned = 0;
       let totalPartialDelivered = 0;
-      let updatedOrders: any[] = [];
+
       for (const id of ids) {
         const ord = (openRepOrders?.orders || []).find((o: any) => o.id === id);
         if (!ord) continue;
@@ -246,19 +246,18 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
         const products = ord?.products || [];
         // تحقق هل كل المنتجات سيتم إرجاعها (مرتجع كامل)
         const isFullReturn = products.every((p: any) => Number(p.quantity || p.qty || 0) > 0);
-        // إذا كان مرتجع كامل: لا تعدل المنتجات، فقط غير الحالة وأعد الكميات للمخزن
+        
         if (isFullReturn) {
           // إرسال طلب تحديث الحالة فقط
           await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ rep_id: Number(orderRepId), order_ids: [id], status: 'full_return' })
           });
-          // إعادة الكميات للمخزن (API يجب أن يدعم ذلك)
+          // إعادة الكميات للمخزن
           await fetch(`${API_BASE_PATH}/api.php?module=orders&action=returnToStock`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ order_id: id, warehouse_id: warehouseId })
           });
-          // لا تعدل المنتجات في الواجهة
           totalReturned += computeOrderSubtotal(ord);
         } else {
           // مرتجع جزئي: قسم المنتجات المرتجعة عن المسلمة
@@ -272,9 +271,7 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
             });
             totalPartialReturned += returnedProducts.reduce((s: number, p: any) => s + (Number(p.returnQuantity) * Number(p.price || p.sale_price || 0)), 0);
           }
-          // المنتجات المسلمة تبقى كما هي (لا تعدل الشحن)
           if (deliveredProducts.length > 0) {
-            // تحديث حالة الأوردر إلى تسليم جزئي إذا لزم الأمر
             await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ rep_id: Number(orderRepId), order_ids: [id], status: 'partial_return' })
@@ -283,26 +280,34 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
           }
         }
       }
-      // خصم قيمة المرتجع فقط من حساب المندوب (بدون المساس بالشحن)
-      if (totalReturned > 0 && openRepOrders) {
+
+      // 1. إزالة الأوردرات المرتجعة فوراً من الواجهة المحلية لعدم تكرارها أو بقائها في الشاشة
+      setOpenRepOrders((prev: any) => {
+        if (!prev) return prev;
+        const remainingOrders = (prev.orders || []).filter((o: any) => !ids.includes(o.id));
+        return { ...prev, orders: remainingOrders };
+      });
+
+      // 2. تحديث ملخص عهدة المندوب محلياً بالقيم المسترجعة
+      const totalDeduction = totalReturned + totalPartialReturned;
+      if (openRepOrders && openRepOrders.repId) {
         const repIdLocal2 = openRepOrders.repId;
         setRepsSummary(prev => prev.map(r => {
           if (String(r.repId) !== String(repIdLocal2)) return r;
-          return { ...r, balance: Number((r.balance || 0)) - totalReturned };
+          return {
+            ...r,
+            balance: Number(r.balance || 0) - totalDeduction,
+            ordersCount: Math.max(0, (r.ordersCount || 0) - ids.length)
+          };
         }));
-        setOpenRepOrders((prev: any) => prev ? ({ ...prev, balance: Number((prev.balance || 0)) - totalReturned }) : prev);
       }
-      if (totalPartialReturned > 0 && openRepOrders) {
-        const repIdLocal2 = openRepOrders.repId;
-        setRepsSummary(prev => prev.map(r => {
-          if (String(r.repId) !== String(repIdLocal2)) return r;
-          return { ...r, balance: Number((r.balance || 0)) - totalPartialReturned };
-        }));
-        setOpenRepOrders((prev: any) => prev ? ({ ...prev, balance: Number((prev.balance || 0)) - totalPartialReturned }) : prev);
-      }
+
+      // 3. تصفية التحديدات وحالات الباركود
       setSelectedOrderIds([]);
       setIsBarcodeModalOpen(false);
       setScanInput('');
+      setScannedBarcodes([]);
+
       Swal.fire('تم', 'تم تسجيل المرتجع بنجاح.', 'success');
       // تحديث الواجهة: إعادة تحميل الأوردرات
       try {

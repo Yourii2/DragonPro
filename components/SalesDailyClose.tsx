@@ -41,7 +41,24 @@ const computePieces = (order: any) => {
 };
 
 const computeOrderValueWithoutShipping = (order: any) => {
-  return (parseFloat(order?.total_amount) || 0) - (parseFloat(order?.shipping_fees) || 0);
+  if (Array.isArray(order.products) && order.products.length > 0) {
+    return order.products.reduce((s: number, p: any) => {
+      const qty = toNum(p.quantity ?? p.qty ?? 0);
+      let lineTotal = parseNumeric(p.total ?? p.total_price ?? p.lineTotal ?? p.line_total ?? p.amount ?? p.value);
+      if (!lineTotal || lineTotal === 0) {
+        const unit = parseNumeric(p.price ?? p.price_per_unit ?? p.sale_price ?? p.salePrice ?? p.unit_price ?? p.unitPrice);
+        lineTotal = unit * qty;
+      }
+      return s + toNum(lineTotal);
+    }, 0);
+  }
+  const rawSub = parseNumeric(order.subTotal ?? order.total_amount ?? order.total ?? 0);
+  const ship = parseNumeric(order.shipping ?? order.shipping_fees ?? order.shippingCost ?? 0);
+  const totalField = parseNumeric(order.total ?? order.total_amount ?? 0);
+  if ((!order.products || order.products.length === 0) && ship > 0 && totalField > 0 && Math.abs(rawSub - totalField) < 0.001) {
+    return Math.max(0, rawSub - ship);
+  }
+  return rawSub;
 };
 
 

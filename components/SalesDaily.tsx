@@ -612,7 +612,7 @@ const SalesDaily: React.FC = () => {
       return;
     }
 
-    const allowedStatuses = ['pending', 'returned', 'cancelled', 'canceled'];
+    const allowedStatuses = ['pending', 'returned', 'cancelled', 'canceled', 'no_answer', 'closed', 'confirmed'];
     const accepted = toAdd.filter(t => allowedStatuses.includes(String(t.status || 'pending')));
     const rejected = toAdd.filter(t => !allowedStatuses.includes(String(t.status || '')));
 
@@ -655,7 +655,7 @@ const SalesDaily: React.FC = () => {
     }
 
     let successMsg = `تم إضافة ${finallyAccepted.length} اوردرات لليومية.`;
-    if (rejected.length > 0) successMsg += ` ${rejected.length} اوردرات لم تُضاف لأن حالتها ليست 'قيد الانتظار' أو 'مرتجع' أو 'ملغي'.`;
+    if (rejected.length > 0) successMsg += ` ${rejected.length} اوردرات لم تُضاف لأن حالتها غير مسموحة.`;
     if (stockRejected.length > 0) successMsg += ` ${stockRejected.length} اوردرات لم تُضاف لمشاكل في المنتج/المخزون.`;
     Swal.fire('انتهاء', successMsg, 'success');
 
@@ -1067,7 +1067,7 @@ const scanBarcodeAddOrder = async () => {
 
     // --- 5. فحص حالة الاوردر والبحث عن اسم المندوب ---
     const status = String(match.status || 'pending');
-    const allowedStatuses = ['pending', 'returned', 'cancelled', 'canceled'];
+    const allowedStatuses = ['pending', 'returned', 'cancelled', 'canceled', 'no_answer', 'closed', 'confirmed'];
     
     if (!allowedStatuses.includes(status)) {
       
@@ -1101,7 +1101,7 @@ const scanBarcodeAddOrder = async () => {
       // 3. لو الاوردر حالته حاجة تانية (تم التسليم مثلاً)
       const statusAr = getOrderStatusLabelAr(status);
       
-      Swal.fire('عفواً، غير مسموح', `لا يمكن إضافة الاوردر لأن حالته: "${statusAr}".\nمسموح فقط بإضافة الاوردرات "قيد الانتظار" أو "المرتجعة" أو "الملغية".`, 'warning');
+      Swal.fire('عفواً، غير مسموح', `لا يمكن إضافة الاوردر لأن حالته: "${statusAr}".\nمسموح فقط بإضافة الاوردرات "قيد الانتظار"، "المرتجعة"، "الملغية"، "لم يرد"، "مغلق"، أو "مؤكد".`, 'warning');
       setBarcodeInput('');
       return;
     }

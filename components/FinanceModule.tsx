@@ -482,11 +482,11 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
     const treasury = treasuries.find(t => t.id === id);
     if (!treasury) return;
 
-    if (treasury.balance !== 0) {
+    if (Math.abs(Number(treasury.balance || 0)) > 0.001) {
       Swal.fire({
         icon: 'error',
         title: 'عملية مرفوضة',
-        text: `لا يمكن حذف الخزينة "${treasury.name}" لاحتوائها على رصيد مالي. الرصيد الحالي: ${treasury.balance.toLocaleString()} ${currencySymbol}`,
+        text: `لا يمكن حذف الخزينة "${treasury.name}" لاحتوائها على رصيد مالي. الرصيد الحالي: ${(Number(treasury.balance) || 0).toLocaleString()} ${currencySymbol}`,
         confirmButtonText: 'موافق',
       });
       return;

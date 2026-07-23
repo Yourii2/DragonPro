@@ -618,8 +618,14 @@ const OrderConfirmations: React.FC = () => {
   );
 
   const selectedRepOrders = useMemo(
-    () => assignments.filter((assignment) => Number(assignment.rep_id) === Number(selectedRepId)),
-    [assignments, selectedRepId]
+    () => assignments
+      .filter((assignment) => Number(assignment.rep_id) === Number(selectedRepId))
+      .sort((a, b) => {
+        const timeA = new Date(a.assigned_at || 0).getTime();
+        const timeB = new Date(b.assigned_at || 0).getTime();
+        return activeSortAsc ? timeA - timeB : timeB - timeA;
+      }),
+    [assignments, selectedRepId, activeSortAsc]
   );
 
   const activeSelectedRepOrders = useMemo(
@@ -1424,7 +1430,7 @@ const OrderConfirmations: React.FC = () => {
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {(activeSortAsc ? activeSelectedRepOrders.slice() : activeSelectedRepOrders.slice().reverse()).map((assignment) => (
+                      {activeSelectedRepOrders.map((assignment) => (
                         <SmallOrderCard
                           key={`active-${assignment.id}`}
                           assignment={assignment}

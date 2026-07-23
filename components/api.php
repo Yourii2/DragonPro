@@ -11242,8 +11242,14 @@ switch ($module) {
                         return;
                     }
 
-                    execute_query($pdo, "INSERT INTO transactions (type, treasury_id, amount, transaction_date, details) VALUES (?, ?, ?, NOW(), ?)", ['transfer_out', $from_treasury_id, -$amount, json_encode(['notes' => $notes, 'transfer_to' => $to_treasury_id])]);
-                    execute_query($pdo, "INSERT INTO transactions (type, treasury_id, amount, transaction_date, details) VALUES (?, ?, ?, NOW(), ?)", ['transfer_in', $to_treasury_id, $amount, json_encode(['notes' => $notes, 'transfer_from' => $from_treasury_id])]);
+                    $createdBy = isset($_SESSION['user_id']) ? intval($_SESSION['user_id']) : null;
+                    if (column_exists($pdo, 'transactions', 'created_by') && $createdBy) {
+                        execute_query($pdo, "INSERT INTO transactions (type, treasury_id, amount, transaction_date, details, created_by) VALUES (?, ?, ?, NOW(), ?, ?)", ['transfer_out', $from_treasury_id, -$amount, json_encode(['notes' => $notes, 'transfer_to' => $to_treasury_id]), $createdBy]);
+                        execute_query($pdo, "INSERT INTO transactions (type, treasury_id, amount, transaction_date, details, created_by) VALUES (?, ?, ?, NOW(), ?, ?)", ['transfer_in', $to_treasury_id, $amount, json_encode(['notes' => $notes, 'transfer_from' => $from_treasury_id]), $createdBy]);
+                    } else {
+                        execute_query($pdo, "INSERT INTO transactions (type, treasury_id, amount, transaction_date, details) VALUES (?, ?, ?, NOW(), ?)", ['transfer_out', $from_treasury_id, -$amount, json_encode(['notes' => $notes, 'transfer_to' => $to_treasury_id])]);
+                        execute_query($pdo, "INSERT INTO transactions (type, treasury_id, amount, transaction_date, details) VALUES (?, ?, ?, NOW(), ?)", ['transfer_in', $to_treasury_id, $amount, json_encode(['notes' => $notes, 'transfer_from' => $from_treasury_id])]);
+                    }
                     execute_query($pdo, "UPDATE treasuries SET current_balance = current_balance - ? WHERE id = ?", [$amount, $from_treasury_id]);
                     execute_query($pdo, "UPDATE treasuries SET current_balance = current_balance + ? WHERE id = ?", [$amount, $to_treasury_id]);
 
