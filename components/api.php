@@ -12212,7 +12212,7 @@ switch ($module) {
                 $repId = intval($input['rep_id'] ?? 0);
                 $barcode = trim((string)($input['barcode'] ?? ''));
                 $decision = strtolower(trim((string)($input['decision'] ?? '')));
-                if ($repId <= 0 || $barcode === '' || !in_array($decision, ['confirm', 'postpone', 'cancel', 'close', 'no_answer', 'assign'], true)) {
+                if ($repId <= 0 || $barcode === '' || !in_array($decision, ['confirm', 'postpone', 'postponed', 'cancel', 'close', 'no_answer', 'assign'], true)) {
                     http_response_code(400);
                     echo json_encode(['success' => false, 'message' => 'يجب تحديد المندوب وإدخال الباركود واختيار إجراء صحيح.']);
                     break;
@@ -12246,7 +12246,7 @@ switch ($module) {
                     $nextAssignmentStatus = 'confirmed';
                     $nextOrderStatus = 'confirmed';
                     $successMessage = 'تم تأكيد الأوردر بنجاح.';
-                } elseif ($decision === 'postpone') {
+                } elseif ($decision === 'postpone' || $decision === 'postponed') {
                     $nextAssignmentStatus = 'postponed';
                     $nextOrderStatus = 'postponed';
                     $successMessage = 'تم تأجيل الأوردر بنجاح.';

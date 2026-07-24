@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Swal from 'sweetalert2';
-import { ArrowDownAZ, ArrowUpAZ, CheckCircle2, CheckSquare, Lock, MapPin, Package2, Phone, PhoneCall, PhoneOff, Printer, RotateCcw, Save, ScanLine, ShieldCheck, Trash2, UserCheck, Users2, WalletCards, XCircle, MessageCircle } from 'lucide-react';
+import { ArrowDownAZ, ArrowUpAZ, CheckCircle2, CheckSquare, Clock, Lock, MapPin, Package2, Phone, PhoneCall, PhoneOff, Printer, RotateCcw, Save, ScanLine, ShieldCheck, Trash2, UserCheck, Users2, WalletCards, XCircle, MessageCircle } from 'lucide-react';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { PrintableOrders } from './PrintableOrderCard';
 
@@ -56,7 +56,7 @@ type AssignmentRow = {
   order: OrderRow;
 };
 
-type DecisionType = 'confirm' | 'close' | 'no_answer' | 'cancel' | 'assign';
+type DecisionType = 'confirm' | 'close' | 'no_answer' | 'postponed' | 'cancel' | 'assign';
 
 type StagedDecisionRow = {
   assignment: AssignmentRow;
@@ -115,6 +115,10 @@ const getStatusLabel = (status?: string) => {
       return 'مؤجل';
     case 'cancelled':
       return 'ملغي';
+    case 'no_answer':
+      return 'لا يرد';
+    case 'closed':
+      return 'مغلق';
     case 'with_rep':
       return 'مع المندوب';
     case 'in_delivery':
@@ -157,6 +161,8 @@ const getDecisionLabel = (decision: string) => {
       return 'مغلقة';
     case 'no_answer':
       return 'لا يرد';
+    case 'postponed':
+      return 'مؤجلة';
     case 'cancel':
       return 'ملغية';
     default:
@@ -275,7 +281,7 @@ const SmallOrderCard: React.FC<{
   selected?: boolean;
   onToggleSelect?: (assignment: AssignmentRow, selected: boolean) => void;
   onWhatsApp?: (assignment: AssignmentRow) => void;
-  onUpdateDecision?: (assignment: AssignmentRow, decision: 'confirm' | 'close' | 'no_answer' | 'cancel' | 'assign') => void;
+  onUpdateDecision?: (assignment: AssignmentRow, decision: 'confirm' | 'close' | 'no_answer' | 'postponed' | 'cancel' | 'assign') => void;
 }> = ({ assignment, badgeLabel, badgeClass, iconClass, actionIcon: ActionIcon, actionLabel, actionClass, onAction, actionDisabled = false, selectable = false, selected = false, onToggleSelect, onWhatsApp, onUpdateDecision }) => {
   const order = assignment.order || { id: assignment.order_id };
   const orderProducts = getOrderProducts(order);
@@ -352,7 +358,7 @@ const SmallOrderCard: React.FC<{
           <span>{formatDateTime(assignment.assigned_at)}</span>
         </div>
         {onUpdateDecision ? (
-          <div className="mt-2 grid grid-cols-4 gap-1">
+          <div className="mt-2 grid grid-cols-5 gap-1">
             <button
               type="button"
               onClick={() => onUpdateDecision(assignment, 'confirm')}
@@ -362,6 +368,16 @@ const SmallOrderCard: React.FC<{
             >
               <CheckCircle2 size={12} />
               مؤكد
+            </button>
+            <button
+              type="button"
+              onClick={() => onUpdateDecision(assignment, 'postponed')}
+              disabled={actionDisabled}
+              title="مؤجل"
+              className="inline-flex items-center justify-center gap-1 rounded-xl bg-blue-500 px-1 py-2 text-[10px] font-black text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Clock size={12} />
+              مؤجل
             </button>
             <button
               type="button"
@@ -420,7 +436,7 @@ const OrderConfirmations: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [assignBarcode, setAssignBarcode] = useState('');
   const [cancelBarcode, setCancelBarcode] = useState('');
-  const [scanDecision, setScanDecision] = useState<'confirm' | 'close' | 'no_answer' | 'cancel'>('cancel');
+  const [scanDecision, setScanDecision] = useState<'confirm' | 'close' | 'no_answer' | 'postponed' | 'cancel'>('cancel');
   const [ordersToPrint, setOrdersToPrint] = useState<any[] | null>(null);
   const [selectedActiveOrderIds, setSelectedActiveOrderIds] = useState<number[]>([]);
   const [selectedCancelledOrderIds, setSelectedCancelledOrderIds] = useState<number[]>([]);
@@ -653,6 +669,11 @@ const OrderConfirmations: React.FC = () => {
     [selectedRepOrders]
   );
 
+  const postponedAssignments = useMemo(
+    () => selectedRepOrders.filter((assignment) => String(assignment.status || '').toLowerCase() === 'postponed'),
+    [selectedRepOrders]
+  );
+
   const closedAssignments = useMemo(
     () => selectedRepOrders.filter((assignment) => String(assignment.status || '').toLowerCase() === 'closed'),
     [selectedRepOrders]
@@ -812,7 +833,7 @@ const OrderConfirmations: React.FC = () => {
     return assignment;
   };
 
-  const handleDecisionBarcode = async (decision: 'cancel' | 'confirm' | 'close' | 'no_answer') => {
+  const handleDecisionBarcode = async (decision: 'cancel' | 'confirm' | 'close' | 'no_answer' | 'postponed') => {
     const barcode = cancelBarcode.trim();
     if (!requireSelectedRep()) return;
     if (!barcode) {
@@ -849,7 +870,7 @@ const OrderConfirmations: React.FC = () => {
       await loadData(selectedRepId);
       await refreshStockSummary([]);
       setCancelBarcode('');
-      const labels: Record<string, string> = { confirm: 'مؤكد', close: 'مغلق', no_answer: 'لا يرد', cancel: 'ملغي' };
+      const labels: Record<string, string> = { confirm: 'مؤكد', postponed: 'مؤجل', close: 'مغلق', no_answer: 'لا يرد', cancel: 'ملغي' };
       Swal.fire('تم', `تم تسجيل حالة "${labels[decision] || decision}" للأوردر.`, 'success');
     } catch (error: any) {
       Swal.fire('تنبيه', error?.message || 'تعذر تحديث الأوردر.', 'warning');
@@ -858,7 +879,7 @@ const OrderConfirmations: React.FC = () => {
     }
   };
 
-  const handleQuickDecision = async (assignment: AssignmentRow, decision: 'confirm' | 'close' | 'no_answer' | 'cancel' | 'assign') => {
+  const handleQuickDecision = async (assignment: AssignmentRow, decision: 'confirm' | 'close' | 'no_answer' | 'postponed' | 'cancel' | 'assign') => {
     if (!requireSelectedRep()) return;
     const order = assignment.order || { id: assignment.order_id };
     const orderNum = getOrderNumber(order);
@@ -1294,14 +1315,15 @@ const OrderConfirmations: React.FC = () => {
                 {/* 1. اختيار الحالة أولاً */}
                 <div className="mb-4">
                   <label className="mb-2 block text-xs font-black text-slate-600 dark:text-slate-300">الحالة المراد تطبيقها:</label>
-                  <div className="grid grid-cols-4 gap-2">
-                    {(['confirm', 'close', 'no_answer', 'cancel'] as const).map((dec) => {
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {(['confirm', 'postponed', 'close', 'no_answer', 'cancel'] as const).map((dec) => {
                       const isActive = scanDecision === dec;
-                      const labels: Record<string, string> = { confirm: 'مؤكد', close: 'مغلق', no_answer: 'لا يرد', cancel: 'ملغي' };
+                      const labels: Record<string, string> = { confirm: 'مؤكد', postponed: 'مؤجل', close: 'مغلق', no_answer: 'لا يرد', cancel: 'ملغي' };
                       
                       // Active color classes
                       const activeClasses: Record<string, string> = {
                         confirm: 'bg-emerald-500 text-white border-emerald-500 ring-2 ring-emerald-300 dark:ring-emerald-800',
+                        postponed: 'bg-blue-500 text-white border-blue-500 ring-2 ring-blue-300 dark:ring-blue-800',
                         close: 'bg-slate-500 text-white border-slate-500 ring-2 ring-slate-300 dark:ring-slate-700',
                         no_answer: 'bg-amber-500 text-white border-amber-500 ring-2 ring-amber-300 dark:ring-amber-800',
                         cancel: 'bg-rose-500 text-white border-rose-500 ring-2 ring-rose-300 dark:ring-rose-800',
@@ -1371,7 +1393,7 @@ const OrderConfirmations: React.FC = () => {
               <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-black dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
                 اختر مندوباً من القائمة الجانبية لتظهر قائمة الأوردرات هنا.
               </div>
-            ) : activeSelectedRepOrders.length === 0 && cancelledOrders.length === 0 && confirmedAssignments.length === 0 && closedAssignments.length === 0 && noAnswerAssignments.length === 0 ? (
+            ) : activeSelectedRepOrders.length === 0 && cancelledOrders.length === 0 && confirmedAssignments.length === 0 && postponedAssignments.length === 0 && closedAssignments.length === 0 && noAnswerAssignments.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-black dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
                 لا توجد أوردرات حالية مع هذا المندوب.
               </div>
@@ -1461,6 +1483,7 @@ const OrderConfirmations: React.FC = () => {
                     {(() => {
                       const tabs = [
                         { key: 'confirmed', label: 'مؤكدة', count: confirmedAssignments.length, badgeClass: 'bg-emerald-500 text-white', tabActiveClass: 'bg-emerald-600 text-white border-emerald-600', tabInactiveClass: 'bg-white text-emerald-700 border-emerald-200 dark:bg-slate-800 dark:text-emerald-300' },
+                        { key: 'postponed', label: 'مؤجلة', count: postponedAssignments.length, badgeClass: 'bg-blue-500 text-white', tabActiveClass: 'bg-blue-600 text-white border-blue-600', tabInactiveClass: 'bg-white text-blue-700 border-blue-200 dark:bg-slate-800 dark:text-blue-300' },
                         { key: 'closed', label: 'مغلقة', count: closedAssignments.length, badgeClass: 'bg-slate-500 text-white', tabActiveClass: 'bg-slate-600 text-white border-slate-600', tabInactiveClass: 'bg-white text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300' },
                         { key: 'no_answer', label: 'لا يرد', count: noAnswerAssignments.length, badgeClass: 'bg-amber-500 text-white', tabActiveClass: 'bg-amber-500 text-white border-amber-500', tabInactiveClass: 'bg-white text-amber-700 border-amber-200 dark:bg-slate-800 dark:text-amber-300' },
                         { key: 'cancelled', label: 'ملغية', count: cancelledOrders.length, badgeClass: 'bg-rose-500 text-white', tabActiveClass: 'bg-rose-600 text-white border-rose-600', tabInactiveClass: 'bg-white text-rose-700 border-rose-200 dark:bg-slate-800 dark:text-rose-300' },
@@ -1468,6 +1491,7 @@ const OrderConfirmations: React.FC = () => {
                       const activeTabData = tabs.find(t => t.key === activeTab) || tabs[0];
                       const getTabAssignments = (key: string) => {
                         if (key === 'confirmed') return confirmedAssignments;
+                        if (key === 'postponed') return postponedAssignments;
                         if (key === 'closed') return closedAssignments;
                         if (key === 'no_answer') return noAnswerAssignments;
                         if (key === 'cancelled') return cancelledAssignments;
@@ -1503,8 +1527,8 @@ const OrderConfirmations: React.FC = () => {
                                   key={`${activeTab}-${assignment.id}`}
                                   assignment={assignment}
                                   badgeLabel={activeTabData.label}
-                                  badgeClass={activeTab === 'confirmed' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200' : activeTab === 'closed' ? 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200' : activeTab === 'no_answer' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200' : 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-200'}
-                                  iconClass={activeTab === 'confirmed' ? 'bg-emerald-600' : activeTab === 'closed' ? 'bg-slate-600' : activeTab === 'no_answer' ? 'bg-amber-500' : 'bg-rose-600'}
+                                  badgeClass={activeTab === 'confirmed' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200' : activeTab === 'postponed' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' : activeTab === 'closed' ? 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200' : activeTab === 'no_answer' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200' : 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-200'}
+                                  iconClass={activeTab === 'confirmed' ? 'bg-emerald-600' : activeTab === 'postponed' ? 'bg-blue-600' : activeTab === 'closed' ? 'bg-slate-600' : activeTab === 'no_answer' ? 'bg-amber-500' : 'bg-rose-600'}
                                   actionLabel={activeTab === 'cancelled' ? 'استرجاع الأوردر' : 'إعادة للنشط'}
                                   actionClass={activeTab === 'cancelled' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-blue-600 hover:bg-blue-700'}
                                   actionIcon={RotateCcw}

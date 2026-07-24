@@ -119,6 +119,10 @@ const getOrderStatusLabelAr = (statusRaw: any) => {
       return 'تم التسليم للعميل';
     case 'closed':
       return 'مغلق';
+    case 'no_answer':
+      return 'لا يرد';
+    case 'confirmed':
+      return 'مؤكد';
     default:
       return status ? status : 'غير محدد';
   }
@@ -459,19 +463,21 @@ const SalesDaily: React.FC = () => {
   // Called after completeDaily so newly-assigned orders (now with_rep) disappear immediately.
   const refreshPendingOrdersList = async () => {
     try {
-      const [rPending, rReturned, rCancelled, rConfirmed, rNoAnswer] = await Promise.all([
+      const [rPending, rReturned, rCancelled, rConfirmed, rNoAnswer, rPostponed] = await Promise.all([
         fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=pending`).then(r => r.json()).catch(() => ({ success: false })),
         fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=returned`).then(r => r.json()).catch(() => ({ success: false })),
         fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=cancelled`).then(r => r.json()).catch(() => ({ success: false })),
         fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=confirmed`).then(r => r.json()).catch(() => ({ success: false })),
-        fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=no_answer`).then(r => r.json()).catch(() => ({ success: false }))
+        fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=no_answer`).then(r => r.json()).catch(() => ({ success: false })),
+        fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=postponed`).then(r => r.json()).catch(() => ({ success: false }))
       ]);
-      const listPending  = rPending.success  ? (rPending.data  || []) : [];
-      const listReturned = rReturned.success ? (rReturned.data || []) : [];
+      const listPending   = rPending.success   ? (rPending.data   || []) : [];
+      const listReturned  = rReturned.success  ? (rReturned.data  || []) : [];
       const listCancelled = rCancelled.success ? (rCancelled.data || []) : [];
       const listConfirmed = rConfirmed.success ? (rConfirmed.data || []) : [];
-      const listNoAnswer = rNoAnswer.success ? (rNoAnswer.data || []) : [];
-      setPendingOrdersList([...listPending, ...listReturned, ...listCancelled, ...listConfirmed, ...listNoAnswer]);
+      const listNoAnswer  = rNoAnswer.success  ? (rNoAnswer.data  || []) : [];
+      const listPostponed = rPostponed.success ? (rPostponed.data || []) : [];
+      setPendingOrdersList([...listPending, ...listReturned, ...listPostponed, ...listCancelled, ...listConfirmed, ...listNoAnswer]);
     } catch (e) {
       console.debug('refreshPendingOrdersList failed', e);
     }
@@ -612,7 +618,7 @@ const SalesDaily: React.FC = () => {
       return;
     }
 
-    const allowedStatuses = ['pending', 'returned', 'cancelled', 'canceled', 'no_answer', 'closed', 'confirmed'];
+    const allowedStatuses = ['pending', 'returned', 'cancelled', 'canceled', 'no_answer', 'closed', 'confirmed', 'postponed', 'deferred'];
     const accepted = toAdd.filter(t => allowedStatuses.includes(String(t.status || 'pending')));
     const rejected = toAdd.filter(t => !allowedStatuses.includes(String(t.status || '')));
 
@@ -1067,7 +1073,7 @@ const scanBarcodeAddOrder = async () => {
 
     // --- 5. فحص حالة الاوردر والبحث عن اسم المندوب ---
     const status = String(match.status || 'pending');
-    const allowedStatuses = ['pending', 'returned', 'cancelled', 'canceled', 'no_answer', 'closed', 'confirmed'];
+    const allowedStatuses = ['pending', 'returned', 'cancelled', 'canceled', 'no_answer', 'closed', 'confirmed', 'postponed', 'deferred'];
     
     if (!allowedStatuses.includes(status)) {
       
