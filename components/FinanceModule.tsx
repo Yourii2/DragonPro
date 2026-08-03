@@ -427,7 +427,7 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
   const handleOpenModal = (treasury: any = null) => {
     if (treasury) {
       setEditingTreasury(treasury);
-      setFormData({ name: treasury.name, type: treasury.type });
+      setFormData({ name: treasury.name || '', type: treasury.type || 'نقدي' });
     } else {
       setEditingTreasury(null);
       setFormData({ name: '', type: 'نقدي' });
@@ -437,7 +437,7 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name) return;
+    if (!formData.name || !formData.name.trim()) return;
 
     try {
       const url = editingTreasury 
@@ -445,8 +445,8 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
         : `${API_BASE_PATH}/api.php?module=treasuries&action=create`;
       
       const body = editingTreasury
-        ? { ...formData, id: editingTreasury.id }
-        : formData;
+        ? { name: formData.name.trim(), type: formData.type || 'نقدي', id: editingTreasury.id }
+        : { name: formData.name.trim(), type: formData.type || 'نقدي' };
       
       const response = await fetch(url, {
         method: 'POST',
@@ -460,6 +460,8 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
         // Refresh treasuries list
         await fetchAllTreasuries();
         setIsModalOpen(false);
+        setFormData({ name: '', type: 'نقدي' });
+        setEditingTreasury(null);
       } else {
         Swal.fire({
           icon: 'error',

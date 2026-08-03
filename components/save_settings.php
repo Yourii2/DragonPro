@@ -120,7 +120,11 @@ try {
         'whatsapp_phone_id' => $input['whatsapp_phone_id'] ?? '',
         'whatsapp_verify_token' => $input['whatsapp_verify_token'] ?? '',
         'external_api_token' => $input['external_api_token'] ?? '',
-        'telegram_bot_token' => $input['telegram_bot_token'] ?? ''
+        'telegram_bot_token' => $input['telegram_bot_token'] ?? '',
+        'telegram_ai_api_key' => $input['telegram_ai_api_key'] ?? '',
+        'telegram_ai_provider' => $input['telegram_ai_provider'] ?? 'gemini',
+        'telegram_notify_customers' => $input['telegram_notify_customers'] ?? 'true',
+        'tg_templates' => $input['tg_templates'] ?? ''
     ];
 
     // If company logo is a data URL, persist it to app_files and set company_logo_file_id

@@ -84,7 +84,16 @@ const SettingsModule: React.FC = () => {
     whatsappPhoneId: '',
     whatsappVerifyToken: 'dragon_meta_verify_token',
     externalApiToken: '',
-    telegramBotToken: ''
+    telegramBotToken: '',
+    telegramAiApiKey: '',
+    telegramAiProvider: 'gemini',
+    telegramNotifyCustomers: true,
+    telegramTemplates: localStorage.getItem('Dragon_tg_templates') || JSON.stringify([
+      { id: 'conf', name: 'تأكيد الأوردر', text: 'مرحباً [الاسم] 👋، تم تأكيد طلبك رقم [رقم_الطلب] بقيمة [المبلغ] ج.م. شكراً لتعاملك معنا!' },
+      { id: 'track', name: 'متابعة الشحن', text: 'عزيزي [الاسم] 🚚، طلبك رقم [رقم_الطلب] الآن مع المندوب [اسم_المندوب] وهو في الطريق إليك.' },
+      { id: 'deliver', name: 'تم التسليم', text: 'تم تسليم أوردرك رقم [رقم_الطلب] بنجاح 🎉! شكراً لتعاملك معنا يا [الاسم].' },
+      { id: 'return', name: 'طلب مرتجع', text: 'مرحباً [الاسم] ⚠️، بخصوص طلبك رقم [رقم_الطلب]، يرجى التواصل معنا للمساعدة.' }
+    ])
   });
 
   const [otpCode, setOtpCode] = useState('');
@@ -232,7 +241,11 @@ const SettingsModule: React.FC = () => {
             whatsappPhoneId: settings.whatsapp_phone_id || prev.whatsappPhoneId,
             whatsappVerifyToken: settings.whatsapp_verify_token || prev.whatsappVerifyToken,
             externalApiToken: settings.external_api_token || prev.externalApiToken,
-            telegramBotToken: settings.telegram_bot_token || prev.telegramBotToken
+            telegramBotToken: settings.telegram_bot_token || prev.telegramBotToken,
+            telegramAiApiKey: settings.telegram_ai_api_key || prev.telegramAiApiKey,
+            telegramAiProvider: settings.telegram_ai_provider || prev.telegramAiProvider,
+            telegramNotifyCustomers: settings.telegram_notify_customers !== undefined ? (settings.telegram_notify_customers === 'true' || settings.telegram_notify_customers === '1') : prev.telegramNotifyCustomers,
+            telegramTemplates: settings.tg_templates || prev.telegramTemplates
           }));
           if (settings.activation_type || settings.activation_expiry || settings.activation_account_status) {
             const isExpired = parseBool(settings.activation_is_expired);
@@ -286,7 +299,11 @@ const SettingsModule: React.FC = () => {
         whatsapp_phone_id: config.whatsappPhoneId,
         whatsapp_verify_token: config.whatsappVerifyToken,
         external_api_token: config.externalApiToken,
-        telegram_bot_token: config.telegramBotToken
+        telegram_bot_token: config.telegramBotToken,
+        telegram_ai_api_key: config.telegramAiApiKey,
+        telegram_ai_provider: config.telegramAiProvider,
+        telegram_notify_customers: config.telegramNotifyCustomers.toString(),
+        tg_templates: config.telegramTemplates
       })
     });
 
@@ -339,6 +356,25 @@ const SettingsModule: React.FC = () => {
     }
   };
 
+  const generateTelegramOtp = async () => {
+    try {
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=telegram&action=generateOtp`);
+      const data = await res.json();
+      if (data.success) {
+        Swal.fire({
+          title: '🔐 كود تفعيل وتوثيق التليجرام',
+          html: `<div style="font-size:2.2rem; font-weight:bold; letter-spacing:4px; color:#2563eb; margin:15px 0;">${data.otp}</div><p style="font-size:12px; color:#64748b; line-height:1.6;">أرسل هذا الكود للبوت في تليجرام لربط حسابك وتفعيل صلاحياتك المعزولة.<br>الكود صالح لمدة 15 دقيقة.</p>`,
+          icon: 'info',
+          confirmButtonText: 'موافق'
+        });
+      } else {
+        Swal.fire('خطأ', data.message || 'فشل توليد كود التفعيل', 'error');
+      }
+    } catch (e) {
+      Swal.fire('خطأ', 'تعذر الاتصال بالخادم', 'error');
+    }
+  };
+
   const updateWaTemplate = (id: string, field: string, value: string) => {
     const temps = JSON.parse(config.whatsappTemplates);
     const next = temps.map((t: any) => t.id === id ? { ...t, [field]: value } : t);
@@ -353,6 +389,22 @@ const SettingsModule: React.FC = () => {
     const temps = JSON.parse(config.whatsappTemplates);
     const next = temps.filter((t: any) => t.id !== id);
     setConfig({ ...config, whatsappTemplates: JSON.stringify(next) });
+  };
+
+  const updateTgTemplate = (id: string, field: string, value: string) => {
+    const temps = JSON.parse(config.telegramTemplates || '[]');
+    const next = temps.map((t: any) => t.id === id ? { ...t, [field]: value } : t);
+    setConfig({ ...config, telegramTemplates: JSON.stringify(next) });
+  };
+  const addTgTemplate = () => {
+    const temps = JSON.parse(config.telegramTemplates || '[]');
+    const next = [...temps, { id: Date.now().toString(), name: 'قالب تليجرام جديد', text: '' }];
+    setConfig({ ...config, telegramTemplates: JSON.stringify(next) });
+  };
+  const deleteTgTemplate = (id: string) => {
+    const temps = JSON.parse(config.telegramTemplates || '[]');
+    const next = temps.filter((t: any) => t.id !== id);
+    setConfig({ ...config, telegramTemplates: JSON.stringify(next) });
   };
 
   const handleSave = async () => {
@@ -815,6 +867,62 @@ const SettingsModule: React.FC = () => {
     }
   };
 
+  const handleClearBrowserCache = async () => {
+    const result = await Swal.fire({
+      title: 'تفريغ كاش المتصفح؟',
+      text: 'سيتم حذف الملفات المؤقتة والذاكرة المخبئية للمتصفح وتحديث التطبيق لأحدث إصدار.',
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: 'نعم، قم بالتفريغ والتحديث',
+      cancelButtonText: 'إلغاء',
+      confirmButtonColor: '#2563eb'
+    });
+
+    if (!result.isConfirmed) return;
+
+    try {
+      Swal.fire({
+        title: 'جاري تفريغ الكاش...',
+        text: 'يرجى الانتظار لحين إزالة الملفات المؤقتة وإعادة التحميل.',
+        allowOutsideClick: false,
+        didOpen: () => {
+          Swal.showLoading();
+        }
+      });
+
+      // 1. Clear Cache Storage API if supported
+      if ('caches' in window) {
+        const cacheKeys = await caches.keys();
+        await Promise.all(cacheKeys.map(key => caches.delete(key)));
+      }
+
+      // 2. Unregister Service Workers if active
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(registrations.map(reg => reg.unregister()));
+      }
+
+      // 3. Clear session storage
+      try {
+        sessionStorage.clear();
+      } catch (e) {}
+
+      // 4. Force reload with cache buster
+      setTimeout(() => {
+        const cleanUrl = window.location.origin + window.location.pathname + '?v=' + Date.now();
+        window.location.href = cleanUrl;
+      }, 800);
+    } catch (error) {
+      console.error('Failed to clear cache:', error);
+      Swal.fire({
+        title: 'خطأ',
+        text: 'حدث خطأ أثناء محاولة تفريغ الكاش.',
+        icon: 'error',
+        confirmButtonText: 'موافق'
+      });
+    }
+  };
+
   return (
     <>
     <div className="space-y-6 max-w-5xl mx-auto pb-12 transition-colors duration-300 animate-in fade-in">
@@ -1241,6 +1349,134 @@ const SettingsModule: React.FC = () => {
                       </div>
                     </div>
                   </div>
+
+                  {/* Telegram User Account Binding OTP */}
+                  <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex flex-col md:flex-row items-center justify-between gap-3 bg-blue-50/50 dark:bg-blue-950/20 p-4 rounded-2xl">
+                    <div>
+                      <h5 className="text-xs font-bold text-slate-800 dark:text-slate-200">ربط وتوثيق حساب التليجرام الخاص بك:</h5>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">ولّد كود تفعيل وأرسله للبوت لتأكيد هويتك وتفعيل أزرار وصلاحيات المناديب/الإدارة المعزولة.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={generateTelegramOtp}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-md whitespace-nowrap"
+                    >
+                      🔑 توليد كود التفعيل (OTP)
+                    </button>
+                  </div>
+
+                  {/* AI Engine Settings Section */}
+                  <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-3">
+                    <h5 className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                      🤖 محرك الذكاء الاصطناعي لبوت التليجرام (AI Natural Language & Voice Parser)
+                    </h5>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                      تيح هذه الميزة تحويل الرسائل الصوتية (Voice Notes) والمحادثات العامية غير المرتبة إلى أوردرات مسجلة بالنظام تلقائياً.
+                    </p>
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 mb-1 block">مزود الذكاء الاصطناعي</label>
+                        <CustomSelect
+                          value={config.telegramAiProvider}
+                          onChange={v => setConfig({...config, telegramAiProvider: v})}
+                          options={[{ value: 'gemini', label: 'Google Gemini AI (موصى به)' }, { value: 'openai', label: 'OpenAI (GPT-4o Mini)' }]}
+                          className="w-full text-xs"
+                        />
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className="text-[10px] font-bold text-slate-400 mb-1 block">مفتاح الـ API (AI Key)</label>
+                        <input
+                          type="password"
+                          value={config.telegramAiApiKey}
+                          onChange={e => setConfig({...config, telegramAiApiKey: e.target.value})}
+                          placeholder="أدخل مفتاح الـ API لـ Gemini أو OpenAI..."
+                          className="w-full bg-white dark:bg-slate-800 border-none rounded-xl py-2 px-3 text-xs font-mono text-slate-700 dark:text-white"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Outbound Customer Telegram Notifications Toggle */}
+                  <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                    <div>
+                      <h5 className="text-xs font-bold text-slate-800 dark:text-slate-200">إرسال إشعارات تليجرام التلقائية للعملاء:</h5>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">إرسال رسائل تلقائية للعميل عند تسجيل الطلب أو تأكيده أو خروجه للشحن مع المندوب أو تسليمه.</p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={config.telegramNotifyCustomers}
+                        onChange={e => setConfig({ ...config, telegramNotifyCustomers: e.target.checked })}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-sky-500"></div>
+                    </label>
+                  </div>
+
+                  {/* Telegram Message Templates Section */}
+                  <div className="pt-6 border-t border-slate-200 dark:border-slate-800 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h5 className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                        <Share2 className="text-sky-500" size={16}/> قوالب رسائل التليجرام (Telegram Message Templates)
+                      </h5>
+                      <button
+                        type="button"
+                        onClick={addTgTemplate}
+                        className="px-3 py-1 bg-sky-50 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400 rounded-xl text-xs font-bold hover:bg-sky-100 transition-colors"
+                      >
+                        + إضافة قالب تليجرام
+                      </button>
+                    </div>
+
+                    <div className="space-y-3">
+                      {(() => {
+                        try {
+                          const templates = JSON.parse(config.telegramTemplates || '[]');
+                          return templates.map((tpl: any) => (
+                            <div key={tpl.id} className="p-3.5 rounded-2xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 relative group">
+                              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                                <div className="md:col-span-1">
+                                  <label className="text-[10px] font-bold text-slate-400 mb-1 block">اسم القالب</label>
+                                  <input
+                                    type="text"
+                                    value={tpl.name}
+                                    onChange={e => updateTgTemplate(tpl.id, 'name', e.target.value)}
+                                    className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl py-2 px-3 text-xs font-bold text-slate-800 dark:text-white"
+                                  />
+                                </div>
+                                <div className="md:col-span-3">
+                                  <label className="text-[10px] font-bold text-slate-400 mb-1 block">نص رسالة التليجرام</label>
+                                  <textarea
+                                    rows={2}
+                                    value={tpl.text}
+                                    onChange={e => updateTgTemplate(tpl.id, 'text', e.target.value)}
+                                    className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl py-2 px-3 text-xs text-slate-700 dark:text-slate-300 resize-none"
+                                  />
+                                  <div className="mt-1 flex flex-wrap gap-1.5">
+                                    {['[الاسم]', '[رقم_الطلب]', '[المبلغ]', '[اسم_المندوب]', '[حالة_الطلب]'].map(tag => (
+                                      <span key={tag} className="text-[9px] bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400 px-1.5 py-0.5 rounded italic">
+                                        {tag}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => deleteTgTemplate(tpl.id)}
+                                className="absolute top-2 left-2 p-1.5 text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg"
+                              >
+                                <XCircle size={14} />
+                              </button>
+                            </div>
+                          ));
+                        } catch (e) {
+                          return <div className="text-xs text-rose-500">حدث خطأ في عرض قوالب التليجرام.</div>;
+                        }
+                      })()}
+                    </div>
+                  </div>
+
                 </div>
               </div>
             </div>
@@ -1607,6 +1843,22 @@ const SettingsModule: React.FC = () => {
                 />
               </div>
             </div>
+          </div>
+
+          {/* تفريغ كاش المتصفح */}
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
+            <h3 className="font-bold flex items-center gap-2 mb-3 text-slate-800 dark:text-slate-100">
+              <RefreshCw className="text-blue-500" size={18}/> تفريغ كاش المتصفح
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 leading-relaxed">
+              إذا كانت بعض التحديثات أو الشاشات لا تظهر بشكل صحيح، يمكنك مسح الملفات المؤقتة المخزنة في المتصفح وتحديث الصفحة فوراً.
+            </p>
+            <button
+              onClick={handleClearBrowserCache}
+              className="w-full py-2.5 bg-slate-100 dark:bg-slate-700/60 hover:bg-blue-600 hover:text-white text-slate-700 dark:text-slate-200 rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-2 active:scale-95 border border-slate-200 dark:border-slate-600 shadow-sm"
+            >
+              <RefreshCw size={14} /> تفريغ الكاش وإعادة التحميل
+            </button>
           </div>
 
           <div className="bg-rose-50 dark:bg-rose-950/20 p-6 rounded-3xl border border-rose-100 dark:border-rose-900/50 shadow-sm">

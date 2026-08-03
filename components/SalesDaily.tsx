@@ -192,10 +192,16 @@ const SalesDaily: React.FC = () => {
   const [barcodeInput, setBarcodeInput] = useState('');
   const [openDailyInfo, setOpenDailyInfo] = useState<{ daily_code: string; journal_id: number } | null>(null);
 
-  // Accounting
+  // Accounting & Dual Payment
   const [prevBalance, setPrevBalance] = useState<number>(0);
   const [paymentAdjustment, setPaymentAdjustment] = useState<number>(0); // Amount Paid Now (deposit) from rep -> company
   const [paymentAction, setPaymentAction] = useState<'collect' | 'pay'>('collect'); // 'collect' = تحصيل من المندوب, 'pay' = دفع إلى المندوب
+
+  const [isSplitPayment, setIsSplitPayment] = useState<boolean>(false);
+  const [cashAmount, setCashAmount] = useState<number>(0);
+  const [cashTreasuryId, setCashTreasuryId] = useState<number | ''>('');
+  const [electronicAmount, setElectronicAmount] = useState<number>(0);
+  const [electronicTreasuryId, setElectronicTreasuryId] = useState<number | ''>('');
 
   // Cashbox / Warehouse
   const [treasuries, setTreasuries] = useState<any[]>([]);
@@ -2116,32 +2122,105 @@ const scanBarcodeAddOrder = async () => {
                   </div>
                 </div>
 
-                {/* صندوق المبلغ المدفوع الآن مع خيار نوع العملية */}
-                <div className="rounded-2xl border-2 border-emerald-200 bg-emerald-50/60 p-3 dark:bg-emerald-900/10 dark:border-emerald-500/30">
-                  <div className="text-xs font-bold text-emerald-800 dark:text-emerald-200 mb-2">المبلغ المدفوع الآن</div>
-                  <div className="flex items-center gap-3 mb-2">
+                {/* صندوق المبلغ المدفوع الآن مع خيار نوع العملية والدفع المقسّم */}
+                <div className="rounded-2xl border-2 border-emerald-200 bg-emerald-50/60 p-3.5 dark:bg-emerald-900/10 dark:border-emerald-500/30 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs font-bold text-emerald-800 dark:text-emerald-200">المبلغ المدفوع الآن</div>
+                    <button
+                      type="button"
+                      onClick={() => setIsSplitPayment(!isSplitPayment)}
+                      className={`text-[11px] px-2.5 py-1 rounded-xl font-bold transition-all border ${isSplitPayment ? 'bg-sky-500 text-white border-sky-400' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-700 hover:bg-slate-100'}`}
+                    >
+                      {isSplitPayment ? '💳 دفع مقسّم (مفعّل)' : '➕ تقسيم كاش/إلكتروني'}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-3">
                     <div className="flex items-center gap-2">
-                      <label className={`inline-flex items-center gap-2 px-3 py-1 rounded-xl cursor-pointer ${paymentAction === 'collect' ? 'bg-emerald-100 text-emerald-800' : 'bg-white dark:bg-slate-900'}`}>
+                      <label className={`inline-flex items-center gap-2 px-3 py-1 rounded-xl cursor-pointer ${paymentAction === 'collect' ? 'bg-emerald-100 text-emerald-800 font-bold' : 'bg-white dark:bg-slate-900'}`}>
                         <input type="radio" name="paymentAction" value="collect" checked={paymentAction === 'collect'} onChange={() => setPaymentAction('collect')} />
                         <span>تحصيل من المندوب</span>
                       </label>
-                      <label className={`inline-flex items-center gap-2 px-3 py-1 rounded-xl cursor-pointer ${paymentAction === 'pay' ? 'bg-rose-100 text-rose-800' : 'bg-white dark:bg-slate-900'}`}>
+                      <label className={`inline-flex items-center gap-2 px-3 py-1 rounded-xl cursor-pointer ${paymentAction === 'pay' ? 'bg-rose-100 text-rose-800 font-bold' : 'bg-white dark:bg-slate-900'}`}>
                         <input type="radio" name="paymentAction" value="pay" checked={paymentAction === 'pay'} onChange={() => setPaymentAction('pay')} />
                         <span>دفع إلى المندوب</span>
                       </label>
                     </div>
-                    <div className={paymentAction === 'collect' ? 'text-emerald-600 text-sm' : 'text-rose-600 text-sm'}>
+                    <div className={paymentAction === 'collect' ? 'text-emerald-600 text-xs font-bold' : 'text-rose-600 text-xs font-bold'}>
                       {paymentAction === 'collect' ? 'تحصيل — يقلل مديونية المندوب' : 'دفع — يزيد مديونية المندوب'}
                     </div>
                   </div>
 
-                  <input
-                    type="number"
-                    min={0}
-                    className="w-full bg-white dark:bg-slate-900 border border-emerald-300 dark:border-emerald-500/40 rounded-xl py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300 dark:focus:ring-emerald-500/40"
-                    value={paymentAdjustment}
-                    onChange={e => setPaymentAdjustment(Math.max(0, toNum(e.target.value)))}
-                  />
+                  {!isSplitPayment ? (
+                    <input
+                      type="number"
+                      min={0}
+                      className="w-full bg-white dark:bg-slate-900 border border-emerald-300 dark:border-emerald-500/40 rounded-xl py-2 px-3 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-emerald-300"
+                      value={paymentAdjustment || ''}
+                      onChange={e => setPaymentAdjustment(Math.max(0, toNum(e.target.value)))}
+                      placeholder="0 ج.م"
+                    />
+                  ) : (
+                    <div className="space-y-2 pt-2 border-t border-emerald-200 dark:border-emerald-800/60">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">💵 مبلغ الكاش</label>
+                          <input
+                            type="number"
+                            min={0}
+                            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 text-xs font-bold"
+                            value={cashAmount || ''}
+                            onChange={e => {
+                              const v = Math.max(0, toNum(e.target.value));
+                              setCashAmount(v);
+                              setPaymentAdjustment(v + electronicAmount);
+                            }}
+                            placeholder="0 ج.م"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">الخزينة النقدية</label>
+                          <select
+                            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-1.5 text-xs font-bold"
+                            value={cashTreasuryId}
+                            onChange={e => setCashTreasuryId(e.target.value ? Number(e.target.value) : '')}
+                          >
+                            <option value="">اختر خزينة الكاش...</option>
+                            {treasuries.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">💳 مبلغ إلكتروني (Vodafone/Instapay)</label>
+                          <input
+                            type="number"
+                            min={0}
+                            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 text-xs font-bold"
+                            value={electronicAmount || ''}
+                            onChange={e => {
+                              const v = Math.max(0, toNum(e.target.value));
+                              setElectronicAmount(v);
+                              setPaymentAdjustment(cashAmount + v);
+                            }}
+                            placeholder="0 ج.م"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">الخزينة الإلكترونية</label>
+                          <select
+                            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-1.5 text-xs font-bold"
+                            value={electronicTreasuryId}
+                            onChange={e => setElectronicTreasuryId(e.target.value ? Number(e.target.value) : '')}
+                          >
+                            <option value="">اختر الخزينة الإلكترونية...</option>
+                            {treasuries.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* صندوق الدين المتبقي بعد الدفع */}

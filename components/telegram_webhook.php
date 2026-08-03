@@ -18,6 +18,7 @@ if (!file_exists($cfg)) {
     exit;
 }
 require_once $cfg;
+require_once __DIR__ . '/telegram_ai_service.php';
 
 try {
     if (!defined('DB_HOST') || !defined('DB_NAME') || !defined('DB_USER')) {
@@ -40,8 +41,41 @@ try {
 }
 
 // -----------------------
-// Dynamic Settings Helper
+// Auto Migration Helpers
 // -----------------------
+if (!function_exists('column_exists')) {
+    function column_exists($pdo, $table, $column) {
+        try {
+            $db = $pdo->query('SELECT DATABASE()')->fetchColumn();
+            if (!$db) return false;
+            $stmt = $pdo->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1');
+            $stmt->execute([$db, $table, $column]);
+            return intval($stmt->fetchColumn()) > 0;
+        } catch (Exception $e) {
+            return false;
+        }
+    }
+}
+
+// Ensure Telegram Auth Columns Exist in Users Table
+try {
+    if ($pdo->query("SHOW TABLES LIKE 'users'")->fetch()) {
+        if (!column_exists($pdo, 'users', 'telegram_chat_id')) {
+            $pdo->exec("ALTER TABLE users ADD COLUMN telegram_chat_id VARCHAR(64) NULL INDEX");
+        }
+        if (!column_exists($pdo, 'users', 'telegram_phone')) {
+            $pdo->exec("ALTER TABLE users ADD COLUMN telegram_phone VARCHAR(32) NULL");
+        }
+        if (!column_exists($pdo, 'users', 'telegram_otp')) {
+            $pdo->exec("ALTER TABLE users ADD COLUMN telegram_otp VARCHAR(16) NULL");
+        }
+        if (!column_exists($pdo, 'users', 'telegram_otp_expires')) {
+            $pdo->exec("ALTER TABLE users ADD COLUMN telegram_otp_expires DATETIME NULL");
+        }
+    }
+} catch (Exception $e) {}
+
+// Dynamic Settings Helper
 function detectAppSettingsCols($pdo) {
     try {
         $check = $pdo->query("SHOW TABLES LIKE 'app_settings'")->fetch();
@@ -57,23 +91,25 @@ function detectAppSettingsCols($pdo) {
     }
 }
 
-function get_setting_value($pdo, $key, $default = '') {
-    try {
-        $appCols = detectAppSettingsCols($pdo);
-        if ($appCols) {
-            list($kcol, $vcol) = $appCols;
-            $stmt = $pdo->prepare("SELECT `" . $vcol . "` FROM app_settings WHERE `" . $kcol . "` = ? LIMIT 1");
-            $stmt->execute([$key]);
-            $val = $stmt->fetchColumn();
-            if ($val !== false) return $val;
-        } else {
-            $stmt = $pdo->prepare("SELECT config_value FROM settings WHERE config_key = ? LIMIT 1");
-            $stmt->execute([$key]);
-            $val = $stmt->fetchColumn();
-            if ($val !== false) return $val;
-        }
-    } catch (Exception $e) {}
-    return $default;
+if (!function_exists('get_setting_value')) {
+    function get_setting_value($pdo, $key, $default = '') {
+        try {
+            $appCols = detectAppSettingsCols($pdo);
+            if ($appCols) {
+                list($kcol, $vcol) = $appCols;
+                $stmt = $pdo->prepare("SELECT `" . $vcol . "` FROM app_settings WHERE `" . $kcol . "` = ? LIMIT 1");
+                $stmt->execute([$key]);
+                $val = $stmt->fetchColumn();
+                if ($val !== false) return $val;
+            } else {
+                $stmt = $pdo->prepare("SELECT config_value FROM settings WHERE config_key = ? LIMIT 1");
+                $stmt->execute([$key]);
+                $val = $stmt->fetchColumn();
+                if ($val !== false) return $val;
+            }
+        } catch (Exception $e) {}
+        return $default;
+    }
 }
 
 if (!function_exists('ensure_product_parent')) {
@@ -87,20 +123,6 @@ if (!function_exists('ensure_product_parent')) {
         $ins = $pdo->prepare("INSERT INTO products (name, category) VALUES (?, ?)");
         $ins->execute([$name, $category]);
         return intval($pdo->lastInsertId());
-    }
-}
-
-if (!function_exists('column_exists')) {
-    function column_exists($pdo, $table, $column) {
-        try {
-            $db = $pdo->query('SELECT DATABASE()')->fetchColumn();
-            if (!$db) return false;
-            $stmt = $pdo->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1');
-            $stmt->execute([$db, $table, $column]);
-            return intval($stmt->fetchColumn()) > 0;
-        } catch (Exception $e) {
-            return false;
-        }
     }
 }
 
@@ -124,7 +146,6 @@ $botToken = get_setting_value($pdo, 'telegram_bot_token', '');
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'setup') {
     header('Content-Type: application/json');
     
-    // License check
     require_once __DIR__ . '/activation_utils.php';
     $license_check = check_license_validity();
     if ($license_check['status'] !== 'ok') {
@@ -140,7 +161,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
         exit;
     }
 
-    // Determine webhook URL dynamically
     $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
     if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
         $proto = 'https';
@@ -166,9 +186,127 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
     if ($response) {
         echo $response;
     } else {
-        echo json_encode(['ok' => false, 'description' => 'فشل الاتصال بخوادم تليجرام من السيرفر. يرجى التحقق من اتصال السيرفر بالإنترنت.']);
+        echo json_encode(['ok' => false, 'description' => 'فشل الاتصال بخوادم تليجرام من السيرفر.']);
     }
     exit;
+}
+
+// ----------------------------------------
+// Identity & Scope Resolution Helper
+// ----------------------------------------
+function get_telegram_user_identity($pdo, $chatId, $senderPhone = '') {
+    if ($chatId === '') return ['is_authenticated' => false, 'role' => 'guest', 'id' => 0, 'name' => 'زائر'];
+
+    // Search by telegram_chat_id
+    $stmt = $pdo->prepare("SELECT id, name, username, role, phone FROM users WHERE telegram_chat_id = ? LIMIT 1");
+    $stmt->execute([$chatId]);
+    $u = $stmt->fetch();
+
+    if ($u) {
+        return [
+            'is_authenticated' => true,
+            'id' => intval($u['id']),
+            'name' => $u['name'],
+            'username' => $u['username'],
+            'role' => strtolower($u['role'] ?? 'representative'),
+            'phone' => $u['phone']
+        ];
+    }
+
+    // Attempt matching by phone if provided via Telegram contact sharing
+    if ($senderPhone !== '') {
+        $clean = preg_replace('/\D/', '', $senderPhone);
+        if (strlen($clean) >= 7) {
+            $stmtP = $pdo->prepare("SELECT id, name, username, role, phone FROM users WHERE (phone = ? OR phone LIKE ?) LIMIT 1");
+            $stmtP->execute([$clean, '%' . $clean]);
+            $uP = $stmtP->fetch();
+            if ($uP) {
+                // Auto-bind telegram_chat_id to user record!
+                $pdo->prepare("UPDATE users SET telegram_chat_id = ?, telegram_phone = ? WHERE id = ?")->execute([$chatId, $clean, $uP['id']]);
+                return [
+                    'is_authenticated' => true,
+                    'id' => intval($uP['id']),
+                    'name' => $uP['name'],
+                    'username' => $uP['username'],
+                    'role' => strtolower($uP['role'] ?? 'representative'),
+                    'phone' => $uP['phone']
+                ];
+            }
+        }
+    }
+
+    return ['is_authenticated' => false, 'role' => 'guest', 'id' => 0, 'name' => 'زائر'];
+}
+
+// ----------------------------------------
+// Send Message with Keyboards Helper
+// ----------------------------------------
+function send_telegram_reply($token, $chatId, $text, $keyboard = null) {
+    if ($token === '' || $chatId === '') return false;
+    $url = "https://api.telegram.org/bot" . $token . "/sendMessage";
+    $payload = [
+        'chat_id' => $chatId,
+        'text' => $text,
+        'parse_mode' => 'Markdown'
+    ];
+
+    if ($keyboard !== null) {
+        $payload['reply_markup'] = json_encode($keyboard);
+    }
+
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($payload));
+    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    $response = curl_exec($ch);
+    curl_close($ch);
+    return true;
+}
+
+// Get Role-Based Reply Keyboards
+function get_role_reply_keyboard($identity) {
+    if (!$identity['is_authenticated']) {
+        return [
+            'keyboard' => [
+                [['text' => '📱 مشاركة رقم الهاتف لربط الحساب تلقائياً', 'request_contact' => true]],
+                [['text' => '🔐 أدخل كود التفعيل'], ['text' => '❓ مساعدة']]
+            ],
+            'resize_keyboard' => true,
+            'one_time_keyboard' => false
+        ];
+    }
+
+    $role = $identity['role'];
+    if ($role === 'admin' || $role === 'manager') {
+        return [
+            'keyboard' => [
+                [['text' => '📊 تقرير اليوم'], ['text' => '💵 إجمالي الخزائن']],
+                [['text' => '🚴 متابعة المناديب'], ['text' => '📦 طلب جديد']],
+                [['text' => '🔍 استعلام عن طلب'], ['text' => '❓ مساعدة']]
+            ],
+            'resize_keyboard' => true
+        ];
+    }
+
+    if ($role === 'representative') {
+        return [
+            'keyboard' => [
+                [['text' => '📦 أوردراتي اليوم'], ['text' => '💰 كشف عهدتي']],
+                [['text' => '🔍 استعلام عن طلب'], ['text' => '❓ مساعدة']]
+            ],
+            'resize_keyboard' => true
+        ];
+    }
+
+    return [
+        'keyboard' => [
+            [['text' => '📦 طلب جديد'], ['text' => '🔍 استعلام عن طلب']],
+            [['text' => '❓ مساعدة']]
+        ],
+        'resize_keyboard' => true
+    ];
 }
 
 // -----------------------
@@ -185,253 +323,274 @@ try {
     file_put_contents($logFile, date('[Y-m-d H:i:s] ') . $rawInput . PHP_EOL, FILE_APPEND);
 } catch (Exception $e) {}
 
+// ----------------------------------------
+// Handle Callback Queries (Inline Buttons)
+// ----------------------------------------
+if (isset($update['callback_query'])) {
+    $cb = $update['callback_query'];
+    $cbId = $cb['id'];
+    $chatId = $cb['message']['chat']['id'] ?? '';
+    $data = $cb['data'] ?? '';
+    $senderName = $cb['from']['first_name'] ?? 'مستخدم';
+
+    $identity = get_telegram_user_identity($pdo, $chatId);
+
+    // Format: rep_status:<order_id>:<new_status>
+    if (strpos($data, 'rep_status:') === 0) {
+        $parts = explode(':', $data);
+        $orderId = intval($parts[1] ?? 0);
+        $newStatus = $parts[2] ?? '';
+
+        if ($orderId > 0 && $newStatus !== '') {
+            // Scope Check: Ensure Rep owns this order (or is Admin)
+            $checkStmt = $pdo->prepare("SELECT id, rep_id, order_number, total_amount FROM orders WHERE id = ? LIMIT 1");
+            $checkStmt->execute([$orderId]);
+            $ordRow = $checkStmt->fetch();
+
+            if ($ordRow) {
+                $isOwner = ($identity['role'] === 'admin' || $identity['role'] === 'manager' || intval($ordRow['rep_id']) === $identity['id']);
+                if (!$isOwner) {
+                    send_telegram_reply($botToken, $chatId, "⛔ *تنبيه أمان:* لا يمكنك تعديل حالة هذا الأوردر، فهو مسند لمندوب آخر للحفاظ على خصوصية البيانات.");
+                } else {
+                    $pdo->prepare("UPDATE orders SET status = ? WHERE id = ?")->execute([$newStatus, $orderId]);
+                    log_order_history($pdo, $orderId, $newStatus, 'status_updated_via_telegram', 'تم تعديل الحالة من تليجرام بواسطة: ' . $senderName, $identity['id']);
+
+                    $statusLabel = get_arabic_status($newStatus);
+                    send_telegram_reply($botToken, $chatId, "✅ *تم تحديث حالة الأوردر رقم (" . ($ordRow['order_number'] ?? $orderId) . ") إلى:* " . $statusLabel);
+                }
+            }
+        }
+    } elseif (strpos($data, 'view_order:') === 0) {
+        $orderId = intval(str_replace('view_order:', '', $data));
+        query_telegram_order_status($pdo, $botToken, $chatId, (string)$orderId, $identity);
+    }
+
+    // Answer Callback Query
+    $ch = curl_init("https://api.telegram.org/bot" . $botToken . "/answerCallbackQuery?callback_query_id=" . $cbId);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_exec($ch);
+    curl_close($ch);
+
+    http_response_code(200);
+    echo json_encode(['success' => true]);
+    exit;
+}
+
+// ----------------------------------------
+// Handle Normal Messages
+// ----------------------------------------
 if (isset($update['message'])) {
     $message = $update['message'];
     $chatId = $message['chat']['id'] ?? '';
     $text = trim($message['text'] ?? '');
     $senderName = $message['from']['first_name'] ?? 'مستخدم تليجرام';
+    $senderPhone = $message['contact']['phone_number'] ?? '';
+
+    $identity = get_telegram_user_identity($pdo, $chatId, $senderPhone);
+    $replyKb = get_role_reply_keyboard($identity);
+
+    // 1. Phone Contact Sharing for Auto Authentication
+    if (!empty($senderPhone)) {
+        if ($identity['is_authenticated']) {
+            send_telegram_reply($botToken, $chatId, "✅ *تم توثيق وربط حسابك بنجاح!*\n\n👤 *الاسم:* " . $identity['name'] . "\n🔰 *الدور:* " . get_role_arabic($identity['role']), $replyKb);
+        } else {
+            send_telegram_reply($botToken, $chatId, "❌ لم نتمكن من العثور على رقم الهاتف (" . $senderPhone . ") في قائمة مستخدمي النظام. يرجى التواصل مع الأدمن لربط رقمك بالنظام.", $replyKb);
+        }
+        exit;
+    }
+
+    // 2. OTP Linking command: /link CODE or OTP code
+    if (preg_match('/^(?:\/link|\/otp|كود|تفعيل)\s+([a-z0-9]{4,10})/ui', $text, $m) || preg_match('/^[a-z0-9]{5,8}$/i', $text)) {
+        $otp = trim($m[1] ?? $text);
+        $stmtOtp = $pdo->prepare("SELECT id, name, role FROM users WHERE telegram_otp = ? AND (telegram_otp_expires IS NULL OR telegram_otp_expires > NOW()) LIMIT 1");
+        $stmtOtp->execute([$otp]);
+        $uOtp = $stmtOtp->fetch();
+
+        if ($uOtp) {
+            $pdo->prepare("UPDATE users SET telegram_chat_id = ?, telegram_otp = NULL, telegram_otp_expires = NULL WHERE id = ?")->execute([$chatId, $uOtp['id']]);
+            $identity = get_telegram_user_identity($pdo, $chatId);
+            $newKb = get_role_reply_keyboard($identity);
+            send_telegram_reply($botToken, $chatId, "🎉 *مبروك! تم تفعيل وربط حسابك بنجاح في DragonPro!*\n\n👤 *المستخدم:* " . $uOtp['name'] . "\n🔰 *الصلاحية:* " . get_role_arabic($uOtp['role']) . "\n\nيمكنك الآن استغلال كافة الميزات المتاحة لصلاحياتك.", $newKb);
+            exit;
+        }
+    }
+
+    // 3. Process Voice Messages via AI Engine
+    if (isset($message['voice'])) {
+        $fileId = $message['voice']['file_id'] ?? '';
+        if ($fileId !== '') {
+            send_telegram_reply($botToken, $chatId, "🎙️ *جاري الاستماع للرسالة الصوتية وتحليل الأوردر بالذكاء الاصطناعي...* ⏳");
+            $aiResult = process_voice_note_with_ai($pdo, $botToken, $fileId);
+            if ($aiResult && !empty($aiResult['customer_name'])) {
+                execute_create_order_from_parsed_data($pdo, $botToken, $chatId, $aiResult, $senderName, $identity);
+            } else {
+                send_telegram_reply($botToken, $chatId, "⚠️ تعذر استخراج بيانات الأوردر من التسجيل الصوتي بدقة. يرجى إعادة التحدث بوضوح أو كتابة الطلب نصياً.", $replyKb);
+            }
+            exit;
+        }
+    }
 
     if ($text !== '') {
-        // Welcome and template guide
-        if ($text === '/start' || $text === '/help' || mb_stripos($text, 'مساعدة') !== false) {
+        // Start / Help / Options
+        if ($text === '/start' || $text === '/help' || mb_stripos($text, 'مساعدة') !== false || $text === '❓ مساعدة') {
+            $authMsg = $identity['is_authenticated']
+                ? "🔒 *حسابك مفعل كـ:* " . $identity['name'] . " (" . get_role_arabic($identity['role']) . ")"
+                : "⚠️ *حسابك غير مفعل بعد:* يمكنك مشاركة رقم هاتفك أو استخدام كود التفعيل لربط حسابك وتمكين الصلاحيات المعزولة.";
+
             send_telegram_reply($botToken, $chatId, 
-                "مرحباً بك يا *" . $senderName . "* في نظام إدارة الطلبات DragonPro! 👋\n\n" .
-                "أنا البوت الذكي لاستلام الطلبات والاستعلام عنها تلقائياً.\n\n" .
-                "📝 *أولاً: لإرسال طلب جديد:* يرجى كتابته بالصيغة التالية تماماً:\n\n" .
-                "طلب جديد\n" .
-                "الاسم: محمد أحمد\n" .
-                "الهاتف: 01002003004\n" .
-                "المحافظة: القاهرة\n" .
-                "العنوان: مصر الجديدة، شارع الثورة\n" .
-                "تفاصيل المنتج:\n" .
-                "الكميه 1 الاسم دبدوب اللون كاروهات المقاس 8 السعر 250\n" .
-                "الكميه 2 الاسم جاكيت اللون اسود المقاس 10 السعر 350\n" .
-                "الشحن: 50\n" .
-                "الموظف: أحمد\n" .
-                "البيدج: صفحة الفيس بوك\n" .
-                "ملاحظات: يرجى الاتصال قبل الوصول\n\n" .
-                "-----------------------------------------\n" .
-                "🔍 *ثانياً: للاستعلام عن حالة أوردر:* أرسل فقط:\n" .
-                "`استعلام [رقم الأوردر]`\n" .
-                "أو أرسل رقم الأوردر مباشرة (مثال: `105` أو `WOO_9988`)"
+                "مرحباً بك يا *" . $senderName . "* في بوت DragonPro الذكي! 👋\n\n" .
+                $authMsg . "\n\n" .
+                "🤖 *أنا مساعدك الذكي لاستلام الطلبات والاستعلام بنظام الصلاحيات المعزولة.*\n\n" .
+                "📝 *لإرسال طلب جديد:* يمكنك كتابته بأي طريقة عامية أو استخدام النموذج القياسي، أو حتى *إرسال رسالة صوتية (Voice Note)* وسيقوم البوت بفهمها فوراً!\n\n" .
+                "🔍 *للاستعلام عن أوردر:* أرسل رقم الأوردر أو اسم العميل.",
+                $replyKb
             );
         }
-        // Order parsing
-        elseif (mb_stripos($text, 'طلب جديد') !== false) {
-            parse_and_create_telegram_order($pdo, $botToken, $chatId, $text, $senderName);
+        // Rep Orders Today
+        elseif ($text === '📦 أوردراتي اليوم' || $text === '/myorders') {
+            if (!$identity['is_authenticated'] || ($identity['role'] !== 'representative' && $identity['role'] !== 'admin')) {
+                send_telegram_reply($botToken, $chatId, "⛔ هذه الميزة مخصصة للمناديب المفعلين فقط. يرجى توثيق حسابك أولاً.", $replyKb);
+            } else {
+                fetch_representative_today_orders($pdo, $botToken, $chatId, $identity);
+            }
         }
-        // Order status query matching prefixes: استعلام, حالة, حاله, وضع, status, info
+        // Rep Cash Custody
+        elseif ($text === '💰 كشف عهدتي' || $text === '💰 عهدتي ورصيدي' || $text === '/mycustody') {
+            if (!$identity['is_authenticated'] || ($identity['role'] !== 'representative' && $identity['role'] !== 'admin')) {
+                send_telegram_reply($botToken, $chatId, "⛔ هذه الميزة مخصصة للمناديب المفعلين فقط.", $replyKb);
+            } else {
+                fetch_representative_custody($pdo, $botToken, $chatId, $identity);
+            }
+        }
+        // Admin Daily Report
+        elseif ($text === '📊 تقرير اليوم' || $text === '/report') {
+            if (!$identity['is_authenticated'] || ($identity['role'] !== 'admin' && $identity['role'] !== 'manager')) {
+                send_telegram_reply($botToken, $chatId, "⛔ تقارير المبيعات مخصصة لمدراء النظام فقط.", $replyKb);
+            } else {
+                fetch_admin_daily_report($pdo, $botToken, $chatId);
+            }
+        }
+        // Admin Treasuries Summary
+        elseif ($text === '💵 إجمالي الخزائن') {
+            if (!$identity['is_authenticated'] || ($identity['role'] !== 'admin' && $identity['role'] !== 'manager')) {
+                send_telegram_reply($botToken, $chatId, "⛔ هذه الميزة مخصصة للإدارة فقط.", $replyKb);
+            } else {
+                fetch_admin_treasuries_summary($pdo, $botToken, $chatId);
+            }
+        }
+        // Order Creation (via AI / Structured text)
+        elseif (mb_stripos($text, 'طلب جديد') !== false || mb_stripos($text, 'اوردر جديد') !== false || preg_match('/(الاسم|الهاتف|العنوان).*المنتج/ui', $text)) {
+            $parsedData = parse_order_with_ai($pdo, $text);
+            if ($parsedData && !empty($parsedData['customer_name']) && !empty($parsedData['phone'])) {
+                execute_create_order_from_parsed_data($pdo, $botToken, $chatId, $parsedData, $senderName, $identity);
+            } else {
+                send_telegram_reply($botToken, $chatId, "⚠️ تعذر استخراج بيانات العميل والمنتج بشكل كامل. يرجى التأكد من كتابة الاسم ورقم الهاتف وتفاصيل المنتج.", $replyKb);
+            }
+        }
+        // Order Query (Strict Scope Protected)
         elseif (preg_match('/^(?:استعلام|حالة|حاله|وضع|status|info)\s+(.+)/ui', $text, $match)) {
-            $orderQuery = trim($match[1]);
-            query_telegram_order_status($pdo, $botToken, $chatId, $orderQuery);
+            query_telegram_order_status($pdo, $botToken, $chatId, trim($match[1]), $identity);
         }
-        // Order status query directly (if it looks like a clean order number, length 3-25 alphanumeric/underscores)
-        elseif (preg_match('/^[a-z0-9_-]{3,25}$/i', $text)) {
-            query_telegram_order_status($pdo, $botToken, $chatId, $text);
+        elseif (preg_match('/^[a-z0-9_-]{3,25}$/i', $text) && $text !== 'help' && $text !== 'start') {
+            query_telegram_order_status($pdo, $botToken, $chatId, $text, $identity);
         }
-        // Unknown command
         else {
             send_telegram_reply($botToken, $chatId, 
-                "⚠️ عذراً، لم أفهم رسالتك.\n\n" .
-                "• لإرسال طلب جديد، يجب أن تبدأ الرسالة بكلمة *طلب جديد* وتتبع النموذج المعتمد.\n" .
-                "• للاستعلام عن أوردر، أرسل: *استعلام [رقم الأوردر]* أو رقم الأوردر مباشرة.\n\n" .
-                "أرسل كلمة *مساعدة* لعرض الصيغة بالتفصيل."
+                "⚠️ لم أفهم رسالتك بوضوح.\n\n" .
+                "• يمكنك اختيار أحد الأوامر من الأزرار بالأسفل 👇\n" .
+                "• أو إرسال طلب جديد نصياً أو تسجيل صوتي (Voice Note).\n" .
+                "• أو إرسال رقم الأوردر مباشرة للاستعلام عن حالته.",
+                $replyKb
             );
         }
     }
 }
 
-// Respond 200 OK to Telegram
 http_response_code(200);
 echo json_encode(['success' => true]);
 exit;
 
 // ----------------------------------------
-// Function: Parse and Create Order
+// Order Creation Executor Helper
 // ----------------------------------------
-function parse_and_create_telegram_order($pdo, $botToken, $chatId, $text, $senderName) {
-    $customerName = '';
-    $phone = '';
-    $phone2 = '';
-    $governorate = '';
-    $address = '';
-    $shippingFees = 0.0;
-    $employee = '';
-    $page = '';
-    $notes = 'تم إرساله عبر بوت التليجرام بواسطة: ' . $senderName;
+function execute_create_order_from_parsed_data($pdo, $botToken, $chatId, $data, $senderName, $identity) {
+    $customerName = trim($data['customer_name'] ?? '');
+    $phone = trim($data['phone'] ?? '');
+    $phone2 = trim($data['phone2'] ?? '');
+    $governorate = trim($data['governorate'] ?? '');
+    $address = trim($data['address'] ?? '');
+    $shippingFees = floatval($data['shipping_fees'] ?? 0.0);
+    $employee = trim($data['employee'] ?? '');
+    $page = trim($data['page'] ?? '');
+    $notes = 'تم الإنشاء عبر بوت التليجرام بواسطة: ' . $senderName;
+    if (!empty($data['notes'])) $notes .= ' - ' . trim($data['notes']);
+    $items = $data['items'] ?? [];
 
-    // Line by line scanning
-    $lines = explode("\n", $text);
-    foreach ($lines as $line) {
-        $line = trim($line);
-        if (preg_match('/^(?:الاسم|الاسم الكامل|اسم العميل|الإسم)\s*[:：-]?\s*(.*)/ui', $line, $m)) {
-            $customerName = trim($m[1]);
-        } elseif (preg_match('/^(?:الهاتف|رقم الهاتف|الموبايل|تليفون|الهاتف1|التليفون)\s*[:：-]?\s*(.*)/ui', $line, $m)) {
-            $rawPhones = $m[1];
-            $phoneParts = preg_split('/[\s,،\/]+/u', $rawPhones);
-            $cleanPhones = [];
-            foreach ($phoneParts as $part) {
-                $clean = preg_replace('/\D/', '', $part);
-                if (strlen($clean) >= 7) {
-                    $cleanPhones[] = $clean;
-                }
-            }
-            if (isset($cleanPhones[0])) $phone = $cleanPhones[0];
-            if (isset($cleanPhones[1])) $phone2 = $cleanPhones[1];
-        } elseif (preg_match('/^(?:المحافظة|المحافظه)\s*[:：-]?\s*(.*)/ui', $line, $m)) {
-            $governorate = trim($m[1]);
-        } elseif (preg_match('/^(?:العنوان|العنوان بالتفصيل|عنوان)\s*[:：-]?\s*(.*)/ui', $line, $m)) {
-            $address = trim($m[1]);
-        } elseif (preg_match('/^(?:الشحن|شحن|مصاريف الشحن)\s*[:：-]?\s*(\d+)/ui', $line, $m)) {
-            $shippingFees = floatval($m[1]);
-        } elseif (preg_match('/^(?:الموظف|موظف|مدخل البيانات)\s*[:：-]?\s*(.*)/ui', $line, $m)) {
-            $employee = trim($m[1]);
-        } elseif (preg_match('/^(?:البيدج|الصفحة|الصفحه)\s*[:：-]?\s*(.*)/ui', $line, $m)) {
-            $page = trim($m[1]);
-        } elseif (preg_match('/^(?:الملاحظات|ملاحظات)\s*[:：-]?\s*(.*)/ui', $line, $m)) {
-            $notes .= ' - ' . trim($m[1]);
-        }
-    }
-
-    // Look for product lines
-    $products = [];
-    foreach ($lines as $line) {
-        $line = trim($line);
-        // Format: الكميه X الاسم Y اللون Z المقاس W السعر P
-        if (preg_match('/(?:الكميه|الكمية)\s*(\d+)\s+(?:الاسم|اسم)\s+(.+?)\s+(?:اللون|لون)\s+(.+?)\s+(?:المقاس|مقاس)\s+(.+?)\s+(?:السعر|سعر)\s*(\d+)/ui', $line, $m)) {
-            $products[] = [
-                'name' => trim($m[2]) . ' - اللون: ' . trim($m[3]) . ' - المقاس: ' . trim($m[4]),
-                'quantity' => intval($m[1]),
-                'price' => floatval($m[5])
-            ];
-        }
-        // Fallback: الكميه X الاسم Y السعر Z
-        elseif (preg_match('/(?:الكميه|الكمية)\s*(\d+)\s+(?:الاسم|اسم)\s+(.+?)\s+(?:السعر|سعر)\s*(\d+)/ui', $line, $m)) {
-            $products[] = [
-                'name' => trim($m[2]),
-                'quantity' => intval($m[1]),
-                'price' => floatval($m[3])
-            ];
-        }
-    }
-
-    // Fallback if no multi-products match: check single product format
-    if (empty($products)) {
-        $singleProdName = '';
-        $singleQty = 1;
-        $singlePrice = null;
-        
-        foreach ($lines as $line) {
-            $line = trim($line);
-            if (preg_match('/(?:المنتج|الصنف|اسم المنتج)\s*[:：-]?\s*(.*)/ui', $line, $m)) {
-                $singleProdName = trim($m[1]);
-            } elseif (preg_match('/(?:الكمية|الكميه|عدد)\s*[:：-]?\s*(\d+)/ui', $line, $m)) {
-                $singleQty = intval($m[1]);
-            } elseif (preg_match('/(?:السعر|سعر|سعر القطعه)\s*[:：-]?\s*(\d+)/ui', $line, $m)) {
-                $singlePrice = floatval($m[1]);
-            }
-        }
-        
-        if ($singleProdName !== '') {
-            $products[] = [
-                'name' => $singleProdName,
-                'quantity' => $singleQty,
-                'price' => $singlePrice
-            ];
-        }
-    }
-
-    // Validation
-    $errors = [];
-    if ($customerName === '') {
-        $errors[] = "- اسم العميل (الاسم:)";
-    }
-    if ($phone === '') {
-        $errors[] = "- رقم الهاتف (الهاتف:)";
-    }
-    if (empty($products)) {
-        $errors[] = "- تفاصيل المنتجات (أرسل اسماً وكمية وسعراً للمنتج)";
-    }
-
-    if (!empty($errors)) {
-        $errorMsg = "❌ خطأ في تسجيل الطلب! البيانات التالية ناقصة أو غير صحيحة:\n\n" . 
-                    implode("\n", $errors) . "\n\n" .
-                    "يرجى تصحيح الرسالة وإعادة إرسالها بالنموذج الصحيح. أرسل *مساعدة* للمزيد.";
-        send_telegram_reply($botToken, $chatId, $errorMsg);
+    if ($customerName === '' || $phone === '' || empty($items)) {
+        send_telegram_reply($botToken, $chatId, "❌ بيانات الطلب ناقصة. يرجى توفير اسم العميل ورقم الهاتف والمنتج على الأقل.");
         return;
     }
 
     try {
         $pdo->beginTransaction();
 
-        // 1. Customer resolution
+        // 1. Customer Resolution
         $customerId = null;
         $stmt = $pdo->prepare("SELECT id FROM customers WHERE phone1 = ? OR phone2 = ? LIMIT 1");
         $stmt->execute([$phone, $phone]);
-        $row = $stmt->fetch();
-        if ($row) {
-            $customerId = intval($row['id']);
-            // Update customer address/governorate if provided to keep records fresh
+        $cRow = $stmt->fetch();
+
+        if ($cRow) {
+            $customerId = intval($cRow['id']);
             $upSql = "UPDATE customers SET name = ?";
             $upVals = [$customerName];
-            if ($governorate !== '') {
-                $upSql .= ", governorate = ?";
-                $upVals[] = $governorate;
-            }
-            if ($address !== '') {
-                $upSql .= ", address = ?";
-                $upVals[] = $address;
-            }
-            if ($phone2 !== '') {
-                $upSql .= ", phone2 = ?";
-                $upVals[] = $phone2;
+            if ($governorate !== '') { $upSql .= ", governorate = ?"; $upVals[] = $governorate; }
+            if ($address !== '') { $upSql .= ", address = ?"; $upVals[] = $address; }
+            if ($phone2 !== '') { $upSql .= ", phone2 = ?"; $upVals[] = $phone2; }
+            if (column_exists($pdo, 'customers', 'telegram_chat_id') && !empty($chatId)) {
+                $upSql .= ", telegram_chat_id = ?";
+                $upVals[] = $chatId;
             }
             $upSql .= " WHERE id = ?";
             $upVals[] = $customerId;
-            $upStmt = $pdo->prepare($upSql);
-            $upStmt->execute($upVals);
+            $pdo->prepare($upSql)->execute($upVals);
         } else {
-            $stmt = $pdo->prepare("INSERT INTO customers (name, phone1, phone2, governorate, address) VALUES (?, ?, ?, ?, ?)");
-            $stmt->execute([$customerName, $phone, $phone2 !== '' ? $phone2 : null, $governorate, $address]);
+            $hasTg = column_exists($pdo, 'customers', 'telegram_chat_id');
+            if ($hasTg) {
+                $stmt = $pdo->prepare("INSERT INTO customers (name, phone1, phone2, governorate, address, telegram_chat_id) VALUES (?, ?, ?, ?, ?, ?)");
+                $stmt->execute([$customerName, $phone, $phone2 !== '' ? $phone2 : null, $governorate, $address, $chatId]);
+            } else {
+                $stmt = $pdo->prepare("INSERT INTO customers (name, phone1, phone2, governorate, address) VALUES (?, ?, ?, ?, ?)");
+                $stmt->execute([$customerName, $phone, $phone2 !== '' ? $phone2 : null, $governorate, $address]);
+            }
             $customerId = intval($pdo->lastInsertId());
         }
 
-        // 2. Insert order items and calculate subtotal
+        // 2. Products Resolution
         $subtotal = 0;
         $orderItemsToInsert = [];
-        
-        foreach ($products as $prod) {
-            $pName = $prod['name'];
-            $pQty = $prod['quantity'];
-            $pPrice = $prod['price'];
-            
+        foreach ($items as $prod) {
+            $pName = trim($prod['name'] ?? 'منتج');
+            $pQty = max(1, intval($prod['quantity'] ?? 1));
+            $pPrice = floatval($prod['price'] ?? 0.0);
+
             $prodId = null;
             $stmt = $pdo->prepare("SELECT id, sale_price FROM product_variants WHERE name = ? LIMIT 1");
             $stmt->execute([$pName]);
             $vRow = $stmt->fetch();
             if ($vRow) {
                 $prodId = intval($vRow['id']);
-                if ($pPrice === null || $pPrice == 0) $pPrice = floatval($vRow['sale_price']);
-            }
-
-            if (!$prodId) {
+                if ($pPrice == 0) $pPrice = floatval($vRow['sale_price']);
+            } else {
                 $parentId = ensure_product_parent($pdo, $pName);
-                $stmt = $pdo->prepare("INSERT INTO product_variants (product_id, name, cost_price, sale_price) VALUES (?, ?, 0, ?)");
-                $stmt->execute([$parentId, $pName, $pPrice]);
+                $stmtIns = $pdo->prepare("INSERT INTO product_variants (product_id, name, cost_price, sale_price) VALUES (?, ?, 0, ?)");
+                $stmtIns->execute([$parentId, $pName, $pPrice]);
                 $prodId = intval($pdo->lastInsertId());
             }
 
-            if ($pPrice === null) $pPrice = 0.0;
             $lineTotal = $pQty * $pPrice;
             $subtotal += $lineTotal;
-            
-            $orderItemsToInsert[] = [
-                'id' => $prodId,
-                'name' => $pName,
-                'quantity' => $pQty,
-                'price' => $pPrice,
-                'total' => $lineTotal
-            ];
+            $orderItemsToInsert[] = ['id' => $prodId, 'name' => $pName, 'quantity' => $pQty, 'price' => $pPrice, 'total' => $lineTotal];
         }
 
         $totalAmount = $subtotal + $shippingFees;
@@ -440,161 +599,153 @@ function parse_and_create_telegram_order($pdo, $botToken, $chatId, $text, $sende
         $mxRow = $pdo->query("SELECT MAX(CAST(order_number AS UNSIGNED)) as mx FROM orders")->fetch();
         $useOrderNumber = (string)(intval($mxRow['mx'] ?? 0) + 1);
 
-        // 4. Insert order
+        // 4. Insert Order
         $ordersHasEmployee = column_exists($pdo, 'orders', 'employee');
         $ordersHasPage = column_exists($pdo, 'orders', 'page');
-        
+        $ordersHasRepId = column_exists($pdo, 'orders', 'rep_id');
+
         $insertCols = ['order_number', 'customer_id', 'status', 'total_amount', 'shipping_fees', 'notes'];
         $insertVals = [$useOrderNumber, $customerId, 'pending', $totalAmount, $shippingFees, $notes];
-        
+
         if ($ordersHasEmployee) {
             $insertCols[] = 'employee';
-            $insertVals[] = ($employee !== '') ? $employee : 'تليجرام تلقائي (' . $senderName . ')';
+            $insertVals[] = ($employee !== '') ? $employee : ($identity['name'] ?? 'تليجرام تلقائي');
         }
         if ($ordersHasPage) {
             $insertCols[] = 'page';
             $insertVals[] = ($page !== '') ? $page : 'بوت تليجرام';
         }
+        if ($ordersHasRepId && $identity['role'] === 'representative') {
+            $insertCols[] = 'rep_id';
+            $insertVals[] = $identity['id'];
+        }
 
         $placeholders = implode(',', array_fill(0, count($insertCols), '?'));
-        $sql = "INSERT INTO orders (" . implode(',', $insertCols) . ") VALUES (" . $placeholders . ")";
-        $stmt = $pdo->prepare($sql);
+        $stmt = $pdo->prepare("INSERT INTO orders (" . implode(',', $insertCols) . ") VALUES (" . $placeholders . ")");
         $stmt->execute($insertVals);
         $orderId = intval($pdo->lastInsertId());
 
-        // 5. Insert order items line by line
+        // 5. Insert Items
         $orderItemsHasTotal = column_exists($pdo, 'order_items', 'total_price');
         foreach ($orderItemsToInsert as $item) {
             if ($orderItemsHasTotal) {
-                $stmtLine = $pdo->prepare("INSERT INTO order_items (order_id, product_id, quantity, price_per_unit, total_price) VALUES (?, ?, ?, ?, ?)");
-                $stmtLine->execute([$orderId, $item['id'], $item['quantity'], $item['price'], $item['total']]);
+                $pdo->prepare("INSERT INTO order_items (order_id, product_id, quantity, price_per_unit, total_price) VALUES (?, ?, ?, ?, ?)")
+                    ->execute([$orderId, $item['id'], $item['quantity'], $item['price'], $item['total']]);
             } else {
-                $stmtLine = $pdo->prepare("INSERT INTO order_items (order_id, product_id, quantity, price_per_unit) VALUES (?, ?, ?, ?)");
-                $stmtLine->execute([$orderId, $item['id'], $item['quantity'], $item['price']]);
+                $pdo->prepare("INSERT INTO order_items (order_id, product_id, quantity, price_per_unit) VALUES (?, ?, ?, ?)")
+                    ->execute([$orderId, $item['id'], $item['quantity'], $item['price']]);
             }
         }
 
-        // 6. Log Order History
-        log_order_history($pdo, $orderId, 'pending', 'created', 'تم إنشاؤه تلقائياً من بوت التليجرام بواسطة: ' . $senderName, null);
-
+        log_order_history($pdo, $orderId, 'pending', 'created_via_telegram', 'تم إدخاله عبر تليجرام بواسطة: ' . $senderName, $identity['id'] ?? null);
         $pdo->commit();
 
-        // 7. Send success confirmation reply
+        // 6. Confirmation Reply
         $replyText = "✅ *تم تسجيل الأوردر بنجاح في DragonPro!*\n\n" .
                      "📦 *رقم الأوردر:* `" . $useOrderNumber . "`\n" .
                      "👤 *العميل:* " . $customerName . "\n" .
                      "📞 *الهاتف:* " . $phone . ($phone2 !== '' ? " , " . $phone2 : "") . "\n" .
                      "📍 *العنوان:* " . ($governorate ? $governorate . " - " : "") . $address . "\n\n" .
-                     "🛍️ *ملخص المنتجات:*\n";
-                     
+                     "🛍️ *المنتجات:*\n";
+
         foreach ($orderItemsToInsert as $item) {
             $replyText .= "• " . $item['name'] . " (x" . $item['quantity'] . ") - " . $item['total'] . " ج.م\n";
         }
-        
-        $replyText .= "\n💵 *إجمالي المنتجات:* " . $subtotal . " ج.م\n" .
-                      "🚚 *مصاريف الشحن:* " . $shippingFees . " ج.م\n" .
-                      "💰 *الإجمالي المطلوب:* " . $totalAmount . " ج.م\n\n" .
-                      "✍️ *الموظف:* " . (($employee !== '') ? $employee : 'تليجرام تلقائي') . "\n" .
-                      "🌐 *الصفحة:* " . (($page !== '') ? $page : 'بوت تليجرام');
+
+        $replyText .= "\n💵 *الإجمالي:* " . $totalAmount . " ج.م (شحن: " . $shippingFees . " ج.م)";
 
         send_telegram_reply($botToken, $chatId, $replyText);
 
     } catch (Exception $e) {
-        if ($pdo->inTransaction()) {
-            $pdo->rollBack();
-        }
-        send_telegram_reply($botToken, $chatId, "❌ حدث خطأ داخلي في الخادم أثناء معالجة وتسجيل الأوردر. يرجى مراجعة المسؤول.");
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        send_telegram_reply($botToken, $chatId, "❌ حدث خطأ أثناء حفظ الأوردر في قاعدة البيانات.");
     }
 }
 
 // ----------------------------------------
-// Send Message via Telegram API Helper
+// Order Query with Strict Representative Scope Protection
 // ----------------------------------------
-function send_telegram_reply($token, $chatId, $text) {
-    if ($token === '' || $chatId === '') return false;
-    $url = "https://api.telegram.org/bot" . $token . "/sendMessage";
-    $payload = [
-        'chat_id' => $chatId,
-        'text' => $text,
-        'parse_mode' => 'Markdown'
-    ];
-
-    $ch = curl_init($url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_POST, true);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($payload));
-    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-    $response = curl_exec($ch);
-    curl_close($ch);
-    return true;
-}
-
-// ----------------------------------------
-// Function: Query Order Status from DB
-// ----------------------------------------
-function query_telegram_order_status($pdo, $botToken, $chatId, $orderQuery) {
+function query_telegram_order_status($pdo, $botToken, $chatId, $orderQuery, $identity) {
     try {
         $orderQuery = trim($orderQuery);
         if ($orderQuery === '') return;
 
-        // 1. First attempt: Search by exact order number or internal ID
+        // Role & Scope Control
+        $role = $identity['role'];
+        $userId = $identity['id'];
+
+        // Base Query with Scope Constraints
+        $sqlWhere = "(o.order_number = :q OR o.id = :q2)";
+        $params = ['q' => $orderQuery, 'q2' => $orderQuery];
+
+        // 🛑 Representative Data Isolation: Reps CANNOT query other reps' orders!
+        if ($role === 'representative') {
+            $sqlWhere .= " AND (o.rep_id = :rep_id OR o.rep_id IS NULL)";
+            $params['rep_id'] = $userId;
+        }
+
         $stmt = $pdo->prepare("
             SELECT o.*, c.name as customer_name, c.phone1, c.phone2, c.governorate, c.address,
                    u.name as rep_name
             FROM orders o
             LEFT JOIN customers c ON o.customer_id = c.id
             LEFT JOIN users u ON o.rep_id = u.id
-            WHERE o.order_number = ? OR o.id = ?
+            WHERE $sqlWhere
             LIMIT 1
         ");
-        $stmt->execute([$orderQuery, $orderQuery]);
+        $stmt->execute($params);
         $order = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if ($order) {
-            render_single_order_details($pdo, $botToken, $chatId, $order);
+            render_single_order_details($pdo, $botToken, $chatId, $order, $identity);
             return;
         }
 
-        // 2. Second attempt: Search by customer name or phone number
-        $search = '%' . $orderQuery . '%';
-        $stmt = $pdo->prepare("
+        // If not found, check if order exists under another rep to notify about permission block
+        if ($role === 'representative') {
+            $checkOther = $pdo->prepare("SELECT id, rep_id FROM orders WHERE (order_number = ? OR id = ?) AND rep_id <> ? LIMIT 1");
+            $checkOther->execute([$orderQuery, $orderQuery, $userId]);
+            if ($checkOther->fetch()) {
+                send_telegram_reply($botToken, $chatId, "⛔ *تنبيه أمان وخصوصية:*\n\nعذراً، الأوردر رقم `" . $orderQuery . "` مسند لمندوب آخر، ولا تملك صلاحية للاطلاع على بياناته أو حسابه.");
+                return;
+            }
+        }
+
+        // Search by Customer Name or Phone
+        $searchSql = "(c.name LIKE :s OR c.phone1 = :q OR c.phone2 = :q)";
+        $searchParams = ['s' => '%' . $orderQuery . '%', 'q' => $orderQuery];
+
+        if ($role === 'representative') {
+            $searchSql .= " AND o.rep_id = :rep_id";
+            $searchParams['rep_id'] = $userId;
+        }
+
+        $stmtSearch = $pdo->prepare("
             SELECT o.*, c.name as customer_name, c.phone1, c.phone2, c.governorate, c.address,
                    u.name as rep_name
             FROM orders o
             LEFT JOIN customers c ON o.customer_id = c.id
             LEFT JOIN users u ON o.rep_id = u.id
-            WHERE c.name LIKE ? OR c.phone1 = ? OR c.phone2 = ? OR c.phone1 LIKE ? OR c.phone2 LIKE ?
+            WHERE $searchSql
             ORDER BY o.id DESC
-            LIMIT 10
+            LIMIT 5
         ");
-        $stmt->execute([$search, $orderQuery, $orderQuery, $search, $search]);
-        $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $stmtSearch->execute($searchParams);
+        $orders = $stmtSearch->fetchAll(PDO::FETCH_ASSOC);
 
         if (empty($orders)) {
-            send_telegram_reply($botToken, $chatId, "🔍 *لم يتم العثور على أي أوردر بالرقم، الاسم أو الهاتف:* `" . $orderQuery . "`\n\nيرجى التأكد من البيانات والمحاولة مرة أخرى.");
+            send_telegram_reply($botToken, $chatId, "🔍 *لم يتم العثور على أوردرات تطابق البحث:* `" . $orderQuery . "`");
             return;
         }
 
         if (count($orders) === 1) {
-            // Only one order match found, render its full details directly
-            render_single_order_details($pdo, $botToken, $chatId, $orders[0]);
+            render_single_order_details($pdo, $botToken, $chatId, $orders[0], $identity);
         } else {
-            // Multiple orders match, render a list summary
-            $replyText = "🔍 *نتائج البحث عن:* `" . $orderQuery . "`\n" .
-                         "👥 تم العثور على *" . count($orders) . "* طلبات:\n\n";
-
+            $replyText = "🔍 *نتائج البحث عن:* `" . $orderQuery . "`\n\n";
             foreach ($orders as $o) {
-                $statusAr = get_arabic_status($o['status']);
-                if (strtolower($o['status']) !== 'pending' && !empty($o['rep_name'])) {
-                    $statusAr .= " (" . $o['rep_name'] . ")";
-                }
-
                 $replyText .= "• أوردر: `" . ($o['order_number'] ?? $o['id']) . "` 👤 *" . $o['customer_name'] . "*\n" .
-                              "   👈 الحالة: " . $statusAr . " | 💰 الإجمالي: " . floatval($o['total_amount']) . " ج.م\n" .
-                              "   📅 التاريخ: " . $o['created_at'] . "\n\n";
+                              "   الحالة: " . get_arabic_status($o['status']) . " | 💰 " . floatval($o['total_amount']) . " ج.م\n\n";
             }
-
-            $replyText .= "💡 *للتفاصيل الكاملة، أرسل رقم الأوردر مباشرة (مثال: `" . ($orders[0]['order_number'] ?? $orders[0]['id']) . "`)*";
             send_telegram_reply($botToken, $chatId, $replyText);
         }
 
@@ -604,10 +755,9 @@ function query_telegram_order_status($pdo, $botToken, $chatId, $orderQuery) {
 }
 
 // ----------------------------------------
-// Function: Helper to Render Single Order Details
+// Render Single Order Details with Interactive Inline Buttons
 // ----------------------------------------
-function render_single_order_details($pdo, $botToken, $chatId, $order) {
-    // Get items inside this order
+function render_single_order_details($pdo, $botToken, $chatId, $order, $identity) {
     $stmtItems = $pdo->prepare("
         SELECT oi.quantity, oi.price_per_unit, pv.name as product_name
         FROM order_items oi
@@ -618,14 +768,14 @@ function render_single_order_details($pdo, $botToken, $chatId, $order) {
     $items = $stmtItems->fetchAll(PDO::FETCH_ASSOC);
 
     $statusAr = get_arabic_status($order['status']);
-    if (strtolower($order['status']) !== 'pending' && !empty($order['rep_name'])) {
-        $statusAr .= " (" . $order['rep_name'] . ")";
+    if (!empty($order['rep_name'])) {
+        $statusAr .= " (المندوب: " . $order['rep_name'] . ")";
     }
-    $subtotal = 0;
 
+    $subtotal = 0;
     $replyText = "🔍 *تفاصيل الأوردر رقم:* `" . ($order['order_number'] ?? $order['id']) . "`\n\n" .
                  "👤 *العميل:* " . ($order['customer_name'] ?? 'غير محدد') . "\n" .
-                 "📞 *الهاتف:* " . ($order['phone1'] ?? '') . ($order['phone2'] ? " , " . $order['phone2'] : "") . "\n" .
+                 "📞 *الهاتف:* `" . ($order['phone1'] ?? '') . "`" . ($order['phone2'] ? " , `" . $order['phone2'] . "`" : "") . "\n" .
                  "📍 *العنوان:* " . ($order['governorate'] ? $order['governorate'] . " - " : "") . ($order['address'] ?? '') . "\n\n" .
                  "🛍️ *المنتجات:*\n";
 
@@ -635,37 +785,144 @@ function render_single_order_details($pdo, $botToken, $chatId, $order) {
             $subtotal += $lineTotal;
             $replyText .= "• " . ($item['product_name'] ?? 'منتج غير معروف') . " (x" . $item['quantity'] . ") - " . $lineTotal . " ج.م\n";
         }
-    } else {
-        $replyText .= "• لا توجد منتجات مسجلة.\n";
-        $subtotal = floatval($order['total_amount']) - floatval($order['shipping_fees']);
     }
 
-    $replyText .= "\n💵 *إجمالي المنتجات:* " . $subtotal . " ج.م\n" .
-                  "🚚 *الشحن:* " . floatval($order['shipping_fees']) . " ج.م\n" .
-                  "💰 *الإجمالي المطلوب:* " . floatval($order['total_amount']) . " ج.م\n\n" .
-                  "-----------------------------------------\n" .
-                  "📊 *الحالة الحالية:* *" . $statusAr . "*\n" .
-                  "🕒 *تاريخ الإضافة:* " . $order['created_at'] . "\n";
+    $replyText .= "\n💵 *الإجمالي النهائي المطلوب:* *" . floatval($order['total_amount']) . " ج.م*\n" .
+                  "📊 *الحالة:* *" . $statusAr . "*\n" .
+                  "🕒 *التاريخ:* " . $order['created_at'] . "\n";
 
-    if ($order['employee']) {
-        $replyText .= "✍️ *الموظف:* " . $order['employee'] . "\n";
+    if (!empty($order['notes'])) {
+        $replyText .= "📝 *ملاحظات:* " . $order['notes'] . "\n";
     }
-    if ($order['page']) {
-        $replyText .= "🌐 *الصفحة:* " . $order['page'] . "\n";
+
+    // Attach Interactive Inline Buttons if user is authorized Rep or Admin
+    $inlineKeyboard = null;
+    $isRepOrAdmin = ($identity['role'] === 'admin' || $identity['role'] === 'manager' || intval($order['rep_id']) === $identity['id']);
+    if ($isRepOrAdmin) {
+        $inlineKeyboard = [
+            'inline_keyboard' => [
+                [
+                    ['text' => '✅ تم التسليم', 'callback_data' => 'rep_status:' . $order['id'] . ':delivered'],
+                    ['text' => '⚠️ مرتجع جزئي', 'callback_data' => 'rep_status:' . $order['id'] . ':partial']
+                ],
+                [
+                    ['text' => '❌ مرتجع كامل', 'callback_data' => 'rep_status:' . $order['id'] . ':returned'],
+                    ['text' => '📅 تأجيل التسليم', 'callback_data' => 'rep_status:' . $order['id'] . ':postponed']
+                ]
+            ]
+        ];
     }
-    if ($order['rep_name']) {
-        $replyText .= "🚴 *المندوب:* " . $order['rep_name'] . "\n";
+
+    send_telegram_reply($botToken, $chatId, $replyText, $inlineKeyboard);
+}
+
+// ----------------------------------------
+// Representative Functions
+// ----------------------------------------
+function fetch_representative_today_orders($pdo, $botToken, $chatId, $identity) {
+    $repId = $identity['id'];
+    $stmt = $pdo->prepare("
+        SELECT o.id, o.order_number, o.status, o.total_amount, c.name as customer_name, c.phone1, c.governorate, c.address
+        FROM orders o
+        LEFT JOIN customers c ON o.customer_id = c.id
+        WHERE o.rep_id = ? AND (DATE(o.created_at) = CURRENT_DATE() OR o.status IN ('pending', 'with_rep'))
+        ORDER BY o.id DESC
+    ");
+    $stmt->execute([$repId]);
+    $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    if (empty($orders)) {
+        send_telegram_reply($botToken, $chatId, "📦 *لا توجد أوردرات معلقة أو مسندة إليك اليوم.*");
+        return;
     }
-    if ($order['notes']) {
-        $replyText .= "\n📝 *الملاحظات:* " . $order['notes'] . "\n";
+
+    $replyText = "📦 *قائمة أوردراتك اليومية (" . count($orders) . " أوردرات):*\n\n";
+    $inlineBtns = [];
+    foreach ($orders as $o) {
+        $replyText .= "• أوردر `" . ($o['order_number'] ?? $o['id']) . "` | 👤 *" . $o['customer_name'] . "*\n" .
+                      "   👈 الحالة: " . get_arabic_status($o['status']) . " | 💰 " . floatval($o['total_amount']) . " ج.م\n" .
+                      "   📍 " . ($o['governorate'] ? $o['governorate'] . " - " : "") . $o['address'] . "\n\n";
+        
+        $inlineBtns[] = [['text' => '🔍 عرض الأوردر ' . ($o['order_number'] ?? $o['id']), 'callback_data' => 'view_order:' . $o['id']]];
     }
+
+    send_telegram_reply($botToken, $chatId, $replyText, ['inline_keyboard' => $inlineBtns]);
+}
+
+function fetch_representative_custody($pdo, $botToken, $chatId, $identity) {
+    $repId = $identity['id'];
+    $stmt = $pdo->prepare("
+        SELECT 
+            COUNT(o.id) as total_orders,
+            COALESCE(SUM(CASE WHEN o.status = 'delivered' THEN o.total_amount ELSE 0 END), 0) as collected_amount,
+            COALESCE(SUM(CASE WHEN o.status IN ('pending', 'with_rep') THEN o.total_amount ELSE 0 END), 0) as pending_amount
+        FROM orders o
+        WHERE o.rep_id = ? AND DATE(o.created_at) = CURRENT_DATE()
+    ");
+    $stmt->execute([$repId]);
+    $res = $stmt->fetch();
+
+    $replyText = "💰 *كشف عهدتك وتحصيلاتك اليومية:* \n\n" .
+                 "👤 *المندوب:* " . $identity['name'] . "\n" .
+                 "📦 *إجمالي أوردرات اليوم:* " . intval($res['total_orders']) . "\n" .
+                 "✅ *المبالغ المحصلة (تم التسليم):* *" . floatval($res['collected_amount']) . " ج.م*\n" .
+                 "⏳ *المبالغ قيد التسليم:* " . floatval($res['pending_amount']) . " ج.م\n\n" .
+                 "🔒 *ملاحظة:* هذه البيانات خاصة بحسابك فقط ومحمية بالنظام.";
 
     send_telegram_reply($botToken, $chatId, $replyText);
 }
 
 // ----------------------------------------
-// Helper: Map status to Arabic label
+// Admin Management Functions
 // ----------------------------------------
+function fetch_admin_daily_report($pdo, $botToken, $chatId) {
+    $stmt = $pdo->query("
+        SELECT 
+            COUNT(id) as total_orders,
+            COALESCE(SUM(total_amount), 0) as total_sales,
+            COALESCE(SUM(CASE WHEN status = 'delivered' THEN total_amount ELSE 0 END), 0) as delivered_sales,
+            COALESCE(SUM(CASE WHEN status = 'returned' THEN 1 ELSE 0 END), 0) as returned_count
+        FROM orders 
+        WHERE DATE(created_at) = CURRENT_DATE()
+    ");
+    $r = $stmt->fetch();
+
+    $replyText = "📊 *تقرير المبيعات اليومي الشامل (DragonPro):*\n\n" .
+                 "📅 *التاريخ:* " . date('Y-m-d') . "\n" .
+                 "📦 *إجمالي عدد الأوردرات:* " . intval($r['total_orders']) . "\n" .
+                 "💰 *إجمالي حجم المبيعات:* *" . floatval($r['total_sales']) . " ج.م*\n" .
+                 "✅ *المبيعات المحصلة:* " . floatval($r['delivered_sales']) . " ج.م\n" .
+                 "❌ *عدد الأوردرات المرتجعة:* " . intval($r['returned_count']) . "\n";
+
+    send_telegram_reply($botToken, $chatId, $replyText);
+}
+
+function fetch_admin_treasuries_summary($pdo, $botToken, $chatId) {
+    $stmt = $pdo->query("SELECT id, name, COALESCE(current_balance, 0) as balance FROM treasuries");
+    $treasuries = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $replyText = "💵 *ملخص أردصة الخزائن الحالية:*\n\n";
+    $totalBalance = 0;
+    foreach ($treasuries as $t) {
+        $bal = floatval($t['balance']);
+        $totalBalance += $bal;
+        $replyText .= "• *" . $t['name'] . ":* " . number_format($bal, 2) . " ج.م\n";
+    }
+    $replyText .= "\n💎 *إجمالي أرصدة الخزائن:* *" . number_format($totalBalance, 2) . " ج.م*";
+
+    send_telegram_reply($botToken, $chatId, $replyText);
+}
+
+function get_role_arabic($role) {
+    switch (strtolower($role)) {
+        case 'admin': return 'أدمن / مدير النظام 👑';
+        case 'manager': return 'مدير مبيعات 🏢';
+        case 'representative': return 'مندوب شحن 🚴';
+        case 'accountant': return 'محاسب 💼';
+        default: return 'عميل 👤';
+    }
+}
+
 function get_arabic_status($status) {
     switch (strtolower($status)) {
         case 'pending': return 'قيد الانتظار ⏳';
@@ -677,8 +934,6 @@ function get_arabic_status($status) {
         case 'cancelled': return 'ملغي 🚫';
         case 'confirmed': return 'تم التأكيد 👍';
         case 'closed': return 'مغلق 🔒';
-        case 'no_answer': return 'لا يرد 📞';
-        case 'in_delivery': return 'مع شركة الشحن 🚚';
         default: return $status;
     }
 }

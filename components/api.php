@@ -155,6 +155,51 @@ if ($module === 'feedback' && $action === 'submit') {
     exit;
 }
 
+if ($module === 'telegram' && $action === 'generateOtp') {
+    try {
+        $userId = $_SESSION['user_id'] ?? 0;
+        if (!$userId) {
+            echo json_encode(['success' => false, 'message' => 'غير مصرح']);
+            exit;
+        }
+
+        // Ensure users table columns exist
+        if (!column_exists($pdo, 'users', 'telegram_otp')) {
+            $pdo->exec("ALTER TABLE users ADD COLUMN telegram_otp VARCHAR(16) NULL");
+            $pdo->exec("ALTER TABLE users ADD COLUMN telegram_otp_expires DATETIME NULL");
+            $pdo->exec("ALTER TABLE users ADD COLUMN telegram_chat_id VARCHAR(64) NULL");
+        }
+
+        // Generate 6-digit OTP
+        $otp = strtoupper(substr(bin2hex(random_bytes(3)), 0, 6));
+        $stmt = $pdo->prepare("UPDATE users SET telegram_otp = ?, telegram_otp_expires = DATE_ADD(NOW(), INTERVAL 15 MINUTE) WHERE id = ?");
+        $stmt->execute([$otp, $userId]);
+
+        echo json_encode(['success' => true, 'otp' => $otp, 'expires_minutes' => 15]);
+    } catch (Exception $e) {
+        echo json_encode(['success' => false, 'message' => 'فشل إنشاء كود التفعيل', 'error' => $e->getMessage()]);
+    }
+    exit;
+}
+
+if ($module === 'telegram' && $action === 'unlinkAccount') {
+    try {
+        $userId = $_SESSION['user_id'] ?? 0;
+        if (!$userId) {
+            echo json_encode(['success' => false, 'message' => 'غير مصرح']);
+            exit;
+        }
+
+        $stmt = $pdo->prepare("UPDATE users SET telegram_chat_id = NULL, telegram_phone = NULL, telegram_otp = NULL WHERE id = ?");
+        $stmt->execute([$userId]);
+
+        echo json_encode(['success' => true, 'message' => 'تم إلغاء ربط حساب التليجرام بنجاح']);
+    } catch (Exception $e) {
+        echo json_encode(['success' => false, 'message' => 'فشل إلغاء الربط', 'error' => $e->getMessage()]);
+    }
+    exit;
+}
+
 
 if ($module === 'sales' && $action === 'getPendingDeliveryNotes') {
     try {
@@ -1894,8 +1939,171 @@ function log_order_history($pdo, $order_id, $status, $action, $notes = null, $re
             "INSERT INTO order_status_history (order_id, status, action, notes, rep_id, created_by) VALUES (?, ?, ?, ?, ?, ?)",
             [$order_id, $status, $action, $notes, $rep_id, $current_user]
         );
+        // Automatically send outbound Telegram notification to customer if linked
+        send_telegram_customer_notification($pdo, $order_id, $status);
     } catch (Exception $e) {
         // ignore to avoid breaking order flow when lifecycle table is missing
+    }
+}
+
+function send_telegram_customer_notification($pdo, $order_id, $event_type = 'status_update') {
+    try {
+        if (!column_exists($pdo, 'customers', 'telegram_chat_id')) {
+            @$pdo->exec("ALTER TABLE customers ADD COLUMN telegram_chat_id VARCHAR(64) NULL INDEX");
+        }
+
+        $botToken = get_setting_value($pdo, 'telegram_bot_token', '');
+        $notifyEnabled = get_setting_value($pdo, 'telegram_notify_customers', 'true');
+        if (empty($botToken) || $notifyEnabled === 'false') return false;
+
+        $stmt = $pdo->prepare("
+            SELECT o.*, c.id as customer_id_val, c.name as customer_name, c.phone1, c.phone2, c.telegram_chat_id as customer_tg_id,
+                   u.name as rep_name
+            FROM orders o
+            LEFT JOIN customers c ON o.customer_id = c.id
+            LEFT JOIN users u ON o.rep_id = u.id
+            WHERE o.id = ? OR o.order_number = ?
+            LIMIT 1
+        ");
+        $stmt->execute([$order_id, $order_id]);
+        $ord = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$ord || empty($ord['customer_name'])) return false;
+
+        $chatId = $ord['customer_tg_id'] ?? '';
+
+        // If customer telegram_chat_id is empty, attempt to resolve via matching phone1 or phone2 in users/customers
+        if (empty($chatId)) {
+            $p1 = preg_replace('/\D/', '', $ord['phone1'] ?? '');
+            $p2 = preg_replace('/\D/', '', $ord['phone2'] ?? '');
+
+            if (!empty($p1) || !empty($p2)) {
+                $stmtMatch = $pdo->prepare("
+                    SELECT telegram_chat_id FROM users 
+                    WHERE (phone = ? OR phone = ? OR phone LIKE ? OR phone LIKE ?) 
+                      AND telegram_chat_id IS NOT NULL AND telegram_chat_id != '' 
+                    LIMIT 1
+                ");
+                $stmtMatch->execute([$p1, $p2, '%' . $p1, '%' . $p2]);
+                $chatId = $stmtMatch->fetchColumn();
+
+                if ($chatId && !empty($ord['customer_id_val'])) {
+                    @$pdo->prepare("UPDATE customers SET telegram_chat_id = ? WHERE id = ?")->execute([$chatId, $ord['customer_id_val']]);
+                }
+            }
+        }
+
+        if (empty($chatId)) return false; // Customer has not linked Telegram yet
+
+        $orderNum = $ord['order_number'] ?? $ord['id'];
+        $custName = $ord['customer_name'];
+        $amount = floatval($ord['total_amount']);
+        $status = strtolower($event_type === 'status_update' ? $ord['status'] : $event_type);
+
+        // Check for Custom User-Defined Telegram Message Templates
+        $tgTemplatesRaw = get_setting_value($pdo, 'tg_templates', '');
+        $customText = null;
+
+        if (!empty($tgTemplatesRaw)) {
+            try {
+                $tgTemplates = json_decode($tgTemplatesRaw, true);
+                if (is_array($tgTemplates)) {
+                    foreach ($tgTemplates as $tpl) {
+                        $tplId = strtolower($tpl['id'] ?? '');
+                        $tplName = $tpl['name'] ?? '';
+                        if (
+                            ($status === 'confirmed' && ($tplId === 'conf' || mb_strpos($tplName, 'تأكيد') !== false)) ||
+                            (($status === 'with_rep' || $status === 'in_delivery') && ($tplId === 'track' || mb_strpos($tplName, 'شحن') !== false || mb_strpos($tplName, 'متابعة') !== false)) ||
+                            (($status === 'returned' || $status === 'partial') && ($tplId === 'return' || mb_strpos($tplName, 'مرتجع') !== false)) ||
+                            ($status === 'delivered' && ($tplId === 'deliver' || mb_strpos($tplName, 'تسليم') !== false))
+                        ) {
+                            $customText = $tpl['text'] ?? '';
+                            break;
+                        }
+                    }
+                }
+            } catch (Exception $e) {}
+        }
+
+        if (!empty($customText)) {
+            $text = str_replace(
+                ['[الاسم]', '[رقم_الطلب]', '[المبلغ]', '[اسم_المندوب]', '[حالة_الطلب]'],
+                [$custName, $orderNum, $amount, $ord['rep_name'] ?? 'المندوب', get_arabic_status($status)],
+                $customText
+            );
+        } else {
+            $text = "";
+            switch ($status) {
+                case 'pending':
+                case 'created':
+                case 'created_via_telegram':
+                    $text = "مرحباً يا *" . $custName . "* 👋\n\n" .
+                            "🎉 *تم تسجيل طلبك رقم:* `" . $orderNum . "` بنجاح في DragonPro!\n" .
+                            "💵 *الإجمالي المطلوب:* " . $amount . " ج.م\n\n" .
+                            "سنقوم بإشعاراتك تلقائياً بأي تحديثات على حالة الشحنة.";
+                    break;
+
+                case 'confirmed':
+                    $text = "مرحباً يا *" . $custName . "* ✅\n\n" .
+                            "👍 *تم تأكيد طلبك رقم:* `" . $orderNum . "` وهو الآن قيد التجهيز للشحن.\n" .
+                            "💰 *المبلغ المستحق:* " . $amount . " ج.م";
+                    break;
+
+                case 'with_rep':
+                case 'in_delivery':
+                    $repInfo = !empty($ord['rep_name']) ? ("\n🚴 *المندوب المسؤول:* " . $ord['rep_name']) : "";
+                    $text = "طلبك في الطريق إليك! 🚚💨\n\n" .
+                            "عزيزي *" . $custName . "*، طلبك رقم `" . $orderNum . "` تم إسناده للمندوب وهو في الطريق لإيصاله لك." . $repInfo . "\n\n" .
+                            "💵 *المبلغ المطلوب عند الاستلام:* *" . $amount . " ج.م*";
+                    break;
+
+                case 'delivered':
+                    $text = "تم تسليم الطلب بنجاح! 🎉\n\n" .
+                            "شكراً لتعاملك معنا يا *" . $custName . "* ❤️\n" .
+                            "تم تسليم أوردرك رقم `" . $orderNum . "` بنجاح.\n\n" .
+                            "نتمنى لك تجربة رائعة وسعداء بخدمتك دائماً!";
+                    break;
+
+                case 'postponed':
+                    $text = "تحديث بشأن طلبك 📅\n\n" .
+                            "عزيزي *" . $custName . "*، تم تأجيل تسليم أوردرك رقم `" . $orderNum . "`.\n" .
+                            "سنقوم بالتواصل معك لتحديد موعد التسليم الجديد المناسب لك.";
+                    break;
+
+                case 'returned':
+                case 'partial':
+                    $text = "تحديث بشأن طلبك ⚠️\n\n" .
+                            "عزيزي *" . $custName . "*، تم تسجيل تحديث على طلبك رقم `" . $orderNum . "`.\n" .
+                            "في حال وجود أي استفسار، يمكنك التواصل معنا مباشرة.";
+                    break;
+
+                default:
+                    $text = "تحديث بشأن طلبك رقم `" . $orderNum . "` 📦\n\n" .
+                            "عزيزي *" . $custName . "*، أوردرك حالياً في حالة تحديث جديد.";
+                    break;
+            }
+        }
+
+        $url = "https://api.telegram.org/bot" . $botToken . "/sendMessage";
+        $payload = [
+            'chat_id' => $chatId,
+            'text' => $text,
+            'parse_mode' => 'Markdown'
+        ];
+
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($payload));
+        curl_setopt($ch, CURLOPT_TIMEOUT, 8);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_exec($ch);
+        curl_close($ch);
+
+        return true;
+
+    } catch (Exception $e) {
+        return false;
     }
 }
 
@@ -6086,6 +6294,13 @@ switch ($module) {
             // Don't block treasuries API if auto-create fails.
         }
 
+        // Ensure type column exists in treasuries table
+        try {
+            if (table_exists($pdo, 'treasuries') && !column_exists($pdo, 'treasuries', 'type')) {
+                execute_query($pdo, "ALTER TABLE treasuries ADD COLUMN type VARCHAR(50) NULL DEFAULT 'نقدي'");
+            }
+        } catch (Exception $e) {}
+
         // If delivery method is not reps, hide the reps insurance treasury.
         // This matches the UX rule: when reps section is hidden, its treasury should also be hidden.
         try {
@@ -6094,7 +6309,7 @@ switch ($module) {
                 $delivery = execute_query($pdo, "SELECT config_value FROM settings WHERE config_key = 'delivery_method' LIMIT 1")->fetchColumn();
                 $delivery = is_string($delivery) ? strtolower(trim($delivery)) : '';
                 if ($delivery !== '' && $delivery !== 'reps') {
-                    $stmt = execute_query($pdo, "SELECT id, name, COALESCE(current_balance, 0) as balance FROM treasuries WHERE name <> ?", ['تأمين المناديب']);
+                    $stmt = execute_query($pdo, "SELECT id, name, COALESCE(type, 'نقدي') as type, COALESCE(current_balance, 0) as balance FROM treasuries WHERE name <> ?", ['تأمين المناديب']);
                     echo json_encode(['success' => true, 'data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
                     break;
                 }
@@ -6103,8 +6318,12 @@ switch ($module) {
             // On any error, fall back to normal behavior.
         }
 
+        if (isset($input['balance']) && !isset($input['current_balance'])) {
+            $input['current_balance'] = $input['balance'];
+        }
+
         // معالجة الخزينة بشكل صحيح
-        handle_crud($pdo, 'treasuries', $input, ['name'], "id, name, COALESCE(current_balance, 0) as balance");
+        handle_crud($pdo, 'treasuries', $input, ['name', 'type', 'current_balance'], "id, name, COALESCE(type, 'نقدي') as type, COALESCE(current_balance, 0) as balance");
         break;    
     case 'suppliers':
         $action = $_GET['action'] ?? 'getAll';
@@ -12986,48 +13205,38 @@ switch ($module) {
         }
         if ($action === 'settleDaily') {
             $repId = intval($input['repId'] ?? 0);
-            $treasuryId = intval($input['treasuryId'] ?? 0);
-            $paidAmount = isset($input['paidAmount']) ? floatval($input['paidAmount']) : 0;
-
-            // enforce defaults/locks for treasury when settling
-            $defaults = get_user_defaults($pdo);
-            if ($defaults) {
-                $defTid = isset($defaults['default_treasury_id']) ? intval($defaults['default_treasury_id']) : null;
-                $canChangeT = isset($defaults['can_change_treasury']) ? boolval($defaults['can_change_treasury']) : true;
-                if (!$canChangeT && $defTid) {
-                    $isElectronic = false;
-                    if ($treasuryId) {
-                        try {
-                            $tName = execute_query($pdo, "SELECT name FROM treasuries WHERE id = ?", [$treasuryId])->fetchColumn();
-                            if ($tName && (mb_strpos($tName, 'إليكترونية') !== false || mb_strpos($tName, 'الكترونيه') !== false || mb_strpos($tName, 'الكترونية') !== false || mb_strpos($tName, 'إليكترونيه') !== false || mb_strpos($tName, 'إلكترونية') !== false || mb_strpos($tName, 'إلكترونيه') !== false)) {
-                                $isElectronic = true;
-                            }
-                        } catch (Exception $e) {}
-                    }
-                    if (!$isElectronic && $treasuryId && $treasuryId !== $defTid) {
-                        http_response_code(400);
-                        echo json_encode(['success' => false, 'message' => 'الخزينة المقفلة للمستخدم، لا يمكن تغييرها.']);
-                        break;
-                    }
-                    if (!$treasuryId) $treasuryId = $defTid;
-                } else {
-                    if (!$treasuryId && $defTid) $treasuryId = $defTid;
+            $splitPayments = isset($input['splitPayments']) && is_array($input['splitPayments']) ? $input['splitPayments'] : null;
+            
+            if (!$splitPayments) {
+                $treasuryId = intval($input['treasuryId'] ?? 0);
+                $paidAmount = isset($input['paidAmount']) ? floatval($input['paidAmount']) : 0;
+                if ($treasuryId > 0 && $paidAmount > 0) {
+                    $splitPayments = [
+                        ['treasuryId' => $treasuryId, 'paidAmount' => $paidAmount, 'type' => 'single', 'title' => 'تسوية يومية']
+                    ];
                 }
             }
 
-            if (!$repId || !$treasuryId) {
+            if (!$repId || empty($splitPayments)) {
                 http_response_code(400);
-                echo json_encode(['success' => false, 'message' => 'repId and treasuryId are required']);
+                echo json_encode(['success' => false, 'message' => 'repId and valid payment amounts/treasuries are required']);
                 break;
             }
-            if ($paidAmount <= 0) {
+
+            // Calculate total paid amount across all split payments
+            $totalPaidAmount = 0;
+            foreach ($splitPayments as $p) {
+                $totalPaidAmount += floatval($p['paidAmount'] ?? 0);
+            }
+
+            if ($totalPaidAmount <= 0) {
                 http_response_code(400);
-                echo json_encode(['success' => false, 'message' => 'paidAmount must be greater than 0']);
+                echo json_encode(['success' => false, 'message' => 'Total paid amount must be greater than 0']);
                 break;
             }
 
             try {
-                // Validate rep exists (most installs store reps in users table)
+                // Validate rep exists
                 if (table_exists($pdo, 'users') && column_exists($pdo, 'users', 'role')) {
                     $repCheck = execute_query($pdo, "SELECT id, name FROM users WHERE id = ? AND role = 'representative' LIMIT 1", [$repId]);
                     $repRow = $repCheck->fetch(PDO::FETCH_ASSOC);
@@ -13038,58 +13247,66 @@ switch ($module) {
                     }
                 }
 
-                // Get current rep balance from transactions (canonical source used by getAllWithBalance)
+                // Get current rep balance from transactions
                 $repRelatedType = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
                 $balStmt = execute_query($pdo, "SELECT COALESCE(SUM(amount),0) AS bal FROM transactions WHERE related_to_type = ? AND related_to_id = ?", [$repRelatedType, $repId]);
                 $balRow = $balStmt->fetch(PDO::FETCH_ASSOC);
                 $currentBal = floatval($balRow['bal'] ?? 0);
 
-                // Negative balance means debt (عليه). Settlement is payment-in to reduce debt.
                 if ($currentBal >= 0) {
                     http_response_code(400);
                     echo json_encode(['success' => false, 'message' => 'لا توجد مديونية على هذا المندوب لإغلاقها.']);
                     break;
                 }
-                if ($paidAmount > abs($currentBal)) {
+                if ($totalPaidAmount > abs($currentBal) + 0.05) {
                     http_response_code(400);
-                    echo json_encode(['success' => false, 'message' => 'مبلغ التقفيل أكبر من المديونية الحالية.']);
+                    echo json_encode(['success' => false, 'message' => 'مبلغ التقفيل الكلي أكبر من المديونية الحالية.']);
                     break;
                 }
 
                 $pdo->beginTransaction();
                 try {
-                    // Lock treasury and update balance (cash in)
-                    execute_query($pdo, "SELECT current_balance FROM treasuries WHERE id = ? FOR UPDATE", [$treasuryId]);
+                    $lastTxId = null;
+                    foreach ($splitPayments as $payment) {
+                        $tId = intval($payment['treasuryId'] ?? 0);
+                        $pAmt = floatval($payment['paidAmount'] ?? 0);
 
-                    $txType = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_settlement', ['rep_settlement','rep_payment_in','payment_in','payment']);
-                    $relType = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
-                    $details = [
-                        'action' => 'settleDaily',
-                        'rep_id' => $repId,
-                        'treasury_id' => $treasuryId,
-                        'paidAmount' => abs($paidAmount),
-                        'model' => 'consignment'
-                    ];
+                        if ($tId <= 0 || $pAmt <= 0) continue;
 
-                    execute_query(
-                        $pdo,
-                        "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)",
-                        [$txType, null, $treasuryId, $relType, $repId, abs($paidAmount), json_encode($details)]
-                    );
-                    $txId = $pdo->lastInsertId();
-                    audit_log($pdo, 'transactions', 'create', $txId, json_encode(['type' => $txType, 'amount' => abs($paidAmount)]));
+                        // Lock treasury and update balance
+                        execute_query($pdo, "SELECT current_balance FROM treasuries WHERE id = ? FOR UPDATE", [$tId]);
 
-                    execute_query($pdo, "UPDATE treasuries SET current_balance = current_balance + ? WHERE id = ?", [abs($paidAmount), $treasuryId]);
+                        $txType = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_settlement', ['rep_settlement','rep_payment_in','payment_in','payment']);
+                        $relType = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
+                        $details = [
+                            'action' => 'settleDaily',
+                            'rep_id' => $repId,
+                            'treasury_id' => $tId,
+                            'paidAmount' => abs($pAmt),
+                            'payment_type' => $payment['type'] ?? 'general',
+                            'model' => 'consignment'
+                        ];
+
+                        execute_query(
+                            $pdo,
+                            "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)",
+                            [$txType, null, $tId, $relType, $repId, abs($pAmt), json_encode($details)]
+                        );
+                        $lastTxId = $pdo->lastInsertId();
+                        audit_log($pdo, 'transactions', 'create', $lastTxId, json_encode(['type' => $txType, 'amount' => abs($pAmt), 'treasury_id' => $tId]));
+
+                        execute_query($pdo, "UPDATE treasuries SET current_balance = current_balance + ? WHERE id = ?", [abs($pAmt), $tId]);
+                    }
 
                     if ($pdo->inTransaction()) $pdo->commit();
 
-                    // Return updated balance
                     $newBalStmt = execute_query($pdo, "SELECT COALESCE(SUM(amount),0) AS bal FROM transactions WHERE related_to_type = ? AND related_to_id = ?", [$repRelatedType, $repId]);
                     $newBalRow = $newBalStmt->fetch(PDO::FETCH_ASSOC);
 
                     echo json_encode([
                         'success' => true,
-                        'transaction_id' => $txId,
+                        'transaction_id' => $lastTxId,
+                        'total_paid' => $totalPaidAmount,
                         'new_balance' => floatval($newBalRow['bal'] ?? 0)
                     ]);
                 } catch (Exception $e) {

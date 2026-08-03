@@ -165,11 +165,18 @@ const SalesDailyClose: React.FC = () => {
   const [selectedTreasuryId, setSelectedTreasuryId] = useState<string>('');
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'electronic'>('cash');
 
-  // Rep State
+  // Rep State & Payment Mode
   const [repBalance, setRepBalance] = useState<number>(0);
   const [paidAmount, setPaidAmount] = useState<number>(0);
   const [settlementDirection, setSettlementDirection] = useState<'collect' | 'pay'>('collect');
   const [openDailyInfo, setOpenDailyInfo] = useState<{ daily_code: string; id: number } | null>(null);
+
+  // Dual/Split Payment States
+  const [isSplitPayment, setIsSplitPayment] = useState<boolean>(false);
+  const [cashPaidAmount, setCashPaidAmount] = useState<number>(0);
+  const [cashTreasuryId, setCashTreasuryId] = useState<string>('');
+  const [electronicPaidAmount, setElectronicPaidAmount] = useState<number>(0);
+  const [electronicTreasuryId, setElectronicTreasuryId] = useState<string>('');
 
   // Transaction state
   const [repTxType, setRepTxType] = useState<'none' | 'bonus' | 'penalty'>('none');
@@ -535,20 +542,35 @@ const SalesDailyClose: React.FC = () => {
   const handleCloseDaily = async () => {
     if (!selectedRepId) { Swal.fire('اختر المندوب', 'يرجى اختيار المندوب أولاً.', 'warning'); return; }
     if (!openDailyInfo) { Swal.fire('تنبيه', 'المندوب ليس له يومية مفتوحة حالياً.', 'warning'); return; }
-    const amount = Math.max(0, toNum(paidAmount));
-    if (amount > 0 && !selectedTreasuryId) { Swal.fire('اختر الخزينة', 'يرجى اختيار الخزينة لإتمام التقفيل.', 'warning'); return; }
+
+    const cashAmt = isSplitPayment ? Math.max(0, toNum(cashPaidAmount)) : 0;
+    const elecAmt = isSplitPayment ? Math.max(0, toNum(electronicPaidAmount)) : 0;
+    const amount = isSplitPayment ? (cashAmt + elecAmt) : Math.max(0, toNum(paidAmount));
+
+    if (amount > 0) {
+      if (isSplitPayment) {
+        if (cashAmt > 0 && !cashTreasuryId) { Swal.fire('اختر الخزينة', 'يرجى اختيار الخزينة النقدية.', 'warning'); return; }
+        if (elecAmt > 0 && !electronicTreasuryId) { Swal.fire('اختر الخزينة', 'يرجى اختيار خزينة المدفوعات الإلكترونية.', 'warning'); return; }
+      } else {
+        if (!selectedTreasuryId) { Swal.fire('اختر الخزينة', 'يرجى اختيار الخزينة لإتمام التقفيل.', 'warning'); return; }
+      }
+    }
 
     const repName = selectedRep?.name || '';
+    const treasuryDisplay = isSplitPayment 
+      ? `مزدوج (كاش: ${money(cashAmt)} ج.م + إلكتروني: ${money(elecAmt)} ج.م)`
+      : (selectedTreasuryName || selectedTreasuryId || '—');
+
     const res = await Swal.fire({
       title: 'تأكيد التقفيل', icon: 'question', showCancelButton: true, confirmButtonText: 'تأكيد', cancelButtonText: 'إلغاء',
       html: `
         <div style="text-align:right; line-height:1.9">
           <div><b>المندوب:</b> ${repName}</div>
-          <div><b>الخزينة:</b> ${selectedTreasuryName || selectedTreasuryId || '—'}</div>
+          <div><b>تفاصيل الخزائن:</b> ${treasuryDisplay}</div>
           <div><b>طريقة التسوية:</b> ${settlementDirection === 'collect' ? 'تحصيل من المندوب' : 'دفع إلى المندوب'}</div>
           <hr/>
           <div><b>الحساب الحالى:</b> ${money(repBalance)} ${currencySymbol} <span>(${balanceLabel(repBalance)})</span></div>
-          <div><b>مبلغ التقفيل المدفوع:</b> ${money(amount)} ${currencySymbol}</div>
+          <div><b>إجمالي مبلغ التقفيل المدفوع:</b> ${money(amount)} ${currencySymbol}</div>
           <div style="margin-top:6px;"><b>المتبقي التقديري:</b> ${money(settlementDirection === 'collect' ? (repBalance + amount) : (repBalance - amount))} ${currencySymbol}</div>
         </div>
       `
@@ -562,14 +584,26 @@ const SalesDailyClose: React.FC = () => {
       if (amount <= 0) {
         settleSuccess = true;
       } else if (settlementDirection === 'collect') {
-        const payload = { repId: Number(selectedRepId), treasuryId: Number(selectedTreasuryId), paidAmount: amount, details: { reason: 'اغلاق اليوميه تلقائيا' }, notes: 'اغلاق اليوميه تلقائيا' };
+        const payload: any = { repId: Number(selectedRepId) };
+        if (isSplitPayment) {
+          const splits = [];
+          if (cashAmt > 0) splits.push({ treasuryId: Number(cashTreasuryId), paidAmount: cashAmt, type: 'cash', title: 'تقفيل يومية - كاش' });
+          if (elecAmt > 0) splits.push({ treasuryId: Number(electronicTreasuryId), paidAmount: elecAmt, type: 'electronic', title: 'تقفيل يومية - إلكتروني' });
+          payload.splitPayments = splits;
+        } else {
+          payload.treasuryId = Number(selectedTreasuryId);
+          payload.paidAmount = amount;
+        }
+        payload.details = { reason: 'اغلاق اليوميه تلقائيا' };
+        payload.notes = 'اغلاق اليوميه تلقائيا';
+
         const r = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=settleDaily`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         const j = await r.json();
         settleSuccess = j?.success;
         if (!settleSuccess) Swal.fire('فشل العملية', j?.message || 'تعذر التقفيل المالي.', 'error');
       } else {
         const txPayload = {
-          type: 'rep_payment_out', related_to_type: 'rep', related_to_id: Number(selectedRepId), amount: amount, treasuryId: Number(selectedTreasuryId), direction: 'out',
+          type: 'rep_payment_out', related_to_type: 'rep', related_to_id: Number(selectedRepId), amount: amount, treasuryId: Number(selectedTreasuryId || cashTreasuryId), direction: 'out',
           details: { context: 'close_daily', action: 'settleDaily', reason: 'اغلاق اليوميه تلقائيا' }, notes: 'اغلاق اليوميه تلقائيا', title: `دفع إلى المندوب - تسوية يومية`
         };
         const r2 = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=create`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(txPayload) });
@@ -598,6 +632,9 @@ const SalesDailyClose: React.FC = () => {
           Swal.fire('تم', amount > 0 ? 'تم التقفيل وإغلاق اليومية بنجاح.' : 'تم إغلاق اليومية بنجاح بدون حركة مالية.', 'success').then(() => {
             // Reset Page Completely
             setSelectedRepId('');
+            setIsSplitPayment(false);
+            setCashPaidAmount(0);
+            setElectronicPaidAmount(0);
           });
         }
       } else {
@@ -1007,24 +1044,71 @@ const SalesDailyClose: React.FC = () => {
           </div>
 
           <div className="rounded-3xl border border-slate-200 dark:border-slate-700 bg-gradient-to-br from-slate-900 to-slate-800 p-5 shadow-sm text-white">
-            <div className="flex items-center gap-2 font-black"><CheckCircle2 className="w-5 h-5 text-emerald-300" /> تأكيد التقفيل</div>
-            <div className="mt-3 rounded-2xl p-3 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800">
-              <div className="text-xs text-slate-700 dark:text-slate-200 mb-2">طريقة التسوية</div>
-              <div className="flex items-center gap-3 mb-3">
-                <label className="inline-flex items-center gap-2 text-xs cursor-pointer"><input type="radio" checked={settlementDirection === 'collect'} onChange={() => setSettlementDirection('collect')} /><span className="text-slate-800 dark:text-slate-200">تحصيل من المندوب</span></label>
-                <label className="inline-flex items-center gap-2 text-xs cursor-pointer"><input type="radio" checked={settlementDirection === 'pay'} onChange={() => setSettlementDirection('pay')} /><span className="text-slate-800 dark:text-slate-200">دفع للمندوب</span></label>
-              </div>
-              <div className="text-xs text-slate-700 dark:text-slate-200 mb-2">المبلغ المدفوع للتقفيل</div>
-              <input type="number" min={0} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl px-3 py-3 text-sm font-bold text-slate-900 dark:text-white" value={paidAmount || ''} onChange={e => setPaidAmount(Math.max(0, toNum(e.target.value)))} disabled={loading || !selectedRepId} />
+            <div className="flex items-center justify-between font-black">
+              <div className="flex items-center gap-2"><CheckCircle2 className="w-5 h-5 text-emerald-300" /> تأكيد التقفيل</div>
+              <button
+                type="button"
+                onClick={() => setIsSplitPayment(!isSplitPayment)}
+                className={`text-[11px] px-2.5 py-1 rounded-xl font-bold transition-all border ${isSplitPayment ? 'bg-sky-500 text-white border-sky-400' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'}`}
+              >
+                {isSplitPayment ? '💳 تقفيل مقسّم (مفعّل)' : '➕ تقسيم كاش/إلكتروني'}
+              </button>
             </div>
+
+            <div className="mt-3 rounded-2xl p-3 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 text-slate-800 dark:text-slate-100">
+              <div className="text-xs font-bold mb-2">طريقة التسوية</div>
+              <div className="flex items-center gap-3 mb-3">
+                <label className="inline-flex items-center gap-2 text-xs cursor-pointer"><input type="radio" checked={settlementDirection === 'collect'} onChange={() => setSettlementDirection('collect')} /><span>تحصيل من المندوب</span></label>
+                <label className="inline-flex items-center gap-2 text-xs cursor-pointer"><input type="radio" checked={settlementDirection === 'pay'} onChange={() => setSettlementDirection('pay')} /><span>دفع للمندوب</span></label>
+              </div>
+
+              {!isSplitPayment ? (
+                <div>
+                  <div className="text-xs font-bold mb-1">المبلغ المدفوع للتقفيل</div>
+                  <input type="number" min={0} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl px-3 py-2.5 text-sm font-bold text-slate-900 dark:text-white" value={paidAmount || ''} onChange={e => setPaidAmount(Math.max(0, toNum(e.target.value)))} disabled={loading || !selectedRepId} />
+                </div>
+              ) : (
+                <div className="space-y-3 pt-1 border-t border-amber-200 dark:border-amber-800/60">
+                  <div>
+                    <label className="text-[11px] font-bold mb-1 flex items-center justify-between">
+                      <span>💵 المبلغ النقدي (الكاش)</span>
+                      <span className="text-[10px] text-slate-500">الخزينة النقدية</span>
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input type="number" min={0} placeholder="0 ج.م" className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-2 text-xs font-bold" value={cashPaidAmount || ''} onChange={e => setCashPaidAmount(Math.max(0, toNum(e.target.value)))} />
+                      <select className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-2 text-xs font-bold" value={cashTreasuryId} onChange={e => setCashTreasuryId(e.target.value)}>
+                        <option value="">اختر خزينة الكاش...</option>
+                        {treasuries.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold mb-1 flex items-center justify-between">
+                      <span>💳 المدفوعات الإلكترونية</span>
+                      <span className="text-[10px] text-slate-500">إنستاباي / فودافون كاش</span>
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input type="number" min={0} placeholder="0 ج.م" className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-2 text-xs font-bold" value={electronicPaidAmount || ''} onChange={e => setElectronicPaidAmount(Math.max(0, toNum(e.target.value)))} />
+                      <select className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-2 text-xs font-bold" value={electronicTreasuryId} onChange={e => setElectronicTreasuryId(e.target.value)}>
+                        <option value="">اختر الخزينة الإلكترونية...</option>
+                        {treasuries.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="mt-4 space-y-2 text-xs">
               <div className="flex justify-between"><span className="text-slate-200/80">المندوب</span><span className="font-black">{selectedRep?.name || '—'}</span></div>
-              <div className="flex justify-between"><span className="text-slate-200/80">الخزينة</span><span className="font-black">{selectedTreasuryName || '—'}</span></div>
+              <div className="flex justify-between"><span className="text-slate-200/80">الخزينة المختارة</span><span className="font-black">{isSplitPayment ? 'مزدوج (كاش + إلكتروني)' : (selectedTreasuryName || '—')}</span></div>
               <div className="flex justify-between"><span className="text-slate-200/80">الحساب القديم</span><span className="font-black">{money(repBalance)} {currencySymbol} <span className="text-[11px] ml-1">({balanceLabel(repBalance)})</span></span></div>
-              <div className="flex justify-between"><span className="text-slate-200/80">المبلغ المدفوع</span><span className="font-black">{money(paidAmount)} {currencySymbol}</span></div>
-              <div className="flex justify-between"><span className="text-slate-200/80">المتبقي (تقديري)</span><span className={`font-black ${balanceClass(settlementDirection === 'collect' ? repBalance + paidAmount : repBalance - paidAmount)}`}>{money(settlementDirection === 'collect' ? repBalance + paidAmount : repBalance - paidAmount)} {currencySymbol}</span></div>
+              <div className="flex justify-between"><span className="text-slate-200/80">المبلغ المدفوع الكلي</span><span className="font-black text-emerald-300">{money(isSplitPayment ? (cashPaidAmount + electronicPaidAmount) : paidAmount)} {currencySymbol}</span></div>
+              <div className="flex justify-between"><span className="text-slate-200/80">المتبقي (تقديري)</span><span className={`font-black ${balanceClass(settlementDirection === 'collect' ? repBalance + (isSplitPayment ? (cashPaidAmount + electronicPaidAmount) : paidAmount) : repBalance - (isSplitPayment ? (cashPaidAmount + electronicPaidAmount) : paidAmount))}`}>{money(settlementDirection === 'collect' ? repBalance + (isSplitPayment ? (cashPaidAmount + electronicPaidAmount) : paidAmount) : repBalance - (isSplitPayment ? (cashPaidAmount + electronicPaidAmount) : paidAmount))} {currencySymbol}</span></div>
             </div>
-            <button onClick={handleCloseDaily} disabled={loading || !selectedRepId || (paidAmount > 0 && !selectedTreasuryId)} className="mt-5 w-full bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-slate-900 font-black py-3 rounded-2xl transition-colors">
+
+            <button onClick={handleCloseDaily} disabled={loading || !selectedRepId || (!isSplitPayment && paidAmount > 0 && !selectedTreasuryId) || (isSplitPayment && (cashPaidAmount + electronicPaidAmount) <= 0)} className="mt-5 w-full bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-slate-900 font-black py-3 rounded-2xl transition-colors">
               تأكيد التقفيل وإغلاق اليومية
             </button>
           </div>
