@@ -84,6 +84,26 @@ const normalizeNumbers = (input: any): string => {
   return s.split('').map(ch => map[ch] || ch).join('');
 };
 
+const parseOrderDateTime = (raw: any): string => {
+  if (!raw) return '';
+  const str = String(raw).trim();
+  if (/^\d{4}-\d{2}-\d{2}[\sT]\d{2}:\d{2}/.test(str)) {
+    const clean = str.replace('T', ' ');
+    return clean.slice(0, 19);
+  }
+  const d = new Date(str);
+  if (!isNaN(d.getTime())) {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const min = String(d.getMinutes()).padStart(2, '0');
+    const ss = String(d.getSeconds()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}`;
+  }
+  return str;
+};
+
 const formatOrderTime = (dateStr?: string | null): string => {
   if (!dateStr) return '';
   try {
@@ -190,7 +210,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
 
   // Mock Data for testing (Or empty array)
   const [orders, setOrders] = useState<any[]>([]);
-  const [statusFilter, setStatusFilter] = useState<string>('pending');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
   const [startDateFilter, setStartDateFilter] = useState<string>('');
   const [endDateFilter, setEndDateFilter] = useState<string>('');
   const [dateFilter, setDateFilter] = useState<string>('all');
@@ -264,14 +284,13 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
     const matchesStatus = statusFilter === 'all' || (o.status || '') === statusFilter;
     
     const rawDate = o.created_at || o.createdAt || o.date || '';
-    const rawStr = String(rawDate).trim().replace('T', ' ');
-    const orderDateTimeStr = rawStr.length >= 16 ? rawStr.slice(0, 16) : rawStr;
-    const orderDateOnly = orderDateTimeStr.slice(0, 10);
-    const orderTimeOnly = orderDateTimeStr.length >= 16 ? orderDateTimeStr.slice(11, 16) : '';
+    const orderFullDateTime = parseOrderDateTime(rawDate);
+    const orderDateOnly = orderFullDateTime.slice(0, 10);
+    const orderTimeOnly = orderFullDateTime.length >= 16 ? orderFullDateTime.slice(11, 16) : '';
 
     let matchesFrom = true;
     if (startDateFilter && timeFromFilter) {
-      matchesFrom = orderDateTimeStr >= `${startDateFilter} ${timeFromFilter}`;
+      matchesFrom = orderFullDateTime >= `${startDateFilter} ${timeFromFilter}:00`;
     } else if (startDateFilter) {
       matchesFrom = orderDateOnly >= startDateFilter;
     } else if (timeFromFilter) {
@@ -280,7 +299,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
 
     let matchesTo = true;
     if (endDateFilter && timeToFilter) {
-      matchesTo = orderDateTimeStr <= `${endDateFilter} ${timeToFilter}`;
+      matchesTo = orderFullDateTime <= `${endDateFilter} ${timeToFilter}:59`;
     } else if (endDateFilter) {
       matchesTo = orderDateOnly <= endDateFilter;
     } else if (timeToFilter) {
