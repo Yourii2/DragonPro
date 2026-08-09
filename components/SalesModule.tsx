@@ -280,46 +280,59 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
     return existingProducts.filter((ep: any) => String((ep as any).product_id || (ep as any).id) === key);
   };
 
-  const filteredOrders = orders.filter(o => {
-    const matchesStatus = statusFilter === 'all' || (o.status || '') === statusFilter;
-    
-    const rawDate = o.created_at || o.createdAt || o.date || '';
-    const orderFullDateTime = parseOrderDateTime(rawDate);
-    const orderDateOnly = orderFullDateTime.slice(0, 10);
-    const orderTimeOnly = orderFullDateTime.length >= 16 ? orderFullDateTime.slice(11, 16) : '';
+  const filteredOrders = useMemo(() => {
+    if (!Array.isArray(orders)) return [];
+    return orders.filter(o => {
+      try {
+        const matchesStatus = statusFilter === 'all' || (o.status || '') === statusFilter;
+        if (!matchesStatus) return false;
 
-    let matchesFrom = true;
-    if (startDateFilter && timeFromFilter) {
-      matchesFrom = orderFullDateTime >= `${startDateFilter} ${timeFromFilter}:00`;
-    } else if (startDateFilter) {
-      matchesFrom = orderDateOnly >= startDateFilter;
-    } else if (timeFromFilter) {
-      matchesFrom = orderTimeOnly >= timeFromFilter;
-    }
+        const phoneA = String(o.phone || o.phone1 || '');
+        const phoneB = String(o.phone2 || '');
+        const term = String(searchTerm || '').toLowerCase();
+        const matchesSearch =
+          !term ||
+          (o.customerName || '').toLowerCase().includes(term) ||
+          phoneA.toLowerCase().includes(term) ||
+          phoneB.toLowerCase().includes(term) ||
+          (o.orderNumber || '').toLowerCase().includes(term);
+        if (!matchesSearch) return false;
 
-    let matchesTo = true;
-    if (endDateFilter && timeToFilter) {
-      matchesTo = orderFullDateTime <= `${endDateFilter} ${timeToFilter}:59`;
-    } else if (endDateFilter) {
-      matchesTo = orderDateOnly <= endDateFilter;
-    } else if (timeToFilter) {
-      matchesTo = orderTimeOnly <= timeToFilter;
-    }
+        if (!startDateFilter && !endDateFilter && !timeFromFilter && !timeToFilter) {
+          return true;
+        }
 
-    const matchesSingleDate = dateFilter === 'all' || !dateFilter || orderDateOnly === dateFilter;
-    const matchesDate = matchesSingleDate && matchesFrom && matchesTo;
+        const rawDate = o.created_at || o.createdAt || o.date || '';
+        const orderFullDateTime = parseOrderDateTime(rawDate);
+        if (!orderFullDateTime) return true;
 
-    const phoneA = o.phone || o.phone1 || '';
-    const phoneB = o.phone2 || '';
-    const term = searchTerm.toLowerCase();
-    const matchesSearch =
-      (o.customerName || '').includes(searchTerm) ||
-      phoneA.includes(searchTerm) ||
-      phoneB.includes(searchTerm) ||
-      (o.orderNumber || '').toLowerCase().includes(term);
+        const orderDateOnly = orderFullDateTime.slice(0, 10);
+        const orderTimeOnly = orderFullDateTime.length >= 16 ? orderFullDateTime.slice(11, 16) : '';
 
-    return matchesStatus && matchesSearch && matchesDate;
-  });
+        let matchesFrom = true;
+        if (startDateFilter && timeFromFilter) {
+          matchesFrom = orderFullDateTime >= `${startDateFilter} ${timeFromFilter}:00`;
+        } else if (startDateFilter) {
+          matchesFrom = orderDateOnly >= startDateFilter;
+        } else if (timeFromFilter) {
+          matchesFrom = orderTimeOnly >= timeFromFilter;
+        }
+
+        let matchesTo = true;
+        if (endDateFilter && timeToFilter) {
+          matchesTo = orderFullDateTime <= `${endDateFilter} ${timeToFilter}:59`;
+        } else if (endDateFilter) {
+          matchesTo = orderDateOnly <= endDateFilter;
+        } else if (timeToFilter) {
+          matchesTo = orderTimeOnly <= timeToFilter;
+        }
+
+        return matchesFrom && matchesTo;
+      } catch (err) {
+        return true;
+      }
+    });
+  }, [orders, statusFilter, searchTerm, startDateFilter, endDateFilter, timeFromFilter, timeToFilter]);
 
   const selectedOrderSubtotal = selectedOrder
     ? (selectedOrder.products || []).reduce((s: number, p: any) => s + (Number(p.price || 0) * Number(p.quantity || p.qty || 0)), 0)

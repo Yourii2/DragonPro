@@ -1,4 +1,4 @@
-const CACHE_NAME = 'dragonpro-cache-v13';
+const CACHE_NAME = 'dragonpro-cache-v14';
 const urlsToCache = [
   './',
   './index.html',
@@ -30,8 +30,8 @@ self.addEventListener('activate', event => {
 
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
-  // Pass through PHP API endpoints, test endpoints, or cross-origin requests directly to browser
-  if (url.pathname.endsWith('.php') || url.origin !== location.origin) {
+  // Pass through PHP API endpoints, HTML, JS, or cross-origin requests directly to browser
+  if (url.pathname.endsWith('.php') || url.pathname.endsWith('.js') || url.pathname.endsWith('.html') || url.origin !== location.origin) {
     return;
   }
 
