@@ -1,4 +1,4 @@
-const CACHE_NAME = 'dragonpro-cache-v10';
+const CACHE_NAME = 'dragonpro-cache-v11';
 const urlsToCache = [
   './',
   './index.html',

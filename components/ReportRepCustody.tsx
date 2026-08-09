@@ -273,7 +273,7 @@ const ReportRepCustody: React.FC = () => {
             th, td { border: 1px solid #ccc; padding: 8px 10px; text-align: right; font-size: 13px; }
             th { background-color: #f3f4f6; color: #1f2937; }
             .totals { margin-top: 20px; font-weight: bold; font-size: 18px; text-align: left; }
-            .qty-badge { background-color: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px; }
+            .qty-badge { background-color: #fee2e2; color: #dc2626; padding: 2px 8px; border-radius: 6px; font-weight: bold; font-size: 11px; border: 1px solid #fca5a5; }
             @media print { body { -webkit-print-color-adjust: exact; } }
           </style>
         </head>
@@ -466,7 +466,7 @@ const ReportRepCustody: React.FC = () => {
                             {item.repsArr.map((r, i) => (
                               <span key={i} className="inline-flex items-center gap-2 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
                                 <span className="font-black text-slate-800 dark:text-slate-200">{r.name}</span>
-                                <span className="bg-red-600 text-white px-2.5 py-0.5 rounded-lg text-xs font-black shadow-sm">
+                                <span className="bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800 px-2.5 py-0.5 rounded-lg text-xs font-black shadow-sm">
                                   {r.qty} قطعة
                                 </span>
                               </span>
