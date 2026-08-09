@@ -4085,7 +4085,7 @@ switch ($module) {
                 ]]);
             } catch (Exception $e) {
                 try { if ($pdo->inTransaction()) $pdo->rollBack(); } catch (Exception $ex) {}
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success'=>false,'message'=>'Assembly failed: ' . $e->getMessage()]);
             }
             break;
@@ -4305,7 +4305,7 @@ switch ($module) {
                 echo json_encode(['success'=>true,'data'=>['id'=>$newId]]);
             } catch (Exception $e) {
                 try { $pdo->rollBack(); } catch (Exception $ex) {}
-                http_response_code(500);
+                // http_response_code(500);
                 error_log('factory_products add failed: ' . $e->getMessage());
                 echo json_encode(['success'=>false,'message'=>'Failed to add factory product.','error'=>$e->getMessage()]);
             }
@@ -4454,7 +4454,7 @@ switch ($module) {
                 echo json_encode(['success'=>true]);
             } catch (Exception $e) {
                 try { $pdo->rollBack(); } catch (Exception $ex) {}
-                http_response_code(500);
+                // http_response_code(500);
                 error_log('factory_products update failed: ' . $e->getMessage());
                 echo json_encode(['success'=>false,'message'=>'Failed to update factory product.','error'=>$e->getMessage()]);
             }
@@ -4732,7 +4732,7 @@ switch ($module) {
                 echo json_encode(['success'=>true,'data'=>['id'=>$newId,'code'=>$code]]);
             } catch (Exception $e) {
                 try { if ($pdo->inTransaction()) $pdo->rollBack(); } catch (Exception $ex) {}
-                http_response_code(500);
+                // http_response_code(500);
                 error_log('cutting_stage add failed: ' . $e->getMessage());
                 echo json_encode(['success'=>false,'message'=>'Failed to create cutting order.','error'=>$e->getMessage()]);
             }
@@ -5308,7 +5308,7 @@ switch ($module) {
                 echo json_encode(['success'=>true]);
             } catch (Exception $e) {
                 try { if ($pdo->inTransaction()) $pdo->rollBack(); } catch (Exception $ex) {}
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success'=>false,'message'=>$e->getMessage()]);
             }
             break;
@@ -5432,7 +5432,7 @@ switch ($module) {
                 echo json_encode(['success'=>true]);
             } catch (Exception $e) {
                 try { if ($pdo->inTransaction()) $pdo->rollBack(); } catch (Exception $ex) {}
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success'=>false,'message'=>$e->getMessage()]);
             }
             break;
@@ -5664,7 +5664,7 @@ switch ($module) {
                 echo json_encode(['success'=>true,'data'=>['finished_pieces'=>$outPieces]]);
             } catch (Exception $e) {
                 try { if ($pdo->inTransaction()) $pdo->rollBack(); } catch (Exception $ex) {}
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success'=>false,'message'=>$e->getMessage()]);
             }
             break;
@@ -5918,7 +5918,7 @@ switch ($module) {
                 echo json_encode(['success'=>true,'data'=>['id'=>$fabricId]]);
             } catch (Exception $e) {
                 try { $pdo->rollBack(); } catch (Exception $ex) {}
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success'=>false,'message'=>'Failed to add fabric.']);
             }
             break;
@@ -5974,7 +5974,7 @@ switch ($module) {
                 echo json_encode(['success'=>true]);
             } catch (Exception $e) {
                 try { $pdo->rollBack(); } catch (Exception $ex) {}
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success'=>false,'message'=>'Failed to update fabric.']);
             }
             break;
@@ -6115,7 +6115,7 @@ switch ($module) {
                 echo json_encode(['success'=>true,'data'=>['id'=>$accId]]);
             } catch (Exception $e) {
                 try { $pdo->rollBack(); } catch (Exception $ex) {}
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success'=>false,'message'=>'Failed to add accessory.']);
             }
             break;
@@ -6166,7 +6166,7 @@ switch ($module) {
                 echo json_encode(['success'=>true]);
             } catch (Exception $e) {
                 try { $pdo->rollBack(); } catch (Exception $ex) {}
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success'=>false,'message'=>'Failed to update accessory.']);
             }
             break;
@@ -6212,7 +6212,7 @@ switch ($module) {
         if ($action === 'archive' || $action === 'unarchive') {
             check_permission_or_die($pdo, 'customers', 'edit');
             if (!column_exists($pdo, 'customers', 'is_archived')) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success'=>false,'message'=>'Archive columns are missing. Run the CRM/SRM migration.']);
                 break;
             }
@@ -6225,7 +6225,7 @@ switch ($module) {
                 audit_log($pdo, 'customers', $action, $id, null);
                 echo json_encode(['success'=>true]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success'=>false,'message'=>'Failed to update archive status.']);
             }
             break;
@@ -6584,7 +6584,7 @@ switch ($module) {
                 echo json_encode(['success'=>true]);
             } catch (Exception $e) {
                 if ($pdo->inTransaction()) $pdo->rollBack();
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success'=>false,'message'=>$e->getMessage()]);
             }
             break;
@@ -6816,7 +6816,7 @@ switch ($module) {
                 $pdo->commit();
             } catch (Exception $e) {
                 if ($pdo->inTransaction()) $pdo->rollBack();
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success'=>false,'message'=>$e->getMessage()]);
                 break;
             }
@@ -6852,7 +6852,7 @@ switch ($module) {
                 echo json_encode(['success'=>true]);
             } catch (Exception $e) {
                 if ($pdo->inTransaction()) $pdo->rollBack();
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success'=>false,'message'=>$e->getMessage()]);
             }
             break;
@@ -6895,7 +6895,7 @@ switch ($module) {
                 echo json_encode(['success'=>true]);
             } catch (Exception $e) {
                 if ($pdo->inTransaction()) $pdo->rollBack();
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success'=>false,'message'=>$e->getMessage()]);
             }
             break;
@@ -6981,7 +6981,7 @@ switch ($module) {
                 handle_crud($pdo, 'employees', $input, ['name', 'job_title', 'salary', 'hire_date', 'phone', 'status', 'fingerprint_device_id', 'fingerprint_user_id']);
             }
         } catch (Exception $e) {
-            http_response_code(500);
+            // http_response_code(500);
             echo json_encode(['success' => false, 'message' => $e->getMessage()]);
         }
         break;
@@ -7002,7 +7002,7 @@ switch ($module) {
                         echo json_encode(['success' => true, 'data' => []]);
                     }
                 } catch (Exception $e) {
-                    http_response_code(500);
+                    // http_response_code(500);
                     echo json_encode(['success' => false, 'message' => $e->getMessage()]);
                 }
             } else {
@@ -7623,7 +7623,7 @@ switch ($module) {
                 echo json_encode(['success' => true, 'data' => ['order_id' => $orderId, 'code' => $code]]);
             } catch (Exception $e) {
                 try { if ($pdo->inTransaction()) $pdo->rollBack(); } catch (Exception $ex) {}
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Create dispatch order failed: ' . $e->getMessage()]);
             }
             break;
@@ -7644,7 +7644,7 @@ switch ($module) {
                 echo json_encode(['success'=>true]);
             } catch (Exception $e) {
                 try { if ($pdo->inTransaction()) $pdo->rollBack(); } catch (Exception $ex) {}
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success'=>false,'message'=>'Cancel failed: ' . $e->getMessage()]);
             }
             break;
@@ -7879,7 +7879,7 @@ switch ($module) {
                 echo json_encode(['success'=>true,'data'=>['status'=>$newStatus]]);
             } catch (Exception $e) {
                 try { if ($pdo->inTransaction()) $pdo->rollBack(); } catch (Exception $ex) {}
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success'=>false,'message'=>'Confirm receipt failed: ' . $e->getMessage()]);
             }
             break;
@@ -7972,7 +7972,7 @@ switch ($module) {
                 echo json_encode(['success' => true, 'data' => ['id' => $dispatchId]]);
             } catch (Exception $e) {
                 try { if ($pdo->inTransaction()) $pdo->rollBack(); } catch (Exception $ex) {}
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Dispatch failed: ' . $e->getMessage()]);
             }
             break;
@@ -8069,7 +8069,7 @@ switch ($module) {
                 echo json_encode(['success' => true]);
             } catch (Exception $e) {
                 try { if ($pdo->inTransaction()) $pdo->rollBack(); } catch (Exception $ex) {}
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Update failed: ' . $e->getMessage()]);
             }
             break;
@@ -8114,7 +8114,7 @@ switch ($module) {
                 echo json_encode(['success' => true]);
             } catch (Exception $e) {
                 try { if ($pdo->inTransaction()) $pdo->rollBack(); } catch (Exception $ex) {}
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Delete failed: ' . $e->getMessage()]);
             }
             break;
@@ -8140,7 +8140,7 @@ switch ($module) {
                 $out = attendance_pull_and_store($pdo, $device_id, $start, $end);
                 echo json_encode(array_merge(['success' => (bool)($out['success'] ?? true)], $out));
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => $e->getMessage()]);
             }
             break;
@@ -8395,7 +8395,7 @@ switch ($module) {
                 echo json_encode(['success' => true]);
             } catch (Exception $e) {
                 $pdo->rollBack();
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => $e->getMessage()]);
             }
             break;
@@ -8437,7 +8437,7 @@ switch ($module) {
                 echo json_encode(['success' => true]);
             } catch (Exception $e) {
                 $pdo->rollBack();
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => $e->getMessage()]);
             }
             break;
@@ -8498,7 +8498,7 @@ switch ($module) {
             }
             handle_crud($pdo, 'attendance_worker_daily_summary', $input, ['worker_id', 'shift_id', 'work_date', 'first_in', 'last_out', 'late_minutes', 'early_leave_minutes', 'overtime_minutes', 'is_absent', 'status']);
         } catch (Exception $e) {
-            http_response_code(500);
+            // http_response_code(500);
             echo json_encode(['success' => false, 'message' => $e->getMessage()]);
         }
         break;
@@ -8977,7 +8977,7 @@ switch ($module) {
                 ]
             ]);
         } catch (Exception $e) {
-            http_response_code(500);
+            // http_response_code(500);
             echo json_encode(['success' => false, 'message' => $e->getMessage()]);
         }
         break;
@@ -9132,7 +9132,7 @@ switch ($module) {
             $filename = 'user_' . $current_user . '_' . date('Ymd_His') . '.' . $ext;
             $target = $upload_dir . '/' . $filename;
             if (!move_uploaded_file($file['tmp_name'], $target)) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'فشل حفظ الملف.']);
                 break;
             }
@@ -9458,7 +9458,7 @@ switch ($module) {
             // fallback
             echo json_encode(['success'=>false,'message'=>'Unknown permissions action']);
         } catch (Exception $e) {
-            http_response_code(500);
+            // http_response_code(500);
             echo json_encode(['success'=>false,'message'=>$e->getMessage()]);
         }
         break;
@@ -9838,7 +9838,7 @@ switch ($module) {
                 $result = nexus_fetch_orders_by_ids($pdo, $_GET['ids'] ?? '');
                 echo json_encode(['success' => true, 'data' => $result]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'getByIds error: ' . $e->getMessage()]);
             }
             break;
@@ -10334,7 +10334,7 @@ switch ($module) {
                     } catch (Exception $e) {
                         // If transaction logging fails, continue but roll back whole op
                         if ($pdo->inTransaction()) $pdo->rollBack();
-                        http_response_code(500);
+                        // http_response_code(500);
                         echo json_encode(['success'=>false,'message'=>'Failed to record rep transaction: '.$e->getMessage()]);
                         break;
                     }
@@ -10474,7 +10474,7 @@ switch ($module) {
                 break;
             } catch (Exception $e) {
                 if ($pdo->inTransaction()) $pdo->rollBack();
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success'=>false,'message'=>'Failed to process partial return: '.$e->getMessage()]);
                 break;
             }
@@ -10573,7 +10573,7 @@ switch ($module) {
                         );
                     } catch (Exception $e) {
                         if ($pdo->inTransaction()) $pdo->rollBack();
-                        http_response_code(500);
+                        // http_response_code(500);
                         echo json_encode(['success' => false, 'message' => 'Failed to record rep transaction: ' . $e->getMessage()]);
                         break;
                     }
@@ -10632,7 +10632,7 @@ switch ($module) {
                 break;
             } catch (Exception $e) {
                 if ($pdo->inTransaction()) $pdo->rollBack();
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'returnToStock failed: ' . $e->getMessage()]);
                 break;
             }
@@ -10953,7 +10953,7 @@ switch ($module) {
                 echo json_encode(['success' => true, 'created' => $created]);
             } catch (Exception $e) {
                 $pdo->rollBack();
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Import failed: ' . $e->getMessage()]);
             }
             break;
@@ -11269,7 +11269,7 @@ switch ($module) {
 
                 echo json_encode(['success' => true, 'message' => 'Order updated.']);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Failed to update order: ' . $e->getMessage()]);
             }
             break;
@@ -11351,7 +11351,7 @@ switch ($module) {
                 echo json_encode(['success' => true, 'order_id' => $orderId, 'total' => $newTotal]);
             } catch (Exception $e) {
                 if ($pdo->inTransaction()) $pdo->rollBack();
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Failed to set items: ' . $e->getMessage()]);
             }
             break;
@@ -11364,7 +11364,7 @@ switch ($module) {
                 check_permission_or_die($pdo, 'finance', $perm_code);
             }
             if (!table_exists($pdo, 'accounts')) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'accounts table missing']);
                 break;
             }
@@ -11421,7 +11421,7 @@ switch ($module) {
                 check_permission_or_die($pdo, 'finance', $perm_code);
             }
             if (!table_exists($pdo, 'journal_entries') || !table_exists($pdo, 'journal_lines')) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'journal tables missing']);
                 break;
             }
@@ -11604,7 +11604,7 @@ switch ($module) {
                     echo json_encode(['success' => true, 'message' => 'تم التحويل بنجاح.']);
                 } catch (Exception $e) {
                     if ($pdo->inTransaction()) $pdo->rollBack();
-                    http_response_code(500);
+                    // http_response_code(500);
                     echo json_encode(['success' => false, 'message' => 'فشل التحويل: ' . $e->getMessage()]);
                 }
             } elseif ($action === 'create') {
@@ -11925,7 +11925,7 @@ switch ($module) {
                     echo json_encode(['success' => true, 'transaction_id' => $txId]);
                 } catch (Exception $e) {
                     if ($pdo->inTransaction()) $pdo->rollBack();
-                    http_response_code(500);
+                    // http_response_code(500);
                     echo json_encode(['success' => false, 'message' => 'Failed to create transaction: ' . $e->getMessage()]);
                 }
             } else {
@@ -12086,7 +12086,7 @@ switch ($module) {
                     ]
                 ]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Failed to load rep daily stats: ' . $e->getMessage()]);
             }
             break;
@@ -12099,7 +12099,7 @@ switch ($module) {
                 $result = nexus_fetch_orders_by_ids($pdo, $_GET['ids'] ?? '');
                 echo json_encode(['success' => true, 'data' => $result]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'getOrdersByIds error: ' . $e->getMessage()]);
             }
             break;
@@ -12153,7 +12153,7 @@ switch ($module) {
 
                 echo json_encode(['success' => true, 'data' => $data]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Failed to load confirmation assignments: ' . $e->getMessage()]);
             }
             break;
@@ -12200,7 +12200,7 @@ switch ($module) {
 
                 echo json_encode(['success' => true, 'data' => $data]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Failed to load confirmation rep summary: ' . $e->getMessage()]);
             }
             break;
@@ -12246,7 +12246,7 @@ switch ($module) {
                     ]
                 ]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Failed to resolve confirmation barcode: ' . $e->getMessage()]);
             }
             break;
@@ -12297,7 +12297,7 @@ switch ($module) {
                     ]
                 ]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Failed to load confirmation stock summary: ' . $e->getMessage()]);
             }
             break;
@@ -12436,7 +12436,7 @@ switch ($module) {
                 ]);
             } catch (Exception $e) {
                 if ($pdo->inTransaction()) $pdo->rollBack();
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Failed to assign confirmation orders: ' . $e->getMessage()]);
             }
             break;
@@ -12530,7 +12530,7 @@ switch ($module) {
                     ]
                 ]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Failed to assign confirmation order by barcode: ' . $e->getMessage()]);
             }
             break;
@@ -12634,7 +12634,7 @@ switch ($module) {
                 ]);
             } catch (Exception $e) {
                 if ($pdo->inTransaction()) $pdo->rollBack();
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Failed to update order confirmation decision: ' . $e->getMessage()]);
             }
             break;
@@ -12679,7 +12679,7 @@ switch ($module) {
                     'message' => 'تم إلغاء إسناد الأوردرات المحددة.'
                 ]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Failed to unassign confirmation orders: ' . $e->getMessage()]);
             }
             break;
@@ -12730,7 +12730,7 @@ switch ($module) {
                     'message' => 'تم مسح كل إسنادات التأكيد لليوم الحالي.'
                 ]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Failed to clear today confirmation assignments: ' . $e->getMessage()]);
             }
             break;
@@ -12828,7 +12828,7 @@ switch ($module) {
                 ]);
             } catch (Exception $e) {
                 if ($pdo->inTransaction()) $pdo->rollBack();
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Failed to restore cancelled confirmation order: ' . $e->getMessage()]);
             }
             break;
@@ -12922,7 +12922,7 @@ switch ($module) {
                 
                 echo json_encode(['success' => true, 'data' => $rows]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Failed to load rep daily journal: ' . $e->getMessage()]);
             }
             break;
@@ -13052,7 +13052,7 @@ switch ($module) {
                     ]
                 ]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Failed to load journal stats: ' . $e->getMessage()]);
             }
             break;
@@ -13126,7 +13126,7 @@ switch ($module) {
                 audit_log($pdo, 'sales', 'close_rep_daily', $repId, json_encode(['journal_id' => $jId, 'closed_ids' => $closedIds]));
                 echo json_encode(['success' => true, 'closed_count' => count($closedIds), 'closed_ids' => $closedIds]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => $e->getMessage()]);
             }
             break;
@@ -13248,7 +13248,7 @@ switch ($module) {
 
                 echo json_encode(['success' => true, 'data' => $row]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Failed to start daily: ' . $e->getMessage()]);
             }
             break;
@@ -13309,7 +13309,7 @@ switch ($module) {
                 $lastId = $pdo->lastInsertId();
                 echo json_encode(['success' => true, 'session_id' => $lastId]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Failed to create delivery session: ' . $e->getMessage()]);
             }
             exit;
@@ -13426,7 +13426,7 @@ switch ($module) {
                 }
             } catch (Exception $e) {
                 if ($pdo->inTransaction()) $pdo->rollBack();
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Settle daily failed: ' . $e->getMessage()]);
             }
             break;
@@ -13467,7 +13467,7 @@ switch ($module) {
                 audit_log($pdo, 'sales', 'return_event', $rep_id, json_encode(['warehouse_id' => $wh_id, 'order_ids' => $ids]));
                 echo json_encode(['success' => true, 'event_id' => $insId]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'logReturnEvent failed: ' . $e->getMessage()]);
             }
             exit;
@@ -13512,7 +13512,7 @@ switch ($module) {
                 audit_log($pdo, 'sales', 'close_daily', $rep_id, json_encode(['treasury_id' => $treasury_id, 'paid_amount' => $paid_amount, 'direction' => $direction]));
                 echo json_encode(['success' => true, 'event_id' => $insId]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'logCloseDaily failed: ' . $e->getMessage()]);
             }
             exit;
@@ -14044,7 +14044,7 @@ switch ($module) {
                     ],
                 ]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'getJournalOrders failed: ' . $e->getMessage()]);
             }
             exit;
@@ -14111,7 +14111,7 @@ switch ($module) {
                 }
                 echo json_encode(['success' => true, 'updated' => $updated]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'updateJournalOrderStatus failed: ' . $e->getMessage()]);
             }
             exit;
@@ -14139,7 +14139,7 @@ switch ($module) {
                 try { log_order_history($pdo, $orderId, $confirmedStatus, 'rep_recall', 'recalled_from_rep', $repId); } catch (Exception $hEx) {}
                 echo json_encode(['success' => true]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'recallOrderFromRep failed: ' . $e->getMessage()]);
             }
             exit;
@@ -14297,7 +14297,7 @@ switch ($module) {
                 echo json_encode(['success' => true]);
             } catch (Exception $e) {
                 if ($pdo->inTransaction()) { $pdo->rollBack(); }
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Failed to undo order: ' . $e->getMessage()]);
             }
             exit;
@@ -14706,7 +14706,7 @@ switch ($module) {
                 echo json_encode(['success' => true, 'daily_code' => $dailyCode ?? '', 'journal_id' => $journalId ?? 0, 'printData' => ['repName' => $repData['name'] ?? '', 'employee' => $_SESSION['user']['name'] ?? null, 'prevBalance' => $prevBalance], 'reportData' => ['prevBalance' => $prevBalance]]);
             } catch (Exception $e) {
                 try { if ($pdo instanceof PDO && $pdo->inTransaction()) $pdo->rollBack(); } catch (Exception $ex) {}
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Complete daily failed: ' . $e->getMessage()]);
             }
             break;
@@ -14817,7 +14817,7 @@ switch ($module) {
                 echo json_encode(['success' => true, 'sale_id' => $saleId, 'total' => $total]);
             } catch (Exception $e) {
                 $pdo->rollBack();
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Sale failed: ' . $e->getMessage()]);
             }
         }
@@ -14895,7 +14895,7 @@ switch ($module) {
                 echo json_encode(['success' => true, 'return_id' => $returnId, 'total' => $returnTotal]);
             } catch (Exception $e) {
                 $pdo->rollBack();
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Customer return failed: ' . $e->getMessage()]);
             }
         }
@@ -15004,7 +15004,7 @@ switch ($module) {
                  handle_crud($pdo, 'employee_transactions', $input, ['employee_id', 'treasury_id', 'amount', 'type', 'date', 'notes', 'status']);
             }
         } catch (Exception $e) {
-            http_response_code(500);
+            // http_response_code(500);
             echo json_encode(['success' => false, 'message' => 'An error occurred in employee transactions: ' . $e->getMessage()]);
         }
         break;
@@ -15118,7 +15118,7 @@ switch ($module) {
                     echo json_encode(['success' => true, 'message' => 'Payroll processed successfully for ' . $month]);
                 } catch (Exception $e) {
                     $pdo->rollBack();
-                    http_response_code(500);
+                    // http_response_code(500);
                     echo json_encode(['success' => false, 'message' => 'Payroll processing failed: ' . $e->getMessage()]);
                 }
             } elseif ($action === 'getReport') {
@@ -15302,12 +15302,12 @@ switch ($module) {
                     if ($pdo->inTransaction()) {
                         $pdo->rollBack();
                     }
-                    http_response_code(500);
+                    // http_response_code(500);
                     echo json_encode(['success' => false, 'message' => $e->getMessage()]);
                 }
             }
         } catch (Exception $e) {
-            http_response_code(500);
+            // http_response_code(500);
             echo json_encode(['success' => false, 'message' => 'An error occurred in salaries module: ' . $e->getMessage()]);
         }
         break;
@@ -15547,7 +15547,7 @@ switch ($module) {
                 echo json_encode(['success' => true, 'purchase_id' => $purchaseId, 'total' => $invoiceTotal, 'new_barcodes' => $newBarcodes]);
             } catch (Exception $e) {
                 try { if ($pdo->inTransaction()) $pdo->rollBack(); } catch (Exception $_) {}
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Receiving failed: ' . $e->getMessage()]);
             }
         } elseif ($action === 'getLastVendorPrice') {
@@ -15733,7 +15733,7 @@ switch ($module) {
                 echo json_encode(['success' => true, 'return_id' => $returnId, 'total' => $returnTotal]);
             } catch (Exception $e) {
                 if ($pdo->inTransaction()) $pdo->rollBack();
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Return failed: ' . $e->getMessage()]);
             }
         }
@@ -15880,7 +15880,7 @@ switch ($module) {
                 echo json_encode(['success' => true, 'transfer_id' => $transferId, 'total' => $transferTotal]);
             } catch (Exception $e) {
                 if ($pdo->inTransaction()) $pdo->rollBack();
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Transfer failed: ' . $e->getMessage()]);
             }
         }
@@ -16057,7 +16057,7 @@ switch ($module) {
                     'byOrder'  => $byOrder,
                 ]]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'profitReport failed: ' . $e->getMessage()]);
             }
             break;
@@ -16410,7 +16410,7 @@ switch ($module) {
 
                 echo json_encode(['success' => true, 'data' => $rows]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Failed to compute product delivery report: ' . $e->getMessage()]);
             }
 
@@ -16633,20 +16633,34 @@ switch ($module) {
             echo json_encode(['success' => true, 'data' => $rows]);
         } elseif ($action === 'inventoryHealth') {
             try {
-                $stmt = execute_query($pdo, "
-                    SELECT 
-                        s.product_id,
-                        s.warehouse_id,
-                        w.name as warehouse_name,
-                        p.name as product_name,
-                        s.quantity,
-                        (SELECT MAX(created_at) FROM product_movements pm WHERE pm.product_id = s.product_id AND pm.warehouse_id = s.warehouse_id) as last_movement
-                    FROM stock s
-                    JOIN product_variants pv ON pv.id = s.product_id
-                    JOIN products p ON p.id = pv.product_id
-                    JOIN warehouses w ON w.id = s.warehouse_id
-                    WHERE s.quantity > 0
-                ");
+                $hasPV = table_exists($pdo, 'product_variants');
+                if ($hasPV) {
+                    $sql = "SELECT 
+                                s.product_id,
+                                s.warehouse_id,
+                                COALESCE(w.name, 'مستودع') as warehouse_name,
+                                COALESCE(p.name, CONCAT('منتج #', s.product_id)) as product_name,
+                                COALESCE(s.quantity, 0) as quantity,
+                                (SELECT MAX(created_at) FROM product_movements pm WHERE pm.product_id = s.product_id AND pm.warehouse_id = s.warehouse_id) as last_movement
+                            FROM stock s
+                            LEFT JOIN product_variants pv ON pv.id = s.product_id
+                            LEFT JOIN products p ON p.id = pv.product_id
+                            LEFT JOIN warehouses w ON w.id = s.warehouse_id
+                            WHERE s.quantity > 0";
+                } else {
+                    $sql = "SELECT 
+                                s.product_id,
+                                s.warehouse_id,
+                                COALESCE(w.name, 'مستودع') as warehouse_name,
+                                COALESCE(p.name, CONCAT('منتج #', s.product_id)) as product_name,
+                                COALESCE(s.quantity, 0) as quantity,
+                                (SELECT MAX(created_at) FROM product_movements pm WHERE pm.product_id = s.product_id AND pm.warehouse_id = s.warehouse_id) as last_movement
+                            FROM stock s
+                            LEFT JOIN products p ON p.id = s.product_id
+                            LEFT JOIN warehouses w ON w.id = s.warehouse_id
+                            WHERE s.quantity > 0";
+                }
+                $stmt = execute_query($pdo, $sql);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 $stagnant = [];
                 $active = [];
@@ -16667,7 +16681,7 @@ switch ($module) {
                 }
                 echo json_encode(['success' => true, 'data' => ['stagnant' => $stagnant, 'active' => $active]]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => $e->getMessage()]);
             }
         } elseif ($action === 'cashFlow') {
@@ -16695,27 +16709,38 @@ switch ($module) {
                     'expenses_by_type' => $expStmt->fetchAll(PDO::FETCH_ASSOC)
                 ]]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => $e->getMessage()]);
             }
         } elseif ($action === 'outstandingBalances') {
             try {
-                $stmt = execute_query($pdo, "
-                    SELECT * FROM (
-                        SELECT 
-                            id, name, 'customer' as role, (total_debit - total_credit) as balance,
-                            (SELECT MAX(transaction_date) FROM transactions WHERE related_to_id = customers.id AND related_to_type = 'customer' AND type IN ('payment_in', 'payment_out')) as last_payment_date
-                        FROM customers 
-                        WHERE ROUND((total_debit - total_credit), 2) != 0
-                        UNION ALL
-                        SELECT 
-                            id, name, 'representative' as role, balance,
-                            (SELECT MAX(transaction_date) FROM transactions WHERE related_to_id = users.id AND related_to_type = 'employee' AND type IN ('payment_in', 'payment_out')) as last_payment_date
-                        FROM users 
-                        WHERE role = 'representative' AND ROUND(balance, 2) != 0
-                    ) t
-                    ORDER BY balance DESC
-                ");
+                $hasCustCols = false;
+                try { $pdo->query("SELECT total_debit, total_credit FROM customers LIMIT 1"); $hasCustCols = true; } catch (Exception $eCol) {}
+                
+                if ($hasCustCols) {
+                    $custQuery = "SELECT 
+                                    id, name, 'customer' as role, (total_debit - total_credit) as balance,
+                                    (SELECT MAX(transaction_date) FROM transactions WHERE related_to_id = customers.id AND related_to_type = 'customer' AND type IN ('payment_in', 'payment_out')) as last_payment_date
+                                FROM customers 
+                                WHERE ROUND((total_debit - total_credit), 2) != 0";
+                } else {
+                    $custQuery = "SELECT 
+                                    id, name, 'customer' as role, 0 as balance,
+                                    NULL as last_payment_date
+                                FROM customers LIMIT 0";
+                }
+                
+                $sql = "SELECT * FROM (
+                            $custQuery
+                            UNION ALL
+                            SELECT 
+                                id, name, 'representative' as role, balance,
+                                (SELECT MAX(transaction_date) FROM transactions WHERE related_to_id = users.id AND related_to_type = 'employee' AND type IN ('payment_in', 'payment_out')) as last_payment_date
+                            FROM users 
+                            WHERE role = 'representative' AND ROUND(balance, 2) != 0
+                        ) t
+                        ORDER BY balance DESC";
+                $stmt = execute_query($pdo, $sql);
                 $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 
                 $aging = ['0_30' => 0, '31_60' => 0, '61_90' => 0, 'over_90' => 0];
@@ -16737,7 +16762,7 @@ switch ($module) {
                 }
                 echo json_encode(['success' => true, 'data' => ['users' => $users, 'aging_summary' => $aging]]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => $e->getMessage()]);
             }
         } elseif ($action === 'returnsAnalysis') {
@@ -16756,44 +16781,69 @@ switch ($module) {
                     ORDER BY return_value DESC
                 ", [$start_date, $end_date . ' 23:59:59']);
                 
-                $prodStmt = execute_query($pdo, "
-                    SELECT p.name as product_name,
-                           SUM(oi.quantity) as return_pieces,
-                           SUM(oi.quantity * oi.price_per_unit) as return_value
-                    FROM orders o
-                    JOIN order_items oi ON o.id = oi.order_id
-                    JOIN product_variants pv ON pv.id = oi.product_id
-                    JOIN products p ON p.id = pv.product_id
-                    WHERE o.status IN ('returned', 'full_return') AND o.created_at BETWEEN ? AND ?
-                    GROUP BY oi.product_id, p.name
-                    ORDER BY return_pieces DESC
-                ", [$start_date, $end_date . ' 23:59:59']);
+                $hasPV = table_exists($pdo, 'product_variants');
+                if ($hasPV) {
+                    $prodSql = "SELECT COALESCE(p.name, CONCAT('منتج #', oi.product_id)) as product_name,
+                                       COALESCE(SUM(oi.quantity), 0) as return_pieces,
+                                       COALESCE(SUM(oi.quantity * oi.price_per_unit), 0) as return_value
+                                FROM orders o
+                                JOIN order_items oi ON o.id = oi.order_id
+                                LEFT JOIN product_variants pv ON pv.id = oi.product_id
+                                LEFT JOIN products p ON p.id = pv.product_id
+                                WHERE o.status IN ('returned', 'full_return') AND o.created_at BETWEEN ? AND ?
+                                GROUP BY oi.product_id, p.name
+                                ORDER BY return_pieces DESC";
+                } else {
+                    $prodSql = "SELECT COALESCE(p.name, CONCAT('منتج #', oi.product_id)) as product_name,
+                                       COALESCE(SUM(oi.quantity), 0) as return_pieces,
+                                       COALESCE(SUM(oi.quantity * oi.price_per_unit), 0) as return_value
+                                FROM orders o
+                                JOIN order_items oi ON o.id = oi.order_id
+                                LEFT JOIN products p ON p.id = oi.product_id
+                                WHERE o.status IN ('returned', 'full_return') AND o.created_at BETWEEN ? AND ?
+                                GROUP BY oi.product_id, p.name
+                                ORDER BY return_pieces DESC";
+                }
+                $prodStmt = execute_query($pdo, $prodSql, [$start_date, $end_date . ' 23:59:59']);
                 
                 echo json_encode(['success' => true, 'data' => [
                     'by_rep' => $repStmt->fetchAll(PDO::FETCH_ASSOC),
                     'by_product' => $prodStmt->fetchAll(PDO::FETCH_ASSOC)
                 ]]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => $e->getMessage()]);
             }
         } elseif ($action === 'inventoryValuation') {
             try {
-                $stmt = execute_query($pdo, "
-                    SELECT 
-                        s.warehouse_id,
-                        w.name as warehouse_name,
-                        SUM(s.quantity) as total_pieces,
-                        SUM(s.quantity * COALESCE(pv.cost_price, 0)) as total_cost_value,
-                        SUM(s.quantity * COALESCE(pv.sale_price, 0)) as total_retail_value
-                    FROM stock s
-                    JOIN product_variants pv ON pv.id = s.product_id
-                    JOIN warehouses w ON w.id = s.warehouse_id
-                    GROUP BY s.warehouse_id, w.name
-                ");
+                $hasPV = table_exists($pdo, 'product_variants');
+                if ($hasPV) {
+                    $sql = "SELECT 
+                                s.warehouse_id,
+                                COALESCE(w.name, 'مستودع') as warehouse_name,
+                                COALESCE(SUM(s.quantity), 0) as total_pieces,
+                                COALESCE(SUM(s.quantity * COALESCE(pv.cost_price, 0)), 0) as total_cost_value,
+                                COALESCE(SUM(s.quantity * COALESCE(pv.sale_price, 0)), 0) as total_retail_value
+                            FROM stock s
+                            LEFT JOIN product_variants pv ON pv.id = s.product_id
+                            LEFT JOIN warehouses w ON w.id = s.warehouse_id
+                            GROUP BY s.warehouse_id, w.name";
+                } else {
+                    $sql = "SELECT 
+                                s.warehouse_id,
+                                COALESCE(w.name, 'مستودع') as warehouse_name,
+                                COALESCE(SUM(s.quantity), 0) as total_pieces,
+                                COALESCE(SUM(s.quantity * COALESCE(p.cost_price, 0)), 0) as total_cost_value,
+                                COALESCE(SUM(s.quantity * COALESCE(p.sale_price, 0)), 0) as total_retail_value
+                            FROM stock s
+                            LEFT JOIN products p ON p.id = s.product_id
+                            LEFT JOIN warehouses w ON w.id = s.warehouse_id
+                            GROUP BY s.warehouse_id, w.name";
+                }
+                $stmt = execute_query($pdo, $sql);
                 echo json_encode(['success' => true, 'data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => $e->getMessage()]);
             }
         } elseif ($action === 'fines_incentives') {
@@ -16922,7 +16972,7 @@ switch ($module) {
                     ]
                 ]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Fines & Incentives failed: ' . $e->getMessage()]);
             }
         } elseif ($action === 'expenses_report') {
@@ -17006,7 +17056,7 @@ switch ($module) {
                     ]
                 ]);
             } catch (Exception $e) {
-                http_response_code(500);
+                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Expenses report failed: ' . $e->getMessage()]);
             }
         }
