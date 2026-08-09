@@ -211,14 +211,15 @@ const SalesDaily: React.FC = () => {
   const [userDefaults, setUserDefaults] = useState<any>(null);
   // Split Payment Auto Treasury Lock Effect
   useEffect(() => {
-    if (!isSplitPayment) return;
+    if (!isSplitPayment || treasuries.length === 0) return;
     const electronicTreasury = treasuries.find(t => 
       normalizeText(t.name).includes('الكترونى') ||
       normalizeText(t.name).includes('الكترونية') ||
       normalizeText(t.name).includes('فودافون') ||
+      normalizeText(t.name).includes('انستاباي') ||
       t.type === 'electronic' ||
       t.is_electronic == 1
-    ) || treasuries[0];
+    ) || treasuries.find(t => normalizeText(t.name).includes('الكترون')) || treasuries[0];
 
     if (electronicTreasury) {
       setElectronicTreasuryId(Number(electronicTreasury.id));
@@ -226,8 +227,9 @@ const SalesDaily: React.FC = () => {
 
     if (userDefaults?.default_treasury_id) {
       setCashTreasuryId(Number(userDefaults.default_treasury_id));
-    } else if (!cashTreasuryId && treasuries.length > 0) {
-      setCashTreasuryId(Number(treasuries[0].id));
+    } else if (!cashTreasuryId) {
+      const cashTr = treasuries.find(t => String(t.id) !== String(electronicTreasury?.id)) || treasuries[0];
+      if (cashTr) setCashTreasuryId(Number(cashTr.id));
     }
   }, [isSplitPayment, treasuries, userDefaults]);
   const [employee, setEmployee] = useState<string>('');
@@ -308,11 +310,7 @@ const SalesDaily: React.FC = () => {
           console.warn('userDefaults not set! Response:', ud);
         }
         // التحكم في التريجرز حسب صلاحية المستخدم
-        if (defaults && defaults.default_treasury_id && !defaults.can_change_treasury) {
-          setTreasuries(tList.filter((t: any) => Number(t.id) === Number(defaults.default_treasury_id)));
-        } else {
-          setTreasuries(tList);
-        }
+        setTreasuries(tList);
         setWarehouses(wList);
         if (defaults && defaults.default_treasury_id && !selectedTreasuryId) setSelectedTreasuryId(Number(defaults.default_treasury_id));
         if (defaults && defaults.default_warehouse_id && !selectedWarehouseId) setSelectedWarehouseId(Number(defaults.default_warehouse_id));

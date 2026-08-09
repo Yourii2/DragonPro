@@ -179,14 +179,15 @@ const SalesDailyClose: React.FC = () => {
 
   // Split Payment Auto Treasury Lock Effect
   useEffect(() => {
-    if (!isSplitPayment) return;
+    if (!isSplitPayment || treasuries.length === 0) return;
     const electronicTreasury = treasuries.find(t => 
       normalizeText(t.name).includes('الكترونى') ||
       normalizeText(t.name).includes('الكترونية') ||
       normalizeText(t.name).includes('فودافون') ||
+      normalizeText(t.name).includes('انستاباي') ||
       t.type === 'electronic' ||
       t.is_electronic == 1
-    ) || treasuries[0];
+    ) || treasuries.find(t => normalizeText(t.name).includes('الكترون')) || treasuries[0];
 
     if (electronicTreasury) {
       setElectronicTreasuryId(String(electronicTreasury.id));
@@ -194,8 +195,9 @@ const SalesDailyClose: React.FC = () => {
 
     if (userDefaults?.default_treasury_id) {
       setCashTreasuryId(String(userDefaults.default_treasury_id));
-    } else if (!cashTreasuryId && treasuries.length > 0) {
-      setCashTreasuryId(String(treasuries[0].id));
+    } else if (!cashTreasuryId) {
+      const cashTr = treasuries.find(t => String(t.id) !== String(electronicTreasury?.id)) || treasuries[0];
+      if (cashTr) setCashTreasuryId(String(cashTr.id));
     }
   }, [isSplitPayment, treasuries, userDefaults]);
 
@@ -277,13 +279,13 @@ const SalesDailyClose: React.FC = () => {
       const defaults = pRes?.success ? (pRes.data || null) : null;
       setUserDefaults(defaults);
 
-      if (defaults?.default_treasury_id && defaults.can_change_treasury === false) {
-        const filtered = tList.filter((t: any) => Number(t.id) === Number(defaults.default_treasury_id));
-        setTreasuries(filtered);
-        if (filtered.length > 0) setSelectedTreasuryId(String(filtered[0].id));
-      } else {
-        setTreasuries(tList);
-        if (tList.length > 0) setSelectedTreasuryId(String(tList[0].id));
+      setTreasuries(tList);
+      if (defaults?.default_treasury_id) {
+        setSelectedTreasuryId(String(defaults.default_treasury_id));
+        setCashTreasuryId(String(defaults.default_treasury_id));
+      } else if (tList.length > 0) {
+        setSelectedTreasuryId(String(tList[0].id));
+        setCashTreasuryId(String(tList[0].id));
       }
     } catch (e) {
       console.error('Initial load failed', e);
