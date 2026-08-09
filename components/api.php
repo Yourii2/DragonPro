@@ -750,6 +750,16 @@ if (!function_exists('pick_allowed_enum')) {
     }
 }
 
+if (!function_exists('ensure_orders_status_column_supports_all_statuses')) {
+    function ensure_orders_status_column_supports_all_statuses($pdo) {
+        if (!($pdo instanceof PDO)) return;
+        if (!table_exists($pdo, 'orders') || !column_exists($pdo, 'orders', 'status')) return;
+        try {
+            execute_query($pdo, "ALTER TABLE `orders` MODIFY COLUMN `status` VARCHAR(50) NOT NULL DEFAULT 'pending'");
+        } catch (Exception $e) {}
+    }
+}
+
 if (!function_exists('ensure_orders_status_has_cancelled')) {
     function ensure_orders_status_has_cancelled($pdo) {
         if (!($pdo instanceof PDO)) return;
@@ -9689,6 +9699,7 @@ switch ($module) {
         break;
     case 'orders':
         $action = $_GET['action'] ?? 'getAll';
+        ensure_orders_status_column_supports_all_statuses($pdo);
         try {
             if (!column_exists($pdo, 'orders', 'items_json')) {
                 execute_query($pdo, "ALTER TABLE orders ADD COLUMN items_json LONGTEXT NULL COMMENT 'أصناف الطلب مخزنة بصيغة JSON'");
@@ -10995,7 +11006,8 @@ switch ($module) {
                 }
                 if ($status !== null) {
                     // Map requested status to an allowed enum value in this installation
-                    $allowedStatus = pick_allowed_enum($pdo, 'orders', 'status', $status, ['delivered','returned','in_delivery','pending','with_rep','pending_payment']);
+                    $allOrderStatuses = ['pending','confirmed','with_rep','in_delivery','delivered','partial','returned','postponed','no_answer','cancelled','closed','pending_payment'];
+                    $allowedStatus = pick_allowed_enum($pdo, 'orders', 'status', $status, $allOrderStatuses);
                     $set_parts[] = 'status = ?';
                     $values[] = $allowedStatus;
                 }
