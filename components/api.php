@@ -3195,6 +3195,65 @@ if ($module === 'rustdesk') {
 
 switch ($module) {
 
+    case 'reports':
+        $action = $_GET['action'] ?? 'getRepCustody';
+        if ($action === 'getRepCustody') {
+            try {
+                $repsStmt = execute_query($pdo, "SELECT id, name, phone, role FROM users WHERE role = 'representative' OR id IN (SELECT DISTINCT rep_id FROM orders WHERE rep_id IS NOT NULL AND rep_id > 0)");
+                $reps = $repsStmt ? $repsStmt->fetchAll(PDO::FETCH_ASSOC) : [];
+
+                $closedStatuses = "'delivered', 'completed', 'settled', 'closed', 'returned', 'full_return', 'cancelled'";
+                $ordersHasItemsJson = column_exists($pdo, 'orders', 'items_json');
+                $itemsJsonSql = $ordersHasItemsJson ? 'o.items_json' : 'NULL AS items_json';
+
+                $sql = "SELECT o.*, ${itemsJsonSql}, c.name as customer_name, c.phone1, c.phone2, c.address, c.governorate, u.name as rep_name
+                        FROM orders o
+                        LEFT JOIN customers c ON o.customer_id = c.id
+                        LEFT JOIN users u ON o.rep_id = u.id
+                        WHERE (o.rep_id IS NOT NULL AND o.rep_id > 0)
+                          AND (LOWER(o.status) NOT IN ($closedStatuses))
+                        ORDER BY o.created_at DESC";
+
+                $stmt = execute_query($pdo, $sql);
+                $orders = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [];
+
+                foreach ($orders as &$ord) {
+                    $items = [];
+                    $jsonStr = $ord['items_json'] ?? $ord['products_json'] ?? $ord['items'] ?? null;
+                    if (!empty($jsonStr) && is_string($jsonStr)) {
+                        $decoded = json_decode($jsonStr, true);
+                        if (is_array($decoded)) $items = $decoded;
+                    }
+
+                    if (empty($items)) {
+                        $oid = intval($ord['id']);
+                        $itStmt = execute_query($pdo, "SELECT oi.product_id, oi.quantity, oi.price_per_unit as price, ppar.name, pv.color, pv.size 
+                                                      FROM order_items oi 
+                                                      LEFT JOIN product_variants pv ON oi.product_id = pv.id 
+                                                      LEFT JOIN products ppar ON pv.product_id = ppar.id 
+                                                      WHERE oi.order_id = ?", [$oid]);
+                        $dbItems = $itStmt ? $itStmt->fetchAll(PDO::FETCH_ASSOC) : [];
+                        if (!empty($dbItems)) $items = $dbItems;
+                    }
+
+                    $ord['products'] = $items;
+                    $ord['rep_id'] = intval($ord['rep_id']);
+                }
+
+                echo json_encode([
+                    'success' => true,
+                    'reps' => $reps,
+                    'orders' => $orders
+                ]);
+            } catch (Exception $e) {
+                echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+            }
+            exit;
+        }
+        break;
+
+
+
     // ─────────────────────────────────────────────────────────
     // User Preferences (theme, notification reads) – per user, per browser
     // ─────────────────────────────────────────────────────────
