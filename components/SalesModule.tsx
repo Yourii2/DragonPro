@@ -280,6 +280,44 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
     return existingProducts.filter((ep: any) => String((ep as any).product_id || (ep as any).id) === key);
   };
 
+  const isOrderInDateTimeRange = (
+    rawDate: any,
+    startDate: string,
+    endDate: string,
+    timeFrom: string,
+    timeTo: string
+  ): boolean => {
+    if (!startDate && !endDate && !timeFrom && !timeTo) return true;
+
+    const orderFullDateTime = parseOrderDateTime(rawDate);
+    if (!orderFullDateTime) return true;
+
+    const orderDateOnly = orderFullDateTime.slice(0, 10);
+    const orderTimeOnly = orderFullDateTime.length >= 16 ? orderFullDateTime.slice(11, 16) : '';
+
+    if (startDate || endDate) {
+      const effectiveStart = startDate || '0000-00-00';
+      const effectiveEnd = endDate || '9999-99-99';
+      const fromStr = `${effectiveStart} ${timeFrom ? timeFrom + ':00' : '00:00:00'}`;
+      const toStr = `${effectiveEnd} ${timeTo ? timeTo + ':59' : '23:59:59'}`;
+      return orderFullDateTime >= fromStr && orderFullDateTime <= toStr;
+    }
+
+    if (timeFrom && timeTo && timeFrom !== timeTo) {
+      if (timeFrom <= timeTo) {
+        return orderTimeOnly >= timeFrom && orderTimeOnly <= timeTo;
+      } else {
+        return orderTimeOnly >= timeFrom || orderTimeOnly <= timeTo;
+      }
+    } else if (timeFrom) {
+      return orderTimeOnly >= timeFrom;
+    } else if (timeTo) {
+      return orderTimeOnly <= timeTo;
+    }
+
+    return true;
+  };
+
   const filteredOrders = useMemo(() => {
     if (!Array.isArray(orders)) return [];
     return orders.filter(o => {
@@ -298,36 +336,8 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
           (o.orderNumber || '').toLowerCase().includes(term);
         if (!matchesSearch) return false;
 
-        if (!startDateFilter && !endDateFilter && !timeFromFilter && !timeToFilter) {
-          return true;
-        }
-
         const rawDate = o.created_at || o.createdAt || o.date || '';
-        const orderFullDateTime = parseOrderDateTime(rawDate);
-        if (!orderFullDateTime) return true;
-
-        const orderDateOnly = orderFullDateTime.slice(0, 10);
-        const orderTimeOnly = orderFullDateTime.length >= 16 ? orderFullDateTime.slice(11, 16) : '';
-
-        let matchesFrom = true;
-        if (startDateFilter && timeFromFilter) {
-          matchesFrom = orderFullDateTime >= `${startDateFilter} ${timeFromFilter}:00`;
-        } else if (startDateFilter) {
-          matchesFrom = orderDateOnly >= startDateFilter;
-        } else if (timeFromFilter) {
-          matchesFrom = orderTimeOnly >= timeFromFilter;
-        }
-
-        let matchesTo = true;
-        if (endDateFilter && timeToFilter) {
-          matchesTo = orderFullDateTime <= `${endDateFilter} ${timeToFilter}:59`;
-        } else if (endDateFilter) {
-          matchesTo = orderDateOnly <= endDateFilter;
-        } else if (timeToFilter) {
-          matchesTo = orderTimeOnly <= timeToFilter;
-        }
-
-        return matchesFrom && matchesTo;
+        return isOrderInDateTimeRange(rawDate, startDateFilter, endDateFilter, timeFromFilter, timeToFilter);
       } catch (err) {
         return true;
       }

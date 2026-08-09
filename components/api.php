@@ -9630,6 +9630,11 @@ switch ($module) {
         break;
     case 'orders':
         $action = $_GET['action'] ?? 'getAll';
+        try {
+            if (!column_exists($pdo, 'orders', 'items_json')) {
+                execute_query($pdo, "ALTER TABLE orders ADD COLUMN items_json LONGTEXT NULL COMMENT 'أصناف الطلب مخزنة بصيغة JSON'");
+            }
+        } catch (Exception $e) {}
         $perm_code = map_action_to_perm($action);
         if ($perm_code) {
             check_permission_or_die($pdo, 'orders', $perm_code);
@@ -9681,7 +9686,9 @@ switch ($module) {
             if ($ordersHasPage) $extraCols[] = 'o.page';
             $extraColsSql = count($extraCols) > 0 ? (', ' . implode(', ', $extraCols)) : '';
 
-            $sql = "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, o.items_json, o.created_at{$extraColsSql}, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, c.address as address, c.governorate as governorate, o.id as order_id, u.name as rep_name
+            $ordersHasItemsJson = column_exists($pdo, 'orders', 'items_json');
+            $itemsJsonSql = $ordersHasItemsJson ? 'o.items_json' : 'NULL AS items_json';
+            $sql = "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, {$itemsJsonSql}, o.created_at{$extraColsSql}, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, c.address as address, c.governorate as governorate, o.id as order_id, u.name as rep_name
                 FROM orders o 
                 LEFT JOIN customers c ON o.customer_id = c.id
                 LEFT JOIN users u ON o.rep_id = u.id";
@@ -13496,7 +13503,9 @@ switch ($module) {
         if ($action === 'getConfirmationAssignments') {
             try {
                 if (table_exists($pdo, 'order_confirmation_assignments')) {
-                    $sql = "SELECT a.*, r.name as rep_name, o.order_number, o.customer_id, o.rep_id as order_rep_id, o.status as order_status, o.total_amount, o.shipping_fees, o.items_json
+                    $ordersHasItemsJsonA = column_exists($pdo, 'orders', 'items_json');
+                    $itemsJsonSqlA = $ordersHasItemsJsonA ? 'o.items_json' : 'NULL AS items_json';
+                    $sql = "SELECT a.*, r.name as rep_name, o.order_number, o.customer_id, o.rep_id as order_rep_id, o.status as order_status, o.total_amount, o.shipping_fees, {$itemsJsonSqlA}
                             FROM order_confirmation_assignments a
                             LEFT JOIN users r ON a.rep_id = r.id
                             LEFT JOIN orders o ON a.order_id = o.id
