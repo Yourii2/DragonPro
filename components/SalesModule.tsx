@@ -2569,19 +2569,21 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
 
                 <button 
                     onClick={() => {
-                      const targetOrders = selectedOrders.length > 0 
-                        ? orders.filter(o => selectedOrders.includes(o.id))
-                        : filteredOrders;
+                      if (selectedOrders.length === 0) {
+                        Swal.fire('تنبيه', 'يرجى تحديد الأوردرات المراد طباعتها أولاً.', 'warning');
+                        return;
+                      }
+                      const targetOrders = orders.filter(o => selectedOrders.includes(o.id));
                       if (!targetOrders.length) {
-                        Swal.fire('تنبيه', 'لا توجد أوردرات متاحة للطباعة.', 'info');
+                        Swal.fire('تنبيه', 'لا توجد أوردرات محددة للطباعة.', 'info');
                         return;
                       }
                       handlePrint(targetOrders);
                     }}
-                    disabled={filteredOrders.length === 0} 
+                    disabled={selectedOrders.length === 0} 
                     className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-2xl text-xs font-bold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-blue-200 transition-all cursor-pointer"
                 >
-                    <Printer size={16}/> طباعة الأوردرات {selectedOrders.length > 0 ? `المحددة (${selectedOrders.length})` : `(${filteredOrders.length})`}
+                    <Printer size={16}/> {selectedOrders.length > 0 ? `طباعة الأوردرات المحددة (${selectedOrders.length})` : 'حدد أوردرات للطباعة'}
                 </button>
             </div>
           </div>
