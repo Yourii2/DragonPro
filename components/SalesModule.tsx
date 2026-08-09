@@ -1,6 +1,7 @@
+import Custom12HourTimePicker from './Custom12HourTimePicker';
 import React, { useState, useEffect } from 'react';
 import { API_BASE_PATH } from '../services/apiConfig';
-import { ShoppingCart, Printer, History, Search, PlusCircle, MinusCircle, UploadCloud, FileText, RefreshCcw, ClipboardPaste, MapPin, Phone, User, CheckSquare, Square, Eye, Edit, ChevronRight } from 'lucide-react';
+import { Calendar, ShoppingCart, Printer, History, Search, PlusCircle, MinusCircle, UploadCloud, FileText, RefreshCcw, ClipboardPaste, MapPin, Phone, User, CheckSquare, Square, Eye, Edit, ChevronRight } from 'lucide-react';
 import Swal from 'sweetalert2';
 import CustomSelect from './CustomSelect';
 import Barcode from './Barcode';
@@ -86,16 +87,24 @@ const normalizeNumbers = (input: any): string => {
 const formatOrderTime = (dateStr?: string | null): string => {
   if (!dateStr) return '';
   try {
-    const isoStr = dateStr.replace(' ', 'T');
-    const d = new Date(isoStr);
-    if (isNaN(d.getTime())) {
-      const d2 = new Date(dateStr);
-      if (isNaN(d2.getTime())) return '';
-      return d2.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' - ' + d2.toLocaleDateString([], { month: '2-digit', day: '2-digit' });
+    const str = String(dateStr).trim();
+    const parts = str.replace('T', ' ').split(' ');
+    if (parts.length >= 2) {
+      const [year, month, day] = parts[0].split('-');
+      const timeParts = parts[1].split(':');
+      let hour = parseInt(timeParts[0] || '0', 10);
+      const min = timeParts[1] || '00';
+      const period = hour >= 12 ? 'م' : 'ص';
+      hour = hour % 12;
+      if (hour === 0) hour = 12;
+      const hourDisplay = hour < 10 ? `0${hour}` : `${hour}`;
+      return `${hourDisplay}:${min} ${period} - ${month}/${day}`;
     }
+    const d = new Date(str);
+    if (isNaN(d.getTime())) return str;
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' - ' + d.toLocaleDateString([], { month: '2-digit', day: '2-digit' });
   } catch {
-    return '';
+    return dateStr || '';
   }
 };
 
@@ -182,6 +191,8 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
   // Mock Data for testing (Or empty array)
   const [orders, setOrders] = useState<any[]>([]);
   const [statusFilter, setStatusFilter] = useState<string>('pending');
+  const [startDateFilter, setStartDateFilter] = useState<string>('');
+  const [endDateFilter, setEndDateFilter] = useState<string>('');
   const [dateFilter, setDateFilter] = useState<string>('all');
   const [timeFromFilter, setTimeFromFilter] = useState<string>('');
   const [timeToFilter, setTimeToFilter] = useState<string>('');
@@ -254,7 +265,10 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
     // Date filter: compare YYYY-MM-DD directly from the raw string to avoid UTC timezone shift
     const rawDate = o.created_at || o.createdAt || o.date || '';
     const orderDateStr = rawDate ? String(rawDate).slice(0, 10) : '';
-    const matchesDate = dateFilter === 'all' || !dateFilter || orderDateStr === dateFilter;
+    const matchesSingleDate = dateFilter === 'all' || !dateFilter || orderDateStr === dateFilter;
+    const matchesStartDate = !startDateFilter || (orderDateStr && orderDateStr >= startDateFilter);
+    const matchesEndDate = !endDateFilter || (orderDateStr && orderDateStr <= endDateFilter);
+    const matchesDate = matchesSingleDate && matchesStartDate && matchesEndDate;
     // Time filter (HH:MM)
     const orderTimeStr = rawDate ? String(rawDate).slice(11, 16) : '';
     const matchesTimeFrom = !timeFromFilter || !orderTimeStr || orderTimeStr >= timeFromFilter;
@@ -289,14 +303,16 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
   const getStatusChip = (status: string) => {
     switch (status) {
       case 'pending': return <span className="bg-amber-100 text-amber-700 px-2 py-1 rounded-lg text-[10px] font-bold">قيد الانتظار</span>;
+      case 'confirmed': return <span className="bg-emerald-100 text-emerald-700 px-2 py-1 rounded-lg text-[10px] font-bold">مؤكد</span>;
       case 'with_rep': return <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded-lg text-[10px] font-bold">مع المندوب</span>;
       case 'in_delivery': return <span className="bg-indigo-100 text-indigo-700 px-2 py-1 rounded-lg text-[10px] font-bold">قيد التسليم</span>;
       case 'delivered': return <span className="bg-emerald-100 text-emerald-700 px-2 py-1 rounded-lg text-[10px] font-bold">تم التسليم</span>;
+      case 'partial': return <span className="bg-teal-100 text-teal-700 px-2 py-1 rounded-lg text-[10px] font-bold">تسليم جزئي</span>;
       case 'returned': return <span className="bg-rose-100 text-rose-700 px-2 py-1 rounded-lg text-[10px] font-bold">مرتجع</span>;
-      case 'cancelled': return <span className="bg-rose-200 text-rose-800 px-2 py-1 rounded-lg text-[10px] font-bold">ملغي</span>;
-      case 'confirmed': return <span className="bg-emerald-100 text-emerald-700 px-2 py-1 rounded-lg text-[10px] font-bold">مؤكد</span>;
-      case 'closed': return <span className="bg-slate-200 text-slate-800 px-2 py-1 rounded-lg text-[10px] font-bold">مغلق</span>;
+      case 'postponed': return <span className="bg-purple-100 text-purple-700 px-2 py-1 rounded-lg text-[10px] font-bold">مؤجل</span>;
       case 'no_answer': return <span className="bg-amber-100 text-amber-800 px-2 py-1 rounded-lg text-[10px] font-bold">لا يرد</span>;
+      case 'cancelled': case 'canceled': return <span className="bg-rose-200 text-rose-800 px-2 py-1 rounded-lg text-[10px] font-bold">ملغي</span>;
+      case 'closed': return <span className="bg-slate-200 text-slate-800 px-2 py-1 rounded-lg text-[10px] font-bold">مغلق</span>;
       default: return <span className="bg-slate-100 text-slate-700 px-2 py-1 rounded-lg text-[10px] font-bold">{status}</span>;
     }
   };
@@ -1751,10 +1767,16 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                       options={[
                         { value: '', label: 'اختر حالة' },
                         { value: 'pending', label: 'قيد الانتظار' },
+                        { value: 'confirmed', label: 'مؤكد' },
                         { value: 'with_rep', label: 'مع المندوب' },
                         { value: 'in_delivery', label: 'قيد التسليم' },
                         { value: 'delivered', label: 'تم التسليم' },
-                        { value: 'returned', label: 'مرتجع' }
+                        { value: 'partial', label: 'تسليم جزئي' },
+                        { value: 'returned', label: 'مرتجع' },
+                        { value: 'postponed', label: 'مؤجل' },
+                        { value: 'no_answer', label: 'لم يتم الرد (لا يرد)' },
+                        { value: 'cancelled', label: 'ملغي' },
+                        { value: 'closed', label: 'مغلق' }
                       ]}
                       className="text-sm"
                     />
@@ -1877,10 +1899,16 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                   options={[
                     { value: '', label: 'اختر حالة' },
                     { value: 'pending', label: 'قيد الانتظار' },
+                    { value: 'confirmed', label: 'مؤكد' },
                     { value: 'with_rep', label: 'مع المندوب' },
                     { value: 'in_delivery', label: 'قيد التسليم' },
                     { value: 'delivered', label: 'تم التسليم' },
-                    { value: 'returned', label: 'مرتجع' }
+                    { value: 'partial', label: 'تسليم جزئي' },
+                    { value: 'returned', label: 'مرتجع' },
+                    { value: 'postponed', label: 'مؤجل' },
+                    { value: 'no_answer', label: 'لم يتم الرد (لا يرد)' },
+                    { value: 'cancelled', label: 'ملغي' },
+                    { value: 'closed', label: 'مغلق' }
                   ]}
                   className="w-full"
                 />
@@ -2410,51 +2438,69 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                   options={[
                     { value: 'all', label: 'كل الحالات' },
                     { value: 'pending', label: 'قيد الانتظار' },
+                    { value: 'confirmed', label: 'مؤكد' },
                     { value: 'with_rep', label: 'مع المندوب' },
                     { value: 'in_delivery', label: 'قيد التسليم' },
                     { value: 'delivered', label: 'تم التسليم' },
+                    { value: 'partial', label: 'تسليم جزئي' },
                     { value: 'returned', label: 'مرتجع' },
+                    { value: 'postponed', label: 'مؤجل' },
+                    { value: 'no_answer', label: 'لا يرد' },
                     { value: 'cancelled', label: 'ملغي' },
-                    { value: 'confirmed', label: 'مؤكد' },
-                    { value: 'closed', label: 'مغلق' },
-                    { value: 'no_answer', label: 'لا يرد' }
+                    { value: 'closed', label: 'مغلق' }
                   ]}
                   className="text-sm font-bold min-w-[180px]"
                 />
-                <div className="flex items-center gap-2">
-                  <label className="text-xs text-slate-500 mr-1">تاريخ</label>
-                  <input
-                    type="date"
-                    value={dateFilter === 'all' ? '' : dateFilter}
-                    onChange={e => setDateFilter(e.target.value ? e.target.value : 'all')}
-                    className="border rounded px-2 py-2 text-sm bg-white text-slate-700 appearance-none"
-                  />
-                  <button onClick={() => setDateFilter('all')} className="text-xs text-blue-600 px-2">الكل</button>
+                <div className="flex flex-wrap items-center gap-2 bg-slate-50 dark:bg-slate-800 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700">
+                  <div className="flex items-center gap-1 text-xs font-bold text-slate-600 dark:text-slate-300">
+                    <Calendar size={14} className="text-blue-600" />
+                    <span className="shrink-0">من تاريخ:</span>
+                    <input
+                      type="date"
+                      value={startDateFilter}
+                      onChange={e => setStartDateFilter(e.target.value)}
+                      className="bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-2 py-1 text-xs font-mono text-slate-700 dark:text-slate-200 outline-none"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1 text-xs font-bold text-slate-600 dark:text-slate-300">
+                    <span className="shrink-0">إلى تاريخ:</span>
+                    <input
+                      type="date"
+                      value={endDateFilter}
+                      onChange={e => setEndDateFilter(e.target.value)}
+                      className="bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-2 py-1 text-xs font-mono text-slate-700 dark:text-slate-200 outline-none"
+                    />
+                  </div>
+                  {(startDateFilter || endDateFilter) && (
+                    <button
+                      onClick={() => { setStartDateFilter(''); setEndDateFilter(''); }}
+                      className="text-xs font-bold text-rose-600 hover:text-rose-700 bg-rose-50 dark:bg-rose-900/30 px-2 py-1 rounded-xl transition-all shrink-0"
+                      title="مسح فلتر التاريخ"
+                    >
+                      ✕ مسح الفلتر
+                    </button>
+                  )}
                 </div>
-                <div className="flex items-center gap-1.5 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                  <label className="text-xs font-bold text-slate-500 shrink-0">من</label>
-                  <input
-                    type="time"
+                <div className="flex flex-wrap items-center gap-2">
+                  <Custom12HourTimePicker
+                    label="من وقت:"
                     value={timeFromFilter}
-                    onChange={e => setTimeFromFilter(e.target.value)}
-                    className="w-24 border-none bg-transparent text-sm text-slate-700 outline-none focus:ring-0"
+                    onChange={v => setTimeFromFilter(v)}
                   />
-                  <span className="text-xs text-slate-400">–</span>
-                  <label className="text-xs font-bold text-slate-500 shrink-0">إلى</label>
-                  <input
-                    type="time"
+                  <Custom12HourTimePicker
+                    label="إلى وقت:"
                     value={timeToFilter}
-                    onChange={e => setTimeToFilter(e.target.value)}
-                    className="w-24 border-none bg-transparent text-sm text-slate-700 outline-none focus:ring-0"
+                    onChange={v => setTimeToFilter(v)}
                   />
-                  {(timeFromFilter || timeToFilter) ? (
+                  {(timeFromFilter || timeToFilter) && (
                     <button
                       onClick={() => { setTimeFromFilter(''); setTimeToFilter(''); }}
-                      className="text-[10px] font-bold text-rose-500 hover:text-rose-700 shrink-0 px-1"
+                      className="text-xs font-bold text-rose-600 hover:text-rose-700 bg-rose-50 dark:bg-rose-900/30 px-2 py-1 rounded-xl transition-all"
                       title="مسح فلتر الوقت"
-                    >✕</button>
-                  ) : null}
+                    >
+                      ✕ مسح الوقت
+                    </button>
+                  )}
                 </div>
                 <button 
                   onClick={toggleSelectAll}
@@ -2465,11 +2511,20 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                 </button>
 
                 <button 
-                    onClick={() => handlePrint(orders.filter(o => selectedOrders.includes(o.id)))} 
-                    disabled={selectedOrders.length === 0} 
-                    className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-slate-800 text-white px-6 py-3 rounded-2xl text-xs font-bold hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-slate-200 transition-all"
+                    onClick={() => {
+                      const targetOrders = selectedOrders.length > 0 
+                        ? orders.filter(o => selectedOrders.includes(o.id))
+                        : filteredOrders;
+                      if (!targetOrders.length) {
+                        Swal.fire('تنبيه', 'لا توجد أوردرات متاحة للطباعة.', 'info');
+                        return;
+                      }
+                      handlePrint(targetOrders);
+                    }}
+                    disabled={filteredOrders.length === 0} 
+                    className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-2xl text-xs font-bold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-blue-200 transition-all cursor-pointer"
                 >
-                    <Printer size={16}/> طباعة المحدد ({selectedOrders.length})
+                    <Printer size={16}/> طباعة الأوردرات {selectedOrders.length > 0 ? `المحددة (${selectedOrders.length})` : `(${filteredOrders.length})`}
                 </button>
             </div>
           </div>

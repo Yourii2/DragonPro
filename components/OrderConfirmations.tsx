@@ -74,6 +74,29 @@ const toNumber = (value: unknown) => {
 
 const getOrderTotal = (order: OrderRow) => toNumber(order.total ?? order.total_amount);
 
+const getOrderSubtotal = (order: OrderRow) => {
+  if (!order) return 0;
+  const shipping = toNumber(order.shipping ?? order.shipping_fees ?? order.shipping_fee ?? order.delivery_fee ?? 0);
+  const total = toNumber(order.total ?? order.total_amount ?? 0);
+
+  const subtotalField = order.subtotal ?? order.sub_total;
+  if (subtotalField !== undefined && subtotalField !== null) {
+    const parsedSub = toNumber(subtotalField);
+    if (parsedSub > 0) return parsedSub;
+  }
+
+  if (Array.isArray(order.products) && order.products.length > 0) {
+    const productsSum = order.products.reduce((sum, item) => {
+      const q = toNumber(item.quantity ?? item.qty);
+      const p = toNumber(item.price ?? item.unit_price ?? item.price_per_unit);
+      return sum + (q * p);
+    }, 0);
+    if (productsSum > 0) return productsSum;
+  }
+
+  return Math.max(0, total - shipping);
+};
+
 const getOrderPieces = (order: OrderRow) =>
   Array.isArray(order.products)
     ? order.products.reduce((sum, product) => sum + toNumber(product.quantity ?? product.qty), 0)
@@ -134,6 +157,21 @@ const getStatusLabel = (status?: string) => {
 
 const formatDateTime = (value?: string) => {
   if (!value) return 'الآن';
+  try {
+    const str = String(value).trim();
+    const parts = str.replace('T', ' ').split(' ');
+    if (parts.length >= 2) {
+      const [year, month, day] = parts[0].split('-');
+      const timeParts = parts[1].split(':');
+      let hour = parseInt(timeParts[0] || '0', 10);
+      const min = timeParts[1] || '00';
+      const period = hour >= 12 ? 'م' : 'ص';
+      hour = hour % 12;
+      if (hour === 0) hour = 12;
+      const hourDisplay = hour < 10 ? `0${hour}` : `${hour}`;
+      return `${year}/${month}/${day} ${hourDisplay}:${min} ${period}`;
+    }
+  } catch (e) {}
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
   return parsed.toLocaleString('ar-EG', {
@@ -339,7 +377,7 @@ const SmallOrderCard: React.FC<{
         <div className="rounded-xl bg-slate-50 px-3 py-2 dark:bg-slate-900/60">
           <div className="mb-1 flex items-center justify-between gap-2">
             <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">المنتجات</span>
-            <span className="text-[10px] font-black text-slate-700 dark:text-slate-300">{formatCurrency(getOrderTotal(order))}</span>
+            <span className="text-[10px] font-black text-slate-700 dark:text-slate-300">{formatCurrency(getOrderSubtotal(order))}</span>
           </div>
           <div className="space-y-1">
             {orderProducts.slice(0, 1).map((product, index) => (
@@ -694,7 +732,7 @@ const OrderConfirmations: React.FC = () => {
     (sum, assignment) => sum + getOrderPieces(assignment.order || { id: assignment.order_id }),
     0
   );
-  const totalValueForSelectedRep = activeSelectedRepOrders.reduce((sum, assignment) => sum + getOrderTotal(assignment.order || { id: assignment.order_id }), 0);
+  const totalValueForSelectedRep = activeSelectedRepOrders.reduce((sum, assignment) => sum + getOrderSubtotal(assignment.order || { id: assignment.order_id }), 0);
 
   const refreshStockSummary = async (orderIdsOverride?: number[]) => {
     const warehouseId = Number(selectedWarehouseId || 0);
@@ -941,21 +979,49 @@ const OrderConfirmations: React.FC = () => {
     setSelectedCancelledOrderIds(cancelledAssignments.map((assignment) => Number(assignment.order_id)));
   };
 
-  const handlePrintSelectedOrders = () => {
-    if (!selectedActiveOrderIds.length) {
-      Swal.fire('تنبيه', 'اختر أوردر واحد على الأقل للطباعة.', 'warning');
-      return;
-    }
-    const selectedOrders = activeSelectedRepOrders
-      .filter((assignment) => selectedActiveOrderIds.includes(Number(assignment.order_id)))
-      .map((assignment) => assignment.order);
+  const handlePrintSelectedOrders = async () => {
+    if (selectedActiveOrderIds.length > 0) {
+      const selectedOrders = activeSelectedRepOrders
+        .filter((assignment) => selectedActiveOrderIds.includes(Number(assignment.order_id)))
+        .map((assignment) => assignment.order)
+        .filter(Boolean);
 
-    if (!selectedOrders.length) {
-      Swal.fire('تنبيه', 'لا توجد أوردرات صالحة للطباعة ضمن التحديد الحالي.', 'warning');
-      return;
+      if (selectedOrders.length > 0) {
+        setOrdersToPrint(selectedOrders);
+        return;
+      }
     }
 
-    setOrdersToPrint(selectedOrders);
+    if (activeSelectedRepOrders.length > 0) {
+      const selectedOrders = activeSelectedRepOrders
+        .map((assignment) => assignment.order)
+        .filter(Boolean);
+
+      if (selectedOrders.length > 0) {
+        setOrdersToPrint(selectedOrders);
+        return;
+      }
+    }
+
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getConfirmationAssignments`);
+      const jr = await res.json();
+      if (jr && jr.success && Array.isArray(jr.data) && jr.data.length > 0) {
+        const activeAssignments = jr.data.filter((a: any) => String(a.status || '').toLowerCase() === 'assigned');
+        const allOrders = activeAssignments.map((a: any) => a.order).filter(Boolean);
+        if (allOrders.length > 0) {
+          setOrdersToPrint(allOrders);
+          return;
+        }
+      }
+      Swal.fire('تنبيه', 'لا توجد أوردرات نشطة متاحة للطباعة حالياً.', 'info');
+    } catch (e) {
+      console.error('Failed to fetch all orders for printing', e);
+      Swal.fire('خطأ', 'تعذر جلب الأوردرات للطباعة.', 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleRemoveSelectedOrders = async () => {
@@ -993,16 +1059,16 @@ const OrderConfirmations: React.FC = () => {
   };
 
   const handlePrintSelectedCancelledOrders = () => {
-    if (!selectedCancelledOrderIds.length) {
-      Swal.fire('تنبيه', 'اختر أوردر ملغي واحد على الأقل للطباعة.', 'warning');
-      return;
-    }
-    const selectedOrders = cancelledAssignments
-      .filter((assignment) => selectedCancelledOrderIds.includes(Number(assignment.order_id)))
-      .map((assignment) => assignment.order);
+    const ordersToFilter = selectedCancelledOrderIds.length > 0
+      ? cancelledAssignments.filter((assignment) => selectedCancelledOrderIds.includes(Number(assignment.order_id)))
+      : cancelledAssignments;
+
+    const selectedOrders = ordersToFilter
+      .map((assignment) => assignment.order)
+      .filter(Boolean);
 
     if (!selectedOrders.length) {
-      Swal.fire('تنبيه', 'لا توجد أوردرات ملغية صالحة للطباعة ضمن التحديد الحالي.', 'warning');
+      Swal.fire('تنبيه', 'لا توجد أوردرات ملغية صالحة للطباعة.', 'warning');
       return;
     }
 
@@ -1160,12 +1226,23 @@ const OrderConfirmations: React.FC = () => {
       <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
         <div className="grid gap-4 lg:grid-cols-[1.2fr_2fr]">
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/60">
-            <div className="mb-3 flex items-center justify-between">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2 text-sm font-black text-slate-900 dark:text-slate-100">
                 <Users2 className="h-4 w-4 text-blue-500" />
                 اختيار المندوب
               </div>
-              <div className="rounded-full bg-white px-3 py-1 text-xs font-black text-slate-700 dark:bg-slate-800 dark:text-slate-200">{reps.length}</div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handlePrintSelectedOrders}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-1.5 text-xs font-black text-white shadow-md hover:bg-blue-700 active:scale-95 transition-all cursor-pointer"
+                  title="طباعة الأوردرات"
+                >
+                  <Printer className="h-4 w-4" />
+                  طباعة الأوردرات {selectedActiveOrderIds.length > 0 ? `(${selectedActiveOrderIds.length})` : activeSelectedRepOrders.length > 0 ? `(${activeSelectedRepOrders.length})` : ''}
+                </button>
+                <div className="rounded-full bg-white px-3 py-1 text-xs font-black text-slate-700 dark:bg-slate-800 dark:text-slate-200">{reps.length}</div>
+              </div>
             </div>
 
             {loading ? (
@@ -1219,14 +1296,23 @@ const OrderConfirmations: React.FC = () => {
             </div>
 
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/60">
-              <div className="text-xs font-semibold text-slate-600 dark:text-slate-400">إجمالي قيمة الأوردرات</div>
+              <div className="text-xs font-semibold text-slate-600 dark:text-slate-400">إجمالي قيمة الأوردرات (بدون الشحن)</div>
               <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">{formatCurrency(totalValueForSelectedRep)}</div>
             </div>
 
             <div className="sm:col-span-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/60">
-              <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <div className="text-xs font-black text-slate-700 dark:text-slate-300">ملخص احتياج المخزون (للمندوب المختار)</div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handlePrintSelectedOrders}
+                    disabled={!selectedRepId || activeSelectedRepOrders.length === 0 || submitting || loading}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-blue-600 px-3 py-1 text-xs font-black text-white shadow-sm transition-all hover:bg-blue-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <Printer className="h-3.5 w-3.5" />
+                    طباعة الأوردرات {selectedActiveOrderIds.length > 0 ? `(${selectedActiveOrderIds.length})` : activeSelectedRepOrders.length > 0 ? `(${activeSelectedRepOrders.length})` : ''}
+                  </button>
                   <div className={`rounded-full px-3 py-1 text-xs font-black ${stockShortageCount > 0 ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-200' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200'}`}>
                     {stockShortageCount > 0 ? `عجز في ${stockShortageCount} صنف` : 'المخزون كافٍ'}
                   </div>
@@ -1413,6 +1499,16 @@ const OrderConfirmations: React.FC = () => {
                             title={activeSortAsc ? 'من الأقدم إلى الأحدث' : 'من الأحدث إلى الأقدم'}
                           >
                             {activeSortAsc ? <ArrowDownAZ size={14} /> : <ArrowUpAZ size={14} />}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handlePrintSelectedOrders}
+                            disabled={submitting || loading || activeSelectedRepOrders.length === 0}
+                            className="inline-flex items-center gap-1 rounded-xl bg-blue-600 px-2.5 py-1.5 text-[11px] font-black text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60 shadow-sm"
+                            title="طباعة الأوردرات المحددة أو جميع الأوردرات الحالية"
+                          >
+                            <Printer className="h-3.5 w-3.5" />
+                            طباعة {selectedActiveOrderIds.length > 0 ? `المحدد (${selectedActiveOrderIds.length})` : 'الأوردرات'}
                           </button>
                           <button
                             type="button"

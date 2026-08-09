@@ -110,7 +110,7 @@ if (!isset($pdo)) {
             ]
         );
         // Set MySQL session timezone to Egypt (UTC+2)
-        $pdo->exec("SET time_zone = '+02:00'");
+        $pdo->exec("SET time_zone = '" . date('P') . "'");
     } catch (Exception $e) {
         http_response_code(500);
         echo json_encode(['success' => false, 'message' => 'Database connection failed.']);
@@ -9681,7 +9681,7 @@ switch ($module) {
             if ($ordersHasPage) $extraCols[] = 'o.page';
             $extraColsSql = count($extraCols) > 0 ? (', ' . implode(', ', $extraCols)) : '';
 
-            $sql = "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, o.created_at{$extraColsSql}, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, c.address as address, c.governorate as governorate, o.id as order_id, u.name as rep_name
+            $sql = "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, o.items_json, o.created_at{$extraColsSql}, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, c.address as address, c.governorate as governorate, o.id as order_id, u.name as rep_name
                 FROM orders o 
                 LEFT JOIN customers c ON o.customer_id = c.id
                 LEFT JOIN users u ON o.rep_id = u.id";
@@ -10748,8 +10748,8 @@ switch ($module) {
                             if (!isset($ordersHasEmployee)) { $ordersHasEmployee = column_exists($pdo, 'orders', 'employee'); }
                             if (!isset($ordersHasPage)) { $ordersHasPage = column_exists($pdo, 'orders', 'page'); }
                         try {
-                            $insertCols = ['order_number','customer_id','rep_id','status','total_amount','shipping_fees','notes'];
-                            $insertVals = [$useOrderNumber, $customerId, null, $status, $total, $shipping, $notes];
+                            $insertCols = ['order_number','customer_id','rep_id','status','total_amount','shipping_fees','notes','created_at'];
+                            $insertVals = [$useOrderNumber, $customerId, null, $status, $total, $shipping, $notes, date('Y-m-d H:i:s')];
                             if ($ordersHasDiscountType) { $insertCols[] = 'discount_type'; $insertVals[] = $discountType; }
                             if ($ordersHasDiscountValue) { $insertCols[] = 'discount_value'; $insertVals[] = $discountValue; }
                             if ($ordersHasDiscountAmount) { $insertCols[] = 'discount_amount'; $insertVals[] = $discountAmount; }
@@ -11411,20 +11411,33 @@ switch ($module) {
                 $start_date = isset($_GET['start_date']) && $_GET['start_date'] !== '' ? $_GET['start_date'] : null;
                 $end_date = isset($_GET['end_date']) && $_GET['end_date'] !== '' ? $_GET['end_date'] : null;
 
-                $sql = "SELECT * FROM transactions WHERE treasury_id = ?";
+                $hasTxCreatedBy = column_exists($pdo, 'transactions', 'created_by');
+                $hasAuditLogs = table_exists($pdo, 'audit_logs');
+                $createdByParts = [];
+                if ($hasTxCreatedBy) {
+                    $createdByParts[] = "(SELECT u.name FROM users u WHERE u.id = t.created_by LIMIT 1)";
+                }
+                if ($hasAuditLogs) {
+                    $createdByParts[] = "(SELECT u2.name FROM audit_logs al JOIN users u2 ON u2.id = al.user_id WHERE al.module='transactions' AND al.action='create' AND al.record_id=t.id ORDER BY al.id ASC LIMIT 1)";
+                }
+                $createdByParts[] = "JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(t.details) THEN t.details ELSE NULL END, '$.employee_name'))";
+                $createdByParts[] = "JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(t.details) THEN t.details ELSE NULL END, '$.created_by_name'))";
+                $createdByExpr = "COALESCE(" . implode(", ", $createdByParts) . ")";
+
+                $sql = "SELECT t.*, ({$createdByExpr}) AS created_by_name FROM transactions t WHERE t.treasury_id = ?";
                 $params = [$id];
                 if ($start_date && $end_date) {
-                    $sql .= " AND DATE(transaction_date) BETWEEN ? AND ?";
+                    $sql .= " AND DATE(t.transaction_date) BETWEEN ? AND ?";
                     $params[] = $start_date;
                     $params[] = $end_date;
                 } elseif ($start_date) {
-                    $sql .= " AND DATE(transaction_date) >= ?";
+                    $sql .= " AND DATE(t.transaction_date) >= ?";
                     $params[] = $start_date;
                 } elseif ($end_date) {
-                    $sql .= " AND DATE(transaction_date) <= ?";
+                    $sql .= " AND DATE(t.transaction_date) <= ?";
                     $params[] = $end_date;
                 }
-                $sql .= " ORDER BY transaction_date DESC";
+                $sql .= " ORDER BY t.transaction_date DESC";
                 $stmt = execute_query($pdo, $sql, $params);
                 echo json_encode(['success' => true, 'data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
             } elseif ($action === 'getById') {
@@ -11461,13 +11474,33 @@ switch ($module) {
                         return;
                     }
 
-                    $createdBy = isset($_SESSION['user_id']) ? intval($_SESSION['user_id']) : null;
+                    $createdBy = $_SESSION['user_id'] ?? ($_SESSION['user']['id'] ?? null);
+                    $createdBy = $createdBy ? intval($createdBy) : null;
+                    $sessionUserName = $_SESSION['user']['name'] ?? ($_SESSION['user_name'] ?? null);
+
+                    $detailsOut = json_encode(['notes' => $notes, 'transfer_to' => $to_treasury_id, 'employee_name' => $sessionUserName], JSON_UNESCAPED_UNICODE);
+                    $detailsIn  = json_encode(['notes' => $notes, 'transfer_from' => $from_treasury_id, 'employee_name' => $sessionUserName], JSON_UNESCAPED_UNICODE);
+
+                    $outId = null;
+                    $inId = null;
+
                     if (column_exists($pdo, 'transactions', 'created_by') && $createdBy) {
-                        execute_query($pdo, "INSERT INTO transactions (type, treasury_id, amount, transaction_date, details, created_by) VALUES (?, ?, ?, NOW(), ?, ?)", ['transfer_out', $from_treasury_id, -$amount, json_encode(['notes' => $notes, 'transfer_to' => $to_treasury_id]), $createdBy]);
-                        execute_query($pdo, "INSERT INTO transactions (type, treasury_id, amount, transaction_date, details, created_by) VALUES (?, ?, ?, NOW(), ?, ?)", ['transfer_in', $to_treasury_id, $amount, json_encode(['notes' => $notes, 'transfer_from' => $from_treasury_id]), $createdBy]);
+                        execute_query($pdo, "INSERT INTO transactions (type, treasury_id, amount, transaction_date, details, created_by) VALUES (?, ?, ?, NOW(), ?, ?)", ['transfer_out', $from_treasury_id, -$amount, $detailsOut, $createdBy]);
+                        $outId = intval($pdo->lastInsertId());
+                        execute_query($pdo, "INSERT INTO transactions (type, treasury_id, amount, transaction_date, details, created_by) VALUES (?, ?, ?, NOW(), ?, ?)", ['transfer_in', $to_treasury_id, $amount, $detailsIn, $createdBy]);
+                        $inId = intval($pdo->lastInsertId());
                     } else {
-                        execute_query($pdo, "INSERT INTO transactions (type, treasury_id, amount, transaction_date, details) VALUES (?, ?, ?, NOW(), ?)", ['transfer_out', $from_treasury_id, -$amount, json_encode(['notes' => $notes, 'transfer_to' => $to_treasury_id])]);
-                        execute_query($pdo, "INSERT INTO transactions (type, treasury_id, amount, transaction_date, details) VALUES (?, ?, ?, NOW(), ?)", ['transfer_in', $to_treasury_id, $amount, json_encode(['notes' => $notes, 'transfer_from' => $from_treasury_id])]);
+                        execute_query($pdo, "INSERT INTO transactions (type, treasury_id, amount, transaction_date, details) VALUES (?, ?, ?, NOW(), ?)", ['transfer_out', $from_treasury_id, -$amount, $detailsOut]);
+                        $outId = intval($pdo->lastInsertId());
+                        execute_query($pdo, "INSERT INTO transactions (type, treasury_id, amount, transaction_date, details) VALUES (?, ?, ?, NOW(), ?)", ['transfer_in', $to_treasury_id, $amount, $detailsIn]);
+                        $inId = intval($pdo->lastInsertId());
+                    }
+
+                    if ($createdBy && $outId) {
+                        audit_log($pdo, 'transactions', 'create', $outId, json_encode(['type' => 'transfer_out', 'amount' => -$amount]));
+                    }
+                    if ($createdBy && $inId) {
+                        audit_log($pdo, 'transactions', 'create', $inId, json_encode(['type' => 'transfer_in', 'amount' => $amount]));
                     }
                     execute_query($pdo, "UPDATE treasuries SET current_balance = current_balance - ? WHERE id = ?", [$amount, $from_treasury_id]);
                     execute_query($pdo, "UPDATE treasuries SET current_balance = current_balance + ? WHERE id = ?", [$amount, $to_treasury_id]);
@@ -11847,7 +11880,7 @@ switch ($module) {
                     FROM transactions t
                     LEFT JOIN treasuries tr ON tr.id = t.treasury_id";
 
-                $conditions = ["t.treasury_id IS NOT NULL", "t.type NOT IN ('other', 'rep_bonus_in', 'rep_penalty', 'rep_assignment', 'rep_return_credit')"];
+                $conditions = ["t.treasury_id IS NOT NULL", "ABS(COALESCE(t.amount, 0)) > 0.001", "t.type NOT IN ('purchase', 'other', 'rep_bonus_in', 'rep_penalty', 'rep_assignment', 'rep_return_credit')"];
                 $params = [];
                 if ($start_date) { $conditions[] = "DATE(t.transaction_date) >= ?"; $params[] = $start_date; }
                 if ($end_date)   { $conditions[] = "DATE(t.transaction_date) <= ?"; $params[] = $end_date; }
@@ -13408,6 +13441,78 @@ switch ($module) {
         }
 
         // --- New command requested by user for Daily Close: getSalesActiveWithRep ---
+        // --- Endpoint for Rep Custody Report ---
+        if ($action === 'getRepCustody') {
+            try {
+                $repsStmt = execute_query($pdo, "SELECT id, name, phone, role FROM users WHERE role = 'representative' OR id IN (SELECT DISTINCT rep_id FROM orders WHERE rep_id IS NOT NULL AND rep_id > 0)");
+                $reps = $repsStmt ? $repsStmt->fetchAll(PDO::FETCH_ASSOC) : [];
+
+                $closedStatuses = "'delivered', 'completed', 'settled', 'closed', 'returned', 'full_return', 'cancelled'";
+                $sql = "SELECT o.*, c.name as customer_name, c.phone1, c.phone2, c.address, c.governorate, u.name as rep_name
+                        FROM orders o
+                        LEFT JOIN customers c ON o.customer_id = c.id
+                        LEFT JOIN users u ON o.rep_id = u.id
+                        WHERE (o.rep_id IS NOT NULL AND o.rep_id > 0)
+                          AND (LOWER(o.status) NOT IN ($closedStatuses))
+                        ORDER BY o.created_at DESC";
+
+                $stmt = execute_query($pdo, $sql);
+                $orders = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [];
+
+                foreach ($orders as &$ord) {
+                    $items = [];
+                    $jsonStr = $ord['items_json'] ?? $ord['products_json'] ?? $ord['items'] ?? null;
+                    if (!empty($jsonStr) && is_string($jsonStr)) {
+                        $decoded = json_decode($jsonStr, true);
+                        if (is_array($decoded)) $items = $decoded;
+                    }
+
+                    if (empty($items)) {
+                        $oid = intval($ord['id']);
+                        $itStmt = execute_query($pdo, "SELECT oi.product_id, oi.quantity, oi.price_per_unit as price, ppar.name, pv.color, pv.size 
+                                                      FROM order_items oi 
+                                                      LEFT JOIN product_variants pv ON oi.product_id = pv.id 
+                                                      LEFT JOIN products ppar ON pv.product_id = ppar.id 
+                                                      WHERE oi.order_id = ?", [$oid]);
+                        $dbItems = $itStmt ? $itStmt->fetchAll(PDO::FETCH_ASSOC) : [];
+                        if (!empty($dbItems)) $items = $dbItems;
+                    }
+
+                    $ord['products'] = $items;
+                    $ord['rep_id'] = intval($ord['rep_id']);
+                }
+
+                echo json_encode([
+                    'success' => true,
+                    'reps' => $reps,
+                    'orders' => $orders
+                ]);
+            } catch (Exception $e) {
+                echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+            }
+            exit;
+        }
+
+        if ($action === 'getConfirmationAssignments') {
+            try {
+                if (table_exists($pdo, 'order_confirmation_assignments')) {
+                    $sql = "SELECT a.*, r.name as rep_name, o.order_number, o.customer_id, o.rep_id as order_rep_id, o.status as order_status, o.total_amount, o.shipping_fees, o.items_json
+                            FROM order_confirmation_assignments a
+                            LEFT JOIN users r ON a.rep_id = r.id
+                            LEFT JOIN orders o ON a.order_id = o.id
+                            ORDER BY a.created_at DESC";
+                    $stmt = execute_query($pdo, $sql);
+                    $rows = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [];
+                    echo json_encode(['success' => true, 'data' => $rows]);
+                } else {
+                    echo json_encode(['success' => true, 'data' => []]);
+                }
+            } catch (Exception $e) {
+                echo json_encode(['success' => true, 'data' => []]);
+            }
+            exit;
+        }
+
         if ($action === 'getSalesActiveWithRep') {
             $repId = intval($_GET['rep_id'] ?? 0);
             if (!$repId) {
@@ -14416,28 +14521,43 @@ switch ($module) {
                     audit_log($pdo, 'transactions', 'create', $assignmentTxId, json_encode(['type' => $txType, 'amount' => -1 * abs($totalAmount)]));
                 }
 
-                // Handle upfront payment adjustment from/to Rep.
-                // Client may send `paymentAction` as 'collect' (rep -> company) or 'pay' (company -> rep).
-                $paymentAction = isset($input['paymentAction']) ? trim(strval($input['paymentAction'])) : 'collect';
-                $amt = abs(floatval($paymentAdjustment));
-                if ($amt > 0) {
-                    if ($paymentAction === 'collect') {
-                        // Rep pays company: credit treasury, reduce rep debt (positive amount)
-                        $txType3 = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_payment_in', ['rep_payment_in','payment_in','payment','rep_settlement']);
-                        $rel_local3 = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
-                        execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txType3, $warehouseId ?: null, $treasuryId, $rel_local3, $repId, $amt, json_encode(['direction'=>'in','context'=>'close_daily','orders'=>$orders,'rep_id'=>$repId,'assignment_tx_id'=>$assignmentTxId,'model'=>'consignment'])]);
-                        $txId3 = $pdo->lastInsertId();
-                        audit_log($pdo, 'transactions', 'create', $txId3, json_encode(['type' => $txType3, 'amount' => $amt]));
-                        if ($treasuryId) execute_query($pdo, "UPDATE treasuries SET current_balance = current_balance + ? WHERE id = ?", [$amt, $treasuryId]);
-                    } else {
-                        // Company pays rep: decrease treasury and increase rep debt (record as negative amount)
-                        $txType3 = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_payment_out', ['rep_payment_out','payment_out','payment','rep_settlement']);
-                        $rel_local3 = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
-                        // Use negative amount to reflect increased debt (consistent with assignment insertion using negative amounts)
-                        execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txType3, $warehouseId ?: null, $treasuryId, $rel_local3, $repId, -1 * $amt, json_encode(['direction'=>'out','context'=>'close_daily','orders'=>$orders,'rep_id'=>$repId,'assignment_tx_id'=>$assignmentTxId,'model'=>'consignment'])]);
-                        $txId3 = $pdo->lastInsertId();
-                        audit_log($pdo, 'transactions', 'create', $txId3, json_encode(['type' => $txType3, 'amount' => -1 * $amt]));
-                        if ($treasuryId) execute_query($pdo, "UPDATE treasuries SET current_balance = current_balance - ? WHERE id = ?", [$amt, $treasuryId]);
+                // Handle upfront payment adjustment from/to Rep (support single or split payments across treasuries).
+                $splitPayments = isset($input['splitPayments']) && is_array($input['splitPayments']) ? $input['splitPayments'] : null;
+                if (!$splitPayments) {
+                    $paymentAction = isset($input['paymentAction']) ? trim(strval($input['paymentAction'])) : 'collect';
+                    $amt = abs(floatval($paymentAdjustment));
+                    if ($amt > 0 && $treasuryId > 0) {
+                        $splitPayments = [
+                            ['treasuryId' => $treasuryId, 'paidAmount' => $amt, 'paymentAction' => $paymentAction, 'type' => 'single']
+                        ];
+                    }
+                }
+
+                if (!empty($splitPayments)) {
+                    foreach ($splitPayments as $pItem) {
+                        $tId = intval($pItem['treasuryId'] ?? 0);
+                        $pAmt = abs(floatval($pItem['paidAmount'] ?? 0));
+                        $pAct = isset($pItem['paymentAction']) ? trim(strval($pItem['paymentAction'])) : (isset($input['paymentAction']) ? trim(strval($input['paymentAction'])) : 'collect');
+
+                        if ($tId <= 0 || $pAmt <= 0) continue;
+
+                        if ($pAct === 'collect') {
+                            // Rep pays company: credit treasury, reduce rep debt (positive amount)
+                            $txType3 = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_payment_in', ['rep_payment_in','payment_in','payment','rep_settlement']);
+                            $rel_local3 = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
+                            execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txType3, $warehouseId ?: null, $tId, $rel_local3, $repId, $pAmt, json_encode(['direction'=>'in','context'=>'close_daily','orders'=>$orders,'rep_id'=>$repId,'assignment_tx_id'=>$assignmentTxId,'model'=>'consignment'])]);
+                            $txId3 = $pdo->lastInsertId();
+                            audit_log($pdo, 'transactions', 'create', $txId3, json_encode(['type' => $txType3, 'amount' => $pAmt, 'treasury_id' => $tId]));
+                            execute_query($pdo, "UPDATE treasuries SET current_balance = current_balance + ? WHERE id = ?", [$pAmt, $tId]);
+                        } else {
+                            // Company pays rep: decrease treasury and increase rep debt (record as negative amount)
+                            $txType3 = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_payment_out', ['rep_payment_out','payment_out','payment','rep_settlement']);
+                            $rel_local3 = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
+                            execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txType3, $warehouseId ?: null, $tId, $rel_local3, $repId, -1 * $pAmt, json_encode(['direction'=>'out','context'=>'close_daily','orders'=>$orders,'rep_id'=>$repId,'assignment_tx_id'=>$assignmentTxId,'model'=>'consignment'])]);
+                            $txId3 = $pdo->lastInsertId();
+                            audit_log($pdo, 'transactions', 'create', $txId3, json_encode(['type' => $txType3, 'amount' => -1 * $pAmt, 'treasury_id' => $tId]));
+                            execute_query($pdo, "UPDATE treasuries SET current_balance = current_balance - ? WHERE id = ?", [$pAmt, $tId]);
+                        }
                     }
                 }
 
@@ -15164,7 +15284,7 @@ switch ($module) {
                 if ($notes !== '') {
                     $detailsPayload = ['items' => $items, 'notes' => $notes];
                 }
-                $stmt = execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txType_local, $warehouseId, $treasuryId, $rel_local, $supplierId, $invoiceTotal, json_encode($detailsPayload)]);
+                $stmt = execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txType_local, $warehouseId, null, $rel_local, $supplierId, $invoiceTotal, json_encode($detailsPayload)]);
                 $purchaseId = $pdo->lastInsertId();
                 foreach ($items as $it) {
                     $productId = intval($it['productId'] ?? 0);
@@ -15959,13 +16079,13 @@ switch ($module) {
 
             // treasuryBalanceHistory
             if ($treasury_id > 0) {
-                $stmt_start = execute_query($pdo, "SELECT SUM(amount) as starting_balance FROM transactions WHERE transaction_date < ? AND treasury_id = ?", [$start_date, $treasury_id]);
+                $stmt_start = execute_query($pdo, "SELECT SUM(amount) as starting_balance FROM transactions WHERE treasury_id = ? AND transaction_date < ? AND ABS(COALESCE(amount, 0)) > 0.001 AND type NOT IN ('purchase', 'other', 'rep_bonus_in', 'rep_penalty', 'rep_assignment', 'rep_return_credit')", [$treasury_id, $start_date]);
             } else {
-                $stmt_start = execute_query($pdo, "SELECT SUM(amount) as starting_balance FROM transactions WHERE transaction_date < ?", [$start_date]);
+                $stmt_start = execute_query($pdo, "SELECT SUM(amount) as starting_balance FROM transactions WHERE treasury_id IS NOT NULL AND transaction_date < ? AND ABS(COALESCE(amount, 0)) > 0.001 AND type NOT IN ('purchase', 'other', 'rep_bonus_in', 'rep_penalty', 'rep_assignment', 'rep_return_credit')", [$start_date]);
             }
             $starting_balance = $stmt_start->fetch(PDO::FETCH_ASSOC)['starting_balance'] ?? 0;
 
-            $financeWhere = "transaction_date BETWEEN ? AND ?";
+            $financeWhere = "treasury_id IS NOT NULL AND ABS(COALESCE(amount, 0)) > 0.001 AND type NOT IN ('purchase', 'other', 'rep_bonus_in', 'rep_penalty', 'rep_assignment', 'rep_return_credit') AND transaction_date BETWEEN ? AND ?";
             $financeParams = [$start_date, $end_date . ' 23:59:59'];
             if ($treasury_id > 0) { $financeWhere .= " AND treasury_id = ?"; $financeParams[] = $treasury_id; }
             if ($txn_type !== '') { $financeWhere .= " AND type = ?"; $financeParams[] = $txn_type; }
@@ -17443,10 +17563,35 @@ function handle_crud($pdo, $table, $input, $fields, $select_fields = "*") {
             }
              if ($table === 'treasuries') {
                 $stmt = execute_query($pdo, "SELECT current_balance FROM $table WHERE id = ?", [$id]);
-                if ($stmt->fetchColumn() != 0) {
+                $bal = floatval($stmt->fetchColumn() ?? 0);
+                if ($bal != 0) {
                     http_response_code(400);
-                    echo json_encode(['success' => false, 'message' => 'Cannot delete with a non-zero balance.']);
+                    echo json_encode(['success' => false, 'message' => 'لا يمكن حذف الخزينة وهي تحتوي على رصيد غير صفري. يرجى تصفية/تحويل الرصيد أولاً.']);
                     return;
+                }
+
+                // Unlink foreign key references in transactions and related tables before deletion
+                try {
+                    if (table_exists($pdo, 'transactions')) {
+                        execute_query($pdo, "UPDATE transactions SET treasury_id = NULL WHERE treasury_id = ?", [$id]);
+                    }
+                    if (table_exists($pdo, 'employee_transactions')) {
+                        execute_query($pdo, "UPDATE employee_transactions SET treasury_id = NULL WHERE treasury_id = ?", [$id]);
+                    }
+                    if (table_exists($pdo, 'rep_daily_journal')) {
+                        execute_query($pdo, "UPDATE rep_daily_journal SET treasury_id = NULL WHERE treasury_id = ?", [$id]);
+                    }
+                    if (table_exists($pdo, 'rep_delivery_sessions')) {
+                        execute_query($pdo, "UPDATE rep_delivery_sessions SET treasury_id = NULL WHERE treasury_id = ?", [$id]);
+                    }
+                    if (table_exists($pdo, 'user_defaults')) {
+                        execute_query($pdo, "UPDATE user_defaults SET default_treasury_id = NULL WHERE default_treasury_id = ?", [$id]);
+                    }
+                    if (column_exists($pdo, 'users', 'restricted_treasury_id')) {
+                        execute_query($pdo, "UPDATE users SET restricted_treasury_id = NULL WHERE restricted_treasury_id = ?", [$id]);
+                    }
+                } catch (Exception $unlinkEx) {
+                    // Ignore minor unlink errors and proceed to attempt delete
                 }
             }
 
@@ -17471,9 +17616,14 @@ function handle_crud($pdo, $table, $input, $fields, $select_fields = "*") {
                 break;
             }
 
-            execute_query($pdo, "DELETE FROM $table WHERE id = ?", [$id]);
-            audit_log($pdo, $table, 'delete', $id, null);
-            echo json_encode(['success' => true, 'message' => 'Deleted successfully.']);
+            try {
+                execute_query($pdo, "DELETE FROM $table WHERE id = ?", [$id]);
+                audit_log($pdo, $table, 'delete', $id, null);
+                echo json_encode(['success' => true, 'message' => 'Deleted successfully.']);
+            } catch (Exception $delEx) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'لا يمكن حذف هذا العنصر لوجود سجلات مرتبطة به: ' . $delEx->getMessage()]);
+            }
             break;
 
         default:

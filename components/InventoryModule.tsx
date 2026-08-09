@@ -50,6 +50,10 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
   const [transferData, setTransferData] = useState({ from: '', to: '', items: [{ transferType: '', productId: '', _parentId: '', _color: '', _size: '', qty: 1 }] });
   const [transferSuccess, setTransferSuccess] = useState(false);
 
+  // --- Date & Time Range Filter State for Products ---
+  const [stockStartDateTime, setStockStartDateTime] = useState<string>('');
+  const [stockEndDateTime, setStockEndDateTime] = useState<string>('');
+
   // --- Inventory Audit State ---
   const [audits, setAudits] = useState<any[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
@@ -2199,7 +2203,42 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                    <span className="font-black text-sm text-slate-800 dark:text-slate-100">سجل الأصناف</span>
                </div>
                <div className="flex items-center gap-2 w-full md:w-auto">
-                   <CustomSelect
+                   {/* Date & Time Range Filter */}
+                    <div className="flex flex-wrap items-center gap-2 bg-white dark:bg-slate-800 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                      <div className="flex items-center gap-1 text-xs">
+                        <span className="font-bold text-slate-500 dark:text-slate-400 shrink-0">من:</span>
+                        <input
+                          type="datetime-local"
+                          value={stockStartDateTime}
+                          onChange={(e) => setStockStartDateTime(e.target.value)}
+                          className="bg-transparent font-mono outline-none text-slate-700 dark:text-slate-200 text-xs"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1 text-xs">
+                        <span className="font-bold text-slate-500 dark:text-slate-400 shrink-0">إلى:</span>
+                        <input
+                          type="datetime-local"
+                          value={stockEndDateTime}
+                          onChange={(e) => setStockEndDateTime(e.target.value)}
+                          className="bg-transparent font-mono outline-none text-slate-700 dark:text-slate-200 text-xs"
+                        />
+                      </div>
+                      {(stockStartDateTime || stockEndDateTime) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setStockStartDateTime('');
+                            setStockEndDateTime('');
+                          }}
+                          className="px-2 py-1 rounded-lg bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300 font-bold text-xs hover:bg-rose-200 transition-all shrink-0"
+                          title="مسح الفلتر الزمني"
+                        >
+                          ✕ مسح
+                        </button>
+                      )}
+                    </div>
+
+                    <CustomSelect
                     value={selectedWarehouseFilter}
                     onChange={(v) => setSelectedWarehouseFilter(v)}
                     options={[{ value: 'كل المستودعات', label: 'كل المستودعات' }, ...warehouses.map(w => ({ value: String(w.name), label: w.name }))]}
@@ -2223,18 +2262,51 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                    : new Map();
 
                  // For warehouse view: filter parents to only those with variants in this warehouse
-                 const displayParents: any[] = isFilteredView
-                   ? parentProducts
-                       .map((pp: any) => ({
-                         ...pp,
-                         variants: (pp.variants || [])
-                           .map((v: any) => ({ ...v, stock: stockMap.has(Number(v.id)) ? stockMap.get(Number(v.id)) : v.stock }))
-                           .filter((v: any) => stockMap.has(Number(v.id)))
-                       }))
-                       .filter((pp: any) => pp.variants.length > 0)
-                   : parentProducts;
+                 const isDateFiltered = Boolean(stockStartDateTime || stockEndDateTime);
 
-                 return (
+                  const isItemInTimeRange = (item: any) => {
+                    if (!isDateFiltered) return true;
+                    const itemTimeStr = item?.created_at || item?.createdDate || item?.date || item?.updated_at || item?.createdAt;
+                    if (!itemTimeStr) return true;
+                    const itemTime = new Date(itemTimeStr).getTime();
+                    if (isNaN(itemTime)) return true;
+
+                    if (stockStartDateTime) {
+                      const startTime = new Date(stockStartDateTime).getTime();
+                      if (!isNaN(startTime) && itemTime < startTime) return false;
+                    }
+
+                    if (stockEndDateTime) {
+                      const endTime = new Date(stockEndDateTime).getTime();
+                      if (!isNaN(endTime) && itemTime > endTime) return false;
+                    }
+
+                    return true;
+                  };
+
+                  const displayParents: any[] = parentProducts
+                    .map((pp: any) => {
+                      const parentMatchesDate = isItemInTimeRange(pp);
+                      const variants = (pp.variants || [])
+                        .map((v: any) => ({ ...v, stock: stockMap.has(Number(v.id)) ? stockMap.get(Number(v.id)) : v.stock }))
+                        .filter((v: any) => {
+                          const isWhMatch = !isFilteredView || stockMap.has(Number(v.id));
+                          const isTimeMatch = !isDateFiltered || isItemInTimeRange(v) || parentMatchesDate;
+                          return isWhMatch && isTimeMatch;
+                        });
+
+                      return {
+                        ...pp,
+                        variants
+                      };
+                    })
+                    .filter((pp: any) => {
+                      const hasVariants = pp.variants.length > 0;
+                      const parentTimeMatch = !isDateFiltered || isItemInTimeRange(pp);
+                      return hasVariants && parentTimeMatch;
+                    });
+
+                  return (
                  <table className="w-full text-right text-sm">
                    <thead className="text-muted border-b dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/20">
                      <tr>

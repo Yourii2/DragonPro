@@ -1782,7 +1782,12 @@ const scanBarcodeAddOrder = async () => {
     });
     if (!confirm.isConfirmed) return;
 
-    const payload = {
+    const splitPayments = isSplitPayment ? [
+      ...(cashAmount > 0 && cashTreasuryId ? [{ treasuryId: Number(cashTreasuryId), paidAmount: cashAmount, paymentAction, type: 'cash' }] : []),
+      ...(electronicAmount > 0 && electronicTreasuryId ? [{ treasuryId: Number(electronicTreasuryId), paidAmount: electronicAmount, paymentAction, type: 'electronic' }] : [])
+    ] : null;
+
+    const payload: any = {
       repId: Number(selectedRepId),
       orders: ordersToAssign.map(o => Number(o.id)),
       treasuryId: selectedTreasuryId ? Number(selectedTreasuryId) : null,
@@ -1793,7 +1798,8 @@ const scanBarcodeAddOrder = async () => {
       paymentAction: paymentAction,
       totalAmount: todayValue,
       productsCount: todayPiecesCount,
-      reason: dailyReason || null
+      reason: dailyReason || null,
+      splitPayments: splitPayments && splitPayments.length > 0 ? splitPayments : null
     };
 
     try {
@@ -1812,6 +1818,9 @@ const scanBarcodeAddOrder = async () => {
         setSelectedOrders([]);
         setSelectedPendingIds([]);
         setPaymentAdjustment(0);
+        setIsSplitPayment(false);
+        setCashAmount(0);
+        setElectronicAmount(0);
         refreshPendingOrdersList();
       } else {
         Swal.fire('فشل', jr?.message || 'لم يؤكد الخادم المعالجة.', 'error');
@@ -1857,7 +1866,7 @@ const scanBarcodeAddOrder = async () => {
 
       const ordersToAssign = todayOrdersUnique;
       if (!ordersToAssign || ordersToAssign.length === 0) return;
-      if (Math.abs(paymentAdjustment) > 0 && !selectedTreasuryId) return;
+      if (!isSplitPayment && Math.abs(paymentAdjustment) > 0 && !selectedTreasuryId) return;
 
       const completeStockCheck = await checkCumulativeStockForOrderIds(ordersToAssign.map((o: any) => Number(o.id)));
       if (!completeStockCheck.ok) {
@@ -1874,7 +1883,12 @@ const scanBarcodeAddOrder = async () => {
       let dailyReason = '';
       if (selectedWarehouseId && todayPiecesCount > 0) dailyReason = 'بدء اليومية';
 
-      const payload = {
+      const splitPayments = isSplitPayment ? [
+        ...(cashAmount > 0 && cashTreasuryId ? [{ treasuryId: Number(cashTreasuryId), paidAmount: cashAmount, paymentAction, type: 'cash' }] : []),
+        ...(electronicAmount > 0 && electronicTreasuryId ? [{ treasuryId: Number(electronicTreasuryId), paidAmount: electronicAmount, paymentAction, type: 'electronic' }] : [])
+      ] : null;
+
+      const payload: any = {
         repId: Number(selectedRepId),
         orders: ordersToAssign.map(o => Number(o.id)),
         treasuryId: selectedTreasuryId ? Number(selectedTreasuryId) : null,
@@ -1885,7 +1899,8 @@ const scanBarcodeAddOrder = async () => {
         paymentAction: paymentAction,
         totalAmount: todayValue,
         productsCount: todayPiecesCount,
-        reason: dailyReason || null
+        reason: dailyReason || null,
+        splitPayments: splitPayments && splitPayments.length > 0 ? splitPayments : null
       };
 
       const resp = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=completeDaily`, {
@@ -1902,6 +1917,9 @@ const scanBarcodeAddOrder = async () => {
         setSelectedOrders([]);
         setSelectedPendingIds([]);
         setPaymentAdjustment(0);
+        setIsSplitPayment(false);
+        setCashAmount(0);
+        setElectronicAmount(0);
         refreshPendingOrdersList();
       } else {
         console.error('Silent complete failed', jr);

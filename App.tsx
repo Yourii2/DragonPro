@@ -319,6 +319,9 @@ const App: React.FC = () => {
       case 'print_waybill':
         return <PrintWaybill />;
       case 'reps':
+        if (activeSubSlug === 'rep-custody') {
+          return <ReportsModule initialView="rep-custody" />;
+        }
         return <RepresentativesModule initialView={activeSubSlug} />;
       case 'sales':
       case 'sales-daily':

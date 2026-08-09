@@ -30,8 +30,6 @@ const buildCandidateApiBases = (initialBase: string): string[] => {
   const candidates = [
     initialBase,
     `${origin}/components`,
-    `${origin}/Nexus/components`,
-    `http://localhost/DragonPro/components`,
     firstSegment ? `${origin}/${firstSegment}/components` : '',
   ].filter(Boolean).map((x) => x.replace(/\/$/, ''));
   return Array.from(new Set(candidates));

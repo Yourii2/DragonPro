@@ -26,38 +26,90 @@ const ReportRepCustody: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([]);
   const [reps, setReps] = useState<any[]>([]);
   const [selectedRepId, setSelectedRepId] = useState<string>('');
+  const [selectedProduct, setSelectedProduct] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
 
-  useEffect(() => {
+    useEffect(() => {
     const fetchData = async () => {
       setIsLoading(true);
       try {
-        const [ordersRes, repsRes] = await Promise.all([
-          fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll`).then(r => r.json()).catch(() => null),
-          fetch(`${API_BASE_PATH}/api.php?module=users&action=getAllWithBalance&related_to_type=rep`).then(r => r.json()).catch(() => null)
-        ]);
+        // Try dedicated primary Rep Custody endpoint
+        const primaryRes = await fetch(`${API_BASE_PATH}/api.php?module=reports&action=getRepCustody`)
+          .then(r => r.json())
+          .catch(() => null);
 
-        if (repsRes && repsRes.success) {
-          const repsList = Array.isArray(repsRes.data) ? repsRes.data : [];
-          setReps(repsList);
-        } else if (repsRes && Array.isArray(repsRes)) {
-          setReps(repsRes);
+        if (primaryRes && primaryRes.success && Array.isArray(primaryRes.orders)) {
+          if (Array.isArray(primaryRes.reps)) {
+            setReps(primaryRes.reps);
+          }
+          setOrders(primaryRes.orders);
+          return;
         }
 
-        if (ordersRes && ordersRes.success) {
-          const allOrders = ordersRes.data || [];
-          const closedStatuses = ['delivered', 'completed', 'settled', 'closed', 'returned', 'full_return', 'cancelled'];
-          
-          const custodyOrders = allOrders.filter((o: any) => {
+        // Fallback: multi-endpoint fetching
+        const [ordersRes, repsRes, assignmentsRes] = await Promise.all([
+          fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll`).then(r => r.json()).catch(() => null),
+          fetch(`${API_BASE_PATH}/api.php?module=users&action=getAllWithBalance&related_to_type=rep`).then(r => r.json()).catch(() => null),
+          fetch(`${API_BASE_PATH}/api.php?module=sales&action=getConfirmationAssignments`).then(r => r.json()).catch(() => null)
+        ]);
+
+        let repsList: any[] = [];
+        if (repsRes && repsRes.success) {
+          repsList = Array.isArray(repsRes.data) ? repsRes.data : [];
+        } else if (repsRes && Array.isArray(repsRes)) {
+          repsList = repsRes;
+        }
+        setReps(repsList);
+
+        const closedStatuses = ['delivered', 'completed', 'settled', 'closed', 'returned', 'full_return', 'cancelled'];
+        const ordersMap = new Map<number, any>();
+
+        if (ordersRes && ordersRes.success && Array.isArray(ordersRes.data)) {
+          ordersRes.data.forEach((o: any) => {
             const repId = o.rep_id ?? o.representative_id ?? o.repId ?? o.user_id;
             const hasRep = repId !== undefined && repId !== null && String(repId).trim() !== '' && String(repId) !== '0';
             const status = String(o.status || '').toLowerCase();
             const isClosed = closedStatuses.includes(status);
-            return hasRep && !isClosed;
+            if (hasRep && !isClosed) {
+              ordersMap.set(Number(o.id), { ...o, rep_id: Number(repId) });
+            }
           });
-
-          setOrders(custodyOrders);
         }
+
+        if (assignmentsRes && assignmentsRes.success && Array.isArray(assignmentsRes.data)) {
+          assignmentsRes.data.forEach((a: any) => {
+            const aStatus = String(a.status || '').toLowerCase();
+            if (aStatus === 'assigned' && a.order && a.rep_id) {
+              const o = a.order;
+              const oStatus = String(o.status || '').toLowerCase();
+              if (!closedStatuses.includes(oStatus)) {
+                ordersMap.set(Number(o.id), { ...o, rep_id: Number(a.rep_id) });
+              }
+            }
+          });
+        }
+
+        if (repsList.length > 0) {
+          const activeSalesPromises = repsList.map(rep =>
+            fetch(`${API_BASE_PATH}/api.php?module=sales&action=getSalesActiveWithRep&rep_id=${encodeURIComponent(rep.id)}`)
+              .then(r => r.json())
+              .catch(() => null)
+          );
+          const activeSalesResults = await Promise.all(activeSalesPromises);
+          activeSalesResults.forEach((res, idx) => {
+            if (res && res.success && Array.isArray(res.data)) {
+              const repId = repsList[idx]?.id;
+              res.data.forEach((o: any) => {
+                const oStatus = String(o.status || '').toLowerCase();
+                if (!closedStatuses.includes(oStatus)) {
+                  ordersMap.set(Number(o.id), { ...o, rep_id: Number(repId) });
+                }
+              });
+            }
+          });
+        }
+
+        setOrders(Array.from(ordersMap.values()));
       } catch (error) {
         console.error("Failed to load rep custody data", error);
         Swal.fire('خطأ', 'فشل تحميل البيانات', 'error');
@@ -67,7 +119,7 @@ const ReportRepCustody: React.FC = () => {
     };
 
     fetchData();
-  }, []);
+  }, []);;
 
   const parseProductDetails = (rawName: string, rawColor?: string, rawSize?: string, rawBarcode?: string) => {
     let name = (rawName || '').trim();
@@ -108,8 +160,40 @@ const ReportRepCustody: React.FC = () => {
     };
   };
 
+  const availableProducts = useMemo(() => {
+    const set = new Set<string>();
+    orders.forEach(order => {
+      let items: any[] = [];
+      if (Array.isArray(order.products)) {
+        items = order.products;
+      } else if (Array.isArray(order.order_items)) {
+        items = order.order_items;
+      } else if (Array.isArray(order.items)) {
+        items = order.items;
+      } else {
+        const jsonStr = order.items_json || order.products_json || (typeof order.products === 'string' ? order.products : null) || (typeof order.items === 'string' ? order.items : null);
+        if (jsonStr) {
+          try {
+            const parsed = JSON.parse(jsonStr);
+            if (Array.isArray(parsed)) items = parsed;
+          } catch (e) {}
+        }
+      }
+      items.forEach(item => {
+        const rawName = item.name || item.product_name || item.title || item.productName || item.product_title || '';
+        if (rawName) {
+          const { productName } = parseProductDetails(rawName);
+          if (productName && productName !== 'منتج غير معروف') {
+            set.add(productName);
+          }
+        }
+      });
+    });
+    return Array.from(set).sort();
+  }, [orders]);
+
   const custodyData = useMemo(() => {
-    const dataMap: { [key: string]: { productName: string; color: string; size: string; barcode: string; quantity: number; reps: Set<string> } } = {};
+    const dataMap: { [key: string]: { productName: string; color: string; size: string; barcode: string; quantity: number; repQuantities: { [repName: string]: number } } } = {};
 
     orders.forEach(order => {
       const repIdStr = String(order.rep_id ?? order.representative_id ?? order.repId ?? order.user_id ?? '');
@@ -145,23 +229,27 @@ const ReportRepCustody: React.FC = () => {
 
         if (qty > 0) {
           const { productName, color, size, barcode } = parseProductDetails(rawName, rawColor, rawSize, rawBarcode);
+
+          // Product filter check
+          if (selectedProduct && productName !== selectedProduct) return;
+
           const key = `${productName}___${color}___${size}___${barcode}`;
 
           if (!dataMap[key]) {
-            dataMap[key] = { productName, color, size, barcode, quantity: 0, reps: new Set() };
+            dataMap[key] = { productName, color, size, barcode, quantity: 0, repQuantities: {} };
           }
           dataMap[key].quantity += qty;
-          dataMap[key].reps.add(repName);
+          dataMap[key].repQuantities[repName] = (dataMap[key].repQuantities[repName] || 0) + qty;
         }
       });
     });
 
     return Object.values(dataMap).map(data => ({
       ...data,
-      repsArr: Array.from(data.reps)
+      repsArr: Object.entries(data.repQuantities).map(([name, qty]) => ({ name, qty }))
     })).sort((a, b) => b.quantity - a.quantity);
 
-  }, [orders, selectedRepId, reps]);
+  }, [orders, selectedRepId, selectedProduct, reps]);
 
   const totalItems = custodyData.reduce((sum, item) => sum + item.quantity, 0);
 
@@ -170,6 +258,7 @@ const ReportRepCustody: React.FC = () => {
     if (!printWindow) return;
 
     const repLabel = selectedRepId ? (reps.find(r => String(r.id) === selectedRepId)?.name || 'محدد') : 'جميع المناديب';
+    const productLabel = selectedProduct || 'جميع المنتجات';
     const dateStr = new Date().toLocaleString('ar-EG');
 
     const html = `
@@ -184,12 +273,13 @@ const ReportRepCustody: React.FC = () => {
             th, td { border: 1px solid #ccc; padding: 8px 10px; text-align: right; font-size: 13px; }
             th { background-color: #f3f4f6; color: #1f2937; }
             .totals { margin-top: 20px; font-weight: bold; font-size: 18px; text-align: left; }
+            .qty-badge { background-color: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 11px; }
             @media print { body { -webkit-print-color-adjust: exact; } }
           </style>
         </head>
         <body>
           <h1>تقرير بضائع عهدة المندوب</h1>
-          <div class="header-info">المندوب: ${repLabel} | تاريخ الطباعة: ${dateStr}</div>
+          <div class="header-info">المندوب: ${repLabel} | المنتج: ${productLabel} | تاريخ الطباعة: ${dateStr}</div>
           <table>
             <thead>
               <tr>
@@ -199,7 +289,7 @@ const ReportRepCustody: React.FC = () => {
                 <th>المقاس</th>
                 <th>الباركود</th>
                 <th>إجمالي القطع في العهدة</th>
-                ${!selectedRepId ? '<th>المناديب المسند لهم</th>' : ''}
+                ${!selectedRepId ? '<th>المناديب المسند لهم والكمية</th>' : ''}
               </tr>
             </thead>
             <tbody>
@@ -211,7 +301,7 @@ const ReportRepCustody: React.FC = () => {
                   <td>${item.size}</td>
                   <td>${item.barcode}</td>
                   <td>${item.quantity}</td>
-                  ${!selectedRepId ? `<td>${item.repsArr.join('، ')}</td>` : ''}
+                  ${!selectedRepId ? `<td>${item.repsArr.map(r => `${r.name} <span class="qty-badge">${r.qty} قطعة</span>`).join('، ')}</td>` : ''}
                 </tr>
               `).join('')}
               ${custodyData.length === 0 ? `<tr><td colspan="${!selectedRepId ? 7 : 6}" style="text-align: center;">لا توجد بضائع في العهدة</td></tr>` : ''}
@@ -231,11 +321,11 @@ const ReportRepCustody: React.FC = () => {
 
   const handleExportCSV = () => {
     const headers = ['اسم المنتج', 'اللون', 'المقاس', 'الباركود', 'إجمالي القطع في العهدة'];
-    if (!selectedRepId) headers.push('المناديب المسند لهم');
+    if (!selectedRepId) headers.push('المناديب المسند لهم والكمية');
 
     const rows = custodyData.map(item => {
       const row = [item.productName, item.color, item.size, item.barcode, String(item.quantity)];
-      if (!selectedRepId) row.push(item.repsArr.join(' - '));
+      if (!selectedRepId) row.push(item.repsArr.map(r => `${r.name} (${r.qty} قطعة)`).join(' - '));
       return row;
     });
 
@@ -268,7 +358,7 @@ const ReportRepCustody: React.FC = () => {
           </div>
           
           <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-            <div className="min-w-[200px]">
+            <div className="min-w-[180px]">
               <CustomSelect
                 value={selectedRepId}
                 onChange={setSelectedRepId}
@@ -277,6 +367,18 @@ const ReportRepCustody: React.FC = () => {
                   ...reps.map(r => ({ value: String(r.id), label: r.name }))
                 ]}
                 placeholder="تصفية حسب المندوب"
+              />
+            </div>
+
+            <div className="min-w-[200px]">
+              <CustomSelect
+                value={selectedProduct}
+                onChange={setSelectedProduct}
+                options={[
+                  { value: '', label: 'جميع المنتجات (كل الأصناف)' },
+                  ...availableProducts.map(p => ({ value: p, label: p }))
+                ]}
+                placeholder="تصفية حسب المنتج"
               />
             </div>
             
@@ -308,7 +410,7 @@ const ReportRepCustody: React.FC = () => {
             <div className="bg-purple-50 dark:bg-purple-900/20 p-5 rounded-2xl border border-purple-100 dark:border-purple-800/30 text-right">
               <div className="text-purple-600 dark:text-purple-400 text-sm font-bold mb-2">المناديب ذوي العهدة</div>
               <div className="text-3xl font-black text-slate-800 dark:text-white">
-                {new Set(custodyData.flatMap(c => c.repsArr)).size}
+                {new Set(custodyData.flatMap(c => c.repsArr.map(r => r.name))).size}
               </div>
             </div>
           </div>
@@ -354,17 +456,22 @@ const ReportRepCustody: React.FC = () => {
                         {item.barcode !== '—' ? item.barcode : '—'}
                       </td>
                       <td className="px-6 py-4 text-center">
-                        <span className="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-3 py-1 rounded-full font-bold">
+                        <span className="bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 px-3 py-1 rounded-full font-black border border-red-200 dark:border-red-800">
                           {item.quantity} قطعة
                         </span>
                       </td>
                       {!selectedRepId && (
                         <td className="px-6 py-4 text-xs font-semibold leading-relaxed">
-                          {item.repsArr.map((r, i) => (
-                            <span key={i} className="inline-block bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded mr-1 mb-1 border border-slate-200 dark:border-slate-600">
-                              {r}
-                            </span>
-                          ))}
+                          <div className="flex flex-wrap gap-2">
+                            {item.repsArr.map((r, i) => (
+                              <span key={i} className="inline-flex items-center gap-2 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                                <span className="font-black text-slate-800 dark:text-slate-200">{r.name}</span>
+                                <span className="bg-red-600 text-white px-2.5 py-0.5 rounded-lg text-xs font-black shadow-sm">
+                                  {r.qty} قطعة
+                                </span>
+                              </span>
+                            ))}
+                          </div>
                         </td>
                       )}
                     </tr>

@@ -142,7 +142,8 @@ export const MENU_ITEMS = [
     subItems: [
       { label: 'قائمه المناديب', slug: 'list' },
       { label: 'يوميات المندوب', slug: 'rep-cycle' },
-      { label: 'أداء المناديب', slug: 'rep-performance' }
+      { label: 'أداء المناديب', slug: 'rep-performance' },
+      { label: 'بضائع عهدة المندوب', slug: 'rep-custody' }
     ]
   },
   {
