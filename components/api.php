@@ -16417,8 +16417,11 @@ switch ($module) {
         } elseif ($action === 'getOrderStats') {
             // Fetch real order statistics from the orders table
             try {
-                $start = $start_date;
-                $end   = $end_date;
+                $start = !empty($_GET['start_date']) ? trim($_GET['start_date']) : $start_date;
+                $end   = !empty($_GET['end_date']) ? trim($_GET['end_date']) : $end_date;
+                if (empty($start) || $start === 'null' || $start === 'undefined') $start = date('Y-m-01');
+                if (empty($end) || $end === 'null' || $end === 'undefined') $end = date('Y-m-t');
+
                 $rep_id = intval($_GET['rep_id'] ?? 0);
 
                 $where = "DATE(o.created_at) BETWEEN ? AND ?";
@@ -16427,21 +16430,25 @@ switch ($module) {
 
                 // Per-day stats init
                 $dayStats = [];
-                $currentDate = new DateTime($start);
-                $endDateObj  = new DateTime($end);
-                while ($currentDate <= $endDateObj) {
-                    $d = $currentDate->format('Y-m-d');
-                    $dayStats[$d] = [
-                        'date'               => $d,
-                        'delivered_orders'   => 0,
-                        'returned_orders'    => 0,
-                        'delivered_pieces'   => 0,
-                        'returned_pieces'    => 0,
-                        'delivered_amount'   => 0.0,
-                        'returned_amount'    => 0.0,
-                        'pending_orders'     => 0,
-                    ];
-                    $currentDate->modify('+1 day');
+                try {
+                    $currentDate = new DateTime($start);
+                    $endDateObj  = new DateTime($end);
+                    while ($currentDate <= $endDateObj) {
+                        $d = $currentDate->format('Y-m-d');
+                        $dayStats[$d] = [
+                            'date'               => $d,
+                            'delivered_orders'   => 0,
+                            'returned_orders'    => 0,
+                            'delivered_pieces'   => 0,
+                            'returned_pieces'    => 0,
+                            'delivered_amount'   => 0.0,
+                            'returned_amount'    => 0.0,
+                            'pending_orders'     => 0,
+                        ];
+                        $currentDate->modify('+1 day');
+                    }
+                } catch (Exception $dtErr) {
+                    $dayStats = [];
                 }
 
                 // ربط جدول المستخدمين لجلب اسم المندوب
@@ -16452,6 +16459,19 @@ switch ($module) {
                     $repJoins = "LEFT JOIN representatives ru ON ru.id = o.rep_id";
                 }
 
+                // فحص وجود جدول rep_journal_orders قبل الربط
+                $hasRepJournalOrders = table_exists($pdo, 'rep_journal_orders');
+                $rjJoin = "";
+                $rjSelect = "0 as ret_pieces, 0 as ret_value";
+                if ($hasRepJournalOrders) {
+                    $rjJoin = "LEFT JOIN (
+                        SELECT order_id, SUM(returned_pieces) as ret_pieces, SUM(returned_value) as ret_value 
+                        FROM rep_journal_orders 
+                        GROUP BY order_id
+                    ) rj ON rj.order_id = o.id";
+                    $rjSelect = "COALESCE(rj.ret_pieces, 0) as ret_pieces, COALESCE(rj.ret_value, 0) as ret_value";
+                }
+
                 // Unified query to fetch delivered and returned parts correctly
                 $sql = "SELECT DATE(o.created_at) as d,
                                o.id,
@@ -16460,15 +16480,10 @@ switch ($module) {
                                COALESCE(NULLIF(TRIM(ru.name),''), CONCAT('مندوب #', o.rep_id)) AS rep_name,
                                COALESCE(SUM(oi.quantity), 0) as total_pieces,
                                COALESCE(SUM(oi.quantity * oi.price_per_unit), 0) as total_amount,
-                               COALESCE(rj.ret_pieces, 0) as ret_pieces,
-                               COALESCE(rj.ret_value, 0) as ret_value
+                               $rjSelect
                         FROM orders o
                         LEFT JOIN order_items oi ON oi.order_id = o.id
-                        LEFT JOIN (
-                            SELECT order_id, SUM(returned_pieces) as ret_pieces, SUM(returned_value) as ret_value 
-                            FROM rep_journal_orders 
-                            GROUP BY order_id
-                        ) rj ON rj.order_id = o.id
+                        $rjJoin
                         $repJoins
                         WHERE $where
                         GROUP BY o.id, d, o.rep_id, ru.name";
@@ -16584,9 +16599,16 @@ switch ($module) {
                     'totals'    => $totals,
                     'rep_stats' => $repStats,
                 ]]);
-            } catch (Exception $e) {
-                http_response_code(500);
-                echo json_encode(['success' => false, 'message' => 'Failed to load order stats: ' . $e->getMessage()]);
+            } catch (Throwable $e) {
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'Failed to load order stats: ' . $e->getMessage(),
+                    'data' => [
+                        'totals' => ['delivered_orders' => 0, 'returned_orders' => 0, 'delivered_pieces' => 0, 'returned_pieces' => 0, 'delivered_amount' => 0.0, 'returned_amount' => 0.0, 'pending_orders' => 0],
+                        'per_day' => [],
+                        'rep_stats' => []
+                    ]
+                ]);
             }
             break;
 

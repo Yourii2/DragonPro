@@ -213,11 +213,11 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
       
       // 1. جلب الإحصائيات الإجمالية
       const statsUrl = `${API_BASE_PATH}/api.php?module=reports&action=getOrderStats&start_date=${journalFrom}&end_date=${journalTo}&rep_id=${repParam}`;
-      const statsRes = await fetch(statsUrl).then(r => r.json());
+      const statsRes = await fetch(statsUrl).then(r => r.json()).catch(() => ({ success: false, data: null }));
       
       // 2. جلب قوائم الأوردرات (للتفاصيل)
       const listUrl = `${API_BASE_PATH}/api.php?module=reports&action=sales&start_date=${journalFrom}&end_date=${journalTo}&rep_id=${repParam}`;
-      const listRes = await fetch(listUrl).then(r => r.json());
+      const listRes = await fetch(listUrl).then(r => r.json()).catch(() => ({ success: false, data: null }));
 
       if (statsRes.success && statsRes.data?.totals) {
         const t = statsRes.data.totals;
