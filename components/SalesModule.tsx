@@ -210,7 +210,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
 
   // Mock Data for testing (Or empty array)
   const [orders, setOrders] = useState<any[]>([]);
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<string>('pending');
   const [startDateFilter, setStartDateFilter] = useState<string>('');
   const [endDateFilter, setEndDateFilter] = useState<string>('');
   const [dateFilter, setDateFilter] = useState<string>('all');
