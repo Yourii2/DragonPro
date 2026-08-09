@@ -262,17 +262,34 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
 
   const filteredOrders = orders.filter(o => {
     const matchesStatus = statusFilter === 'all' || (o.status || '') === statusFilter;
-    // Date filter: compare YYYY-MM-DD directly from the raw string to avoid UTC timezone shift
+    
     const rawDate = o.created_at || o.createdAt || o.date || '';
-    const orderDateStr = rawDate ? String(rawDate).slice(0, 10) : '';
-    const matchesSingleDate = dateFilter === 'all' || !dateFilter || orderDateStr === dateFilter;
-    const matchesStartDate = !startDateFilter || (orderDateStr && orderDateStr >= startDateFilter);
-    const matchesEndDate = !endDateFilter || (orderDateStr && orderDateStr <= endDateFilter);
-    const matchesDate = matchesSingleDate && matchesStartDate && matchesEndDate;
-    // Time filter (HH:MM)
-    const orderTimeStr = rawDate ? String(rawDate).slice(11, 16) : '';
-    const matchesTimeFrom = !timeFromFilter || !orderTimeStr || orderTimeStr >= timeFromFilter;
-    const matchesTimeTo = !timeToFilter || !orderTimeStr || orderTimeStr <= timeToFilter;
+    const rawStr = String(rawDate).trim().replace('T', ' ');
+    const orderDateTimeStr = rawStr.length >= 16 ? rawStr.slice(0, 16) : rawStr;
+    const orderDateOnly = orderDateTimeStr.slice(0, 10);
+    const orderTimeOnly = orderDateTimeStr.length >= 16 ? orderDateTimeStr.slice(11, 16) : '';
+
+    let matchesFrom = true;
+    if (startDateFilter && timeFromFilter) {
+      matchesFrom = orderDateTimeStr >= `${startDateFilter} ${timeFromFilter}`;
+    } else if (startDateFilter) {
+      matchesFrom = orderDateOnly >= startDateFilter;
+    } else if (timeFromFilter) {
+      matchesFrom = orderTimeOnly >= timeFromFilter;
+    }
+
+    let matchesTo = true;
+    if (endDateFilter && timeToFilter) {
+      matchesTo = orderDateTimeStr <= `${endDateFilter} ${timeToFilter}`;
+    } else if (endDateFilter) {
+      matchesTo = orderDateOnly <= endDateFilter;
+    } else if (timeToFilter) {
+      matchesTo = orderTimeOnly <= timeToFilter;
+    }
+
+    const matchesSingleDate = dateFilter === 'all' || !dateFilter || orderDateOnly === dateFilter;
+    const matchesDate = matchesSingleDate && matchesFrom && matchesTo;
+
     const phoneA = o.phone || o.phone1 || '';
     const phoneB = o.phone2 || '';
     const term = searchTerm.toLowerCase();
@@ -281,7 +298,8 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       phoneA.includes(searchTerm) ||
       phoneB.includes(searchTerm) ||
       (o.orderNumber || '').toLowerCase().includes(term);
-    return matchesStatus && matchesSearch && matchesDate && matchesTimeFrom && matchesTimeTo;
+
+    return matchesStatus && matchesSearch && matchesDate;
   });
 
   const selectedOrderSubtotal = selectedOrder
@@ -2451,56 +2469,53 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                   ]}
                   className="text-sm font-bold min-w-[180px]"
                 />
-                <div className="flex flex-wrap items-center gap-2 bg-slate-50 dark:bg-slate-800 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700">
-                  <div className="flex items-center gap-1 text-xs font-bold text-slate-600 dark:text-slate-300">
-                    <Calendar size={14} className="text-blue-600" />
-                    <span className="shrink-0">من تاريخ:</span>
-                    <input
-                      type="date"
-                      value={startDateFilter}
-                      onChange={e => setStartDateFilter(e.target.value)}
-                      className="bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-2 py-1 text-xs font-mono text-slate-700 dark:text-slate-200 outline-none"
+                <div className="flex flex-col gap-2 bg-slate-50 dark:bg-slate-800 p-2.5 rounded-3xl border border-slate-200 dark:border-slate-700">
+                  {/* Line 1: From Date & From Time */}
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-600 dark:text-slate-300">
+                      <Calendar size={14} className="text-blue-600 shrink-0" />
+                      <span className="shrink-0">من تاريخ:</span>
+                      <input
+                        type="date"
+                        value={startDateFilter}
+                        onChange={e => setStartDateFilter(e.target.value)}
+                        className="bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-2.5 py-1 text-xs font-mono text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <Custom12HourTimePicker
+                      label="من وقت:"
+                      value={timeFromFilter}
+                      onChange={v => setTimeFromFilter(v)}
                     />
                   </div>
-                  <div className="flex items-center gap-1 text-xs font-bold text-slate-600 dark:text-slate-300">
-                    <span className="shrink-0">إلى تاريخ:</span>
-                    <input
-                      type="date"
-                      value={endDateFilter}
-                      onChange={e => setEndDateFilter(e.target.value)}
-                      className="bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-2 py-1 text-xs font-mono text-slate-700 dark:text-slate-200 outline-none"
+
+                  {/* Line 2: To Date & To Time */}
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-600 dark:text-slate-300">
+                      <Calendar size={14} className="text-blue-600 shrink-0" />
+                      <span className="shrink-0">إلى تاريخ:</span>
+                      <input
+                        type="date"
+                        value={endDateFilter}
+                        onChange={e => setEndDateFilter(e.target.value)}
+                        className="bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-2.5 py-1 text-xs font-mono text-slate-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <Custom12HourTimePicker
+                      label="إلى وقت:"
+                      value={timeToFilter}
+                      onChange={v => setTimeToFilter(v)}
                     />
+                    {(startDateFilter || endDateFilter || timeFromFilter || timeToFilter) && (
+                      <button
+                        onClick={() => { setStartDateFilter(''); setEndDateFilter(''); setTimeFromFilter(''); setTimeToFilter(''); }}
+                        className="text-xs font-bold text-rose-600 hover:text-rose-700 bg-rose-50 dark:bg-rose-900/30 px-2.5 py-1 rounded-xl transition-all shrink-0"
+                        title="مسح الفلاتر"
+                      >
+                        ✕ مسح الفلتر
+                      </button>
+                    )}
                   </div>
-                  {(startDateFilter || endDateFilter) && (
-                    <button
-                      onClick={() => { setStartDateFilter(''); setEndDateFilter(''); }}
-                      className="text-xs font-bold text-rose-600 hover:text-rose-700 bg-rose-50 dark:bg-rose-900/30 px-2 py-1 rounded-xl transition-all shrink-0"
-                      title="مسح فلتر التاريخ"
-                    >
-                      ✕ مسح الفلتر
-                    </button>
-                  )}
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Custom12HourTimePicker
-                    label="من وقت:"
-                    value={timeFromFilter}
-                    onChange={v => setTimeFromFilter(v)}
-                  />
-                  <Custom12HourTimePicker
-                    label="إلى وقت:"
-                    value={timeToFilter}
-                    onChange={v => setTimeToFilter(v)}
-                  />
-                  {(timeFromFilter || timeToFilter) && (
-                    <button
-                      onClick={() => { setTimeFromFilter(''); setTimeToFilter(''); }}
-                      className="text-xs font-bold text-rose-600 hover:text-rose-700 bg-rose-50 dark:bg-rose-900/30 px-2 py-1 rounded-xl transition-all"
-                      title="مسح فلتر الوقت"
-                    >
-                      ✕ مسح الوقت
-                    </button>
-                  )}
                 </div>
                 <button 
                   onClick={toggleSelectAll}
