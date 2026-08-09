@@ -16064,281 +16064,307 @@ switch ($module) {
         }
 
         if ($action === 'sales') {
+            try {
+                $status = trim((string)($_GET['status'] ?? ''));
+                $customer_id = intval($_GET['customer_id'] ?? 0);
+                $rep_id = intval($_GET['rep_id'] ?? 0);
 
-            $status = trim((string)($_GET['status'] ?? ''));
-            $customer_id = intval($_GET['customer_id'] ?? 0);
-            $rep_id = intval($_GET['rep_id'] ?? 0);
+                $salesWhere = "o.created_at BETWEEN ? AND ?";
+                $salesParams = [$start_date, $end_date . ' 23:59:59'];
+                if ($status !== '') {
+                    $salesWhere .= " AND o.status = ?";
+                    $salesParams[] = $status;
+                } else {
+                    $salesWhere .= " AND o.status IN ('delivered', 'partial')";
+                }
+                if ($customer_id > 0) { $salesWhere .= " AND o.customer_id = ?"; $salesParams[] = $customer_id; }
+                if ($rep_id > 0) { $salesWhere .= " AND o.rep_id = ?"; $salesParams[] = $rep_id; }
 
-            $salesWhere = "o.created_at BETWEEN ? AND ?";
-            $salesParams = [$start_date, $end_date . ' 23:59:59'];
-            if ($status !== '') {
-                $salesWhere .= " AND o.status = ?";
-                $salesParams[] = $status;
-            } else {
-                $salesWhere .= " AND o.status IN ('delivered', 'partial')";
+                // salesByProduct
+                $hasPV = table_exists($pdo, 'product_variants');
+                if ($hasPV) {
+                    $salesByProductStmt = execute_query(
+                        $pdo,
+                        "SELECT
+                            COALESCE(ppar.name, CONCAT('منتج #', oi.product_id)) as name,
+                            COALESCE(SUM(oi.quantity), 0) as sales,
+                            COALESCE(SUM(oi.quantity * oi.price_per_unit), 0) as sales_amount,
+                            COALESCE(SUM(oi.quantity * (oi.price_per_unit - COALESCE(pv.cost_price, 0))), 0) as net_profit
+                         FROM order_items oi
+                         LEFT JOIN product_variants pv ON oi.product_id = pv.id
+                         LEFT JOIN products ppar ON pv.product_id = ppar.id
+                         JOIN orders o ON oi.order_id = o.id
+                         WHERE $salesWhere
+                         GROUP BY ppar.id, ppar.name
+                         ORDER BY sales DESC",
+                        $salesParams
+                    );
+                } else {
+                    $salesByProductStmt = execute_query(
+                        $pdo,
+                        "SELECT
+                            COALESCE(p.name, CONCAT('منتج #', oi.product_id)) as name,
+                            COALESCE(SUM(oi.quantity), 0) as sales,
+                            COALESCE(SUM(oi.quantity * oi.price_per_unit), 0) as sales_amount,
+                            COALESCE(SUM(oi.quantity * oi.price_per_unit), 0) as net_profit
+                         FROM order_items oi
+                         LEFT JOIN products p ON p.id = oi.product_id
+                         JOIN orders o ON oi.order_id = o.id
+                         WHERE $salesWhere
+                         GROUP BY p.id, p.name
+                         ORDER BY sales DESC",
+                        $salesParams
+                    );
+                }
+                $salesByProduct = $salesByProductStmt->fetchAll(PDO::FETCH_ASSOC);
+
+                // dailySales
+                $stmt = execute_query($pdo, "SELECT DATE(o.created_at) as date, COALESCE(SUM(o.total_amount), 0) as total FROM orders o WHERE $salesWhere GROUP BY DATE(o.created_at) ORDER BY date ASC", $salesParams);
+                $dailySales = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+                // invoiceRecords - use LEFT JOIN for customers
+                $stmt = execute_query($pdo, "SELECT o.order_number, o.created_at as date, COALESCE(c.name, 'غير محدد') as customer, COALESCE(o.total_amount, 0) as total, o.status FROM orders o LEFT JOIN customers c ON o.customer_id = c.id WHERE $salesWhere ORDER BY o.created_at DESC LIMIT 100", $salesParams);
+                $invoiceRecords = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+                echo json_encode(['success' => true, 'data' => [
+                    'salesByProduct' => $salesByProduct,
+                    'dailySales' => $dailySales,
+                    'invoiceRecords' => $invoiceRecords
+                ]]);
+            } catch (Throwable $e) {
+                echo json_encode(['success' => false, 'message' => 'Sales report failed: ' . $e->getMessage(), 'data' => ['salesByProduct' => [], 'dailySales' => [], 'invoiceRecords' => []]]);
             }
-            if ($customer_id > 0) { $salesWhere .= " AND o.customer_id = ?"; $salesParams[] = $customer_id; }
-            if ($rep_id > 0) { $salesWhere .= " AND o.rep_id = ?"; $salesParams[] = $rep_id; }
-
-            // salesByProduct
-            $stmt = execute_query(
-                $pdo,
-                "SELECT
-                    ppar.name,
-                    COALESCE(SUM(oi.quantity), 0) as sales,
-                    COALESCE(SUM(oi.quantity * oi.price_per_unit), 0) as sales_amount,
-                    COALESCE(SUM(oi.quantity * (oi.price_per_unit - COALESCE(pv.cost_price, 0))), 0) as net_profit
-                 FROM order_items oi
-                 JOIN product_variants pv ON oi.product_id = pv.id
-                 JOIN products ppar ON pv.product_id = ppar.id
-                 JOIN orders o ON oi.order_id = o.id
-                 WHERE $salesWhere
-                 GROUP BY ppar.id, ppar.name
-                 ORDER BY sales DESC",
-                $salesParams
-            );
-            $salesByProduct = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-            // dailySales
-            $stmt = execute_query($pdo, "SELECT DATE(o.created_at) as date, SUM(o.total_amount) as total FROM orders o WHERE $salesWhere GROUP BY DATE(o.created_at) ORDER BY date ASC", $salesParams);
-            $dailySales = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-            // invoiceRecords
-            $stmt = execute_query($pdo, "SELECT o.order_number, o.created_at as date, c.name as customer, o.total_amount as total, o.status FROM orders o JOIN customers c ON o.customer_id = c.id WHERE $salesWhere ORDER BY o.created_at DESC LIMIT 100", $salesParams);
-            $invoiceRecords = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-            echo json_encode(['success' => true, 'data' => [
-                'salesByProduct' => $salesByProduct,
-                'dailySales' => $dailySales,
-                'invoiceRecords' => $invoiceRecords
-            ]]);
 
         } elseif ($action === 'inventory') {
-            $warehouse_id = intval($_GET['warehouse_id'] ?? 0);
-            $movement_type = trim((string)($_GET['movement_type'] ?? ''));
+            try {
+                $warehouse_id = intval($_GET['warehouse_id'] ?? 0);
+                $movement_type = trim((string)($_GET['movement_type'] ?? ''));
+                $hasPV = table_exists($pdo, 'product_variants');
+                $hasPM = table_exists($pdo, 'product_movements');
 
-            // inventoryStockByWarehouse
-            if ($warehouse_id > 0) {
-                $stmt = execute_query($pdo, "SELECT w.name, SUM(s.quantity) as quantity FROM stock s JOIN warehouses w ON s.warehouse_id = w.id WHERE w.id = ? GROUP BY w.id", [$warehouse_id]);
-            } else {
-                $stmt = execute_query($pdo, "SELECT w.name, SUM(s.quantity) as quantity FROM stock s JOIN warehouses w ON s.warehouse_id = w.id GROUP BY w.id");
+                // inventoryStockByWarehouse
+                if ($warehouse_id > 0) {
+                    $stmt = execute_query($pdo, "SELECT COALESCE(w.name, 'مستودع') as name, COALESCE(SUM(s.quantity),0) as quantity FROM stock s LEFT JOIN warehouses w ON s.warehouse_id = w.id WHERE s.warehouse_id = ? GROUP BY s.warehouse_id", [$warehouse_id]);
+                } else {
+                    $stmt = execute_query($pdo, "SELECT COALESCE(w.name, 'مستودع') as name, COALESCE(SUM(s.quantity),0) as quantity FROM stock s LEFT JOIN warehouses w ON s.warehouse_id = w.id GROUP BY s.warehouse_id");
+                }
+                $inventoryStockByWarehouse = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+                // inventoryMovement
+                $invWhere = "pm.created_at BETWEEN ? AND ?";
+                $invParams = [$start_date, $end_date . ' 23:59:59'];
+                if ($warehouse_id > 0) { $invWhere .= " AND pm.warehouse_id = ?"; $invParams[] = $warehouse_id; }
+                if ($movement_type !== '') { $invWhere .= " AND pm.movement_type = ?"; $invParams[] = $movement_type; }
+
+                $inventoryMovement = [];
+                if ($hasPM) {
+                    try {
+                        $stmt = execute_query($pdo, "SELECT DATE(pm.created_at) as date, COALESCE(SUM(ABS(pm.quantity_change)),0) as quantity FROM product_movements pm WHERE $invWhere GROUP BY DATE(pm.created_at) ORDER BY date ASC", $invParams);
+                        $inventoryMovement = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                    } catch (Exception $e2) {}
+                }
+
+                // inventoryStock
+                if ($hasPV) {
+                    if ($warehouse_id > 0) {
+                        $stmt = execute_query($pdo, "SELECT COALESCE(ppar.name,'منتج') as product, COALESCE(pv.barcode,'') as barcode, COALESCE(w.name,'مستودع') as warehouse, COALESCE(s.quantity,0) as quantity, COALESCE(pv.cost_price,0) as purchasePrice FROM stock s LEFT JOIN product_variants pv ON s.product_id = pv.id LEFT JOIN products ppar ON pv.product_id = ppar.id LEFT JOIN warehouses w ON s.warehouse_id = w.id WHERE s.warehouse_id = ? ORDER BY s.quantity DESC LIMIT 100", [$warehouse_id]);
+                    } else {
+                        $stmt = execute_query($pdo, "SELECT COALESCE(ppar.name,'منتج') as product, COALESCE(pv.barcode,'') as barcode, COALESCE(w.name,'مستودع') as warehouse, COALESCE(s.quantity,0) as quantity, COALESCE(pv.cost_price,0) as purchasePrice FROM stock s LEFT JOIN product_variants pv ON s.product_id = pv.id LEFT JOIN products ppar ON pv.product_id = ppar.id LEFT JOIN warehouses w ON s.warehouse_id = w.id ORDER BY s.quantity DESC LIMIT 100");
+                    }
+                } else {
+                    if ($warehouse_id > 0) {
+                        $stmt = execute_query($pdo, "SELECT COALESCE(p.name,'منتج') as product, '' as barcode, COALESCE(w.name,'مستودع') as warehouse, COALESCE(s.quantity,0) as quantity, 0 as purchasePrice FROM stock s LEFT JOIN products p ON s.product_id = p.id LEFT JOIN warehouses w ON s.warehouse_id = w.id WHERE s.warehouse_id = ? ORDER BY s.quantity DESC LIMIT 100", [$warehouse_id]);
+                    } else {
+                        $stmt = execute_query($pdo, "SELECT COALESCE(p.name,'منتج') as product, '' as barcode, COALESCE(w.name,'مستودع') as warehouse, COALESCE(s.quantity,0) as quantity, 0 as purchasePrice FROM stock s LEFT JOIN products p ON s.product_id = p.id LEFT JOIN warehouses w ON s.warehouse_id = w.id ORDER BY s.quantity DESC LIMIT 100");
+                    }
+                }
+                $inventoryStock = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+                // inventoryMovementHistory
+                $inventoryMovementHistory = [];
+                if ($hasPM) {
+                    try {
+                        if ($hasPV) {
+                            $stmt = execute_query($pdo, "SELECT pm.id, pm.created_at as date, COALESCE(ppar.name,'منتج') as product, pm.movement_type as type, pm.quantity_change as quantity, COALESCE(w.name,'مستودع') as sourceDest FROM product_movements pm LEFT JOIN product_variants pv ON pm.product_id = pv.id LEFT JOIN products ppar ON pv.product_id = ppar.id LEFT JOIN warehouses w ON pm.warehouse_id = w.id WHERE $invWhere ORDER BY pm.created_at DESC LIMIT 100", $invParams);
+                        } else {
+                            $stmt = execute_query($pdo, "SELECT pm.id, pm.created_at as date, COALESCE(p.name,'منتج') as product, pm.movement_type as type, pm.quantity_change as quantity, COALESCE(w.name,'مستودع') as sourceDest FROM product_movements pm LEFT JOIN products p ON pm.product_id = p.id LEFT JOIN warehouses w ON pm.warehouse_id = w.id WHERE $invWhere ORDER BY pm.created_at DESC LIMIT 100", $invParams);
+                        }
+                        $inventoryMovementHistory = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                    } catch (Exception $e3) {}
+                }
+
+                echo json_encode(['success' => true, 'data' => [
+                    'inventoryStockByWarehouse' => $inventoryStockByWarehouse,
+                    'inventoryMovement'         => $inventoryMovement,
+                    'inventoryStock'            => $inventoryStock,
+                    'inventoryMovementHistory'  => $inventoryMovementHistory
+                ]]);
+            } catch (Throwable $e) {
+                echo json_encode(['success' => false, 'message' => 'Inventory report failed: ' . $e->getMessage(), 'data' => ['inventoryStockByWarehouse' => [], 'inventoryMovement' => [], 'inventoryStock' => [], 'inventoryMovementHistory' => []]]);
             }
-            $inventoryStockByWarehouse = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-            // inventoryMovement
-            $invWhere = "pm.created_at BETWEEN ? AND ?";
-            $invParams = [$start_date, $end_date . ' 23:59:59'];
-            if ($warehouse_id > 0) { $invWhere .= " AND pm.warehouse_id = ?"; $invParams[] = $warehouse_id; }
-            if ($movement_type !== '') { $invWhere .= " AND pm.movement_type = ?"; $invParams[] = $movement_type; }
-
-            $stmt = execute_query($pdo, "SELECT DATE(pm.created_at) as date, SUM(ABS(pm.quantity_change)) as quantity FROM product_movements pm WHERE $invWhere GROUP BY DATE(pm.created_at) ORDER BY date ASC", $invParams);
-            $inventoryMovement = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-            // inventoryStock
-            if ($warehouse_id > 0) {
-                $stmt = execute_query($pdo, "SELECT ppar.name as product, pv.barcode, w.name as warehouse, s.quantity, pv.cost_price as purchasePrice FROM stock s JOIN product_variants pv ON s.product_id = pv.id JOIN products ppar ON pv.product_id = ppar.id JOIN warehouses w ON s.warehouse_id = w.id WHERE w.id = ? ORDER BY s.quantity DESC LIMIT 100", [$warehouse_id]);
-            } else {
-                $stmt = execute_query($pdo, "SELECT ppar.name as product, pv.barcode, w.name as warehouse, s.quantity, pv.cost_price as purchasePrice FROM stock s JOIN product_variants pv ON s.product_id = pv.id JOIN products ppar ON pv.product_id = ppar.id JOIN warehouses w ON s.warehouse_id = w.id ORDER BY s.quantity DESC LIMIT 100");
-            }
-            $inventoryStock = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-            // inventoryMovementHistory
-            $stmt = execute_query($pdo, "SELECT pm.id, pm.created_at as date, ppar.name as product, pm.movement_type as type, pm.quantity_change as quantity, w.name as sourceDest FROM product_movements pm JOIN product_variants pv ON pm.product_id = pv.id JOIN products ppar ON pv.product_id = ppar.id JOIN warehouses w ON pm.warehouse_id = w.id WHERE $invWhere ORDER BY pm.created_at DESC LIMIT 100", $invParams);
-            $inventoryMovementHistory = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            
-            echo json_encode(['success' => true, 'data' => [
-                'inventoryStockByWarehouse' => $inventoryStockByWarehouse,
-                'inventoryMovement' => $inventoryMovement,
-                'inventoryStock' => $inventoryStock,
-                'inventoryMovementHistory' => $inventoryMovementHistory
-            ]]);
 
         } elseif ($action === 'finance') {
-            $treasury_id = intval($_GET['treasury_id'] ?? 0);
-            $txn_type = trim((string)($_GET['txn_type'] ?? ''));
+            try {
+                $treasury_id = intval($_GET['treasury_id'] ?? 0);
+                $txn_type = trim((string)($_GET['txn_type'] ?? ''));
 
-            // treasuryBalanceHistory
-            if ($treasury_id > 0) {
-                $stmt_start = execute_query($pdo, "SELECT SUM(amount) as starting_balance FROM transactions WHERE treasury_id = ? AND transaction_date < ? AND ABS(COALESCE(amount, 0)) > 0.001 AND type NOT IN ('purchase', 'other', 'rep_bonus_in', 'rep_penalty', 'rep_assignment', 'rep_return_credit')", [$treasury_id, $start_date]);
-            } else {
-                $stmt_start = execute_query($pdo, "SELECT SUM(amount) as starting_balance FROM transactions WHERE treasury_id IS NOT NULL AND transaction_date < ? AND ABS(COALESCE(amount, 0)) > 0.001 AND type NOT IN ('purchase', 'other', 'rep_bonus_in', 'rep_penalty', 'rep_assignment', 'rep_return_credit')", [$start_date]);
-            }
-            $starting_balance = $stmt_start->fetch(PDO::FETCH_ASSOC)['starting_balance'] ?? 0;
-
-            $financeWhere = "treasury_id IS NOT NULL AND ABS(COALESCE(amount, 0)) > 0.001 AND type NOT IN ('purchase', 'other', 'rep_bonus_in', 'rep_penalty', 'rep_assignment', 'rep_return_credit') AND transaction_date BETWEEN ? AND ?";
-            $financeParams = [$start_date, $end_date . ' 23:59:59'];
-            if ($treasury_id > 0) { $financeWhere .= " AND treasury_id = ?"; $financeParams[] = $treasury_id; }
-            if ($txn_type !== '') { $financeWhere .= " AND type = ?"; $financeParams[] = $txn_type; }
-
-            $stmt = execute_query($pdo, "SELECT DATE(transaction_date) as date, SUM(amount) as balance_change FROM transactions WHERE $financeWhere GROUP BY DATE(transaction_date) ORDER BY date ASC", $financeParams);
-            $dailyChanges = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            
-            $balance = floatval($starting_balance);
-            $treasuryBalanceHistory = [];
-            $changesMap = [];
-            foreach($dailyChanges as $change) {
-                $changesMap[$change['date']] = floatval($change['balance_change']);
-            }
-
-            $currentDate = new DateTime($start_date);
-            $endDateObj = new DateTime($end_date);
-            while($currentDate <= $endDateObj) {
-                $dateStr = $currentDate->format('Y-m-d');
-                if(isset($changesMap[$dateStr])) {
-                    $balance += $changesMap[$dateStr];
+                // treasuryBalanceHistory
+                if ($treasury_id > 0) {
+                    $stmt_start = execute_query($pdo, "SELECT COALESCE(SUM(amount),0) as starting_balance FROM transactions WHERE treasury_id = ? AND transaction_date < ? AND ABS(COALESCE(amount, 0)) > 0.001 AND type NOT IN ('purchase', 'other', 'rep_bonus_in', 'rep_penalty', 'rep_assignment', 'rep_return_credit')", [$treasury_id, $start_date]);
+                } else {
+                    $stmt_start = execute_query($pdo, "SELECT COALESCE(SUM(amount),0) as starting_balance FROM transactions WHERE treasury_id IS NOT NULL AND transaction_date < ? AND ABS(COALESCE(amount, 0)) > 0.001 AND type NOT IN ('purchase', 'other', 'rep_bonus_in', 'rep_penalty', 'rep_assignment', 'rep_return_credit')", [$start_date]);
                 }
-                $treasuryBalanceHistory[] = ['date' => $dateStr, 'balance' => $balance];
-                $currentDate->modify('+1 day');
-            }
+                $starting_balance = $stmt_start->fetch(PDO::FETCH_ASSOC)['starting_balance'] ?? 0;
 
-            // expenseCategories
-            $expenseWhere = "amount < 0 AND transaction_date BETWEEN ? AND ?";
-            $expenseParams = [$start_date, $end_date . ' 23:59:59'];
-            if ($treasury_id > 0) { $expenseWhere .= " AND treasury_id = ?"; $expenseParams[] = $treasury_id; }
-            if ($txn_type !== '') { $expenseWhere .= " AND type = ?"; $expenseParams[] = $txn_type; }
-            $stmt = execute_query($pdo, "SELECT details, amount, type FROM transactions WHERE $expenseWhere", $expenseParams);
-            $expenses = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            $categoryTotals = [];
-            foreach($expenses as $exp) {
-                $details = json_decode($exp['details'], true);
-                $category = 'غير مصنف';
-                if (isset($details['subtype'])) {
-                    if ($details['subtype'] === 'expense') $category = 'مصروفات عامة';
-                    elseif ($details['subtype'] === 'supplier_payment') $category = 'دفعات موردين';
-                } else if ($exp['type'] === 'salary' || (isset($details['notes']) && strpos($details['notes'], 'راتب') !== false)) {
-                    $category = 'رواتب';
-                } else if ($exp['type'] === 'purchase') {
-                    $category = 'مشتريات';
+                $financeWhere = "treasury_id IS NOT NULL AND ABS(COALESCE(amount, 0)) > 0.001 AND type NOT IN ('purchase', 'other', 'rep_bonus_in', 'rep_penalty', 'rep_assignment', 'rep_return_credit') AND transaction_date BETWEEN ? AND ?";
+                $financeParams = [$start_date, $end_date . ' 23:59:59'];
+                if ($treasury_id > 0) { $financeWhere .= " AND treasury_id = ?"; $financeParams[] = $treasury_id; }
+                if ($txn_type !== '') { $financeWhere .= " AND type = ?"; $financeParams[] = $txn_type; }
+
+                $stmt = execute_query($pdo, "SELECT DATE(transaction_date) as date, COALESCE(SUM(amount),0) as balance_change FROM transactions WHERE $financeWhere GROUP BY DATE(transaction_date) ORDER BY date ASC", $financeParams);
+                $dailyChanges = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+                $balance = floatval($starting_balance);
+                $treasuryBalanceHistory = [];
+                $changesMap = [];
+                foreach($dailyChanges as $change) {
+                    $changesMap[$change['date']] = floatval($change['balance_change']);
                 }
-                
-                if (!isset($categoryTotals[$category])) $categoryTotals[$category] = 0;
-                $categoryTotals[$category] += abs(floatval($exp['amount']));
-            }
-            $expenseCategoriesData = [];
-            foreach($categoryTotals as $name => $value) {
-                $expenseCategoriesData[] = ['name' => $name, 'value' => $value];
-            }
 
-            // revenueAndExpenseRecords
-            $stmt = execute_query($pdo, "SELECT t.transaction_date as date, t.type, t.details, t.amount, tr.name as treasury_name FROM transactions t LEFT JOIN treasuries tr ON t.treasury_id = tr.id WHERE $financeWhere ORDER BY t.transaction_date DESC LIMIT 100", $financeParams);
-            $rawRecords = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            $revenueAndExpenseRecords = [];
-            foreach($rawRecords as $rec) {
-                $details = json_decode($rec['details'], true);
-                $revenueAndExpenseRecords[] = [
-                    'date' => $rec['date'],
-                    'type' => floatval($rec['amount']) >= 0 ? 'revenue' : 'expense',
-                    'desc' => $details['notes'] ?? $details['note'] ?? $rec['type'],
-                    'amount' => floatval($rec['amount']),
-                    'treasury' => $rec['treasury_name'] ?? 'غير محدد',
-                    'txn_type' => $rec['type'],
-                    'raw_details' => $rec['details']
-                ];
-            }
+                try {
+                    $currentDate = new DateTime($start_date);
+                    $endDateObj  = new DateTime($end_date);
+                    while($currentDate <= $endDateObj) {
+                        $dateStr = $currentDate->format('Y-m-d');
+                        if(isset($changesMap[$dateStr])) {
+                            $balance += $changesMap[$dateStr];
+                        }
+                        $treasuryBalanceHistory[] = ['date' => $dateStr, 'balance' => $balance];
+                        $currentDate->modify('+1 day');
+                    }
+                } catch (Exception $dtErr) { $treasuryBalanceHistory = []; }
 
-            echo json_encode(['success' => true, 'data' => [
-                'starting_balance' => floatval($starting_balance),
-                'treasuryBalanceHistory' => $treasuryBalanceHistory,
-                'expenseCategories' => $expenseCategoriesData,
-                'revenueAndExpenseRecords' => $revenueAndExpenseRecords
-            ]]);
+                // expenseCategories
+                $expenseWhere = "amount < 0 AND transaction_date BETWEEN ? AND ?";
+                $expenseParams = [$start_date, $end_date . ' 23:59:59'];
+                if ($treasury_id > 0) { $expenseWhere .= " AND treasury_id = ?"; $expenseParams[] = $treasury_id; }
+                if ($txn_type !== '') { $expenseWhere .= " AND type = ?"; $expenseParams[] = $txn_type; }
+                $stmt = execute_query($pdo, "SELECT details, amount, type FROM transactions WHERE $expenseWhere", $expenseParams);
+                $expenses = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                $categoryTotals = [];
+                foreach($expenses as $exp) {
+                    $details = json_decode($exp['details'] ?? '{}', true) ?: [];
+                    $category = 'غير مصنف';
+                    if (isset($details['subtype'])) {
+                        if ($details['subtype'] === 'expense') $category = 'مصروفات عامة';
+                        elseif ($details['subtype'] === 'supplier_payment') $category = 'دفعات موردين';
+                    } else if ($exp['type'] === 'salary' || (isset($details['notes']) && strpos($details['notes'], 'راتب') !== false)) {
+                        $category = 'رواتب';
+                    } else if ($exp['type'] === 'purchase') {
+                        $category = 'مشتريات';
+                    }
+                    if (!isset($categoryTotals[$category])) $categoryTotals[$category] = 0;
+                    $categoryTotals[$category] += abs(floatval($exp['amount']));
+                }
+                $expenseCategoriesData = [];
+                foreach($categoryTotals as $name => $value) {
+                    $expenseCategoriesData[] = ['name' => $name, 'value' => $value];
+                }
+
+                // revenueAndExpenseRecords
+                $stmt = execute_query($pdo, "SELECT t.transaction_date as date, t.type, t.details, t.amount, tr.name as treasury_name FROM transactions t LEFT JOIN treasuries tr ON t.treasury_id = tr.id WHERE $financeWhere ORDER BY t.transaction_date DESC LIMIT 100", $financeParams);
+                $rawRecords = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                $revenueAndExpenseRecords = [];
+                foreach($rawRecords as $rec) {
+                    $details = json_decode($rec['details'] ?? '{}', true) ?: [];
+                    $revenueAndExpenseRecords[] = [
+                        'date'        => $rec['date'],
+                        'type'        => floatval($rec['amount']) >= 0 ? 'revenue' : 'expense',
+                        'desc'        => $details['notes'] ?? $details['note'] ?? $rec['type'],
+                        'amount'      => floatval($rec['amount']),
+                        'treasury'    => $rec['treasury_name'] ?? 'غير محدد',
+                        'txn_type'    => $rec['type'],
+                        'raw_details' => $rec['details']
+                    ];
+                }
+
+                echo json_encode(['success' => true, 'data' => [
+                    'starting_balance'          => floatval($starting_balance),
+                    'treasuryBalanceHistory'     => $treasuryBalanceHistory,
+                    'expenseCategories'          => $expenseCategoriesData,
+                    'revenueAndExpenseRecords'   => $revenueAndExpenseRecords
+                ]]);
+            } catch (Throwable $e) {
+                echo json_encode(['success' => false, 'message' => 'Finance report failed: ' . $e->getMessage(), 'data' => ['starting_balance' => 0, 'treasuryBalanceHistory' => [], 'expenseCategories' => [], 'revenueAndExpenseRecords' => []]]);
+            }
         } elseif ($action === 'compare') {
-            $year = intval($_GET['year'] ?? date('Y'));
-            $prev_year = $year - 1;
+            try {
+                $year = intval($_GET['year'] ?? date('Y'));
+                $prev_year = $year - 1;
 
-            $months = range(1, 12);
-            $sales = array_fill(1, 12, 0.0);
-            $sales_prev = array_fill(1, 12, 0.0);
-            $profit = array_fill(1, 12, 0.0);
-            $profit_prev = array_fill(1, 12, 0.0);
-            $expense = array_fill(1, 12, 0.0);
-            $expense_prev = array_fill(1, 12, 0.0);
+                $months = range(1, 12);
+                $sales       = array_fill(1, 12, 0.0);
+                $sales_prev  = array_fill(1, 12, 0.0);
+                $profit      = array_fill(1, 12, 0.0);
+                $profit_prev = array_fill(1, 12, 0.0);
+                $expense     = array_fill(1, 12, 0.0);
+                $expense_prev = array_fill(1, 12, 0.0);
+                $hasPV = table_exists($pdo, 'product_variants');
 
-            // تعديل: المبيعات للسنة الحالية (تم التسليم والتسليم الجزئي)
-            $stmt = execute_query($pdo, "SELECT MONTH(created_at) as m, COALESCE(SUM(total_amount),0) as total FROM orders WHERE YEAR(created_at) = ? AND status IN ('delivered', 'partial') GROUP BY m", [$year]);
-            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-                $sales[intval($row['m'])] = floatval($row['total'] ?? 0);
+                $stmt = execute_query($pdo, "SELECT MONTH(created_at) as m, COALESCE(SUM(total_amount),0) as total FROM orders WHERE YEAR(created_at) = ? AND status IN ('delivered', 'partial') GROUP BY m", [$year]);
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                    $sales[intval($row['m'])] = floatval($row['total'] ?? 0);
+                }
+                $stmt = execute_query($pdo, "SELECT MONTH(created_at) as m, COALESCE(SUM(total_amount),0) as total FROM orders WHERE YEAR(created_at) = ? AND status IN ('delivered', 'partial') GROUP BY m", [$prev_year]);
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                    $sales_prev[intval($row['m'])] = floatval($row['total'] ?? 0);
+                }
+
+                if ($hasPV) {
+                    $profitSql = "SELECT MONTH(o.created_at) as m, COALESCE(SUM((oi.price_per_unit - COALESCE(pv.cost_price,0)) * oi.quantity),0) as profit
+                                  FROM order_items oi JOIN orders o ON o.id = oi.order_id LEFT JOIN product_variants pv ON pv.id = oi.product_id
+                                  WHERE YEAR(o.created_at) = ? AND o.status IN ('delivered', 'partial') GROUP BY m";
+                } else {
+                    $profitSql = "SELECT MONTH(o.created_at) as m, COALESCE(SUM(oi.quantity * oi.price_per_unit),0) as profit
+                                  FROM order_items oi JOIN orders o ON o.id = oi.order_id
+                                  WHERE YEAR(o.created_at) = ? AND o.status IN ('delivered', 'partial') GROUP BY m";
+                }
+                $stmt = execute_query($pdo, $profitSql, [$year]);
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) { $profit[intval($row['m'])] = floatval($row['profit'] ?? 0); }
+                $stmt = execute_query($pdo, $profitSql, [$prev_year]);
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) { $profit_prev[intval($row['m'])] = floatval($row['profit'] ?? 0); }
+
+                $stmt = execute_query($pdo, "SELECT MONTH(transaction_date) as m, COALESCE(SUM(ABS(amount)),0) as total FROM transactions WHERE YEAR(transaction_date) = ? AND amount < 0 GROUP BY m", [$year]);
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) { $expense[intval($row['m'])] = floatval($row['total'] ?? 0); }
+                $stmt = execute_query($pdo, "SELECT MONTH(transaction_date) as m, COALESCE(SUM(ABS(amount)),0) as total FROM transactions WHERE YEAR(transaction_date) = ? AND amount < 0 GROUP BY m", [$prev_year]);
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) { $expense_prev[intval($row['m'])] = floatval($row['total'] ?? 0); }
+
+                $salesOut = []; $salesPrevOut = []; $profitOut = []; $profitPrevOut = []; $expenseOut = []; $expensePrevOut = [];
+                foreach ($months as $m) {
+                    $salesOut[]      = $sales[$m];
+                    $salesPrevOut[]  = $sales_prev[$m];
+                    $profitOut[]     = $profit[$m];
+                    $profitPrevOut[] = $profit_prev[$m];
+                    $expenseOut[]    = $expense[$m];
+                    $expensePrevOut[] = $expense_prev[$m];
+                }
+
+                echo json_encode(['success' => true, 'data' => [
+                    'year'       => $year,
+                    'prev_year'  => $prev_year,
+                    'months'     => $months,
+                    'sales'      => $salesOut,
+                    'sales_prev' => $salesPrevOut,
+                    'profit'     => $profitOut,
+                    'profit_prev'=> $profitPrevOut,
+                    'expense'    => $expenseOut,
+                    'expense_prev'=> $expensePrevOut,
+                    'year_totals' => ['sales' => array_sum($salesOut), 'profit' => array_sum($profitOut), 'expense' => array_sum($expenseOut)],
+                    'prev_year_totals' => ['sales' => array_sum($salesPrevOut), 'profit' => array_sum($profitPrevOut), 'expense' => array_sum($expensePrevOut)]
+                ]]);
+            } catch (Throwable $e) {
+                echo json_encode(['success' => false, 'message' => 'Compare report failed: ' . $e->getMessage(), 'data' => null]);
             }
-
-            // تعديل: المبيعات للسنة السابقة (تم التسليم والتسليم الجزئي)
-            $stmt = execute_query($pdo, "SELECT MONTH(created_at) as m, COALESCE(SUM(total_amount),0) as total FROM orders WHERE YEAR(created_at) = ? AND status IN ('delivered', 'partial') GROUP BY m", [$prev_year]);
-            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-                $sales_prev[intval($row['m'])] = floatval($row['total'] ?? 0);
-            }
-
-            // تعديل: الأرباح للسنة الحالية (تم التسليم والتسليم الجزئي)
-            $stmt = execute_query(
-                $pdo,
-                "SELECT MONTH(o.created_at) as m, COALESCE(SUM((oi.price_per_unit - pv.cost_price) * oi.quantity),0) as profit
-                 FROM order_items oi
-                 JOIN orders o ON o.id = oi.order_id
-                 JOIN product_variants pv ON pv.id = oi.product_id
-                 WHERE YEAR(o.created_at) = ? AND o.status IN ('delivered', 'partial')
-                 GROUP BY m",
-                [$year]
-            );
-            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-                $profit[intval($row['m'])] = floatval($row['profit'] ?? 0);
-            }
-
-            // تعديل: الأرباح للسنة السابقة (تم التسليم والتسليم الجزئي)
-            $stmt = execute_query(
-                $pdo,
-                "SELECT MONTH(o.created_at) as m, COALESCE(SUM((oi.price_per_unit - pv.cost_price) * oi.quantity),0) as profit
-                 FROM order_items oi
-                 JOIN orders o ON o.id = oi.order_id
-                 JOIN product_variants pv ON pv.id = oi.product_id
-                 WHERE YEAR(o.created_at) = ? AND o.status IN ('delivered', 'partial')
-                 GROUP BY m",
-                [$prev_year]
-            );
-            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-                $profit_prev[intval($row['m'])] = floatval($row['profit'] ?? 0);
-            }
-
-            // مصروفات الخزينة (تبقى كما هي لأنها من جدول transactions)
-            $stmt = execute_query($pdo, "SELECT MONTH(transaction_date) as m, COALESCE(SUM(ABS(amount)),0) as total FROM transactions WHERE YEAR(transaction_date) = ? AND amount < 0 GROUP BY m", [$year]);
-            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-                $expense[intval($row['m'])] = floatval($row['total'] ?? 0);
-            }
-
-            $stmt = execute_query($pdo, "SELECT MONTH(transaction_date) as m, COALESCE(SUM(ABS(amount)),0) as total FROM transactions WHERE YEAR(transaction_date) = ? AND amount < 0 GROUP BY m", [$prev_year]);
-            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-                $expense_prev[intval($row['m'])] = floatval($row['total'] ?? 0);
-            }
-
-            $salesOut = []; $salesPrevOut = []; $profitOut = []; $profitPrevOut = []; $expenseOut = []; $expensePrevOut = [];
-            foreach ($months as $m) {
-                $salesOut[] = $sales[$m];
-                $salesPrevOut[] = $sales_prev[$m];
-                $profitOut[] = $profit[$m];
-                $profitPrevOut[] = $profit_prev[$m];
-                $expenseOut[] = $expense[$m];
-                $expensePrevOut[] = $expense_prev[$m];
-            }
-
-            echo json_encode(['success' => true, 'data' => [
-                'year' => $year,
-                'prev_year' => $prev_year,
-                'months' => $months,
-                'sales' => $salesOut,
-                'sales_prev' => $salesPrevOut,
-                'profit' => $profitOut,
-                'profit_prev' => $profitPrevOut,
-                'expense' => $expenseOut,
-                'expense_prev' => $expensePrevOut,
-                'year_totals' => [
-                    'sales' => array_sum($salesOut),
-                    'profit' => array_sum($profitOut),
-                    'expense' => array_sum($expenseOut)
-                ],
-                'prev_year_totals' => [
-                    'sales' => array_sum($salesPrevOut),
-                    'profit' => array_sum($profitPrevOut),
-                    'expense' => array_sum($expensePrevOut)
-                ]
-            ]]);
-            break;
         } elseif ($action === 'product_delivery') {
             try {
                 $params = [$start_date, $end_date . ' 23:59:59'];
