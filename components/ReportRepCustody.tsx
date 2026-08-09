@@ -27,6 +27,8 @@ const ReportRepCustody: React.FC = () => {
   const [reps, setReps] = useState<any[]>([]);
   const [selectedRepId, setSelectedRepId] = useState<string>('');
   const [selectedProduct, setSelectedProduct] = useState<string>('');
+  const [selectedColor, setSelectedColor] = useState<string>('');
+  const [selectedSize, setSelectedSize] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
 
     useEffect(() => {
@@ -160,25 +162,30 @@ const ReportRepCustody: React.FC = () => {
     };
   };
 
+  const getOrderItems = (order: any) => {
+    let items: any[] = [];
+    if (Array.isArray(order.products)) {
+      items = order.products;
+    } else if (Array.isArray(order.order_items)) {
+      items = order.order_items;
+    } else if (Array.isArray(order.items)) {
+      items = order.items;
+    } else {
+      const jsonStr = order.items_json || order.products_json || (typeof order.products === 'string' ? order.products : null) || (typeof order.items === 'string' ? order.items : null);
+      if (jsonStr) {
+        try {
+          const parsed = JSON.parse(jsonStr);
+          if (Array.isArray(parsed)) items = parsed;
+        } catch (e) {}
+      }
+    }
+    return items;
+  };
+
   const availableProducts = useMemo(() => {
     const set = new Set<string>();
     orders.forEach(order => {
-      let items: any[] = [];
-      if (Array.isArray(order.products)) {
-        items = order.products;
-      } else if (Array.isArray(order.order_items)) {
-        items = order.order_items;
-      } else if (Array.isArray(order.items)) {
-        items = order.items;
-      } else {
-        const jsonStr = order.items_json || order.products_json || (typeof order.products === 'string' ? order.products : null) || (typeof order.items === 'string' ? order.items : null);
-        if (jsonStr) {
-          try {
-            const parsed = JSON.parse(jsonStr);
-            if (Array.isArray(parsed)) items = parsed;
-          } catch (e) {}
-        }
-      }
+      const items = getOrderItems(order);
       items.forEach(item => {
         const rawName = item.name || item.product_name || item.title || item.productName || item.product_title || '';
         if (rawName) {
@@ -191,6 +198,45 @@ const ReportRepCustody: React.FC = () => {
     });
     return Array.from(set).sort();
   }, [orders]);
+
+  const availableColors = useMemo(() => {
+    const set = new Set<string>();
+    orders.forEach(order => {
+      const items = getOrderItems(order);
+      items.forEach(item => {
+        const rawName = item.name || item.product_name || item.title || item.productName || item.product_title || '';
+        const rawColor = item.color || item.product_color || item.variant_color;
+        const rawSize = item.size || item.product_size || item.variant_size;
+        const { productName, color } = parseProductDetails(rawName, rawColor, rawSize);
+
+        if (selectedProduct && productName !== selectedProduct) return;
+        if (color && color !== '—') {
+          set.add(color);
+        }
+      });
+    });
+    return Array.from(set).sort();
+  }, [orders, selectedProduct]);
+
+  const availableSizes = useMemo(() => {
+    const set = new Set<string>();
+    orders.forEach(order => {
+      const items = getOrderItems(order);
+      items.forEach(item => {
+        const rawName = item.name || item.product_name || item.title || item.productName || item.product_title || '';
+        const rawColor = item.color || item.product_color || item.variant_color;
+        const rawSize = item.size || item.product_size || item.variant_size;
+        const { productName, color, size } = parseProductDetails(rawName, rawColor, rawSize);
+
+        if (selectedProduct && productName !== selectedProduct) return;
+        if (selectedColor && color !== selectedColor) return;
+        if (size && size !== '—') {
+          set.add(size);
+        }
+      });
+    });
+    return Array.from(set).sort();
+  }, [orders, selectedProduct, selectedColor]);
 
   const custodyData = useMemo(() => {
     const dataMap: { [key: string]: { productName: string; color: string; size: string; barcode: string; quantity: number; repQuantities: { [repName: string]: number } } } = {};
@@ -232,6 +278,10 @@ const ReportRepCustody: React.FC = () => {
 
           // Product filter check
           if (selectedProduct && productName !== selectedProduct) return;
+          // Color filter check
+          if (selectedColor && color !== selectedColor) return;
+          // Size filter check
+          if (selectedSize && size !== selectedSize) return;
 
           const key = `${productName}___${color}___${size}___${barcode}`;
 
@@ -249,7 +299,7 @@ const ReportRepCustody: React.FC = () => {
       repsArr: Object.entries(data.repQuantities).map(([name, qty]) => ({ name, qty }))
     })).sort((a, b) => b.quantity - a.quantity);
 
-  }, [orders, selectedRepId, selectedProduct, reps]);
+  }, [orders, selectedRepId, selectedProduct, selectedColor, selectedSize, reps]);
 
   const totalItems = custodyData.reduce((sum, item) => sum + item.quantity, 0);
 
@@ -259,6 +309,8 @@ const ReportRepCustody: React.FC = () => {
 
     const repLabel = selectedRepId ? (reps.find(r => String(r.id) === selectedRepId)?.name || 'محدد') : 'جميع المناديب';
     const productLabel = selectedProduct || 'جميع المنتجات';
+    const colorLabel = selectedColor || 'جميع الألوان';
+    const sizeLabel = selectedSize || 'جميع المقاسات';
     const dateStr = new Date().toLocaleString('ar-EG');
 
     const html = `
@@ -279,7 +331,7 @@ const ReportRepCustody: React.FC = () => {
         </head>
         <body>
           <h1>تقرير بضائع عهدة المندوب</h1>
-          <div class="header-info">المندوب: ${repLabel} | المنتج: ${productLabel} | تاريخ الطباعة: ${dateStr}</div>
+          <div class="header-info">المندوب: ${repLabel} | المنتج: ${productLabel} | اللون: ${colorLabel} | المقاس: ${sizeLabel} | تاريخ الطباعة: ${dateStr}</div>
           <table>
             <thead>
               <tr>
@@ -370,17 +422,51 @@ const ReportRepCustody: React.FC = () => {
               />
             </div>
 
-            <div className="min-w-[200px]">
+            <div className="min-w-[180px]">
               <CustomSelect
                 value={selectedProduct}
-                onChange={setSelectedProduct}
+                onChange={(val) => { setSelectedProduct(val); setSelectedColor(''); setSelectedSize(''); }}
                 options={[
-                  { value: '', label: 'جميع المنتجات (كل الأصناف)' },
+                  { value: '', label: 'جميع المنتجات' },
                   ...availableProducts.map(p => ({ value: p, label: p }))
                 ]}
                 placeholder="تصفية حسب المنتج"
               />
             </div>
+
+            <div className="min-w-[150px]">
+              <CustomSelect
+                value={selectedColor}
+                onChange={(val) => { setSelectedColor(val); setSelectedSize(''); }}
+                options={[
+                  { value: '', label: 'جميع الألوان' },
+                  ...availableColors.map(c => ({ value: c, label: c }))
+                ]}
+                placeholder="تصفية حسب اللون"
+              />
+            </div>
+
+            <div className="min-w-[150px]">
+              <CustomSelect
+                value={selectedSize}
+                onChange={setSelectedSize}
+                options={[
+                  { value: '', label: 'جميع المقاسات' },
+                  ...availableSizes.map(s => ({ value: s, label: s }))
+                ]}
+                placeholder="تصفية حسب المقاس"
+              />
+            </div>
+
+            {(selectedRepId || selectedProduct || selectedColor || selectedSize) && (
+              <button
+                onClick={() => { setSelectedRepId(''); setSelectedProduct(''); setSelectedColor(''); setSelectedSize(''); }}
+                className="px-3 py-2 text-xs font-bold text-rose-600 hover:text-rose-700 bg-rose-50 dark:bg-rose-900/30 rounded-xl transition-all shrink-0"
+                title="مسح جميع الفلاتر"
+              >
+                ✕ مسح الفلاتر
+              </button>
+            )}
             
             <button
               onClick={handleExportCSV}
