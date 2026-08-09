@@ -211,11 +211,15 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
   // Mock Data for testing (Or empty array)
   const [orders, setOrders] = useState<any[]>([]);
   const [statusFilter, setStatusFilter] = useState<string>('pending');
+  const [visibleOrdersCount, setVisibleOrdersCount] = useState<number>(50);
   const [startDateFilter, setStartDateFilter] = useState<string>('');
   const [endDateFilter, setEndDateFilter] = useState<string>('');
   const [dateFilter, setDateFilter] = useState<string>('all');
   const [timeFromFilter, setTimeFromFilter] = useState<string>('');
   const [timeToFilter, setTimeToFilter] = useState<string>('');
+    useEffect(() => {
+    setVisibleOrdersCount(50);
+  }, [statusFilter, searchTerm, startDateFilter, endDateFilter, timeFromFilter, timeToFilter, dateFilter]);
   const [reps, setReps] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
 
@@ -343,6 +347,10 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       }
     });
   }, [orders, statusFilter, searchTerm, startDateFilter, endDateFilter, timeFromFilter, timeToFilter]);
+
+  const displayedOrders = useMemo(() => {
+    return filteredOrders.slice(0, visibleOrdersCount);
+  }, [filteredOrders, visibleOrdersCount]);
 
   const selectedOrderSubtotal = selectedOrder
     ? (selectedOrder.products || []).reduce((s: number, p: any) => s + (Number(p.price || 0) * Number(p.quantity || p.qty || 0)), 0)
@@ -2595,8 +2603,9 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                <p className="text-slate-400 font-bold">لا توجد اوردرات مطابقة للبحث</p>
              </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-5">
-              {filteredOrders.map(order => (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-5">
+              {displayedOrders.map(order => (
                 <div 
                   key={order.id} 
                   className={`relative group bg-white p-0 rounded-3xl border transition-all duration-300 hover:shadow-xl hover:-translate-y-1 ${selectedOrders.includes(order.id) ? 'border-blue-500 ring-2 ring-blue-500/20 z-10' : 'border-slate-200 shadow-sm'}`}
@@ -2708,6 +2717,25 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                 </div>
               ))}
             </div>
+
+            {visibleOrdersCount < filteredOrders.length && (
+              <div className="text-center py-6 border-t border-slate-200 dark:border-slate-800 mt-6">
+                <button
+                  type="button"
+                  onClick={() => setVisibleOrdersCount(prev => prev + 50)}
+                  className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-2xl shadow-lg shadow-blue-200 dark:shadow-none transition-all active:scale-95 flex items-center justify-center gap-2 mx-auto cursor-pointer"
+                >
+                  <span>عرض المزيد من الأوردرات (+50)</span>
+                  <span className="bg-white/20 text-white px-2.5 py-0.5 rounded-full text-xs font-mono">
+                    متبقي {filteredOrders.length - visibleOrdersCount}
+                  </span>
+                </button>
+                <p className="text-xs text-slate-400 mt-2 font-medium">
+                  يتم عرض {displayedOrders.length} من إجمالي {filteredOrders.length} أوردر
+                </p>
+              </div>
+            )}
+          </>
           )}
         </div>
       )}
