@@ -9,22 +9,23 @@ date_default_timezone_set('Africa/Cairo');
 error_reporting(E_ALL);
 ini_set('display_errors', '0');
 
-// Restrict credentialed CORS to same-host, local development, or registered client domains.
-function nexus_is_allowed_origin($origin) {
-    if (!is_string($origin) || $origin === '') return false;
-    $originParts = @parse_url($origin);
-    $originHost = strtolower((string)($originParts['host'] ?? ''));
-    if ($originHost === '') return false;
+if (!function_exists('nexus_is_allowed_origin')) {
+    function nexus_is_allowed_origin($origin) {
+        if (!is_string($origin) || $origin === '') return false;
+        $originParts = @parse_url($origin);
+        $originHost = strtolower((string)($originParts['host'] ?? ''));
+        if ($originHost === '') return false;
 
-    $serverHost = strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
-    $serverHost = preg_replace('/:\d+$/', '', $serverHost);
-    if ($serverHost !== '' && $originHost === $serverHost) return true;
+        $serverHost = strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
+        $serverHost = preg_replace('/:\d+$/', '', $serverHost);
+        if ($serverHost !== '' && $originHost === $serverHost) return true;
 
-    // Allow subdomains of dragon-systems.online and other custom client domains
-    if (preg_match('/(^|\.)dragon-systems\.online$/i', $originHost)) return true;
-    if (preg_match('/(^|\.)a2zspot\.com$/i', $originHost)) return true;
+        // Allow subdomains of dragon-systems.online and other custom client domains
+        if (preg_match('/(^|\.)dragon-systems\.online$/i', $originHost)) return true;
+        if (preg_match('/(^|\.)a2zspot\.com$/i', $originHost)) return true;
 
-    return in_array($originHost, ['localhost', '127.0.0.1', '::1'], true);
+        return in_array($originHost, ['localhost', '127.0.0.1', '::1'], true);
+    }
 }
 
 $origin = trim((string)($_SERVER['HTTP_ORIGIN'] ?? ''));
@@ -1815,15 +1816,17 @@ if (!function_exists('check_permission_or_die')) {
     }
 }
 
-function map_action_to_perm($action) {
-    $a = strtolower((string)$action);
-    if ($a === '') return null;
-    if (strpos($a, 'get') === 0 || strpos($a, 'list') === 0 || strpos($a, 'report') !== false) return 'view';
-    if (strpos($a, 'check') === 0) return 'view';
-    if (strpos($a, 'create') !== false || strpos($a, 'add') !== false || strpos($a, 'import') !== false) return 'add';
-    if (strpos($a, 'update') !== false || strpos($a, 'edit') !== false || strpos($a, 'status') !== false || strpos($a, 'assign') !== false || strpos($a, 'transfer') !== false || strpos($a, 'receive') !== false) return 'edit';
-    if (strpos($a, 'delete') !== false || strpos($a, 'remove') !== false) return 'delete';
-    return null;
+if (!function_exists('map_action_to_perm')) {
+    function map_action_to_perm($action) {
+        $a = strtolower((string)$action);
+        if ($a === '') return null;
+        if (strpos($a, 'get') === 0 || strpos($a, 'list') === 0 || strpos($a, 'report') !== false) return 'view';
+        if (strpos($a, 'check') === 0) return 'view';
+        if (strpos($a, 'create') !== false || strpos($a, 'add') !== false || strpos($a, 'import') !== false) return 'add';
+        if (strpos($a, 'update') !== false || strpos($a, 'edit') !== false || strpos($a, 'status') !== false || strpos($a, 'assign') !== false || strpos($a, 'transfer') !== false || strpos($a, 'receive') !== false) return 'edit';
+        if (strpos($a, 'delete') !== false || strpos($a, 'remove') !== false) return 'delete';
+        return null;
+    }
 }
 
 // -----------------------
@@ -3205,62 +3208,9 @@ if ($module === 'rustdesk') {
 
 switch ($module) {
 
-    case 'reports':
-        $action = $_GET['action'] ?? 'getRepCustody';
-        if ($action === 'getRepCustody') {
-            try {
-                $repsStmt = execute_query($pdo, "SELECT id, name, phone, role FROM users WHERE role = 'representative' OR id IN (SELECT DISTINCT rep_id FROM orders WHERE rep_id IS NOT NULL AND rep_id > 0)");
-                $reps = $repsStmt ? $repsStmt->fetchAll(PDO::FETCH_ASSOC) : [];
-
-                $closedStatuses = "'delivered', 'completed', 'settled', 'closed', 'returned', 'full_return', 'cancelled'";
-                $ordersHasItemsJson = column_exists($pdo, 'orders', 'items_json');
-                $itemsJsonSql = $ordersHasItemsJson ? 'o.items_json' : 'NULL AS items_json';
-
-                $sql = "SELECT o.*, ${itemsJsonSql}, c.name as customer_name, c.phone1, c.phone2, c.address, c.governorate, u.name as rep_name
-                        FROM orders o
-                        LEFT JOIN customers c ON o.customer_id = c.id
-                        LEFT JOIN users u ON o.rep_id = u.id
-                        WHERE (o.rep_id IS NOT NULL AND o.rep_id > 0)
-                          AND (LOWER(o.status) NOT IN ($closedStatuses))
-                        ORDER BY o.created_at DESC";
-
-                $stmt = execute_query($pdo, $sql);
-                $orders = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [];
-
-                foreach ($orders as &$ord) {
-                    $items = [];
-                    $jsonStr = $ord['items_json'] ?? $ord['products_json'] ?? $ord['items'] ?? null;
-                    if (!empty($jsonStr) && is_string($jsonStr)) {
-                        $decoded = json_decode($jsonStr, true);
-                        if (is_array($decoded)) $items = $decoded;
-                    }
-
-                    if (empty($items)) {
-                        $oid = intval($ord['id']);
-                        $itStmt = execute_query($pdo, "SELECT oi.product_id, oi.quantity, oi.price_per_unit as price, ppar.name, pv.color, pv.size 
-                                                      FROM order_items oi 
-                                                      LEFT JOIN product_variants pv ON oi.product_id = pv.id 
-                                                      LEFT JOIN products ppar ON pv.product_id = ppar.id 
-                                                      WHERE oi.order_id = ?", [$oid]);
-                        $dbItems = $itStmt ? $itStmt->fetchAll(PDO::FETCH_ASSOC) : [];
-                        if (!empty($dbItems)) $items = $dbItems;
-                    }
-
-                    $ord['products'] = $items;
-                    $ord['rep_id'] = intval($ord['rep_id']);
-                }
-
-                echo json_encode([
-                    'success' => true,
-                    'reps' => $reps,
-                    'orders' => $orders
-                ]);
-            } catch (Exception $e) {
-                echo json_encode(['success' => false, 'message' => $e->getMessage()]);
-            }
-            exit;
-        }
-        break;
+// ─────────────────────────────────────────────────────────
+    // User Preferences (theme, notification reads) – per user, per browser
+    // ─────────────────────────────────────────────────────────
 
 
 
@@ -15894,6 +15844,60 @@ switch ($module) {
 
         $include_html = ($_GET['include_html'] ?? '') === '1';
 
+        if ($action === 'getRepCustody') {
+            try {
+                $repsStmt = execute_query($pdo, "SELECT id, name, phone, role FROM users WHERE role = 'representative' OR id IN (SELECT DISTINCT rep_id FROM orders WHERE rep_id IS NOT NULL AND rep_id > 0)");
+                $reps = $repsStmt ? $repsStmt->fetchAll(PDO::FETCH_ASSOC) : [];
+
+                $closedStatuses = "'delivered', 'completed', 'settled', 'closed', 'returned', 'full_return', 'cancelled'";
+                $ordersHasItemsJson = column_exists($pdo, 'orders', 'items_json');
+                $itemsJsonSql = $ordersHasItemsJson ? 'o.items_json' : 'NULL AS items_json';
+
+                $sql = "SELECT o.*, {$itemsJsonSql}, c.name as customer_name, c.phone1, c.phone2, c.address, c.governorate, u.name as rep_name
+                        FROM orders o
+                        LEFT JOIN customers c ON o.customer_id = c.id
+                        LEFT JOIN users u ON o.rep_id = u.id
+                        WHERE (o.rep_id IS NOT NULL AND o.rep_id > 0)
+                          AND (LOWER(o.status) NOT IN ($closedStatuses))
+                        ORDER BY o.created_at DESC";
+
+                $stmt = execute_query($pdo, $sql);
+                $orders = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [];
+
+                foreach ($orders as &$ord) {
+                    $items = [];
+                    $jsonStr = $ord['items_json'] ?? $ord['products_json'] ?? $ord['items'] ?? null;
+                    if (!empty($jsonStr) && is_string($jsonStr)) {
+                        $decoded = json_decode($jsonStr, true);
+                        if (is_array($decoded)) $items = $decoded;
+                    }
+
+                    if (empty($items)) {
+                        $oid = intval($ord['id']);
+                        $itStmt = execute_query($pdo, "SELECT oi.product_id, oi.quantity, oi.price_per_unit as price, ppar.name, pv.color, pv.size 
+                                                      FROM order_items oi 
+                                                      LEFT JOIN product_variants pv ON oi.product_id = pv.id 
+                                                      LEFT JOIN products ppar ON pv.product_id = ppar.id 
+                                                      WHERE oi.order_id = ?", [$oid]);
+                        $dbItems = $itStmt ? $itStmt->fetchAll(PDO::FETCH_ASSOC) : [];
+                        if (!empty($dbItems)) $items = $dbItems;
+                    }
+
+                    $ord['products'] = $items;
+                    $ord['rep_id'] = intval($ord['rep_id']);
+                }
+
+                echo json_encode([
+                    'success' => true,
+                    'reps' => $reps,
+                    'orders' => $orders
+                ]);
+            } catch (Exception $e) {
+                echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+            }
+            break;
+        }
+
         if ($action === 'profitReport') {
             $rep_id_filter = intval($_GET['rep_id'] ?? 0);
             $status_filter = trim((string)($_GET['status'] ?? ''));
@@ -17810,4 +17814,3 @@ function handle_crud($pdo, $table, $input, $fields, $select_fields = "*") {
             break;
     }
 }
-?>    
