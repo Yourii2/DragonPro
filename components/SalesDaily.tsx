@@ -209,6 +209,27 @@ const SalesDaily: React.FC = () => {
   const [warehouses, setWarehouses] = useState<any[]>([]);
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<number | ''>('');
   const [userDefaults, setUserDefaults] = useState<any>(null);
+  // Split Payment Auto Treasury Lock Effect
+  useEffect(() => {
+    if (!isSplitPayment) return;
+    const electronicTreasury = treasuries.find(t => 
+      normalizeText(t.name).includes('الكترونى') ||
+      normalizeText(t.name).includes('الكترونية') ||
+      normalizeText(t.name).includes('فودافون') ||
+      t.type === 'electronic' ||
+      t.is_electronic == 1
+    ) || treasuries[0];
+
+    if (electronicTreasury) {
+      setElectronicTreasuryId(Number(electronicTreasury.id));
+    }
+
+    if (userDefaults?.default_treasury_id) {
+      setCashTreasuryId(Number(userDefaults.default_treasury_id));
+    } else if (!cashTreasuryId && treasuries.length > 0) {
+      setCashTreasuryId(Number(treasuries[0].id));
+    }
+  }, [isSplitPayment, treasuries, userDefaults]);
   const [employee, setEmployee] = useState<string>('');
   const [page, setPage] = useState<string>('');
 
@@ -2199,9 +2220,10 @@ const scanBarcodeAddOrder = async () => {
                         <div>
                           <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">الخزينة النقدية</label>
                           <select
-                            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-1.5 text-xs font-bold"
+                            className={`w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-1.5 text-xs font-bold ${Boolean(userDefaults?.default_treasury_id) ? 'bg-slate-100 dark:bg-slate-800 opacity-80 cursor-not-allowed' : ''}`}
                             value={cashTreasuryId}
                             onChange={e => setCashTreasuryId(e.target.value ? Number(e.target.value) : '')}
+                            disabled={Boolean(userDefaults?.default_treasury_id)}
                           >
                             <option value="">اختر خزينة الكاش...</option>
                             {treasuries.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
@@ -2228,9 +2250,10 @@ const scanBarcodeAddOrder = async () => {
                         <div>
                           <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">الخزينة الإلكترونية</label>
                           <select
-                            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-1.5 text-xs font-bold"
+                            className="w-full bg-slate-100 dark:bg-slate-800 opacity-80 cursor-not-allowed border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-1.5 text-xs font-bold"
                             value={electronicTreasuryId}
                             onChange={e => setElectronicTreasuryId(e.target.value ? Number(e.target.value) : '')}
+                            disabled={true}
                           >
                             <option value="">اختر الخزينة الإلكترونية...</option>
                             {treasuries.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}

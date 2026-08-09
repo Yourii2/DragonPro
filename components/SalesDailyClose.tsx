@@ -159,6 +159,27 @@ const SalesDailyClose: React.FC = () => {
   const [reps, setReps] = useState<any[]>([]);
   const [treasuries, setTreasuries] = useState<any[]>([]);
   const [userDefaults, setUserDefaults] = useState<any>(null);
+  // Split Payment Auto Treasury Lock Effect
+  useEffect(() => {
+    if (!isSplitPayment) return;
+    const electronicTreasury = treasuries.find(t => 
+      normalizeText(t.name).includes('الكترونى') ||
+      normalizeText(t.name).includes('الكترونية') ||
+      normalizeText(t.name).includes('فودافون') ||
+      t.type === 'electronic' ||
+      t.is_electronic == 1
+    ) || treasuries[0];
+
+    if (electronicTreasury) {
+      setElectronicTreasuryId(String(electronicTreasury.id));
+    }
+
+    if (userDefaults?.default_treasury_id) {
+      setCashTreasuryId(String(userDefaults.default_treasury_id));
+    } else if (!cashTreasuryId && treasuries.length > 0) {
+      setCashTreasuryId(String(treasuries[0].id));
+    }
+  }, [isSplitPayment, treasuries, userDefaults]);
 
   // Selections
   const [selectedRepId, setSelectedRepId] = useState<string>('');
@@ -1076,7 +1097,7 @@ const SalesDailyClose: React.FC = () => {
                     </label>
                     <div className="grid grid-cols-2 gap-2">
                       <input type="number" min={0} placeholder="0 ج.م" className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-2 text-xs font-bold" value={cashPaidAmount || ''} onChange={e => setCashPaidAmount(Math.max(0, toNum(e.target.value)))} />
-                      <select className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-2 text-xs font-bold" value={cashTreasuryId} onChange={e => setCashTreasuryId(e.target.value)}>
+                      <select className={`w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-2 text-xs font-bold ${Boolean(userDefaults?.default_treasury_id) ? 'bg-slate-100 dark:bg-slate-800 opacity-80 cursor-not-allowed' : ''}`} value={cashTreasuryId} onChange={e => setCashTreasuryId(e.target.value)} disabled={Boolean(userDefaults?.default_treasury_id)}>
                         <option value="">اختر خزينة الكاش...</option>
                         {treasuries.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                       </select>
@@ -1090,7 +1111,7 @@ const SalesDailyClose: React.FC = () => {
                     </label>
                     <div className="grid grid-cols-2 gap-2">
                       <input type="number" min={0} placeholder="0 ج.م" className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-2 text-xs font-bold" value={electronicPaidAmount || ''} onChange={e => setElectronicPaidAmount(Math.max(0, toNum(e.target.value)))} />
-                      <select className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-2 text-xs font-bold" value={electronicTreasuryId} onChange={e => setElectronicTreasuryId(e.target.value)}>
+                      <select className="w-full bg-slate-100 dark:bg-slate-800 opacity-80 cursor-not-allowed border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-2 text-xs font-bold" value={electronicTreasuryId} onChange={e => setElectronicTreasuryId(e.target.value)} disabled={true}>
                         <option value="">اختر الخزينة الإلكترونية...</option>
                         {treasuries.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                       </select>
