@@ -1,5 +1,5 @@
 import Custom12HourTimePicker from './Custom12HourTimePicker';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { Calendar, ShoppingCart, Printer, History, Search, PlusCircle, MinusCircle, UploadCloud, FileText, RefreshCcw, ClipboardPaste, MapPin, Phone, User, CheckSquare, Square, Eye, Edit, ChevronRight } from 'lucide-react';
 import Swal from 'sweetalert2';
