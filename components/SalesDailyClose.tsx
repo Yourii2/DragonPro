@@ -159,6 +159,24 @@ const SalesDailyClose: React.FC = () => {
   const [reps, setReps] = useState<any[]>([]);
   const [treasuries, setTreasuries] = useState<any[]>([]);
   const [userDefaults, setUserDefaults] = useState<any>(null);
+  // Selections
+  const [selectedRepId, setSelectedRepId] = useState<string>('');
+  const [selectedTreasuryId, setSelectedTreasuryId] = useState<string>('');
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'electronic'>('cash');
+
+  // Rep State & Payment Mode
+  const [repBalance, setRepBalance] = useState<number>(0);
+  const [paidAmount, setPaidAmount] = useState<number>(0);
+  const [settlementDirection, setSettlementDirection] = useState<'collect' | 'pay'>('collect');
+  const [openDailyInfo, setOpenDailyInfo] = useState<{ daily_code: string; id: number } | null>(null);
+
+  // Dual/Split Payment States
+  const [isSplitPayment, setIsSplitPayment] = useState<boolean>(false);
+  const [cashPaidAmount, setCashPaidAmount] = useState<number>(0);
+  const [cashTreasuryId, setCashTreasuryId] = useState<string>('');
+  const [electronicPaidAmount, setElectronicPaidAmount] = useState<number>(0);
+  const [electronicTreasuryId, setElectronicTreasuryId] = useState<string>('');
+
   // Split Payment Auto Treasury Lock Effect
   useEffect(() => {
     if (!isSplitPayment) return;
@@ -180,24 +198,6 @@ const SalesDailyClose: React.FC = () => {
       setCashTreasuryId(String(treasuries[0].id));
     }
   }, [isSplitPayment, treasuries, userDefaults]);
-
-  // Selections
-  const [selectedRepId, setSelectedRepId] = useState<string>('');
-  const [selectedTreasuryId, setSelectedTreasuryId] = useState<string>('');
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'electronic'>('cash');
-
-  // Rep State & Payment Mode
-  const [repBalance, setRepBalance] = useState<number>(0);
-  const [paidAmount, setPaidAmount] = useState<number>(0);
-  const [settlementDirection, setSettlementDirection] = useState<'collect' | 'pay'>('collect');
-  const [openDailyInfo, setOpenDailyInfo] = useState<{ daily_code: string; id: number } | null>(null);
-
-  // Dual/Split Payment States
-  const [isSplitPayment, setIsSplitPayment] = useState<boolean>(false);
-  const [cashPaidAmount, setCashPaidAmount] = useState<number>(0);
-  const [cashTreasuryId, setCashTreasuryId] = useState<string>('');
-  const [electronicPaidAmount, setElectronicPaidAmount] = useState<number>(0);
-  const [electronicTreasuryId, setElectronicTreasuryId] = useState<string>('');
 
   // Transaction state
   const [repTxType, setRepTxType] = useState<'none' | 'bonus' | 'penalty'>('none');
