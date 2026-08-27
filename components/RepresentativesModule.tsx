@@ -1156,13 +1156,13 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
     const paidNow         = paymentAction === 'collect' ? paymentAmt : -paymentAmt;
     const localTotalShipping = allOrdersFull.reduce((s: number, o: any) => s + _toN(o.shipping ?? o.shipping_fees ?? 0), 0);
 
-    // Products summary (old + today combined)
-    const summaryMap: Record<string, {name:string; color:string; size:string; qty:number}> = {};
+    // Products summary (old + today combined) - Product name and total quantity only
+    const summaryMap: Record<string, {name:string; qty:number}> = {};
     allOrdersFull.forEach((o: any) => {
       (o.products || []).forEach((p: any) => {
-        const key = `${p.name||''}||${p.color||''}||${p.size||''}`;
-        if (!summaryMap[key]) summaryMap[key] = {name: p.name||'', color: p.color||'', size: p.size||'', qty: 0};
-        summaryMap[key].qty += _toN(p.quantity ?? p.qty ?? 0);
+        const name = (p.name || p.product_name || 'منتج غير محدد').trim();
+        if (!summaryMap[name]) summaryMap[name] = {name, qty: 0};
+        summaryMap[name].qty += _toN(p.quantity ?? p.qty ?? 0);
       });
     });
     const prodRows = Object.values(summaryMap);
@@ -1190,20 +1190,91 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
     const colHeaders = `<tr><th>رقم اوردر</th><th>اسم العميل</th><th>الهاتف</th><th>المحافظة</th><th>العنوان</th><th>الموظف</th><th>البيدج</th><th>الإجمالي</th><th>شحن</th><th>الإجمالي الكلي</th><th>ملاحظات</th></tr>`;
 
     const pageVal = row.page || row.page_number || row.page_no || row.pageName || row.page_name || row.source || '';
+    let empDisplay = row.employee || userDefaults?.name || userDefaults?.username || '';
+    if (!empDisplay) {
+      try {
+        const u = JSON.parse(localStorage.getItem('Dragon_user') || '{}');
+        empDisplay = u.name || u.username || '';
+      } catch (e) {}
+    }
+
+    // helper: calc days between a date and now
+    const calcDaysAgo = (ds: string | null | undefined): number => {
+      if (!ds) return -1;
+      try { const d = new Date(String(ds).replace(' ', 'T')); if (isNaN(d.getTime())) return -1; return Math.floor((Date.now() - d.getTime()) / (1000 * 60 * 60 * 24)); } catch { return -1; }
+    };
+    const fmtDate = (ds: string | null | undefined): string => {
+      if (!ds) return '-';
+      try { const d = new Date(String(ds).replace(' ', 'T')); if (isNaN(d.getTime())) return '-'; return d.toLocaleDateString('ar-EG', { year: 'numeric', month: '2-digit', day: '2-digit' }); } catch { return '-'; }
+    };
+
+    // old orders table with late-badge
+    let oldOrdersTableHtml = '';
+    if (oldOrders.length > 0) {
+      const oldRows = oldOrders.map((o: any) => {
+        const sub  = _orderSub(o);
+        const ship = _toN(o.shipping ?? o.shipping_fees ?? 0);
+        const empVal = o.employee ?? o.employee_name ?? o.assigneeName ?? row.employee ?? '';
+        const pgVal  = o.page ?? o.page_raw ?? o.page_name ?? o.source ?? row.page ?? '';
+        const assignDateRaw = o.assigned_at ?? o.with_rep_at ?? o.rep_assigned_at ?? o.updated_at ?? null;
+        const assignDateFormatted = fmtDate(assignDateRaw);
+        const daysAgo = calcDaysAgo(assignDateRaw);
+        const badge = daysAgo < 0
+          ? ''
+          : daysAgo >= 3
+            ? `<span class="late-badge">⚠️ ${daysAgo} يوم</span>`
+            : `<span class="ok-badge">${daysAgo === 0 ? 'اليوم' : daysAgo + ' يوم'}</span>`;
+        return `<tr style="${daysAgo >= 3 ? 'background:#fff7f7;' : ''}">
+          <td>${o.orderNumber ?? o.order_number ?? o.id ?? ''}</td>
+          <td>${o.customerName ?? o.customer_name ?? ''}</td>
+          <td>${o.phone ?? o.phone1 ?? ''}</td>
+          <td>${o.governorate ?? ''}</td>
+          <td>${o.address ?? ''}</td>
+          <td>${empVal}</td><td>${pgVal}</td>
+          <td>${sub.toLocaleString()}</td>
+          <td>${ship.toLocaleString()}</td>
+          <td>${(sub + ship).toLocaleString()}</td>
+          <td style="text-align:center;">${assignDateFormatted}${badge ? '<br/>' + badge : ''}</td>
+          <td>${o.notes ?? ''}</td>
+        </tr>`;
+      }).join('');
+      oldOrdersTableHtml = `
+        <h3 style="margin-top:16px;color:#b91c1c;">⚠️ اوردرات نزول (الاوردرات القديمة في عهدة المندوب)</h3>
+        <p style="font-size:11px;color:#6b7280;margin:4px 0 8px 0;">الصف باللون الأحمر الفاتح = الأوردر عمره 3 أيام أو أكثر في العهدة</p>
+        <table><thead><tr>
+          <th>رقم اوردر</th><th>اسم العميل</th><th>الهاتف</th><th>المحافظة</th><th>العنوان</th>
+          <th>الموظف</th><th>البيدج</th><th>الإجمالي</th><th>شحن</th><th>الإجمالي الكلي</th>
+          <th style="background:#fef2f2;">تاريخ التسليم للمندوب</th><th>ملاحظات</th>
+        </tr></thead><tbody>${oldRows}</tbody></table>`;
+    }
+
+    // products summary: name + total qty only (sorted alphabetically)
+    const sortedProdRows = prodRows.slice().sort((a, b) => a.name.localeCompare(b.name, 'ar'));
+    const productsSummaryHtml = sortedProdRows.length > 0
+      ? `<h3>البضاعة المستلمة — جميع المنتجات (قديم + اليوم)</h3>
+         <table><thead><tr><th>المنتج</th><th>إجمالي الكمية</th></tr></thead>
+         <tbody>${sortedProdRows.map(r => `<tr><td>${r.name}</td><td style="text-align:center;font-weight:700;">${r.qty}</td></tr>`).join('')}</tbody></table>`
+      : '';
 
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>يومية المندوب</title>
 <style>
 body{font-family:Arial,Helvetica,'Noto Naskh Arabic',sans-serif;direction:rtl;padding:12px;font-size:12px;}
 h1{font-size:18px;text-align:center;margin:0 0 6px 0}
+h3{font-size:13px;margin:14px 0 4px;}
 .header{display:flex;justify-content:space-between;align-items:center;}
 table{width:100%;border-collapse:collapse;margin-top:8px;}
 th,td{border:1px solid #333;padding:5px;font-size:11px;text-align:right}
 th{background:#eee;}
-h3{font-size:13px;margin:14px 0 4px;}
+.late-badge{background:#fee2e2;color:#b91c1c;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;}
+.ok-badge{background:#d1fae5;color:#065f46;padding:2px 6px;border-radius:4px;font-size:10px;}
 </style></head><body>
 <div class="header"><div></div><div style="text-align:center;"><h1>يومية المندوب "${repName}"</h1></div><div></div></div>
-<div style="display:flex;gap:12px;align-items:flex-start;margin-top:8px;font-size:12px">
-  <div style="flex:0 0 auto;min-width:140px;padding:6px">التاريخ: <b>${dateStr}</b>${row.employee ? `<br>الموظف: <b>${row.employee}</b>` : ''}${pageVal ? `<br>البيدج: <b>${pageVal}</b>` : ''}</div>
+<div style="margin-top:8px;font-size:12px;">
+  <div style="padding:4px 6px;">التاريخ: <b>${dateStr}</b></div>
+  ${empDisplay ? `<div style="padding:4px 6px;margin-top:2px;">الموظف: <b>${empDisplay}</b></div>` : ''}
+  ${pageVal ? `<div style="padding:4px 6px;margin-top:2px;">البيدج: <b>${pageVal}</b></div>` : ''}
+</div>
+<div style="display:flex;gap:12px;align-items:flex-start;margin-top:6px;font-size:12px">
   <div style="flex:1;display:flex;gap:8px;flex-wrap:wrap">
     <div style="flex:1;min-width:150px;padding:6px;border:1px solid #ddd;border-radius:6px">
       <div style="font-weight:700;">الأرصدة القديمة</div>
@@ -1212,7 +1283,7 @@ h3{font-size:13px;margin:14px 0 4px;}
       <div>الاوردرات: <b>${oldOrdersCount}</b> • قطع: <b>${oldPiecesCount}</b></div>
     </div>
     <div style="flex:1;min-width:150px;padding:6px;border:1px solid #ddd;border-radius:6px">
-      <div style="font-weight:700;">تسليم اليوم</div>
+      <div style="font-weight:700;">تسليم اليوم (المحدد الآن)</div>
       <div>قيمة اوردرات اليوم: <b>${sumValue.toLocaleString()} ج.م</b></div>
       <div>عدد اوردرات: <b>${todayOrders.length}</b> • قطع: <b>${todayPieces}</b></div>
     </div>
@@ -1225,15 +1296,12 @@ h3{font-size:13px;margin:14px 0 4px;}
       <div style="font-weight:700;">الباقي بعد الدفع</div>
       <div style="font-weight:800;font-size:14px">${Math.abs(afterPay).toLocaleString()} ${_balLabel(afterPay)} ج.م</div>
     </div>
-  </div>
+</div>
 </div>
 ${todayOrders.length > 0 ? `<h3>اوردرات اليوم (${todayOrders.length})</h3>
 <table><thead>${colHeaders}</thead><tbody>${todayOrders.map(orderRow).join('')}</tbody></table>` : ''}
-${oldOrders.length > 0 ? `<h3>اوردرات نزول / قديمة (${oldOrders.length})</h3>
-<table><thead>${colHeaders}</thead><tbody>${oldOrders.map(orderRow).join('')}</tbody></table>` : ''}
-${prodRows.length > 0 ? `<h3>البضاعة المستلمة — جميع المنتجات (قديم + اليوم)</h3>
-<table><thead><tr><th>المنتج</th><th>اللون</th><th>المقاس</th><th>الكمية</th></tr></thead>
-<tbody>${prodRows.map(r => `<tr><td>${r.name}</td><td>${r.color}</td><td>${r.size}</td><td>${r.qty}</td></tr>`).join('')}</tbody></table>` : ''}
+${oldOrdersTableHtml}
+${productsSummaryHtml}
 </body></html>`;
 
     const w = window.open('', '_blank', 'toolbar=0,location=0,menubar=0,scrollbars=1,width=960,height=720');
@@ -1471,62 +1539,95 @@ ${prodRows.length > 0 ? `<h3>البضاعة المستلمة — جميع الم
         <head>
           <title>تقرير إغلاق اليومية</title>
           <style>
-            body { font-family: Tahoma, Arial, sans-serif; font-size: 13px; margin: 20px; line-height: 1.5; direction: rtl; }
-            .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 10px; }
-            .flex { display: flex; justify-content: space-between; margin-bottom: 15px; gap: 10px; flex-wrap: wrap; }
-            .box { border: 1px solid #000; padding: 10px; border-radius: 5px; flex: 1; min-width: 200px; }
-            table { width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: 12px; }
-            th { background: #eee; padding: 8px; border: 1px solid #ccc; text-align: right; font-weight: bold; }
-            td { padding: 8px; border: 1px solid #ccc; text-align: right; }
+            body { font-family: Tahoma, Arial, sans-serif; font-size: 12px; margin: 16px; line-height: 1.5; direction: rtl; }
+            .header { text-align: center; margin-bottom: 14px; border-bottom: 2px solid #000; padding-bottom: 8px; }
+            h2 { margin: 0 0 4px; font-size: 16px; }
+            h4 { margin: 12px 0 4px; font-size: 12px; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 11px; }
+            th { background: #eee; padding: 4px 6px; border: 1px solid #ccc; text-align: right; font-weight: bold; }
+            td { padding: 4px 6px; border: 1px solid #ccc; }
+            .summary-top { border: 1px solid #bbb; border-radius: 6px; padding: 8px 12px; background: #fafafa; margin-bottom: 10px; font-size: 12px; }
+            .summary-top .title { font-weight: bold; font-size: 13px; margin-bottom: 6px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+            .summary-top .row { display: flex; justify-content: space-between; padding: 2px 0; }
+            .summary-top .row b { direction: ltr; }
+            .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+            .box { border: 1px solid #bbb; border-radius: 6px; padding: 8px 10px; background: #fff; }
+            .box .box-title { font-weight: bold; font-size: 11px; border-bottom: 1px solid #ddd; padding-bottom: 4px; margin-bottom: 5px; color: #333; }
+            .box .row { display: flex; justify-content: space-between; font-size: 11px; padding: 1px 0; }
+            .box .row .val { font-weight: bold; direction: ltr; }
+            .remaining-box { border: 2px solid #000; border-radius: 6px; padding: 10px; background: #f0fdf4; text-align: center; margin-bottom: 10px; }
+            .remaining-box .label { font-size: 12px; color: #555; margin-bottom: 4px; }
+            .remaining-box .amount { font-size: 20px; font-weight: bold; direction: ltr; color: #065f46; }
+            .account-box { border: 1px solid #bbb; border-radius: 6px; padding: 8px 12px; background: #fffbea; margin-bottom: 10px; font-size: 12px; }
+            .account-box .title { font-weight: bold; margin-bottom: 5px; }
+            .account-box .row { display: flex; justify-content: space-between; padding: 2px 0; }
           </style>
         </head>
         <body>
           <div class="header">
-            <h2 style="margin: 0 0 5px;">تقرير إغلاق اليومية — ${repName}</h2>
-            <div>التاريخ: <span dir="ltr">${dateOnly}</span> | كود اليومية: ${row.daily_code || '---'}</div>
+            <h2>تقرير إغلاق اليومية — ${repName}</h2>
+            <div style="font-size:11px;">التاريخ: <span dir="ltr">${dateOnly}</span> | كود اليومية: ${row.daily_code || '---'}</div>
+            ${(() => { const empN = row.employee || userDefaults?.name || userDefaults?.username || ''; return empN ? `<div style="font-size:11px;margin-top:2px;">الموظف: <b>${empN}</b></div>` : ''; })()}
           </div>
 
-          <div style="margin-bottom:12px;border:1px solid #ddd;padding:10px;border-radius:6px;background:#fafafa;">
-            <div style="font-weight:bold;margin-bottom:8px;">ملخص قبل الإغلاق</div>
-            <table style="width:100%;border-collapse:collapse;font-size:12px;">
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;width:60%;">اجمالى المبلغ المطلوب قبل اغلاق اليومية</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${totalRequiredBeforeClose.toLocaleString()} ج.م</td></tr>
-
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات التسليم الكامل</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${delivFullCount} طلب</td></tr>
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع التسليم الكامل</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${delivFullPieces}</td></tr>
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ التسليم الكامل</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${delivFullAmount.toLocaleString()} ج.م</td></tr>
-
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات الارجاع الكلي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${returnFullCount} طلب</td></tr>
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع الارتجاع الكلى</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${returnFullPieces}</td></tr>
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ الارتجاع الكلى</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${returnFullAmount.toLocaleString()} ج.م</td></tr>
-
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات التسليم الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${delivPartialCount} طلب</td></tr>
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع التسليم الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${delivPartialPieces}</td></tr>
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ التسليم الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${delivPartialAmount.toLocaleString()} ج.م</td></tr>
-
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات الارجاع الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${returnPartialCount} طلب</td></tr>
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع الارتجاع الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${returnPartialPieces}</td></tr>
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ الارتجاع الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${returnPartialAmount.toLocaleString()} ج.م</td></tr>
-
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات النزول</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${deferredCount} طلب</td></tr>
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع النزول</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${deferredPiecesSum}</td></tr>
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ النزول</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${deferredAmountSum.toLocaleString()} ج.م</td></tr>
-
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">المبلغ المتبقى</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${estimatedRemaining.toLocaleString()} ج.م</td></tr>
-            </table>
+          <!-- ملخص قبل الإغلاق -->
+          <div class="summary-top">
+            <div class="title">ملخص قبل الإغلاق</div>
+            <div class="row"><span>إجمالى المبلغ المطلوب قبل إغلاق اليومية</span><b>${totalRequiredBeforeClose.toLocaleString()} ج.م</b></div>
           </div>
 
-          <div class="flex">
-            <div class="box" style="margin-right:0;">
-              <strong>ملخص الحساب:</strong><br/>
-              الحساب قبل الإغلاق: <span dir="ltr">${totalRequiredBeforeClose.toLocaleString()} ج.م</span><br/>
-              طريقة التسوية: <strong>${settlementDirection === 'collect' ? 'تحصيل من المندوب' : 'دفع للمندوب'}</strong><br/>
-              المبلغ المدفوع للتقفيل: <span dir="ltr">${paidAmount.toLocaleString()} ج.م</span><br/><br/>
-              <div style="background:#f1f1f1; padding:5px;"><strong>المتبقي:</strong> <span dir="ltr">${estimatedRemaining.toLocaleString()} ج.م</span></div>
+          <!-- صناديق الإحصاء -->
+          <div class="grid2">
+            <div class="box">
+              <div class="box-title">✅ التسليم الكامل</div>
+              <div class="row"><span>عدد الطلبات</span><span class="val">${delivFullCount} طلب</span></div>
+              <div class="row"><span>إجمالى القطع</span><span class="val">${delivFullPieces}</span></div>
+              <div class="row"><span>إجمالى المبلغ</span><span class="val">${delivFullAmount.toLocaleString()} ج.م</span></div>
+            </div>
+            <div class="box">
+              <div class="box-title">🔄 الارجاع الكلي</div>
+              <div class="row"><span>عدد الطلبات</span><span class="val">${returnFullCount} طلب</span></div>
+              <div class="row"><span>إجمالى القطع</span><span class="val">${returnFullPieces}</span></div>
+              <div class="row"><span>إجمالى المبلغ</span><span class="val">${returnFullAmount.toLocaleString()} ج.م</span></div>
+            </div>
+            <div class="box">
+              <div class="box-title">🔀 التسليم الجزئي</div>
+              <div class="row"><span>عدد الطلبات</span><span class="val">${delivPartialCount} طلب</span></div>
+              <div class="row"><span>إجمالى القطع</span><span class="val">${delivPartialPieces}</span></div>
+              <div class="row"><span>إجمالى المبلغ</span><span class="val">${delivPartialAmount.toLocaleString()} ج.م</span></div>
+            </div>
+            <div class="box">
+              <div class="box-title">↩️ الارجاع الجزئي</div>
+              <div class="row"><span>عدد الطلبات</span><span class="val">${returnPartialCount} طلب</span></div>
+              <div class="row"><span>إجمالى القطع</span><span class="val">${returnPartialPieces}</span></div>
+              <div class="row"><span>إجمالى المبلغ</span><span class="val">${returnPartialAmount.toLocaleString()} ج.م</span></div>
             </div>
           </div>
 
+          <!-- صندوق النزول وملخص الحساب -->
+          <div class="grid2" style="grid-template-columns:1fr 1fr;">
+            <div class="box">
+              <div class="box-title">⬇️ النزول (مؤجل)</div>
+              <div class="row"><span>عدد الطلبات</span><span class="val">${deferredCount} طلب</span></div>
+              <div class="row"><span>إجمالى القطع</span><span class="val">${deferredPiecesSum}</span></div>
+              <div class="row"><span>إجمالى المبلغ</span><span class="val">${deferredAmountSum.toLocaleString()} ج.م</span></div>
+            </div>
+            <div class="account-box">
+              <div class="title">💰 ملخص الحساب</div>
+              <div class="row"><span>الحساب قبل الإغلاق</span><b dir="ltr">${totalRequiredBeforeClose.toLocaleString()} ج.م</b></div>
+              <div class="row"><span>طريقة التسوية</span><b>${settlementDirection === 'collect' ? 'تحصيل من المندوب' : 'دفع للمندوب'}</b></div>
+              <div class="row"><span>المبلغ المدفوع للتقفيل</span><b dir="ltr">${paidAmount.toLocaleString()} ج.م</b></div>
+            </div>
+          </div>
+
+          <!-- المبلغ المتبقى -->
+          <div class="remaining-box">
+            <div class="label">المبلغ المتبقى بعد الإغلاق</div>
+            <div class="amount">${estimatedRemaining.toLocaleString()} ج.م</div>
+          </div>
+
           ${finalDeliveredList.length > 0 ? `
-          <h4 style="margin-bottom:5px;">جدول تفاصيل التسليم (${finalDeliveredList.length} طلب) — القطع: ${deliveredPiecesTotal} — إجمالي: ${Number(totalReceived).toLocaleString()}</h4>
+          <h4>تفاصيل التسليم (${finalDeliveredList.length} طلب) — القطع: ${deliveredPiecesTotal} — إجمالي: ${Number(totalReceived).toLocaleString()} ج.م</h4>
           <table>
             <tr><th>رقم الأوردر</th><th>العميل</th><th style="text-align:center;">القطع</th><th style="text-align:center;">القيمة</th></tr>
             ${delivHTML}
@@ -1534,7 +1635,7 @@ ${prodRows.length > 0 ? `<h3>البضاعة المستلمة — جميع الم
           ` : ''}
 
           ${finalReturnedList.length > 0 ? `
-          <h4 style="margin-bottom:5px;">جدول تفاصيل المرتجع (${finalReturnedList.length} طلب) — القطع: ${returnedPiecesTotal} — إجمالي: ${Number(totalPaid).toLocaleString()}</h4>
+          <h4>تفاصيل المرتجع (${finalReturnedList.length} طلب) — القطع: ${returnedPiecesTotal} — إجمالي: ${Number(totalPaid).toLocaleString()} ج.م</h4>
           <table>
             <tr><th>رقم الأوردر</th><th>العميل</th><th style="text-align:center;">القطع</th><th style="text-align:center;">القيمة</th></tr>
             ${retHTML}
@@ -1542,20 +1643,13 @@ ${prodRows.length > 0 ? `<h3>البضاعة المستلمة — جميع الم
           ` : ''}
 
           ${deferredList.length > 0 ? `
-          <h4 style="margin-bottom:5px;">جدول تفاصيل النزول (${deferredList.length} طلب) — القطع: ${deferredPiecesSum} — إجمالي: ${Number(deferredAmountSum).toLocaleString()}</h4>
+          <h4>تفاصيل النزول (${deferredList.length} طلب) — القطع: ${deferredPiecesSum} — إجمالي: ${Number(deferredAmountSum).toLocaleString()} ج.م</h4>
           <table>
             <tr><th>رقم الأوردر</th><th>العميل</th><th style="text-align:center;">القطع</th><th style="text-align:center;">القيمة</th></tr>
             ${defHTML}
           </table>
           ` : ''}
 
-          <div style="margin-top:30px;padding:15px;border:2px solid #000;text-align:center;background:#f5f5f5;">
-            <div style="font-weight:bold;font-size:14px;margin-bottom:10px;">الحالة النهائية للحساب</div>
-            <div style="font-size:18px;font-weight:bold;direction:ltr;color:#1b5e20;">
-              ${Math.abs(currentBalance).toLocaleString()} ج.م 
-              <span>${currentBalance > 0 ? 'له' : currentBalance < 0 ? 'عليه' : ''}</span>
-            </div>
-          </div>
         </body>
         </html>
       `;

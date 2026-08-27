@@ -149,6 +149,68 @@ const SalesReport: React.FC = () => {
     [treasuries, selectedTreasuryId]
   );
 
+  const [outSortKey, setOutSortKey] = useState<string>('date');
+  const [outSortAsc, setOutSortAsc] = useState<boolean>(false);
+
+  const [inSortKey, setInSortKey] = useState<string>('date');
+  const [inSortAsc, setInSortAsc] = useState<boolean>(false);
+
+  const handleOutSort = (key: string) => {
+    if (outSortKey === key) setOutSortAsc(!outSortAsc);
+    else { setOutSortKey(key); setOutSortAsc(false); }
+  };
+
+  const handleInSort = (key: string) => {
+    if (inSortKey === key) setInSortAsc(!inSortAsc);
+    else { setInSortKey(key); setInSortAsc(false); }
+  };
+
+  const sortedCashOut = useMemo(() => {
+    return [...cashOut].sort((a: any, b: any) => {
+      if (outSortKey === 'amount') {
+        const aVal = Math.abs(toNum(a.amount));
+        const bVal = Math.abs(toNum(b.amount));
+        return outSortAsc ? aVal - bVal : bVal - aVal;
+      }
+      if (outSortKey === 'reason') {
+        const aVal = getReasonForOut(a);
+        const bVal = getReasonForOut(b);
+        return outSortAsc ? aVal.localeCompare(bVal, 'ar') : bVal.localeCompare(aVal, 'ar');
+      }
+      if (outSortKey === 'type') {
+        const aVal = getTypeLabel(a);
+        const bVal = getTypeLabel(b);
+        return outSortAsc ? aVal.localeCompare(bVal, 'ar') : bVal.localeCompare(aVal, 'ar');
+      }
+      const aVal = String(a.date || a.transaction_date || '');
+      const bVal = String(b.date || b.transaction_date || '');
+      return outSortAsc ? aVal.localeCompare(bVal, 'ar') : bVal.localeCompare(aVal, 'ar');
+    });
+  }, [cashOut, outSortKey, outSortAsc]);
+
+  const sortedCashIn = useMemo(() => {
+    return [...cashIn].sort((a: any, b: any) => {
+      if (inSortKey === 'amount') {
+        const aVal = Math.abs(toNum(a.amount));
+        const bVal = Math.abs(toNum(b.amount));
+        return inSortAsc ? aVal - bVal : bVal - aVal;
+      }
+      if (inSortKey === 'entity') {
+        const aVal = getEntityNameForIn(a);
+        const bVal = getEntityNameForIn(b);
+        return inSortAsc ? aVal.localeCompare(bVal, 'ar') : bVal.localeCompare(aVal, 'ar');
+      }
+      if (inSortKey === 'type') {
+        const aVal = getTypeLabel(a);
+        const bVal = getTypeLabel(b);
+        return inSortAsc ? aVal.localeCompare(bVal, 'ar') : bVal.localeCompare(aVal, 'ar');
+      }
+      const aVal = String(a.date || a.transaction_date || '');
+      const bVal = String(b.date || b.transaction_date || '');
+      return inSortAsc ? aVal.localeCompare(bVal, 'ar') : bVal.localeCompare(aVal, 'ar');
+    });
+  }, [cashIn, inSortKey, inSortAsc]);
+
   const exportCSV = () => {
     let csv = '\uFEFF';
     csv += `"تاريخ اليومية","${dailyDate}"\n`;
@@ -275,22 +337,24 @@ const SalesReport: React.FC = () => {
             <table className="w-full text-right text-sm">
               <thead className="sticky top-0 z-10 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
                 <tr className="text-xs text-slate-500 dark:text-slate-400">
-                  <th className="px-5 py-3 font-black">السبب / الملاحظات</th>
-                  <th className="px-5 py-3 font-black">نوع الحركة</th>
-                  <th className="px-5 py-3 font-black text-left">المبلغ</th>
+                  <th onClick={() => handleOutSort('reason')} className="px-5 py-3 font-black cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-800 transition select-none group">
+                    <div className="flex items-center gap-1">السبب / الملاحظات<span className="text-slate-400">{outSortKey === 'reason' ? (outSortAsc ? '▲' : '▼') : '↕'}</span></div>
+                  </th>
+                  <th onClick={() => handleOutSort('type')} className="px-5 py-3 font-black cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-800 transition select-none group">
+                    <div className="flex items-center gap-1">نوع الحركة<span className="text-slate-400">{outSortKey === 'type' ? (outSortAsc ? '▲' : '▼') : '↕'}</span></div>
+                  </th>
+                  <th onClick={() => handleOutSort('amount')} className="px-5 py-3 font-black text-left cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-800 transition select-none group">
+                    <div className="flex items-center justify-end gap-1">المبلغ<span className="text-slate-400">{outSortKey === 'amount' ? (outSortAsc ? '▲' : '▼') : '↕'}</span></div>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {loading ? (
-                  <tr>
-                    <td colSpan={3} className="px-5 py-10 text-center text-slate-400">جارٍ التحميل...</td>
-                  </tr>
-                ) : cashOut.length === 0 ? (
-                  <tr>
-                    <td colSpan={3} className="px-5 py-10 text-center text-slate-400">لا توجد مدفوعات</td>
-                  </tr>
+                  <tr><td colSpan={3} className="px-5 py-10 text-center text-slate-400">جارٍ التحميل...</td></tr>
+                ) : sortedCashOut.length === 0 ? (
+                  <tr><td colSpan={3} className="px-5 py-10 text-center text-slate-400">لا توجد مدفوعات</td></tr>
                 ) : (
-                  cashOut.map((rec: any, idx: number) => {
+                  sortedCashOut.map((rec: any, idx: number) => {
                     const amt = toNum(rec.amount);
                     const typeLabel = getTypeLabel(rec);
                     const reason = getReasonForOut(rec);
@@ -305,9 +369,7 @@ const SalesReport: React.FC = () => {
                             {typeLabel || '—'}
                           </span>
                         </td>
-                        <td className="px-5 py-3 text-left font-black text-rose-600">
-                          {money(amt)} {currencySymbol}
-                        </td>
+                        <td className="px-5 py-3 text-left font-black text-rose-600">{money(amt)} {currencySymbol}</td>
                       </tr>
                     );
                   })
@@ -333,22 +395,24 @@ const SalesReport: React.FC = () => {
             <table className="w-full text-right text-sm">
               <thead className="sticky top-0 z-10 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
                 <tr className="text-xs text-slate-500 dark:text-slate-400">
-                  <th className="px-5 py-3 font-black">الجهة / الاسم</th>
-                  <th className="px-5 py-3 font-black">نوع الحركة</th>
-                  <th className="px-5 py-3 font-black text-left">المبلغ</th>
+                  <th onClick={() => handleInSort('entity')} className="px-5 py-3 font-black cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-800 transition select-none group">
+                    <div className="flex items-center gap-1">الجهة / الاسم<span className="text-slate-400">{inSortKey === 'entity' ? (inSortAsc ? '▲' : '▼') : '↕'}</span></div>
+                  </th>
+                  <th onClick={() => handleInSort('type')} className="px-5 py-3 font-black cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-800 transition select-none group">
+                    <div className="flex items-center gap-1">نوع الحركة<span className="text-slate-400">{inSortKey === 'type' ? (inSortAsc ? '▲' : '▼') : '↕'}</span></div>
+                  </th>
+                  <th onClick={() => handleInSort('amount')} className="px-5 py-3 font-black text-left cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-800 transition select-none group">
+                    <div className="flex items-center justify-end gap-1">المبلغ<span className="text-slate-400">{inSortKey === 'amount' ? (inSortAsc ? '▲' : '▼') : '↕'}</span></div>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {loading ? (
-                  <tr>
-                    <td colSpan={3} className="px-5 py-10 text-center text-slate-400">جارٍ التحميل...</td>
-                  </tr>
-                ) : cashIn.length === 0 ? (
-                  <tr>
-                    <td colSpan={3} className="px-5 py-10 text-center text-slate-400">لا توجد استلامات</td>
-                  </tr>
+                  <tr><td colSpan={3} className="px-5 py-10 text-center text-slate-400">جارٍ التحميل...</td></tr>
+                ) : sortedCashIn.length === 0 ? (
+                  <tr><td colSpan={3} className="px-5 py-10 text-center text-slate-400">لا توجد استلامات</td></tr>
                 ) : (
-                  cashIn.map((rec: any, idx: number) => {
+                  sortedCashIn.map((rec: any, idx: number) => {
                     const amt = toNum(rec.amount);
                     const typeLabel = getTypeLabel(rec);
                     const entity = getEntityNameForIn(rec);
@@ -363,9 +427,7 @@ const SalesReport: React.FC = () => {
                             {typeLabel || '—'}
                           </span>
                         </td>
-                        <td className="px-5 py-3 text-left font-black text-emerald-600">
-                          {money(amt)} {currencySymbol}
-                        </td>
+                        <td className="px-5 py-3 text-left font-black text-emerald-600">{money(amt)} {currencySymbol}</td>
                       </tr>
                     );
                   })

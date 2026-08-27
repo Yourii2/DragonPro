@@ -238,6 +238,9 @@ const ReportRepCustody: React.FC = () => {
     return Array.from(set).sort();
   }, [orders, selectedProduct, selectedColor]);
 
+  const [sortKey, setSortKey] = useState<string>('quantity');
+  const [sortAsc, setSortAsc] = useState(false);
+
   const custodyData = useMemo(() => {
     const dataMap: { [key: string]: { productName: string; color: string; size: string; barcode: string; quantity: number; repQuantities: { [repName: string]: number } } } = {};
 
@@ -294,12 +297,45 @@ const ReportRepCustody: React.FC = () => {
       });
     });
 
-    return Object.values(dataMap).map(data => ({
+    const rows = Object.values(dataMap).map(data => ({
       ...data,
       repsArr: Object.entries(data.repQuantities).map(([name, qty]) => ({ name, qty }))
-    })).sort((a, b) => b.quantity - a.quantity);
+    }));
 
-  }, [orders, selectedRepId, selectedProduct, selectedColor, selectedSize, reps]);
+    return rows.sort((a, b) => {
+      if (sortKey === 'quantity') {
+        return sortAsc ? a.quantity - b.quantity : b.quantity - a.quantity;
+      }
+      const aVal = String((a as any)[sortKey] || '');
+      const bVal = String((b as any)[sortKey] || '');
+      return sortAsc ? aVal.localeCompare(bVal, 'ar') : bVal.localeCompare(aVal, 'ar');
+    });
+
+  }, [orders, selectedRepId, selectedProduct, selectedColor, selectedSize, reps, sortKey, sortAsc]);
+
+  const handleSort = (key: string) => {
+    if (sortKey === key) {
+      setSortAsc(!sortAsc);
+    } else {
+      setSortKey(key);
+      setSortAsc(false);
+    }
+  };
+
+  const SortHeader: React.FC<{ col: string; label: string; align?: 'center' | 'right' | 'left' }> = ({ col, label, align = 'center' }) => (
+    <th
+      onClick={() => handleSort(col)}
+      className={`px-4 py-4 font-bold text-${align} cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors select-none group`}
+      title="اضغط للفرز تصاعدي / تنازلي"
+    >
+      <div className={`flex items-center gap-1 ${align === 'center' ? 'justify-center' : align === 'right' ? 'justify-start' : 'justify-end'}`}>
+        <span>{label}</span>
+        <span className="text-xs text-slate-400 group-hover:text-blue-600 transition-colors">
+          {sortKey === col ? (sortAsc ? '▲' : '▼') : '↕'}
+        </span>
+      </div>
+    </th>
+  );
 
   const totalItems = custodyData.reduce((sum, item) => sum + item.quantity, 0);
 
@@ -505,12 +541,12 @@ const ReportRepCustody: React.FC = () => {
             <table className="w-full text-right text-sm">
               <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400">
                 <tr>
-                  <th className="px-4 py-4 font-bold">#</th>
-                  <th className="px-6 py-4 font-bold">اسم المنتج / الصنف</th>
-                  <th className="px-4 py-4 font-bold text-center">اللون</th>
-                  <th className="px-4 py-4 font-bold text-center">المقاس</th>
-                  <th className="px-4 py-4 font-bold text-center">الباركود</th>
-                  <th className="px-6 py-4 font-bold text-center">الكمية في العهدة</th>
+                  <th className="px-4 py-4 font-bold text-center w-12">#</th>
+                  <SortHeader col="productName" label="اسم المنتج / الصنف" align="right" />
+                  <SortHeader col="color" label="اللون" align="center" />
+                  <SortHeader col="size" label="المقاس" align="center" />
+                  <SortHeader col="barcode" label="الباركود" align="center" />
+                  <SortHeader col="quantity" label="الكمية في العهدة" align="center" />
                   {!selectedRepId && <th className="px-6 py-4 font-bold">موزعة مع (المناديب)</th>}
                 </tr>
               </thead>

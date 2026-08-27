@@ -123,6 +123,8 @@ const getOrderStatusLabelAr = (statusRaw: any) => {
       return 'لا يرد';
     case 'confirmed':
       return 'مؤكد';
+    case 'wrong_number':
+      return 'رقم خاطئ';
     default:
       return status ? status : 'غير محدد';
   }
@@ -306,6 +308,10 @@ const SalesDaily: React.FC = () => {
         if (defaults) {
           setUserDefaults(defaults);
           console.log('userDefaults set:', defaults);
+          // جلب اسم الموظف تلقائياً من بيانات تسجيل الدخول
+          if (defaults.name || defaults.username) {
+            setEmployee(defaults.name || defaults.username || '');
+          }
         } else {
           console.warn('userDefaults not set! Response:', ud);
         }
@@ -1555,19 +1561,21 @@ const scanBarcodeAddOrder = async () => {
     let productsSummaryHtml = '';
     try {
       const combined = [...(assignedOrders || []), ...ordersParam];
-      const summaryMap: Record<string, { name: string; color: string; size: string; qty: number }> = {};
+      const summaryMap: Record<string, { name: string; qty: number }> = {};
       combined.forEach((o: any) => {
         (o.products || []).forEach((p: any) => {
-          const key = `${p.name || ''}||${p.color || ''}||${p.size || ''}`;
-          if (!summaryMap[key]) summaryMap[key] = { name: p.name || '', color: p.color || '', size: p.size || '', qty: 0 };
+          const key = String(p.name || '').trim();
+          if (!summaryMap[key]) summaryMap[key] = { name: p.name || '', qty: 0 };
           summaryMap[key].qty += toNum(p.quantity ?? p.qty ?? 0);
         });
       });
-      const prodRows = Object.values(summaryMap).map(r => `<tr><td>${r.name}</td><td>${r.color}</td><td>${r.size}</td><td>${r.qty}</td></tr>`).join('');
+      const prodRows = Object.values(summaryMap)
+        .sort((a, b) => a.name.localeCompare(b.name, 'ar'))
+        .map(r => `<tr><td>${r.name}</td><td style="text-align:center; font-weight:700;">${r.qty}</td></tr>`).join('');
       productsSummaryHtml = `
-        <h3 style="margin-top:18px;"البضاعه المستلمه - جميع المنتجات (قديم + اليوم)</h3>
+        <h3 style="margin-top:18px;">البضاعة المستلمة - جميع المنتجات (قديم + اليوم)</h3>
         <table style="width:100%; border-collapse:collapse; margin-top:8px;">
-          <thead><tr><th>المنتج</th><th>اللون</th><th>المقاس</th><th>الكمية</th></tr></thead>
+          <thead><tr><th>المنتج</th><th>إجمالي الكمية</th></tr></thead>
           <tbody>${prodRows}</tbody>
         </table>
       `;
@@ -1579,6 +1587,9 @@ const scanBarcodeAddOrder = async () => {
     const noOrdersMessageHtml = (!Array.isArray(assignedOrders) || assignedOrders.length === 0) && ordersParam.length === 0
       ? `<div style="margin-top:18px; padding:12px; border:1px dashed #ccc; text-align:center;">لا توجد اوردرات لعرضها في اليومية.</div>`
       : '';
+
+    // اسم الموظف الذي أجرى اليومية
+    const reportEmployeeName = employee || userDefaults?.name || userDefaults?.username || '';
 
     const mainTableHtml = `<!doctype html><html><head><meta charset="utf-8"><title>${reportTitle}</title>` +
       `<style>
@@ -1592,10 +1603,15 @@ const scanBarcodeAddOrder = async () => {
         .grid{display:grid; grid-template-columns:repeat(2,1fr); gap:6px; margin-top:8px}
         .box{border:1px solid #ddd; padding:6px; border-radius:6px;}
         .muted{font-size:11px; color:#555}
+        .late-badge{background:#fee2e2; color:#b91c1c; padding:2px 6px; border-radius:4px; font-size:10px; font-weight:700;}
+        .ok-badge{background:#d1fae5; color:#065f46; padding:2px 6px; border-radius:4px; font-size:10px;}
       </style></head><body>` +
       `<div class="header"><div></div><div style="text-align:center;"><h1>${reportTitle} ${whoName}</h1></div><div></div></div>` +
-      `<div style="display:flex; gap:12px; align-items:flex-start; margin-top:8px; font-size:12px">
-        <div style="flex:0 0 auto; min-width:160px; padding:6px">التاريخ: <b>${dateStr}</b></div>
+      `<div style="margin-top:8px; font-size:12px;">
+        <div style="padding:4px 6px;">التاريخ: <b>${dateStr}</b></div>
+        ${reportEmployeeName ? `<div style="padding:4px 6px; margin-top:2px;">الموظف: <b>${reportEmployeeName}</b></div>` : ''}
+      </div>` +
+      `<div style="display:flex; gap:12px; align-items:flex-start; margin-top:6px; font-size:12px;">
         ${showMoney ? `
           <div style="flex:1; display:flex; gap:10px; align-items:flex-start">
             <div style="flex:1; padding:6px; border:1px solid #ddd; border-radius:6px">
@@ -1651,6 +1667,24 @@ const scanBarcodeAddOrder = async () => {
 
     // Build an "اوردرات نزول" table for assigned (old) orders, show if any
     const oldOrdersList = Array.isArray(assignedOrders) ? assignedOrders : [];
+    // دالة مساعدة: حساب عدد الأيام من تاريخ الإضافة حتى اليوم
+    const calcDaysAgo = (dateStr: string | null | undefined): number => {
+      if (!dateStr) return 0;
+      try {
+        const d = new Date(String(dateStr).replace(' ', 'T'));
+        if (isNaN(d.getTime())) return 0;
+        return Math.floor((Date.now() - d.getTime()) / (1000 * 60 * 60 * 24));
+      } catch { return 0; }
+    };
+    const formatDateOnly = (dateStr: string | null | undefined): string => {
+      if (!dateStr) return '-';
+      try {
+        const d = new Date(String(dateStr).replace(' ', 'T'));
+        if (isNaN(d.getTime())) return '-';
+        return d.toLocaleDateString('ar-EG', { year: 'numeric', month: '2-digit', day: '2-digit' });
+      } catch { return '-'; }
+    };
+
     let oldOrdersTableHtml = '';
     if (oldOrdersList.length > 0) {
       const oldRows = oldOrdersList.map((o: any) => {
@@ -1659,7 +1693,14 @@ const scanBarcodeAddOrder = async () => {
         const tot = orderTotal(o);
         const emp = o.employee ?? o.employee_name ?? o.assigneeName ?? o.assigned_to ?? (o.assigned && (o.assigned.name || o.assigned.employee)) ?? '';
         const pg = o.page ?? o.page_number ?? o.page_no ?? o.pageNumber ?? o.package_page ?? '';
-        return `<tr>
+        // تاريخ إضافة الأوردر للمندوب/اليومية فقط (لا يُستخدم تاريخ إنشاء الأوردر)
+        const assignDateRaw = o.assigned_at ?? o.with_rep_at ?? o.rep_assigned_at ?? o.rep_date ?? o.daily_assigned_at ?? o.assignment_date ?? o.delivery_date ?? o.updated_at ?? null;
+        const assignDateFormatted = formatDateOnly(assignDateRaw);
+        const daysAgo = calcDaysAgo(assignDateRaw);
+        const lateBadge = daysAgo >= 3
+          ? `<span class="late-badge">⚠️ ${daysAgo} يوم</span>`
+          : `<span class="ok-badge">${daysAgo === 0 ? 'اليوم' : daysAgo + ' يوم'}</span>`;
+        return `<tr style="${daysAgo >= 3 ? 'background:#fff7f7;' : ''}">
             <td>${o.orderNumber ?? o.order_number ?? o.id ?? ''}</td>
             <td>${o.customerName ?? o.customer_name ?? ''}</td>
             <td>${o.phone ?? o.phone1 ?? ''}</td>
@@ -1670,16 +1711,19 @@ const scanBarcodeAddOrder = async () => {
             <td>${sub.toLocaleString()}</td>
             <td>${ship.toLocaleString()}</td>
             <td>${tot.toLocaleString()}</td>
+            <td style="text-align:center;">${assignDateFormatted}<br/>${lateBadge}</td>
             <td>${o.notes ?? ''}</td>
           </tr>`;
       }).join('');
 
       oldOrdersTableHtml = `
-        <h3 style="margin-top:16px;">اوردرات نزول (الاوردرات القديمة)</h3>
+        <h3 style="margin-top:16px; color:#b91c1c;">⚠️ اوردرات نزول (الاوردرات القديمة في عهدة المندوب)</h3>
+        <p style="font-size:11px; color:#6b7280; margin:4px 0 8px 0;">الصف باللون الأحمر الفاتح = الأوردر عمره 3 أيام أو أكثر في العهدة</p>
         <table style="width:100%; border-collapse:collapse; margin-top:8px;">
           <thead><tr>
             <th>رقم اوردر</th><th>اسم العميل</th><th>الهاتف</th><th>المحافظة</th><th>العنوان</th>
-            <th>الموظف</th><th>البيدج</th><th>الإجمالي</th><th>شحن</th><th>الإجمالي الكلي</th><th>ملاحظات</th>
+            <th>الموظف</th><th>البيدج</th><th>الإجمالي</th><th>شحن</th><th>الإجمالي الكلي</th>
+            <th style="background:#fef2f2;">تاريخ التسليم للمندوب</th><th>ملاحظات</th>
           </tr></thead>
           <tbody>${oldRows}</tbody>
         </table>
@@ -1693,6 +1737,29 @@ const scanBarcodeAddOrder = async () => {
     win.document.write(finalHtml);
     win.document.close();
     setTimeout(() => win.print(), 500);
+  };
+
+  // ========= إعادة ضبط الصفحة لحالتها الأولى الفارغة =========
+  const resetPage = () => {
+    setSelectedRepId('');
+    setSelectedShippingCompanyId('');
+    setSelectedOrders([]);
+    setAssignedOrders([]);
+    setSelectedPendingIds([]);
+    setBarcodeInput('');
+    setPrevBalance(0);
+    setPaymentAdjustment(0);
+    setPaymentAction('collect');
+    setIsSplitPayment(false);
+    setCashAmount(0);
+    setElectronicAmount(0);
+    setCashTreasuryId('');
+    setElectronicTreasuryId('');
+    setSelectedTreasuryId('');
+    setSelectedWarehouseId('');
+    setOpenDailyInfo(null);
+    setEmployee('');
+    setPage('');
   };
 
   const onComplete = async () => {
@@ -1832,14 +1899,7 @@ const scanBarcodeAddOrder = async () => {
       if (jr && jr.success) {
         Swal.fire('تم', 'تمت معالجة اليومية وطباعه اليومية.', 'success');
         printA4Report(ordersToAssign, { ...(jr.reportData || {}), repName, prevBalance, paidNow: paidNowSigned });
-
-        await loadRepContext(Number(selectedRepId));
-        setSelectedOrders([]);
-        setSelectedPendingIds([]);
-        setPaymentAdjustment(0);
-        setIsSplitPayment(false);
-        setCashAmount(0);
-        setElectronicAmount(0);
+        resetPage();
         refreshPendingOrdersList();
       } else {
         Swal.fire('فشل', jr?.message || 'لم يؤكد الخادم المعالجة.', 'error');
@@ -1850,7 +1910,6 @@ const scanBarcodeAddOrder = async () => {
     }
   };
 
-  // Silent completion: complete daily and print without any modals or confirmations
   const onCompleteSilent = async () => {
     try {
       const assigneeId = isShippingMode ? selectedShippingCompanyId : selectedRepId;
@@ -1931,14 +1990,7 @@ const scanBarcodeAddOrder = async () => {
       if (jr && jr.success) {
         // print using server-provided data when available (A4 daily)
         printA4Report(ordersToAssign, { ...(jr.reportData || {}), repName: reps.find(r => Number(r.id) === Number(selectedRepId))?.name || '', prevBalance, paidNow: paidNowSigned });
-
-        await loadRepContext(Number(selectedRepId));
-        setSelectedOrders([]);
-        setSelectedPendingIds([]);
-        setPaymentAdjustment(0);
-        setIsSplitPayment(false);
-        setCashAmount(0);
-        setElectronicAmount(0);
+        resetPage();
         refreshPendingOrdersList();
       } else {
         console.error('Silent complete failed', jr);

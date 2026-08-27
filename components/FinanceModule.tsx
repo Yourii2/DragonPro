@@ -17,7 +17,7 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
   const [modalType, setModalType] = useState<'expense' | 'deposit' | 'transfer' | null>(null);
 
   // Form states
-  const [expenseData, setExpenseData] = useState({ amount: '', treasury_id: '', notes: '' });
+  const [expenseData, setExpenseData] = useState({ amount: '', treasury_id: '', category: 'other', notes: '' });
   const [depositData, setDepositData] = useState({ amount: '', treasury_id: '', notes: '' });
   const [transferData, setTransferData] = useState({ amount: '', from_treasury_id: '', to_treasury_id: '', notes: '' });
 
@@ -419,7 +419,7 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
   const closeTransactionModal = () => {
     setIsTransactionModalOpen(false);
     setModalType(null);
-    setExpenseData({ amount: '', treasury_id: '', notes: '' });
+    setExpenseData({ amount: '', treasury_id: '', category: 'other', notes: '' });
     setDepositData({ amount: '', treasury_id: '', notes: '' });
     setTransferData({ amount: '', from_treasury_id: '', to_treasury_id: '', notes: '' });
   };
@@ -573,6 +573,18 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
   };
 
   const getTransactionTypeLabel = (type: string, detailsJson: string | null) => {
+    const expenseCategoryLabels: Record<string, string> = {
+      ads: 'مصروف (إعلانات وتسويق)',
+      salaries: 'مصروف (رواتب وأجور)',
+      rent: 'مصروف (إيجارات)',
+      utilities: 'مصروف (مرافق وخدمات)',
+      transport: 'مصروف (انتقالات وشحن)',
+      maintenance: 'مصروف (صيانة وإصلاح)',
+      hospitality: 'مصروف (ضيافة وبوفيه)',
+      supplies: 'مصروف (أدوات مكتبية)',
+      other: 'مصروفات متنوعة'
+    };
+
     const labels: { [key: string]: string } = {
         // New subtype-based labels
         deposit: 'إيداع نقدي',
@@ -601,6 +613,9 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
     if (detailsJson) {
         try {
             const details = JSON.parse(detailsJson);
+            if ((type === 'expense' || details.subtype === 'expense') && details.category && expenseCategoryLabels[details.category]) {
+                return expenseCategoryLabels[details.category];
+            }
             if (details.subtype && labels[details.subtype]) {
                 return labels[details.subtype];
             }
@@ -752,7 +767,17 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
 
     switch (modalType) {
       case 'expense':
-        payload = { ...expenseData, type: 'expense', amount: -Math.abs(parseFloat(expenseData.amount)) };
+        payload = { 
+          ...expenseData, 
+          type: 'expense', 
+          amount: -Math.abs(parseFloat(expenseData.amount)),
+          category: expenseData.category || 'other',
+          details: {
+            category: expenseData.category || 'other',
+            notes: expenseData.notes,
+            reason: expenseData.notes
+          }
+        };
         treasuryToCheck = treasuries.find(t => t.id == expenseData.treasury_id);
         amountToCheck = parseFloat(expenseData.amount);
         affectedTreasuryId = String(expenseData.treasury_id || '');
@@ -1179,6 +1204,26 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
                 <>
                   <div><label className="text-xs font-bold text-slate-500">المبلغ</label><input type="number" required value={expenseData.amount} onChange={e => setExpenseData({...expenseData, amount: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1" /></div>
                   <div>
+                    <label className="text-xs font-bold text-slate-500">نوع / تصنيف المصروف</label>
+                    <CustomSelect
+                      required
+                      value={expenseData.category || 'other'}
+                      onChange={v => setExpenseData({...expenseData, category: v})}
+                      options={[
+                        { value: 'ads', label: 'إعلانات وتسويق' },
+                        { value: 'salaries', label: 'رواتب وأجور' },
+                        { value: 'rent', label: 'إيجارات' },
+                        { value: 'utilities', label: 'مرافق وخدمات (كهرباء / مياه / انترنت)' },
+                        { value: 'transport', label: 'انتقالات وشحن وبنزين' },
+                        { value: 'maintenance', label: 'صيانة وإصلاح' },
+                        { value: 'hospitality', label: 'ضيافة وبوفيه' },
+                        { value: 'supplies', label: 'أدوات مكتبية ومطبوعات' },
+                        { value: 'other', label: 'مصروفات متنوعة / أخرى' }
+                      ]}
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
                     <label className="text-xs font-bold text-slate-500">من خزينة</label>
                     <CustomSelect
                       required
@@ -1188,7 +1233,7 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
                       className="w-full"
                     />
                   </div>
-                  <div><label className="text-xs font-bold text-slate-500">السبب/البيان</label><input type="text" required value={expenseData.notes} onChange={e => setExpenseData({...expenseData, notes: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1" /></div>
+                  <div><label className="text-xs font-bold text-slate-500">السبب/البيان</label><input type="text" required value={expenseData.notes} onChange={e => setExpenseData({...expenseData, notes: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1" placeholder="مثال: إعلانات ممولة فيسبوك، صيانة أجهزة..." /></div>
                 </>
               )}
               {/* Transfer Form */}

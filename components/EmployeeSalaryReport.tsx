@@ -265,7 +265,45 @@ const EmployeeSalaryReport: React.FC<EmployeeSalaryReportProps> = ({ employees }
     URL.revokeObjectURL(url);
   };
 
-  const totals = report?.attendance?.totals || {};
+  const [attSortKey, setAttSortKey] = useState<string>('work_date');
+  const [attSortAsc, setAttSortAsc] = useState<boolean>(true);
+
+  const [txSortKey, setTxSortKey] = useState<string>('date');
+  const [txSortAsc, setTxSortAsc] = useState<boolean>(false);
+
+  const handleAttSort = (key: string) => {
+    if (attSortKey === key) setAttSortAsc(!attSortAsc);
+    else { setAttSortKey(key); setAttSortAsc(true); }
+  };
+
+  const handleTxSort = (key: string) => {
+    if (txSortKey === key) setTxSortAsc(!txSortAsc);
+    else { setTxSortKey(key); setTxSortAsc(false); }
+  };
+
+  const sortedAttendanceRows = [...(report?.attendance?.rows || [])].sort((a: any, b: any) => {
+    if (['late_minutes', 'early_leave_minutes', 'overtime_minutes'].includes(attSortKey)) {
+      const aVal = Number(a[attSortKey] || 0);
+      const bVal = Number(b[attSortKey] || 0);
+      return attSortAsc ? aVal - bVal : bVal - aVal;
+    }
+    const aVal = String(a[attSortKey] || '');
+    const bVal = String(b[attSortKey] || '');
+    return attSortAsc ? aVal.localeCompare(bVal, 'ar') : bVal.localeCompare(aVal, 'ar');
+  });
+
+  const sortedTxRows = [...(report?.transactions?.rows || [])].sort((a: any, b: any) => {
+    if (txSortKey === 'amount') {
+      const aVal = Number(a.amount || 0);
+      const bVal = Number(b.amount || 0);
+      return txSortAsc ? aVal - bVal : bVal - aVal;
+    }
+    const aVal = String(a[txSortKey] || '');
+    const bVal = String(b[txSortKey] || '');
+    return txSortAsc ? aVal.localeCompare(bVal, 'ar') : bVal.localeCompare(aVal, 'ar');
+  });
+
+  const attTotals = report?.attendance?.totals || {};
   const penalties = report?.attendance?.penalties || {};
   const txTotals = report?.transactions?.totals || {};
   const computed = report?.computed || {};
@@ -322,13 +360,13 @@ const EmployeeSalaryReport: React.FC<EmployeeSalaryReportProps> = ({ employees }
             <div className="p-6 rounded-3xl border border-card shadow-sm card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
               <h4 className="font-black mb-4">ملخص الحضور</h4>
               <div className="grid grid-cols-2 gap-3 text-xs">
-                <div>أيام الحضور: <strong>{totals.present_days || 0}</strong></div>
-                <div>أيام التأخير: <strong>{totals.late_days || 0}</strong></div>
-                <div>أيام الغياب: <strong>{totals.absent_days || 0}</strong></div>
-                <div>أيام العطلات: <strong>{totals.holiday_days || 0}</strong></div>
-                <div>دقائق التأخير: <strong>{totals.late_minutes || 0}</strong></div>
-                <div>دقائق الانصراف المبكر: <strong>{totals.early_leave_minutes || 0}</strong></div>
-                <div>دقائق الإضافي: <strong>{totals.overtime_minutes || 0}</strong></div>
+                <div>أيام الحضور: <strong>{attTotals.present_days || 0}</strong></div>
+                <div>أيام التأخير: <strong>{attTotals.late_days || 0}</strong></div>
+                <div>أيام الغياب: <strong>{attTotals.absent_days || 0}</strong></div>
+                <div>أيام العطلات: <strong>{attTotals.holiday_days || 0}</strong></div>
+                <div>دقائق التأخير: <strong>{attTotals.late_minutes || 0}</strong></div>
+                <div>دقائق الانصراف المبكر: <strong>{attTotals.early_leave_minutes || 0}</strong></div>
+                <div>دقائق الإضافي: <strong>{attTotals.overtime_minutes || 0}</strong></div>
               </div>
               <div className="mt-4 text-xs">
                 <div>خصم التأخير: <strong>{Number(penalties.late_penalty || 0).toLocaleString()}</strong></div>
@@ -359,29 +397,45 @@ const EmployeeSalaryReport: React.FC<EmployeeSalaryReportProps> = ({ employees }
             <h4 className="font-black mb-4">تفاصيل الحضور اليومي</h4>
             <div className="overflow-x-auto">
               <table className="w-full text-xs text-right">
-                <thead className="text-muted">
+                <thead className="text-muted bg-slate-50 dark:bg-slate-900/30">
                   <tr>
-                    <th className="px-2 py-1">التاريخ</th>
-                    <th className="px-2 py-1">الوردية</th>
-                    <th className="px-2 py-1">الدخول</th>
-                    <th className="px-2 py-1">الخروج</th>
-                    <th className="px-2 py-1">تأخير</th>
-                    <th className="px-2 py-1">انصراف مبكر</th>
-                    <th className="px-2 py-1">إضافي</th>
-                    <th className="px-2 py-1">الحالة</th>
+                    <th onClick={() => handleAttSort('work_date')} className="px-3 py-2 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition select-none group">
+                      <div className="flex items-center gap-1"><span>التاريخ</span><span className="text-[10px] text-slate-400 group-hover:text-blue-600">{attSortKey === 'work_date' ? (attSortAsc ? '▲' : '▼') : '↕'}</span></div>
+                    </th>
+                    <th onClick={() => handleAttSort('shift_name')} className="px-3 py-2 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition select-none group">
+                      <div className="flex items-center gap-1"><span>الوردية</span><span className="text-[10px] text-slate-400 group-hover:text-blue-600">{attSortKey === 'shift_name' ? (attSortAsc ? '▲' : '▼') : '↕'}</span></div>
+                    </th>
+                    <th onClick={() => handleAttSort('first_in')} className="px-3 py-2 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition select-none group">
+                      <div className="flex items-center gap-1"><span>الدخول</span><span className="text-[10px] text-slate-400 group-hover:text-blue-600">{attSortKey === 'first_in' ? (attSortAsc ? '▲' : '▼') : '↕'}</span></div>
+                    </th>
+                    <th onClick={() => handleAttSort('last_out')} className="px-3 py-2 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition select-none group">
+                      <div className="flex items-center gap-1"><span>الخروج</span><span className="text-[10px] text-slate-400 group-hover:text-blue-600">{attSortKey === 'last_out' ? (attSortAsc ? '▲' : '▼') : '↕'}</span></div>
+                    </th>
+                    <th onClick={() => handleAttSort('late_minutes')} className="px-3 py-2 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition select-none group">
+                      <div className="flex items-center gap-1"><span>تأخير</span><span className="text-[10px] text-slate-400 group-hover:text-blue-600">{attSortKey === 'late_minutes' ? (attSortAsc ? '▲' : '▼') : '↕'}</span></div>
+                    </th>
+                    <th onClick={() => handleAttSort('early_leave_minutes')} className="px-3 py-2 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition select-none group">
+                      <div className="flex items-center gap-1"><span>انصراف مبكر</span><span className="text-[10px] text-slate-400 group-hover:text-blue-600">{attSortKey === 'early_leave_minutes' ? (attSortAsc ? '▲' : '▼') : '↕'}</span></div>
+                    </th>
+                    <th onClick={() => handleAttSort('overtime_minutes')} className="px-3 py-2 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition select-none group">
+                      <div className="flex items-center gap-1"><span>إضافي</span><span className="text-[10px] text-slate-400 group-hover:text-blue-600">{attSortKey === 'overtime_minutes' ? (attSortAsc ? '▲' : '▼') : '↕'}</span></div>
+                    </th>
+                    <th onClick={() => handleAttSort('status')} className="px-3 py-2 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition select-none group">
+                      <div className="flex items-center gap-1"><span>الحالة</span><span className="text-[10px] text-slate-400 group-hover:text-blue-600">{attSortKey === 'status' ? (attSortAsc ? '▲' : '▼') : '↕'}</span></div>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(report.attendance?.rows || []).map((row: any) => (
+                  {sortedAttendanceRows.map((row: any) => (
                     <tr key={row.id} className="border-t border-slate-200/50">
-                      <td className="px-2 py-1">{row.work_date}</td>
-                      <td className="px-2 py-1">{row.shift_name || '-'}</td>
-                      <td className="px-2 py-1">{row.first_in || '-'}</td>
-                      <td className="px-2 py-1">{row.last_out || '-'}</td>
-                      <td className="px-2 py-1">{row.late_minutes}</td>
-                      <td className="px-2 py-1">{row.early_leave_minutes}</td>
-                      <td className="px-2 py-1">{row.overtime_minutes}</td>
-                      <td className="px-2 py-1">{row.status}</td>
+                      <td className="px-3 py-2">{row.work_date}</td>
+                      <td className="px-3 py-2">{row.shift_name || '-'}</td>
+                      <td className="px-3 py-2">{row.first_in || '-'}</td>
+                      <td className="px-3 py-2">{row.last_out || '-'}</td>
+                      <td className="px-3 py-2">{row.late_minutes}</td>
+                      <td className="px-3 py-2">{row.early_leave_minutes}</td>
+                      <td className="px-3 py-2">{row.overtime_minutes}</td>
+                      <td className="px-3 py-2">{row.status}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -393,26 +447,46 @@ const EmployeeSalaryReport: React.FC<EmployeeSalaryReportProps> = ({ employees }
             <h4 className="font-black mb-4">المعاملات خلال الشهر</h4>
             <div className="overflow-x-auto">
               <table className="w-full text-xs text-right">
-                <thead className="text-muted">
+                <thead className="text-muted bg-slate-50 dark:bg-slate-900/30">
                   <tr>
-                    <th className="px-2 py-1">التاريخ</th>
-                    <th className="px-2 py-1">النوع</th>
-                    <th className="px-2 py-1">المبلغ</th>
-                    <th className="px-2 py-1">ملاحظات</th>
+                    <th onClick={() => handleTxSort('date')} className="px-3 py-2 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition select-none group" title="فرز تصاعدي / تنازلي">
+                      <div className="flex items-center gap-1">
+                        <span>التاريخ</span>
+                        <span className="text-[10px] text-slate-400 group-hover:text-blue-600">{txSortKey === 'date' ? (txSortAsc ? '▲' : '▼') : '↕'}</span>
+                      </div>
+                    </th>
+                    <th onClick={() => handleTxSort('type')} className="px-3 py-2 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition select-none group" title="فرز تصاعدي / تنازلي">
+                      <div className="flex items-center gap-1">
+                        <span>النوع</span>
+                        <span className="text-[10px] text-slate-400 group-hover:text-blue-600">{txSortKey === 'type' ? (txSortAsc ? '▲' : '▼') : '↕'}</span>
+                      </div>
+                    </th>
+                    <th onClick={() => handleTxSort('amount')} className="px-3 py-2 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition select-none group" title="فرز تصاعدي / تنازلي">
+                      <div className="flex items-center gap-1">
+                        <span>المبلغ</span>
+                        <span className="text-[10px] text-slate-400 group-hover:text-blue-600">{txSortKey === 'amount' ? (txSortAsc ? '▲' : '▼') : '↕'}</span>
+                      </div>
+                    </th>
+                    <th onClick={() => handleTxSort('notes')} className="px-3 py-2 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition select-none group" title="فرز تصاعدي / تنازلي">
+                      <div className="flex items-center gap-1">
+                        <span>ملاحظات</span>
+                        <span className="text-[10px] text-slate-400 group-hover:text-blue-600">{txSortKey === 'notes' ? (txSortAsc ? '▲' : '▼') : '↕'}</span>
+                      </div>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(report.transactions?.rows || []).map((tx: any) => (
-                    <tr key={tx.id} className="border-t border-slate-200/50">
-                      <td className="px-2 py-1">{tx.date}</td>
-                      <td className="px-2 py-1">
+                  {sortedTxRows.map((tx: any) => (
+                    <tr key={tx.id} className="border-t border-slate-200/50 hover:bg-slate-50 dark:hover:bg-slate-700/30">
+                      <td className="px-3 py-2 font-mono">{tx.date}</td>
+                      <td className="px-3 py-2">
                         {tx.type === 'advance' && 'سلفة'}
                         {tx.type === 'bonus' && 'حافز'}
                         {tx.type === 'penalty' && 'خصم'}
                         {tx.type === 'salary' && 'راتب'}
                       </td>
-                      <td className="px-2 py-1">{Number(tx.amount || 0).toLocaleString()}</td>
-                      <td className="px-2 py-1">{tx.notes || '-'}</td>
+                      <td className="px-3 py-2 font-black">{Number(tx.amount || 0).toLocaleString()}</td>
+                      <td className="px-3 py-2">{tx.notes || '-'}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -314,7 +314,7 @@ const SalesDailyClose: React.FC = () => {
         const rep = repsList.find((u: any) => String(u.id) === String(repId));
         const bal = toNum(rep?.balance ?? 0);
         setRepBalance(bal);
-        setPaidAmount(Math.max(0, -bal));
+        setPaidAmount(0); // لا يتم ملء المبلغ تلقائياً — يُدخله المستخدم يدوياً
       }
 
       // 2. Get Open Daily
@@ -636,14 +636,23 @@ const SalesDailyClose: React.FC = () => {
       }
 
       if (settleSuccess) {
+        let currentEmpName = userDefaults?.name || userDefaults?.username || '';
+        if (!currentEmpName) {
+          try {
+            const u = JSON.parse(localStorage.getItem('Dragon_user') || '{}');
+            currentEmpName = u.name || u.username || '';
+          } catch (e) {}
+        }
+        const currentUserId = userDefaults?.user_id || userDefaults?.id || null;
+
         await fetch(`${API_BASE_PATH}/api.php?module=sales&action=logCloseDaily`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ rep_id: Number(selectedRepId), treasury_id: selectedTreasuryId ? Number(selectedTreasuryId) : null, paid_amount: amount, direction: settlementDirection, event_date: new Date().toISOString().slice(0, 10), notes: 'اغلاق اليوميه تلقائيا' })
+          body: JSON.stringify({ rep_id: Number(selectedRepId), treasury_id: selectedTreasuryId ? Number(selectedTreasuryId) : null, paid_amount: amount, direction: settlementDirection, event_date: new Date().toISOString().slice(0, 10), notes: 'اغلاق اليوميه تلقائيا', employee: currentEmpName, created_by: currentUserId })
         }).catch(() => null);
 
         const closeResp = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=closeRepDaily`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ rep_id: Number(selectedRepId), journal_id: openDailyInfo.id })
+          body: JSON.stringify({ rep_id: Number(selectedRepId), journal_id: openDailyInfo.id, employee: currentEmpName, created_by: currentUserId })
         });
         const closeJson = await closeResp.json().catch(() => null);
         if (!closeJson?.success) {
@@ -774,72 +783,98 @@ const SalesDailyClose: React.FC = () => {
       <head>
         <title>يومية مندوب - ${pRepName}</title>
         <style>
-          body { font-family: Tahoma, Arial, sans-serif; font-size: 13px; margin: 20px; line-height: 1.5; }
-          .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 10px; }
-          .flex { display: flex; justify-content: space-between; margin-bottom: 15px; }
-          .box { border: 1px solid #000; padding: 10px; border-radius: 5px; flex: 1; margin: 0 5px; }
-          table { width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: 12px; }
-          th { background: #eee; padding: 5px; border: 1px solid #ccc; text-align: right; }
-          td { padding: 5px; border: 1px solid #ccc; }
-          .page-break { page-break-after: always; }
+          body { font-family: Tahoma, Arial, sans-serif; font-size: 12px; margin: 16px; line-height: 1.5; direction: rtl; }
+          .header { text-align: center; margin-bottom: 14px; border-bottom: 2px solid #000; padding-bottom: 8px; }
+          h2 { margin: 0 0 4px; font-size: 16px; }
+          h4 { margin: 12px 0 4px; font-size: 12px; }
+          table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 11px; }
+          th { background: #eee; padding: 4px 6px; border: 1px solid #ccc; text-align: right; font-weight: bold; }
+          td { padding: 4px 6px; border: 1px solid #ccc; }
+          .summary-top { border: 1px solid #bbb; border-radius: 6px; padding: 8px 12px; background: #fafafa; margin-bottom: 10px; font-size: 12px; }
+          .summary-top .title { font-weight: bold; font-size: 13px; margin-bottom: 6px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+          .summary-top .row { display: flex; justify-content: space-between; padding: 2px 0; }
+          .summary-top .row b { direction: ltr; }
+          .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+          .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+          .box { border: 1px solid #bbb; border-radius: 6px; padding: 8px 10px; background: #fff; }
+          .box .box-title { font-weight: bold; font-size: 11px; border-bottom: 1px solid #ddd; padding-bottom: 4px; margin-bottom: 5px; color: #333; }
+          .box .row { display: flex; justify-content: space-between; font-size: 11px; padding: 1px 0; }
+          .box .row .val { font-weight: bold; direction: ltr; }
+          .remaining-box { border: 2px solid #000; border-radius: 6px; padding: 10px; background: #f0fdf4; text-align: center; margin-bottom: 10px; }
+          .remaining-box .label { font-size: 12px; color: #555; margin-bottom: 4px; }
+          .remaining-box .amount { font-size: 20px; font-weight: bold; direction: ltr; color: #065f46; }
+          .account-box { border: 1px solid #bbb; border-radius: 6px; padding: 8px 12px; background: #fffbea; margin-bottom: 10px; font-size: 12px; }
+          .account-box .title { font-weight: bold; margin-bottom: 5px; }
+          .account-box .row { display: flex; justify-content: space-between; padding: 2px 0; }
         </style>
       </head>
       <body>
         <div class="header">
-          <h2 style="margin: 0 0 5px;">إغلاق يومية المندوب : ${pRepName}</h2>
-          <div>تاريخ الإغلاق: <span dir="ltr">${pDate}</span> | رقم اليومية: ${openDailyInfo?.daily_code || '---'}</div>
+          <h2>إغلاق يومية المندوب: ${pRepName}</h2>
+          <div style="font-size:11px;">تاريخ الإغلاق: <span dir="ltr">${pDate}</span> | رقم اليومية: ${openDailyInfo?.daily_code || '---'}</div>
+          ${(() => { const empN = userDefaults?.name || userDefaults?.username || ''; return empN ? `<div style="font-size:11px;margin-top:2px;">الموظف: <b>${empN}</b></div>` : ''; })()}
         </div>
 
-        <div style="margin-bottom:12px;border:1px solid #ddd;padding:10px;border-radius:6px;background:#fafafa;">
-          <div style="font-weight:bold;margin-bottom:8px;">ملخص قبل الإغلاق</div>
-          <table style="width:100%;border-collapse:collapse;font-size:12px;">
-            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;width:60%;">اجمالى المبلغ المطلوب قبل اغلاق اليومية</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${money(totalRequiredBeforeClose)} ${currencySymbol}</td></tr>
-
-            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات التسليم الكامل</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${delivFullCount} طلب</td></tr>
-            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع التسليم الكامل</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${delivFullPieces}</td></tr>
-            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ التسليم الكامل</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${money(delivFullAmount)} ${currencySymbol}</td></tr>
-
-            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات الارجاع الكلي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${returnFullCount} طلب</td></tr>
-            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع الارتجاع الكلى</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${returnFullPieces}</td></tr>
-            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ الارتجاع الكلى</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${money(returnFullAmount)} ${currencySymbol}</td></tr>
-
-            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات التسليم الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${delivPartialCount} طلب</td></tr>
-            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع التسليم الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${delivPartialPieces}</td></tr>
-            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ التسليم الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${money(delivPartialAmount)} ${currencySymbol}</td></tr>
-
-            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات الارجاع الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${returnPartialCount} طلب</td></tr>
-            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع الارتجاع الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${returnPartialPieces}</td></tr>
-            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ الارتجاع الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${money(returnPartialAmount)} ${currencySymbol}</td></tr>
-
-            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات النزول</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${deferredCount} طلب</td></tr>
-            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع النزول</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${deferredPiecesSum}</td></tr>
-            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ النزول</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${money(deferredAmountSum)} ${currencySymbol}</td></tr>
-
-            <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">المبلغ المتبقى</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${money(estimatedRemaining)} ${currencySymbol}</td></tr>
-          </table>
+        <!-- ملخص قبل الإغلاق -->
+        <div class="summary-top">
+          <div class="title">ملخص قبل الإغلاق</div>
+          <div class="row"><span>إجمالى المبلغ المطلوب قبل إغلاق اليومية</span><b>${money(totalRequiredBeforeClose)} ${currencySymbol}</b></div>
         </div>
 
-        <div class="flex">
-          <div class="box" style="margin-right:0;">
-            <strong>ملخص الحساب:</strong><br/>
-            الحساب الحالي: <span dir="ltr">${money(pTotal)} ج.م</span> (${balanceLabel(pTotal)})<br/>
-            طريقة التسوية: <strong>${settlementDirection === 'collect' ? 'تحصيل من المندوب' : 'دفع للمندوب'}</strong><br/>
-            المبلغ المدفوع للتقفيل: <span dir="ltr">${money(pAmount)} ج.م</span><br/>
-            الخزينة: ${pTreasury}<br/><br/>
-            <div style="background:#f1f1f1; padding:5px;"><strong>المتبقي (تقديري):</strong> <span dir="ltr">${money(settlementDirection === 'collect' ? pTotal + pAmount : pTotal - pAmount)} ج.م</span></div>
+        <!-- صناديق الإحصاء -->
+        <div class="grid2">
+          <div class="box">
+            <div class="box-title">✅ التسليم الكامل</div>
+            <div class="row"><span>عدد الطلبات</span><span class="val">${delivFullCount} طلب</span></div>
+            <div class="row"><span>إجمالى القطع</span><span class="val">${delivFullPieces}</span></div>
+            <div class="row"><span>إجمالى المبلغ</span><span class="val">${money(delivFullAmount)} ${currencySymbol}</span></div>
           </div>
-          ${repTxType !== 'none' && repTxAmount > 0 ? `
-          <div class="box" style="margin-left:0;">
-            <strong>معاملة مالية للمندوب:</strong><br/>
-            النوع: <strong>${repTxType === 'bonus' ? 'حافز' : 'غرامة'}</strong><br/>
-            المبلغ: <span dir="ltr">${money(repTxAmount)} ج.م</span><br/>
-            السبب: ${repTxReason || '---'}
+          <div class="box">
+            <div class="box-title">🔄 الارجاع الكلي</div>
+            <div class="row"><span>عدد الطلبات</span><span class="val">${returnFullCount} طلب</span></div>
+            <div class="row"><span>إجمالى القطع</span><span class="val">${returnFullPieces}</span></div>
+            <div class="row"><span>إجمالى المبلغ</span><span class="val">${money(returnFullAmount)} ${currencySymbol}</span></div>
           </div>
-          ` : ''}
+          <div class="box">
+            <div class="box-title">🔀 التسليم الجزئي</div>
+            <div class="row"><span>عدد الطلبات</span><span class="val">${delivPartialCount} طلب</span></div>
+            <div class="row"><span>إجمالى القطع</span><span class="val">${delivPartialPieces}</span></div>
+            <div class="row"><span>إجمالى المبلغ</span><span class="val">${money(delivPartialAmount)} ${currencySymbol}</span></div>
+          </div>
+          <div class="box">
+            <div class="box-title">↩️ الارجاع الجزئي</div>
+            <div class="row"><span>عدد الطلبات</span><span class="val">${returnPartialCount} طلب</span></div>
+            <div class="row"><span>إجمالى القطع</span><span class="val">${returnPartialPieces}</span></div>
+            <div class="row"><span>إجمالى المبلغ</span><span class="val">${money(returnPartialAmount)} ${currencySymbol}</span></div>
+          </div>
+        </div>
+
+        <!-- صندوق النزول -->
+        <div class="grid2" style="grid-template-columns:1fr 1fr;">
+          <div class="box">
+            <div class="box-title">⬇️ النزول (مؤجل)</div>
+            <div class="row"><span>عدد الطلبات</span><span class="val">${deferredCount} طلب</span></div>
+            <div class="row"><span>إجمالى القطع</span><span class="val">${deferredPiecesSum}</span></div>
+            <div class="row"><span>إجمالى المبلغ</span><span class="val">${money(deferredAmountSum)} ${currencySymbol}</span></div>
+          </div>
+          <div class="account-box">
+            <div class="title">💰 ملخص الحساب</div>
+            <div class="row"><span>رصيد المندوب الحالي</span><b dir="ltr">${money(pTotal)} ${currencySymbol} (${balanceLabel(pTotal)})</b></div>
+            <div class="row"><span>طريقة التسوية</span><b>${settlementDirection === 'collect' ? 'تحصيل من المندوب' : 'دفع للمندوب'}</b></div>
+            <div class="row"><span>المبلغ المدفوع للتقفيل</span><b dir="ltr">${money(pAmount)} ${currencySymbol}</b></div>
+            <div class="row"><span>الخزينة</span><b>${pTreasury}</b></div>
+            ${repTxType !== 'none' && repTxAmount > 0 ? `<div class="row" style="margin-top:4px;padding-top:4px;border-top:1px solid #ddd;"><span>${repTxType === 'bonus' ? 'حافز' : 'غرامة'}</span><b dir="ltr">${money(repTxAmount)} ${currencySymbol}</b></div>` : ''}
+          </div>
+        </div>
+
+        <!-- المبلغ المتبقى -->
+        <div class="remaining-box">
+          <div class="label">المبلغ المتبقى بعد الإغلاق</div>
+          <div class="amount">${money(estimatedRemaining)} ${currencySymbol}</div>
         </div>
 
         ${finalDeliveredList.length > 0 ? `
-        <h4 style="margin-bottom:5px;">جدول تفاصيل التسليم (${finalDeliveredList.length} طلب) — القطع: ${deliveredPieces} — إجمالي: ${money(deliveredValue)}</h4>
+        <h4>تفاصيل التسليم (${finalDeliveredList.length} طلب) — القطع: ${deliveredPieces} — إجمالي: ${money(deliveredValue)} ${currencySymbol}</h4>
         <table>
           <tr><th>رقم الأوردر</th><th>العميل</th><th style="text-align:center;">القطع</th><th style="text-align:center;">القيمة</th></tr>
           ${delivHTML}
@@ -847,7 +882,7 @@ const SalesDailyClose: React.FC = () => {
         ` : ''}
 
         ${finalReturnedList.length > 0 ? `
-        <h4 style="margin-bottom:5px;">جدول تفاصيل المرتجع (${finalReturnedList.length} طلب) — القطع: ${returnedPieces} — إجمالي: ${money(returnedValue)}</h4>
+        <h4>تفاصيل المرتجع (${finalReturnedList.length} طلب) — القطع: ${returnedPieces} — إجمالي: ${money(returnedValue)} ${currencySymbol}</h4>
         <table>
           <tr><th>رقم الأوردر</th><th>العميل</th><th style="text-align:center;">القطع</th><th style="text-align:center;">القيمة</th></tr>
           ${retHTML}
@@ -855,13 +890,13 @@ const SalesDailyClose: React.FC = () => {
         ` : ''}
 
         ${deferredOrders.length > 0 ? `
-        <h4 style="margin-bottom:5px;">جدول تفاصيل النزول (${deferredOrders.length} طلب) — القطع: ${deferredPieces} — إجمالي: ${money(deferredValue)}</h4>
+        <h4>تفاصيل النزول (${deferredOrders.length} طلب) — القطع: ${deferredPieces} — إجمالي: ${money(deferredValue)} ${currencySymbol}</h4>
         <table>
           <tr><th>رقم الأوردر</th><th>العميل</th><th style="text-align:center;">القطع</th><th style="text-align:center;">القيمة</th></tr>
           ${defHTML}
         </table>
         ` : ''}
-        
+
       </body>
       </html>
     `;

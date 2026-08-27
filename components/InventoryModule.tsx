@@ -2303,7 +2303,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
                     .filter((pp: any) => {
                       const hasVariants = pp.variants.length > 0;
                       const parentTimeMatch = !isDateFiltered || isItemInTimeRange(pp);
-                      return hasVariants && parentTimeMatch;
+                      return (hasVariants || !isFilteredView) && parentTimeMatch;
                     });
 
                   return (

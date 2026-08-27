@@ -173,6 +173,46 @@ const DailyReport: React.FC = () => {
     setTimeout(() => w.print(), 500);
   }
 
+  const [sortKey, setSortKey] = useState<string>('date');
+  const [sortAsc, setSortAsc] = useState<boolean>(false);
+
+  const handleSort = (key: string) => {
+    if (sortKey === key) {
+      setSortAsc(!sortAsc);
+    } else {
+      setSortKey(key);
+      setSortAsc(false);
+    }
+  };
+
+  const sortedRecords = useMemo(() => {
+    return [...records].sort((a: any, b: any) => {
+      if (sortKey === 'amount') {
+        const aVal = Number(a.amount || 0);
+        const bVal = Number(b.amount || 0);
+        return sortAsc ? aVal - bVal : bVal - aVal;
+      }
+      const aVal = String(a[sortKey] || '');
+      const bVal = String(b[sortKey] || '');
+      return sortAsc ? aVal.localeCompare(bVal, 'ar') : bVal.localeCompare(aVal, 'ar');
+    });
+  }, [records, sortKey, sortAsc]);
+
+  const SortHeader: React.FC<{ col: string; label: string; align?: 'center' | 'right' | 'left' }> = ({ col, label, align = 'right' }) => (
+    <th
+      onClick={() => handleSort(col)}
+      className={`px-4 py-3 font-semibold text-${align} cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors select-none group`}
+      title="اضغط للفرز تصاعدي / تنازلي"
+    >
+      <div className={`flex items-center gap-1 ${align === 'center' ? 'justify-center' : align === 'right' ? 'justify-start' : 'justify-end'}`}>
+        <span>{label}</span>
+        <span className="text-xs text-slate-400 group-hover:text-blue-600 transition-colors">
+          {sortKey === col ? (sortAsc ? '▲' : '▼') : '↕'}
+        </span>
+      </div>
+    </th>
+  );
+
   const kpiClass = "p-4 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 text-right bg-white dark:bg-slate-800";
 
   return (
@@ -222,7 +262,7 @@ const DailyReport: React.FC = () => {
             <div key={k.label} className={kpiClass}>
               <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">{k.label}</div>
               <div className={`text-xl font-black ${k.color}`}>
-                {(k as any).isCur ? Number(k.value).toLocaleString() : Number(k.value).toLocaleString()}
+                {Number(k.value).toLocaleString()}
               </div>
             </div>
           ))}
@@ -236,19 +276,19 @@ const DailyReport: React.FC = () => {
           <table className="w-full text-sm text-right">
             <thead className="bg-slate-50 dark:bg-slate-900/30 text-slate-500 dark:text-slate-400">
               <tr>
-                <th className="px-4 py-3 font-semibold">التاريخ</th>
-                <th className="px-4 py-3 font-semibold">النوع</th>
-                <th className="px-4 py-3 font-semibold">الوصف</th>
-                <th className="px-4 py-3 font-semibold">المبلغ</th>
-                <th className="px-4 py-3 font-semibold">الخزينة</th>
+                <SortHeader col="date" label="التاريخ" align="right" />
+                <SortHeader col="type" label="النوع" align="right" />
+                <SortHeader col="desc" label="الوصف" align="right" />
+                <SortHeader col="amount" label="المبلغ" align="right" />
+                <SortHeader col="treasury" label="الخزينة" align="right" />
               </tr>
             </thead>
             <tbody className="divide-y dark:divide-slate-700">
               {loading ? (
                 <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">جارٍ التحميل...</td></tr>
-              ) : records.length === 0 ? (
+              ) : sortedRecords.length === 0 ? (
                 <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">لا توجد حركات مالية في هذا اليوم.</td></tr>
-              ) : records.map((r: any, idx: number) => (
+              ) : sortedRecords.map((r: any, idx: number) => (
                 <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
                   <td className="px-4 py-3">{r.date}</td>
                   <td className="px-4 py-3">

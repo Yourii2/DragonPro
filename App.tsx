@@ -24,6 +24,8 @@ import AttendanceModule from './components/AttendanceModule';
 import SalesOffices from './components/SalesOffices';
 import DeliveryConfirmation from './components/DeliveryConfirmation';
 import ReportsModule from './components/ReportsModule';
+import ReportRepCustody from './components/ReportRepCustody';
+import ReportRepPerformance from './components/ReportRepPerformance';
 import WorkersModule from './components/WorkersModule';
 import BarcodePrintPage from './components/BarcodePrintPage';
 import { API_BASE_PATH, testConnection } from './services/apiConfig';
@@ -320,7 +322,10 @@ const App: React.FC = () => {
         return <PrintWaybill />;
       case 'reps':
         if (activeSubSlug === 'rep-custody') {
-          return <ReportsModule initialView="rep-custody" />;
+          return <ReportRepCustody />;
+        }
+        if (activeSubSlug === 'rep-performance') {
+          return <ReportRepPerformance />;
         }
         return <RepresentativesModule initialView={activeSubSlug} />;
       case 'sales':

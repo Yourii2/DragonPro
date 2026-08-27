@@ -86,6 +86,7 @@ if exist "Dragon.png" copy /y "Dragon.png" "%STAGE%\Dragon.png" >nul
 if exist "metadata.json" copy /y "metadata.json" "%STAGE%\metadata.json" >nul
 if exist "update-config.json" copy /y "update-config.json" "%STAGE%\update-config.json" >nul
 if exist "version.json" copy /y "version.json" "%STAGE%\version.json" >nul
+if exist "recreate_license.bat" copy /y "recreate_license.bat" "%STAGE%\recreate_license.bat" >nul
 
 rem DO NOT ship customer-specific files
 if exist "%STAGE%\config.php" del /f /q "%STAGE%\config.php" >nul 2>nul

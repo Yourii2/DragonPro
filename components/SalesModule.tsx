@@ -379,6 +379,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       case 'returned': return <span className="bg-rose-100 text-rose-700 px-2 py-1 rounded-lg text-[10px] font-bold">مرتجع</span>;
       case 'postponed': return <span className="bg-purple-100 text-purple-700 px-2 py-1 rounded-lg text-[10px] font-bold">مؤجل</span>;
       case 'no_answer': return <span className="bg-amber-100 text-amber-800 px-2 py-1 rounded-lg text-[10px] font-bold">لا يرد</span>;
+      case 'wrong_number': return <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded-lg text-[10px] font-bold">رقم خاطئ</span>;
       case 'cancelled': case 'canceled': return <span className="bg-rose-200 text-rose-800 px-2 py-1 rounded-lg text-[10px] font-bold">ملغي</span>;
       case 'closed': return <span className="bg-slate-200 text-slate-800 px-2 py-1 rounded-lg text-[10px] font-bold">مغلق</span>;
       default: return <span className="bg-slate-100 text-slate-700 px-2 py-1 rounded-lg text-[10px] font-bold">{status}</span>;
@@ -1679,8 +1680,19 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       return;
     }
     try {
+      // الحالات التي تحتاج صرف rep_id (ليست مرتبطة بمندوب)
+      const statusesWithoutRep = ['pending','confirmed','wrong_number','cancelled','canceled','no_answer','postponed','closed'];
       const payload: any = { id: selectedOrder.id, status: statusUpdate, status_note: statusNote };
-      if (statusUpdateRepId) payload.rep_id = Number(statusUpdateRepId);
+      if (statusUpdate === 'with_rep' || statusUpdate === 'in_delivery') {
+        // مع مندوب: أرسل المندوب المختار
+        if (statusUpdateRepId) payload.rep_id = Number(statusUpdateRepId);
+      } else if (statusesWithoutRep.includes(statusUpdate)) {
+        // حالة لا تحتاج مندوب: صفّر rep_id صراحةً
+        payload.rep_id = null;
+      } else {
+        // حالات أخرى: أرسل المندوب إن وجد
+        if (statusUpdateRepId) payload.rep_id = Number(statusUpdateRepId);
+      }
       const res = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1765,6 +1777,8 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       }
     }
     try {
+      // الحالات التي تحتاج صرف rep_id
+      const statusesWithoutRep = ['pending','confirmed','wrong_number','cancelled','canceled','no_answer','postponed','closed'];
       const editPayload: any = {
         id: statusEditOrder.id,
         status: statusEditValue,
@@ -1772,7 +1786,14 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
         penalty_apply: returnFineMode === 'fine' ? 1 : 0,
         penalty_amount: returnFineMode === 'fine' ? Number(returnFineAmount || 0) : 0
       };
-      if (statusEditRepId) editPayload.rep_id = Number(statusEditRepId);
+      if (statusEditValue === 'with_rep' || statusEditValue === 'in_delivery') {
+        if (statusEditRepId) editPayload.rep_id = Number(statusEditRepId);
+      } else if (statusesWithoutRep.includes(statusEditValue)) {
+        // حالة لا تحتاج مندوب: صفّر rep_id صراحةً
+        editPayload.rep_id = null;
+      } else {
+        if (statusEditRepId) editPayload.rep_id = Number(statusEditRepId);
+      }
       const res = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1843,6 +1864,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                         { value: 'returned', label: 'مرتجع' },
                         { value: 'postponed', label: 'مؤجل' },
                         { value: 'no_answer', label: 'لم يتم الرد (لا يرد)' },
+                        { value: 'wrong_number', label: 'رقم خاطئ' },
                         { value: 'cancelled', label: 'ملغي' },
                         { value: 'closed', label: 'مغلق' }
                       ]}
@@ -1975,6 +1997,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                     { value: 'returned', label: 'مرتجع' },
                     { value: 'postponed', label: 'مؤجل' },
                     { value: 'no_answer', label: 'لم يتم الرد (لا يرد)' },
+                    { value: 'wrong_number', label: 'رقم خاطئ' },
                     { value: 'cancelled', label: 'ملغي' },
                     { value: 'closed', label: 'مغلق' }
                   ]}
@@ -2514,6 +2537,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                     { value: 'returned', label: 'مرتجع' },
                     { value: 'postponed', label: 'مؤجل' },
                     { value: 'no_answer', label: 'لا يرد' },
+                    { value: 'wrong_number', label: 'رقم خاطئ' },
                     { value: 'cancelled', label: 'ملغي' },
                     { value: 'closed', label: 'مغلق' }
                   ]}

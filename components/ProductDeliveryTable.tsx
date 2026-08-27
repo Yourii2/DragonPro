@@ -15,6 +15,8 @@ const ProductDeliveryTable: React.FC<{ startDate: string; endDate: string }> = (
   const [rows, setRows]       = useState<ProductRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<string>('delivered_qty');
+  const [sortAsc, setSortAsc] = useState(false);
   const currency = localStorage.getItem('Dragon_currency') || 'ج.م';
 
   useEffect(() => {
@@ -56,6 +58,35 @@ const ProductDeliveryTable: React.FC<{ startDate: string; endDate: string }> = (
     load();
   }, [startDate, endDate]);
 
+  const handleSort = (key: string) => {
+    if (sortKey === key) {
+      setSortAsc(!sortAsc);
+    } else {
+      setSortKey(key);
+      setSortAsc(false);
+    }
+  };
+
+  const sortedRows = [...rows].sort((a, b) => {
+    if (sortKey === 'product_name') {
+      const aVal = (a.product_name || '').localeCompare(b.product_name || '', 'ar');
+      return sortAsc ? aVal : -aVal;
+    }
+    if (sortKey === 'delivery_rate') {
+      const aVal = a.total_qty > 0 ? a.delivered_qty / a.total_qty : 0;
+      const bVal = b.total_qty > 0 ? b.delivered_qty / b.total_qty : 0;
+      return sortAsc ? aVal - bVal : bVal - aVal;
+    }
+    if (sortKey === 'return_rate') {
+      const aVal = a.total_qty > 0 ? a.returned_qty / a.total_qty : 0;
+      const bVal = b.total_qty > 0 ? b.returned_qty / b.total_qty : 0;
+      return sortAsc ? aVal - bVal : bVal - aVal;
+    }
+    const aVal = Number((a as any)[sortKey] || 0);
+    const bVal = Number((b as any)[sortKey] || 0);
+    return sortAsc ? aVal - bVal : bVal - aVal;
+  });
+
   // Totals
   const totals = rows.reduce(
     (acc, r) => ({
@@ -68,8 +99,26 @@ const ProductDeliveryTable: React.FC<{ startDate: string; endDate: string }> = (
     { total_qty: 0, delivered_qty: 0, delivered_amount: 0, returned_qty: 0, returned_amount: 0 }
   );
 
-  const pct = (num: number, den: number) =>
-    den === 0 ? '—' : `${Math.round((num / den) * 10000) / 100}%`;
+  const formatPct = (num: number, den: number) => {
+    if (den <= 0) return '0%';
+    const pctVal = (num / den) * 100;
+    return `${Number(pctVal.toFixed(2))}%`;
+  };
+
+  const SortHeader: React.FC<{ col: string; label: string; align?: 'center' | 'right' | 'left'; colorClass?: string }> = ({ col, label, align = 'center', colorClass = '' }) => (
+    <th
+      onClick={() => handleSort(col)}
+      className={`px-4 py-3 font-semibold text-${align} cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors select-none group ${colorClass}`}
+      title="اضغط للفرز تصاعدي / تنازلي"
+    >
+      <div className={`flex items-center gap-1 ${align === 'center' ? 'justify-center' : align === 'right' ? 'justify-start' : 'justify-end'}`}>
+        <span>{label}</span>
+        <span className="text-xs text-slate-400 group-hover:text-blue-600 transition-colors">
+          {sortKey === col ? (sortAsc ? '▲' : '▼') : '↕'}
+        </span>
+      </div>
+    </th>
+  );
 
   if (loading) {
     return (
@@ -94,7 +143,7 @@ const ProductDeliveryTable: React.FC<{ startDate: string; endDate: string }> = (
   if (rows.length === 0) {
     return (
       <div className="py-12 text-center text-slate-400 text-sm">
-        لا توجد منتجات مُسلَّمة أو مرتجعة في الفترة من <strong>{startDate}</strong> إلى <strong>{endDate}</strong>.
+        لا توجد منتجات مُسلَّمة أو مرتجعة في اليوميات المغلقة في الفترة من <strong>{startDate}</strong> إلى <strong>{endDate}</strong>.
       </div>
     );
   }
@@ -104,29 +153,29 @@ const ProductDeliveryTable: React.FC<{ startDate: string; endDate: string }> = (
       <table className="w-full text-sm text-right">
         <thead className="bg-slate-50 dark:bg-slate-900/40 text-slate-600 dark:text-slate-400">
           <tr>
-            <th className="px-4 py-3 font-semibold">#</th>
-            <th className="px-4 py-3 font-semibold">المنتج</th>
-            <th className="px-4 py-3 font-semibold text-center">قطع كلية</th>
-            <th className="px-4 py-3 font-semibold text-center text-emerald-700 dark:text-emerald-400">مسلَّمة (قطعة)</th>
-            <th className="px-4 py-3 font-semibold text-center text-emerald-700 dark:text-emerald-400">مبيعات ({currency})</th>
-            <th className="px-4 py-3 font-semibold text-center">نسبة التسليم</th>
-            <th className="px-4 py-3 font-semibold text-center text-rose-600 dark:text-rose-400">مرتجعة (قطعة)</th>
-            <th className="px-4 py-3 font-semibold text-center text-rose-600 dark:text-rose-400">مرتجعات ({currency})</th>
-            <th className="px-4 py-3 font-semibold text-center">نسبة الإرجاع</th>
+            <th className="px-4 py-3 font-semibold text-center w-12">#</th>
+            <SortHeader col="product_name" label="المنتج" align="right" />
+            <SortHeader col="total_qty" label="قطع كلية" align="center" />
+            <SortHeader col="delivered_qty" label="مسلَّمة (قطعة)" align="center" colorClass="text-emerald-700 dark:text-emerald-400" />
+            <SortHeader col="delivered_amount" label={`مبيعات (${currency})`} align="center" colorClass="text-emerald-700 dark:text-emerald-400" />
+            <SortHeader col="delivery_rate" label="نسبة التسليم" align="center" />
+            <SortHeader col="returned_qty" label="مرتجعة (قطعة)" align="center" colorClass="text-rose-600 dark:text-rose-400" />
+            <SortHeader col="returned_amount" label={`مرتجعات (${currency})`} align="center" colorClass="text-rose-600 dark:text-rose-400" />
+            <SortHeader col="return_rate" label="نسبة الإرجاع" align="center" />
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-          {rows.map((r, idx) => {
-            const deliveryRate = pct(r.delivered_qty, r.total_qty);
-            const returnRate   = pct(r.returned_qty,  r.total_qty);
+          {sortedRows.map((r, idx) => {
+            const deliveryRate = formatPct(r.delivered_qty, r.total_qty);
+            const returnRate   = formatPct(r.returned_qty,  r.total_qty);
             const deliveryNum  = r.total_qty > 0 ? Math.round((r.delivered_qty / r.total_qty) * 100) : 0;
             return (
               <tr key={r.product_id || idx} className="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
-                <td className="px-4 py-3 text-slate-400 text-xs">{idx + 1}</td>
+                <td className="px-4 py-3 text-slate-400 text-xs text-center">{idx + 1}</td>
                 <td className="px-4 py-3 font-bold text-slate-800 dark:text-slate-100">{r.product_name}</td>
-                <td className="px-4 py-3 text-center">{r.total_qty.toLocaleString()}</td>
+                <td className="px-4 py-3 text-center font-bold">{r.total_qty.toLocaleString()}</td>
                 <td className="px-4 py-3 text-center">
-                  <span className="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 rounded-full text-xs font-bold">
+                  <span className="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 px-2.5 py-0.5 rounded-full text-xs font-bold">
                     {r.delivered_qty.toLocaleString()}
                   </span>
                 </td>
@@ -138,24 +187,24 @@ const ProductDeliveryTable: React.FC<{ startDate: string; endDate: string }> = (
                     <div className="flex-1 h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
                       <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${deliveryNum}%` }} />
                     </div>
-                    <span className="text-xs font-bold text-slate-600 dark:text-slate-300 w-12 flex-shrink-0 text-left">
+                    <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 w-14 flex-shrink-0 text-left">
                       {deliveryRate}
                     </span>
                   </div>
                 </td>
                 <td className="px-4 py-3 text-center">
                   {r.returned_qty > 0 ? (
-                    <span className="bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400 px-2 py-0.5 rounded-full text-xs font-bold">
+                    <span className="bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400 px-2.5 py-0.5 rounded-full text-xs font-bold">
                       {r.returned_qty.toLocaleString()}
                     </span>
                   ) : (
-                    <span className="text-slate-300 dark:text-slate-600 text-xs">—</span>
+                    <span className="text-slate-400 text-xs">0</span>
                   )}
                 </td>
                 <td className="px-4 py-3 text-center font-bold text-rose-600 dark:text-rose-400">
-                  {r.returned_amount > 0 ? r.returned_amount.toLocaleString() : '—'}
+                  {r.returned_amount > 0 ? r.returned_amount.toLocaleString() : '0'}
                 </td>
-                <td className="px-4 py-3 text-center text-xs font-bold text-slate-500 dark:text-slate-400">
+                <td className="px-4 py-3 text-center text-xs font-bold text-rose-600 dark:text-rose-400">
                   {returnRate}
                 </td>
               </tr>
@@ -165,14 +214,14 @@ const ProductDeliveryTable: React.FC<{ startDate: string; endDate: string }> = (
         {/* Totals row */}
         <tfoot>
           <tr className="bg-slate-100 dark:bg-slate-700/60 font-black text-slate-800 dark:text-slate-100 border-t-2 border-slate-300 dark:border-slate-600">
-            <td className="px-4 py-3" colSpan={2}>الإجمالي</td>
+            <td className="px-4 py-3 text-center" colSpan={2}>الإجمالي</td>
             <td className="px-4 py-3 text-center">{totals.total_qty.toLocaleString()}</td>
             <td className="px-4 py-3 text-center text-emerald-700 dark:text-emerald-400">{totals.delivered_qty.toLocaleString()}</td>
             <td className="px-4 py-3 text-center text-emerald-700 dark:text-emerald-400">{totals.delivered_amount.toLocaleString()}</td>
-            <td className="px-4 py-3 text-center">{pct(totals.delivered_qty, totals.total_qty)}</td>
+            <td className="px-4 py-3 text-center text-emerald-700 dark:text-emerald-400">{formatPct(totals.delivered_qty, totals.total_qty)}</td>
             <td className="px-4 py-3 text-center text-rose-600 dark:text-rose-400">{totals.returned_qty.toLocaleString()}</td>
             <td className="px-4 py-3 text-center text-rose-600 dark:text-rose-400">{totals.returned_amount.toLocaleString()}</td>
-            <td className="px-4 py-3 text-center">{pct(totals.returned_qty, totals.total_qty)}</td>
+            <td className="px-4 py-3 text-center text-rose-600 dark:text-rose-400">{formatPct(totals.returned_qty, totals.total_qty)}</td>
           </tr>
         </tfoot>
       </table>

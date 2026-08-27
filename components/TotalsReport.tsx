@@ -84,13 +84,14 @@ const TotalsReport: React.FC = () => {
         setPerDayStats([]); setOrderTotals({});
       }
 
-      // ── 3. Rep assigned journal ──────────────────────────────────────
+      // ── 3. Rep assigned journal (Closed journals only) ─────────────
       try {
         const repUrl = `${API_BASE_PATH}/api.php?module=sales&action=getRepDailyJournal&from=${startDate}&to=${endDate}`;
         const repRes = await fetch(repUrl).then(r => r.json()).catch(() => null);
         if (repRes && repRes.success && Array.isArray(repRes.data)) {
           const grouped: Record<string, any> = {};
           repRes.data.forEach((row: any) => {
+            if (Number(row.is_closed) !== 1) return; // closed journals only
             const d = String(row.journal_date || row.created_at || '').slice(0, 10);
             if (!d) return;
             if (!grouped[d]) grouped[d] = { date: d, orders: 0, pieces: 0 };
@@ -111,6 +112,9 @@ const TotalsReport: React.FC = () => {
 
   useEffect(() => { load(); }, []);
 
+  const [sortKey, setSortKey] = useState<string>('date');
+  const [sortAsc, setSortAsc] = useState(false);
+
   // Finance totals
   const finTotals = useMemo(() => {
     let totalIn = 0, totalOut = 0;
@@ -129,7 +133,7 @@ const TotalsReport: React.FC = () => {
 
   // Merged per-day for table
   const tableRows = useMemo(() => {
-    return perDayStats.map((day: any) => {
+    const rows = perDayStats.map((day: any) => {
       const repDay = assignedToRepsStats.find(r => r.date === day.date);
       return {
         ...day,
@@ -137,11 +141,46 @@ const TotalsReport: React.FC = () => {
         rep_pieces: repDay?.pieces || 0,
       };
     });
-  }, [perDayStats, assignedToRepsStats]);
+
+    return rows.sort((a: any, b: any) => {
+      if (sortKey === 'date') {
+        const aVal = String(a.date || '');
+        const bVal = String(b.date || '');
+        return sortAsc ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+      }
+      const aVal = Number(a[sortKey] || 0);
+      const bVal = Number(b[sortKey] || 0);
+      return sortAsc ? aVal - bVal : bVal - aVal;
+    });
+  }, [perDayStats, assignedToRepsStats, sortKey, sortAsc]);
+
+  const handleSort = (key: string) => {
+    if (sortKey === key) {
+      setSortAsc(!sortAsc);
+    } else {
+      setSortKey(key);
+      setSortAsc(false);
+    }
+  };
+
+  const SortHeader: React.FC<{ col: string; label: string; align?: 'center' | 'right' | 'left'; colorClass?: string }> = ({ col, label, align = 'center', colorClass = '' }) => (
+    <th
+      onClick={() => handleSort(col)}
+      className={`px-3 py-3 font-semibold text-${align} cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors select-none group ${colorClass}`}
+      title="اضغط للفرز تصاعدي / تنازلي"
+    >
+      <div className={`flex items-center gap-1 ${align === 'center' ? 'justify-center' : align === 'right' ? 'justify-start' : 'justify-end'}`}>
+        <span>{label}</span>
+        <span className="text-xs text-slate-400 group-hover:text-blue-600 transition-colors">
+          {sortKey === col ? (sortAsc ? '▲' : '▼') : '↕'}
+        </span>
+      </div>
+    </th>
+  );
 
   function exportCSV() {
     if (!tableRows.length) { Swal.fire('تنبيه', 'لا توجد بيانات للتصدير', 'info'); return; }
-    const headers = ['التاريخ','أوردرات مسلَّمة','أوردرات مرتجعة','للمناديب','قطع للمناديب','قطع مسلَّمة','قطع مرتجعة','مبيعات','مرتجعات'];
+    const headers = ['التاريخ','أوردرات مسلَّمة','أوردرات مرتجعة','اوردرات جديده خرجت للتسليم','قطع جديده خرجت للتسليم','قطع مسلَّمة','قطع مرتجعة','مبيعات','مرتجعات'];
     const rows = tableRows.map((d: any) => [
       d.date, d.delivered_orders, d.returned_orders, d.rep_orders, d.rep_pieces,
       d.delivered_pieces, d.returned_pieces,
@@ -186,16 +225,21 @@ const TotalsReport: React.FC = () => {
       <div>الفترة: ${startDate} — ${endDate}</div>
       <div class="summary" style="margin:12px 0;padding:10px;background:#f8f9fa;border-radius:6px;">
         <div>رصيد البداية: <strong>${startingBalance.toLocaleString()}</strong></div>
+        <div>إجمالي الوارد: <strong>${finTotals.totalIn.toLocaleString()}</strong></div>
+        <div>إجمالي الصادر: <strong>${finTotals.totalOut.toLocaleString()}</strong></div>
         <div>رصيد النهاية: <strong>${endBalance.toLocaleString()}</strong></div>
         <div>إجمالي أوردرات مسلَّمة: <strong>${(orderTotals.delivered_orders||0).toLocaleString()}</strong></div>
         <div>إجمالي أوردرات مرتجعة: <strong>${(orderTotals.returned_orders||0).toLocaleString()}</strong></div>
+        <div>اوردرات جديده خرجت للتسليم: <strong>${repTotals.orders.toLocaleString()}</strong></div>
+        <div>قطع جديده خرجت للتسليم: <strong>${repTotals.pieces.toLocaleString()}</strong></div>
         <div>إجمالي قطع مسلَّمة: <strong>${(orderTotals.delivered_pieces||0).toLocaleString()}</strong></div>
+        <div>إجمالي قطع مرتجعة: <strong>${(orderTotals.returned_pieces||0).toLocaleString()}</strong></div>
         <div>إجمالي مبيعات (مسلَّمة): <strong>${Number(orderTotals.delivered_amount||0).toLocaleString()}</strong></div>
         <div>إجمالي مرتجعات: <strong>${Number(orderTotals.returned_amount||0).toLocaleString()}</strong></div>
       </div>
       <table><thead><tr>
         <th>التاريخ</th><th>أوردرات مسلَّمة</th><th>أوردرات مرتجعة</th>
-        <th>للمناديب</th><th>قطع للمناديب</th>
+        <th>اوردرات جديده خرجت للتسليم</th><th>قطع جديده خرجت للتسليم</th>
         <th>قطع مسلَّمة</th><th>قطع مرتجعة</th>
         <th>مبيعات</th><th>مرتجعات</th>
       </tr></thead><tbody>${rowsHtml}</tbody></table>
@@ -250,8 +294,8 @@ const TotalsReport: React.FC = () => {
           <div className={kpiClass}><div className="text-xs text-slate-500 mb-1">قطع مرتجعة</div><div className="text-xl font-black text-rose-600">{(orderTotals.returned_pieces||0).toLocaleString()}</div></div>
           <div className={kpiClass}><div className="text-xs text-slate-500 mb-1">مبيعات مسلَّمة</div><div className="text-xl font-black text-emerald-700">{Number(orderTotals.delivered_amount||0).toLocaleString()}</div></div>
           <div className={kpiClass}><div className="text-xs text-slate-500 mb-1">مرتجعات (مبلغ)</div><div className="text-xl font-black text-rose-700">{Number(orderTotals.returned_amount||0).toLocaleString()}</div></div>
-          <div className={kpiClass}><div className="text-xs text-slate-500 mb-1">للمناديب (أوردرات)</div><div className="text-xl font-black text-blue-600">{repTotals.orders.toLocaleString()}</div></div>
-          <div className={kpiClass}><div className="text-xs text-slate-500 mb-1">للمناديب (قطع)</div><div className="text-xl font-black text-blue-600">{repTotals.pieces.toLocaleString()}</div></div>
+          <div className={kpiClass}><div className="text-xs text-slate-500 mb-1">اوردرات جديده خرجت للتسليم</div><div className="text-xl font-black text-blue-600">{repTotals.orders.toLocaleString()}</div></div>
+          <div className={kpiClass}><div className="text-xs text-slate-500 mb-1">قطع جديده خرجت للتسليم</div><div className="text-xl font-black text-blue-600">{repTotals.pieces.toLocaleString()}</div></div>
         </div>
       </div>
 
@@ -262,15 +306,15 @@ const TotalsReport: React.FC = () => {
           <table className="w-full text-sm text-right">
             <thead className="bg-slate-50 dark:bg-slate-900/30 text-slate-500 dark:text-slate-400">
               <tr>
-                <th className="px-3 py-3 font-semibold">التاريخ</th>
-                <th className="px-3 py-3 font-semibold">أوردرات مسلَّمة</th>
-                <th className="px-3 py-3 font-semibold">أوردرات مرتجعة</th>
-                <th className="px-3 py-3 font-semibold">للمناديب</th>
-                <th className="px-3 py-3 font-semibold">قطع للمناديب</th>
-                <th className="px-3 py-3 font-semibold">قطع مسلَّمة</th>
-                <th className="px-3 py-3 font-semibold">قطع مرتجعة</th>
-                <th className="px-3 py-3 font-semibold">مبيعات</th>
-                <th className="px-3 py-3 font-semibold">مرتجعات</th>
+                <SortHeader col="date" label="التاريخ" align="right" />
+                <SortHeader col="delivered_orders" label="أوردرات مسلَّمة" align="center" />
+                <SortHeader col="returned_orders" label="أوردرات مرتجعة" align="center" />
+                <SortHeader col="rep_orders" label="اوردرات جديده خرجت للتسليم" align="center" />
+                <SortHeader col="rep_pieces" label="قطع جديده خرجت للتسليم" align="center" />
+                <SortHeader col="delivered_pieces" label="قطع مسلَّمة" align="center" />
+                <SortHeader col="returned_pieces" label="قطع مرتجعة" align="center" />
+                <SortHeader col="delivered_amount" label="مبيعات" align="left" colorClass="text-emerald-700 dark:text-emerald-400" />
+                <SortHeader col="returned_amount" label="مرتجعات" align="left" colorClass="text-rose-700 dark:text-rose-400" />
               </tr>
             </thead>
             <tbody className="divide-y dark:divide-slate-700">

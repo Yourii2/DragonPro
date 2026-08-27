@@ -47,6 +47,45 @@ const ReportOutstandingBalances: React.FC = () => {
     padding: '10px 14px', textAlign: 'right' as const
   };
 
+  const [sortKey, setSortKey] = useState<string>('balance');
+  const [sortAsc, setSortAsc] = useState(false);
+
+  const handleSort = (key: string) => {
+    if (sortKey === key) {
+      setSortAsc(!sortAsc);
+    } else {
+      setSortKey(key);
+      setSortAsc(false);
+    }
+  };
+
+  const usersList: any[] = data.users || [];
+  const sortedUsers = [...usersList].sort((a, b) => {
+    if (sortKey === 'balance' || sortKey === 'days_since_payment') {
+      const aVal = Number(a[sortKey] || 0);
+      const bVal = Number(b[sortKey] || 0);
+      return sortAsc ? aVal - bVal : bVal - aVal;
+    }
+    const aVal = String(a[sortKey] || '');
+    const bVal = String(b[sortKey] || '');
+    return sortAsc ? aVal.localeCompare(bVal, 'ar') : bVal.localeCompare(aVal, 'ar');
+  });
+
+  const SortHeader: React.FC<{ col: string; label: string; align?: 'center' | 'right' | 'left' }> = ({ col, label, align = 'right' }) => (
+    <th
+      onClick={() => handleSort(col)}
+      className={`p-4 font-bold text-${align} cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors select-none group`}
+      title="اضغط للفرز تصاعدي / تنازلي"
+    >
+      <div className={`flex items-center gap-1 ${align === 'center' ? 'justify-center' : align === 'right' ? 'justify-start' : 'justify-end'}`}>
+        <span>{label}</span>
+        <span className="text-xs text-slate-400 group-hover:text-blue-600 transition-colors">
+          {sortKey === col ? (sortAsc ? '▲' : '▼') : '↕'}
+        </span>
+      </div>
+    </th>
+  );
+
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-6 rounded-3xl text-white shadow-lg flex justify-between items-center">
@@ -105,17 +144,17 @@ const ReportOutstandingBalances: React.FC = () => {
           <table className="w-full text-right text-sm">
             <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400">
               <tr>
-                <th className="p-4">الاسم</th>
-                <th className="p-4">النوع</th>
-                <th className="p-4">الرصيد ({sym})</th>
-                <th className="p-4">أيام منذ أخر دفعة</th>
+                <SortHeader col="name" label="الاسم" align="right" />
+                <SortHeader col="role" label="النوع" align="right" />
+                <SortHeader col="balance" label={`الرصيد (${sym})`} align="right" />
+                <SortHeader col="days_since_payment" label="أيام منذ أخر دفعة" align="right" />
                 <th className="p-4">الحالة</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-              {!data.users || data.users.length === 0 ? (
+              {sortedUsers.length === 0 ? (
                 <tr><td colSpan={5} className="p-8 text-center text-slate-400">لا توجد أرصدة معلقة</td></tr>
-              ) : data.users.map((u: any, i: number) => {
+              ) : sortedUsers.map((u: any, i: number) => {
                 const bal = Number(u.balance);
                 const days = u.days_since_payment;
                 let statusColor = 'text-slate-500';

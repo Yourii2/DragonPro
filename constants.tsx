@@ -190,16 +190,9 @@ export const MENU_ITEMS = [
       { label: 'المبيعات', slug: 'sales' },
       { label: 'ملخص الفترة', slug: 'totals' },
       { label: 'تقرير منتجات', slug: 'product-report' },
-      { label: 'أداء المناديب', slug: 'reps' },
-      { label: 'المقارنات', slug: 'compare' },
-      { label: 'المخزون الراكد', slug: 'inventory-health' },
-      { label: 'التدفق النقدي', slug: 'cash-flow' },
       { label: 'أعمار الديون', slug: 'outstanding-balances' },
-      { label: 'تحليل المرتجعات', slug: 'returns-analysis' },
-      { label: 'تقييم المخزون', slug: 'inventory-valuation' },
       { label: 'الغرامات و الحافز', slug: 'fines-incentives' },
-      { label: 'المصروفات', slug: 'expenses' },
-      { label: 'بضائع عهده المندوب', slug: 'rep-custody' }
+      { label: 'المصروفات', slug: 'expenses' }
     ]
   },
   {

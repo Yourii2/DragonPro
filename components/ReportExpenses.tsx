@@ -2,14 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { useTheme } from './ThemeContext';
 import Swal from 'sweetalert2';
-import { RefreshCw, ArrowDownRight, Printer, Download, Search, Receipt, CreditCard, Landmark, Truck, Settings, Coffee, FileText } from 'lucide-react';
+import { RefreshCw, ArrowDownRight, Printer, Download, Search, Receipt, CreditCard, Landmark, Truck, Settings, Coffee, FileText, Megaphone, Users } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface ExpenseRow {
   id: number;
   date: string;
   type: string;
-  category: 'rent' | 'utilities' | 'transport' | 'maintenance' | 'hospitality' | 'supplies' | 'other';
+  category: 'rent' | 'utilities' | 'transport' | 'maintenance' | 'hospitality' | 'supplies' | 'ads' | 'salaries' | 'other';
   notes: string;
   amount: number;
   treasury_name: string;
@@ -19,6 +19,8 @@ const fmt = (n: number) => Number(n || 0).toLocaleString('ar-EG');
 
 const getCategoryLabel = (category: string) => {
   switch (category) {
+    case 'ads': return 'إعلانات وتسويق';
+    case 'salaries': return 'رواتب وأجور';
     case 'rent': return 'إيجارات';
     case 'utilities': return 'مرافق وخدمات';
     case 'transport': return 'انتقالات وشحن';
@@ -32,6 +34,8 @@ const getCategoryLabel = (category: string) => {
 
 const getCategoryIcon = (category: string) => {
   switch (category) {
+    case 'ads': return <Megaphone className="text-pink-500" size={18} />;
+    case 'salaries': return <Users className="text-indigo-500" size={18} />;
     case 'rent': return <Landmark className="text-blue-500" size={18} />;
     case 'utilities': return <Receipt className="text-orange-500" size={18} />;
     case 'transport': return <Truck className="text-emerald-500" size={18} />;
@@ -43,7 +47,7 @@ const getCategoryIcon = (category: string) => {
   }
 };
 
-const COLORS = ['#3b82f6', '#f97316', '#10b981', '#ef4444', '#f59e0b', '#8b5cf6', '#64748b'];
+const COLORS = ['#ec4899', '#6366f1', '#3b82f6', '#f97316', '#10b981', '#ef4444', '#f59e0b', '#8b5cf6', '#64748b'];
 
 const ReportExpenses: React.FC = () => {
   const { isDark } = useTheme();
@@ -65,6 +69,8 @@ const ReportExpenses: React.FC = () => {
       maintenance: 0,
       hospitality: 0,
       supplies: 0,
+      ads: 0,
+      salaries: 0,
       other: 0
     },
     total_expenses: 0
@@ -91,13 +97,58 @@ const ReportExpenses: React.FC = () => {
     load();
   }, [startDate, endDate]);
 
+  const [sortKey, setSortKey] = useState<string>('date');
+  const [sortAsc, setSortAsc] = useState(false);
+
   const filteredList = data.list.filter(item => 
     (item.notes || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
     (item.treasury_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
     getCategoryLabel(item.category).toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const handleSort = (key: string) => {
+    if (sortKey === key) {
+      setSortAsc(!sortAsc);
+    } else {
+      setSortKey(key);
+      setSortAsc(false);
+    }
+  };
+
+  const sortedList = [...filteredList].sort((a, b) => {
+    if (sortKey === 'amount') {
+      const aVal = Number(a.amount || 0);
+      const bVal = Number(b.amount || 0);
+      return sortAsc ? aVal - bVal : bVal - aVal;
+    }
+    if (sortKey === 'category') {
+      const aVal = getCategoryLabel(a.category);
+      const bVal = getCategoryLabel(b.category);
+      return sortAsc ? aVal.localeCompare(bVal, 'ar') : bVal.localeCompare(aVal, 'ar');
+    }
+    const aVal = String((a as any)[sortKey] || '');
+    const bVal = String((b as any)[sortKey] || '');
+    return sortAsc ? aVal.localeCompare(bVal, 'ar') : bVal.localeCompare(aVal, 'ar');
+  });
+
+  const SortHeader: React.FC<{ col: string; label: string; align?: 'center' | 'right' | 'left' }> = ({ col, label, align = 'right' }) => (
+    <th
+      onClick={() => handleSort(col)}
+      className={`px-4 py-3 font-bold text-${align} cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors select-none group`}
+      title="اضغط للفرز تصاعدي / تنازلي"
+    >
+      <div className={`flex items-center gap-1 ${align === 'center' ? 'justify-center' : align === 'right' ? 'justify-start' : 'justify-end'}`}>
+        <span>{label}</span>
+        <span className="text-xs text-slate-400 group-hover:text-blue-600 transition-colors">
+          {sortKey === col ? (sortAsc ? '▲' : '▼') : '↕'}
+        </span>
+      </div>
+    </th>
+  );
+
   const chartData = [
+    { name: 'إعلانات وتسويق', value: data.totals.ads },
+    { name: 'رواتب وأجور', value: data.totals.salaries },
     { name: 'إيجارات', value: data.totals.rent },
     { name: 'مرافق وخدمات', value: data.totals.utilities },
     { name: 'انتقالات وشحن', value: data.totals.transport },
@@ -108,12 +159,12 @@ const ReportExpenses: React.FC = () => {
   ].filter(item => item.value > 0);
 
   const exportCSV = () => {
-    if (!filteredList.length) {
+    if (!sortedList.length) {
       Swal.fire('تنبيه', 'لا توجد بيانات لتصديرها.', 'info');
       return;
     }
     const headers = ['التاريخ', 'الخزينة', 'التصنيف', 'المبلغ', 'البيان/السبب'];
-    const rows = filteredList.map(r => [
+    const rows = sortedList.map(r => [
       r.date,
       r.treasury_name,
       getCategoryLabel(r.category),
@@ -137,7 +188,7 @@ const ReportExpenses: React.FC = () => {
   };
 
   const printReport = () => {
-    const rows = filteredList.map((r, i) => `
+    const rows = sortedList.map((r, i) => `
       <tr>
         <td>${i + 1}</td>
         <td>${r.date}</td>
@@ -175,6 +226,14 @@ const ReportExpenses: React.FC = () => {
           <div class="card" style="border-top: 4px solid #ef4444; background: #fff5f5; min-width: 180px;">
             <h3>إجمالي المصروفات</h3>
             <p style="color: #ef4444; font-size: 20px;">${data.total_expenses.toLocaleString()} ${sym}</p>
+          </div>
+          <div class="card">
+            <h3>إعلانات وتسويق</h3>
+            <p>${data.totals.ads.toLocaleString()} ${sym}</p>
+          </div>
+          <div class="card">
+            <h3>رواتب وأجور</h3>
+            <p>${data.totals.salaries.toLocaleString()} ${sym}</p>
           </div>
           <div class="card">
             <h3>إيجارات</h3>
@@ -261,20 +320,36 @@ const ReportExpenses: React.FC = () => {
       </div>
 
       {/* KPI Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
-        <div className={`${kpiClass} col-span-2 bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900`}>
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9 gap-3">
+        <div className={`${kpiClass} col-span-2 md:col-span-3 lg:col-span-1 xl:col-span-1 bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900`}>
           <div className="text-slate-500 dark:text-slate-400 text-xs font-bold flex items-center gap-1.5 mb-2">
             <ArrowDownRight className="text-red-500" /> إجمالي المصروفات
           </div>
-          <div className="text-2xl font-black text-red-600 dark:text-red-400">
-            {fmt(data.total_expenses)} <span className="text-sm font-normal">{sym}</span>
+          <div className="text-xl font-black text-red-600 dark:text-red-400">
+            {fmt(data.total_expenses)} <span className="text-xs font-normal">{sym}</span>
+          </div>
+        </div>
+        <div className={kpiClass}>
+          <div className="text-slate-500 dark:text-slate-400 text-[11px] font-bold flex items-center gap-1 mb-2">
+            {getCategoryIcon('ads')} إعلانات وتسويق
+          </div>
+          <div className="text-base font-black text-pink-600 dark:text-pink-400">
+            {fmt(data.totals.ads)} <span className="text-[10px] font-normal text-slate-400">{sym}</span>
+          </div>
+        </div>
+        <div className={kpiClass}>
+          <div className="text-slate-500 dark:text-slate-400 text-[11px] font-bold flex items-center gap-1 mb-2">
+            {getCategoryIcon('salaries')} رواتب وأجور
+          </div>
+          <div className="text-base font-black text-indigo-600 dark:text-indigo-400">
+            {fmt(data.totals.salaries)} <span className="text-[10px] font-normal text-slate-400">{sym}</span>
           </div>
         </div>
         <div className={kpiClass}>
           <div className="text-slate-500 dark:text-slate-400 text-[11px] font-bold flex items-center gap-1 mb-2">
             {getCategoryIcon('rent')} إيجارات
           </div>
-          <div className="text-lg font-black text-slate-800 dark:text-slate-100">
+          <div className="text-base font-black text-slate-800 dark:text-slate-100">
             {fmt(data.totals.rent)} <span className="text-[10px] font-normal text-slate-400">{sym}</span>
           </div>
         </div>
@@ -282,15 +357,15 @@ const ReportExpenses: React.FC = () => {
           <div className="text-slate-500 dark:text-slate-400 text-[11px] font-bold flex items-center gap-1 mb-2">
             {getCategoryIcon('utilities')} مرافق وخدمات
           </div>
-          <div className="text-lg font-black text-slate-800 dark:text-slate-100">
+          <div className="text-base font-black text-slate-800 dark:text-slate-100">
             {fmt(data.totals.utilities)} <span className="text-[10px] font-normal text-slate-400">{sym}</span>
           </div>
         </div>
         <div className={kpiClass}>
           <div className="text-slate-500 dark:text-slate-400 text-[11px] font-bold flex items-center gap-1 mb-2">
-            {getCategoryIcon('transport')} انتقالات وشحن
+            {getCategoryIcon('transport')} شحن وانتقالات
           </div>
-          <div className="text-lg font-black text-slate-800 dark:text-slate-100">
+          <div className="text-base font-black text-slate-800 dark:text-slate-100">
             {fmt(data.totals.transport)} <span className="text-[10px] font-normal text-slate-400">{sym}</span>
           </div>
         </div>
@@ -298,7 +373,7 @@ const ReportExpenses: React.FC = () => {
           <div className="text-slate-500 dark:text-slate-400 text-[11px] font-bold flex items-center gap-1 mb-2">
             {getCategoryIcon('maintenance')} صيانة وإصلاح
           </div>
-          <div className="text-lg font-black text-slate-800 dark:text-slate-100">
+          <div className="text-base font-black text-slate-800 dark:text-slate-100">
             {fmt(data.totals.maintenance)} <span className="text-[10px] font-normal text-slate-400">{sym}</span>
           </div>
         </div>
@@ -306,15 +381,15 @@ const ReportExpenses: React.FC = () => {
           <div className="text-slate-500 dark:text-slate-400 text-[11px] font-bold flex items-center gap-1 mb-2">
             {getCategoryIcon('hospitality')} ضيافة وبوفيه
           </div>
-          <div className="text-lg font-black text-slate-800 dark:text-slate-100">
+          <div className="text-base font-black text-slate-800 dark:text-slate-100">
             {fmt(data.totals.hospitality)} <span className="text-[10px] font-normal text-slate-400">{sym}</span>
           </div>
         </div>
         <div className={kpiClass}>
           <div className="text-slate-500 dark:text-slate-400 text-[11px] font-bold flex items-center gap-1 mb-2">
-            {getCategoryIcon('supplies')} مكتبية
+            {getCategoryIcon('supplies')} أدوات مكتبية
           </div>
-          <div className="text-lg font-black text-slate-800 dark:text-slate-100">
+          <div className="text-base font-black text-slate-800 dark:text-slate-100">
             {fmt(data.totals.supplies)} <span className="text-[10px] font-normal text-slate-400">{sym}</span>
           </div>
         </div>
@@ -398,11 +473,11 @@ const ReportExpenses: React.FC = () => {
             <table className="w-full text-right text-xs">
               <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 sticky top-0">
                 <tr>
-                  <th className="px-4 py-3 font-bold">التاريخ</th>
-                  <th className="px-4 py-3 font-bold">الخزينة</th>
-                  <th className="px-4 py-3 font-bold">التصنيف</th>
-                  <th className="px-4 py-3 font-bold text-center">المبلغ</th>
-                  <th className="px-4 py-3 font-bold">البيان / السبب</th>
+                  <SortHeader col="date" label="التاريخ" align="right" />
+                  <SortHeader col="treasury_name" label="الخزينة" align="right" />
+                  <SortHeader col="category" label="التصنيف" align="right" />
+                  <SortHeader col="amount" label="المبلغ" align="center" />
+                  <SortHeader col="notes" label="البيان / السبب" align="right" />
                 </tr>
               </thead>
               <tbody className="divide-y dark:divide-slate-700 text-slate-700 dark:text-slate-300">
@@ -415,13 +490,13 @@ const ReportExpenses: React.FC = () => {
                       </div>
                     </td>
                   </tr>
-                ) : filteredList.length === 0 ? (
+                ) : sortedList.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="py-12 text-center text-slate-400">
                       لا توجد مصروفات مسجلة في هذه الفترة.
                     </td>
                   </tr>
-                ) : filteredList.map((item) => (
+                ) : sortedList.map((item) => (
                   <tr key={item.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-700/20 transition-colors">
                     <td className="px-4 py-3.5 font-mono text-[10px]">{item.date.slice(0, 16)}</td>
                     <td className="px-4 py-3.5 text-slate-600 dark:text-slate-400">{item.treasury_name}</td>
