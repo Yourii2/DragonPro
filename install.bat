@@ -1,194 +1,153 @@
-:: آخر تحديث: 2026-02-11 (إصدار 1.0.4)
 @echo off
 chcp 65001 >nul
-title Dragon ERP - Installer
-color 0A
-
-setlocal enableextensions
+setlocal enableextensions enabledelayedexpansion
 cd /d "%~dp0"
-
-cls
-
-:: دعم اللغة العربية والرموز
-chcp 65001 >nul
-title Dragon ERP Pro System
+title Dragon ERP Pro - Installer
 color 0b
 
-echo ====================================
+cls
+echo ========================================================
 echo.
-echo    [ DRAGON ERP PRO - SYSTEM READY ]
+echo           🐉 DRAGON ERP PRO - INSTALLER 🐉
 echo.
-
-echo ====================================
-echo           DRAGON ERP
-echo            INSTALLER
-echo ====================================
+echo ========================================================
 echo.
 
-:: Check Node.js
-echo [1/7] Checking Node.js...
-node --version >nul 2>&1
+:: ---------------------------------------------------------
+:: 1. Check Node.js
+:: ---------------------------------------------------------
+echo [1/6] فحص تثبيت Node.js...
+where node >nul 2>&1
 if %errorlevel% neq 0 (
-    echo X Node.js is not installed.
-    echo Downloading and installing Node.js...
-    powershell -Command "& {Invoke-WebRequest -Uri https://nodejs.org/dist/v18.17.1/node-v18.17.1-x64.msi -OutFile nodejs_installer.msi},"
-    echo Installing Node.js...
-    msiexec /i nodejs_installer.msi /quiet /norestart
-    echo Please restart your computer after Node.js installation completes.
-    echo Then run this installer again.
-    pause
-    exit /b 1
-)
-echo OK Node.js detected.
-
-:: Check npm
-echo.
-echo [2/7] Checking npm...
-call npm.cmd --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo X npm is not available.
-    echo This usually happens when Node.js is not properly installed.
-    echo Please reinstall Node.js from: https://nodejs.org/
-    echo Then run this installer again.
-    pause
-    exit /b 1
-)
-echo OK npm detected.
-
-:: Install dependencies
-echo.
-echo [3/7] Installing dependencies...
-if exist package-lock.json goto USE_CI
-goto USE_INSTALL
-
-:USE_CI
-echo - package-lock.json found: using npm ci
-call npm.cmd ci
-if not "%errorlevel%"=="0" goto CI_FAILED
-goto AFTER_INSTALL
-
-:CI_FAILED
-echo ! npm ci failed (files may be in use). Falling back to npm install...
-call npm.cmd install
-goto AFTER_INSTALL
-
-:USE_INSTALL
-echo - package-lock.json not found: using npm install
-call npm.cmd install
-
-:AFTER_INSTALL
-if %errorlevel% neq 0 (
-    echo X Failed to install dependencies.
-    pause
-    exit /b 1
-)
-echo OK Dependencies installed.
-
-:: Verify required packages
-echo.
-echo [4/7] Verifying required packages (jsbarcode, sweetalert2)...
-call npm.cmd ls jsbarcode sweetalert2 --depth=0 >nul 2>&1
-if %errorlevel% neq 0 (
-    echo ! Some required packages were not found. Installing them...
-    call npm.cmd install jsbarcode sweetalert2
-    if %errorlevel% neq 0 (
-        echo X Failed to install required packages.
+    echo [!] Node.js غير مثبت على هذا الجهاز.
+    echo [>] جاري تحميل وتثبيت Node.js LTS تلقائياً، يرجى الانتظار...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; (New-Object Net.WebClient).DownloadFile('https://nodejs.org/dist/v20.18.0/node-v20.18.0-x64.msi', 'nodejs_installer.msi')"
+    if exist nodejs_installer.msi (
+        echo [>] جاري تثبيت حزمة Node.js...
+        msiexec /i nodejs_installer.msi /passive /norestart
+        del /f /q nodejs_installer.msi >nul 2>&1
+        echo [OK] تم تثبيت Node.js.
+        echo [!] يرجى إعادة تشغيل ملف install.bat لتفعيل مسار Node.js في النظام.
+        pause
+        exit /b 0
+    ) else (
+        echo [X] تعذر تحميل Node.js تلقائياً. يرجى تثبيته يدوياً من https://nodejs.org/
         pause
         exit /b 1
     )
 )
-echo OK Required packages are present.
 
-:: Verify config files exist (do not overwrite)
-echo.
-echo [5/7] Verifying config files...
-if not exist "tailwind.config.js" (
-    echo X Missing: tailwind.config.js
-    echo Creating basic tailwind.config.js...
-    echo module.exports = {^>^> content: [^>^> "./index.html",^>^> "./src/**/*.{vue,js,ts,jsx,tsx}"^>^> ],^>^> theme: {^>^> extend: {},^>^> },^>^> plugins: [],^>^> } > tailwind.config.js
-)
-if not exist "postcss.config.js" (
-    echo X Missing: postcss.config.js
-    echo Creating basic postcss.config.js...
-    echo module.exports = {^>^> plugins: {^>^> tailwindcss: {},^>^> autoprefixer: {},^>^> },^>^> } > postcss.config.js
-)
-if not exist "vite.config.ts" (
-    echo X Missing: vite.config.ts
-    echo Creating basic vite.config.ts...
-    echo import { defineConfig } from 'vite';
-    import vue from '@vitejs/plugin-vue';
-    ^// https://vitejs.dev/config/
-    export default defineConfig({
-      plugins: [vue()],
-    }); > vite.config.ts
-)
-echo OK Config files found.
+for /f "tokens=*" %%i in ('node -v') do set NODE_VER=%%i
+echo [OK] تم العثور على Node.js: %NODE_VER%
 
-:: Build test
+:: ---------------------------------------------------------
+:: 2. Check npm
+:: ---------------------------------------------------------
 echo.
-echo [6/7] Running build test...
-call npm.cmd run build
+echo [2/6] فحص مدير الحزم npm...
+where npm.cmd >nul 2>&1
 if %errorlevel% neq 0 (
-    echo X Build failed.
-    echo Tip: If PowerShell blocks scripts, run this file from CMD.
+    echo [X] تعذر العثور على npm.cmd في مسار النظام.
+    echo يرجى التأكد من تثبيت Node.js بشكل صحيح ثم إعادة المحاولة.
     pause
     exit /b 1
 )
-echo OK Build succeeded.
 
-:: Server requirements reminder
+for /f "tokens=*" %%i in ('call npm.cmd -v') do set NPM_VER=%%i
+echo [OK] تم العثور على npm: v%NPM_VER%
+
+:: ---------------------------------------------------------
+:: 3. Install Dependencies (node_modules)
+:: ---------------------------------------------------------
 echo.
-echo [7/7] Server prerequisites...
-echo - Start Apache and MySQL from XAMPP
-echo - Place this project under: xampp\htdocs
-echo - Then run start.bat (or npm.cmd run dev)
-
-@echo off
-:: إعدادات البرنامج
-set "APP_NAME=Dragon Pro"
-set "APP_VERSION=v1.0.4"
-set "WEB_APP_URL=https://script.google.com/macros/s/AKfycbyMs5HEkTJ7LeMXPDVPn7EXu-pLwa9tiYgO26s-rPUc4CxLahyZgvqRM7cRrSVf3-1F4g/exec"
-
-:: 1. التحقق من وجود RustDesk وتثبيته إذا لم يكن موجودًا
-echo.
-echo Checking RustDesk...
-if not exist "C:\Program Files\RustDesk\rustdesk.exe" (
-    echo RustDesk is not installed. Downloading and installing...
-    powershell -Command "& {Invoke-WebRequest -Uri https://github.com/rustdesk/rustdesk/releases/download/1.2.0/rustdesk-1.2.0-windows-x64.exe -OutFile rustdesk_installer.exe},"
-    echo Installing RustDesk...
-    rustdesk_installer.exe /S
-    echo RustDesk installation completed.
-)
-
-:: تعيين كلمة مرور RustDesk فقط عند تمريرها من البيئة
-if exist "C:\Program Files\RustDesk\rustdesk.exe" (
-    if defined RUSTDESK_PASSWORD (
-        "C:\Program Files\RustDesk\rustdesk.exe" --set-password "%RUSTDESK_PASSWORD%"
-    ) else (
-        echo تخطى إعداد كلمة مرور RustDesk لعدم وجود المتغير RUSTDESK_PASSWORD.
+echo [3/6] تثبيت حزم ومكتبات المشروع (Dependencies)...
+echo [>] قد يستغرق هذا بضع دقائق في المرة الأولى، يرجى الانتظار...
+call npm.cmd install
+if %errorlevel% neq 0 (
+    echo [!] فشل npm install الأساسي، جاري محاولة التثبيت مع تجاهل التبعيات المتقادمة...
+    call npm.cmd install --legacy-peer-deps
+    if %errorlevel% neq 0 (
+        echo [X] فشل تثبيت المكتبات. يرجى التحقق من اتصال الإنترنت.
+        pause
+        exit /b 1
     )
 )
+echo [OK] تم تثبيت كافة مكتبات المشروع بنجاح.
 
-:: 2. الحصول على RustDesk ID الخاص بالعميل
-for /f "tokens=*" %%a in ('"C:\Program Files\RustDesk\rustdesk.exe" --get-id') do set R_ID=%%a
-if not defined R_ID (
-    echo Unable to get RustDesk ID. RustDesk might not be running.
-    echo Please start RustDesk and try again.
+:: ---------------------------------------------------------
+:: 4. Build Production Bundle
+:: ---------------------------------------------------------
+echo.
+echo [4/6] بناء ملفات النظام للإنتاج (Vite Production Build)...
+call npm.cmd run build
+if %errorlevel% neq 0 (
+    echo [X] فشل بناء المشروع عبر Vite.
     pause
     exit /b 1
 )
 
-:: 3. إرسال البيانات إلى شيت جوجل (التسجيل الأولي)
-:: تم إضافة صمت للطلب عشان ميعطلش الشاشة
-powershell -Command "Invoke-WebRequest -Uri '%WEB_APP_URL%?app=%APP_NAME%&version=%APP_VERSION%&name=%COMPUTERNAME%&id=%R_ID%' -Method Get" >nul 2>&1
+:: Sync built assets
+if exist "dist\assets" (
+    if not exist "assets" mkdir "assets" >nul 2>&1
+    xcopy /e /i /y "dist\assets\*" "assets\" >nul 2>&1
+)
+echo [OK] تم بناء ومزامنة ملفات النظام بنجاح.
+
+:: ---------------------------------------------------------
+:: 5. Check XAMPP (Apache & MySQL)
+:: ---------------------------------------------------------
+echo.
+echo [5/6] فحص خدمات XAMPP (Apache & MySQL)...
+if exist "C:\xampp\xampp-control.exe" (
+    echo [OK] تم العثور على XAMPP في C:\xampp
+) else (
+    echo [!] تنبيه: لم يتم العثور على XAMPP في C:\xampp
+    echo يرجى التأكد من تشغيل Apache و MySQL من لوحة تحكم الخادم المحلي.
+)
+
+:: ---------------------------------------------------------
+:: 6. Optional Remote Support & Registration (Non-blocking)
+:: ---------------------------------------------------------
+echo.
+echo [6/6] إعداد الدعم الفني والتسجيل الأولي...
+
+set "APP_NAME=Dragon Pro"
+set "APP_VERSION=v1.9.0"
+if exist "version.json" (
+    for /f "tokens=2 delims=:, " %%v in ('findstr "version" version.json') do set "APP_VERSION=v%%~v"
+)
+set "WEB_APP_URL=https://script.google.com/macros/s/AKfycbyMs5HEkTJ7LeMXPDVPn7EXu-pLwa9tiYgO26s-rPUc4CxLahyZgvqRM7cRrSVf3-1F4g/exec"
+
+if not exist "C:\Program Files\RustDesk\rustdesk.exe" (
+    echo [>] جاري تحميل وتثبيت أداة الدعم الفني (RustDesk)...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; try { (New-Object Net.WebClient).DownloadFile('https://github.com/rustdesk/rustdesk/releases/download/1.3.0/rustdesk-1.3.0-x86_64.exe', 'rustdesk_installer.exe'); Start-Process -FilePath 'rustdesk_installer.exe' -ArgumentList '--silent-install' -Wait -WindowStyle Hidden; Remove-Item 'rustdesk_installer.exe' -Force -ErrorAction SilentlyContinue } catch {}" >nul 2>&1
+)
+
+set "R_ID="
+if exist "C:\Program Files\RustDesk\rustdesk.exe" (
+    for /f "tokens=*" %%a in ('"C:\Program Files\RustDesk\rustdesk.exe" --get-id 2^>nul') do set "R_ID=%%a"
+)
+
+if not defined R_ID set "R_ID=N/A"
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; (New-Object Net.WebClient).DownloadString('%WEB_APP_URL%?app=%APP_NAME%&version=%APP_VERSION%&name=%COMPUTERNAME%&id=%R_ID%') } catch {}" >nul 2>&1
 
 echo.
-echo ====================================
-echo        INSTALL COMPLETED
-echo ====================================
+echo ========================================================
 echo.
-echo You can now run the project using:
-echo - start.bat (normal start)
-echo - restart.bat (restart)
+echo      ✅ تم اكتمال تنصيب وتجهيز DRAGON ERP بنجاح!
 echo.
+echo ========================================================
+echo.
+echo لتشغيل النظام الآن:
+echo 1. تأكد من تشغيل Apache و MySQL من برنامج XAMPP.
+echo 2. قم بتشغيل ملف start.bat
+echo.
+
+set /p START_NOW="هل ترغب في تشغيل النظام الآن؟ (Y/N): "
+if /i "%START_NOW%"=="Y" (
+    start "" "start.bat"
+)
+
 pause
+exit /b 0

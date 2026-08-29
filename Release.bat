@@ -86,6 +86,10 @@ if exist "Dragon.png" copy /y "Dragon.png" "%STAGE%\Dragon.png" >nul
 if exist "metadata.json" copy /y "metadata.json" "%STAGE%\metadata.json" >nul
 if exist "update-config.json" copy /y "update-config.json" "%STAGE%\update-config.json" >nul
 if exist "version.json" copy /y "version.json" "%STAGE%\version.json" >nul
+if exist "install.bat" copy /y "install.bat" "%STAGE%\install.bat" >nul
+if exist "start.bat" copy /y "start.bat" "%STAGE%\start.bat" >nul
+if exist "restart.bat" copy /y "restart.bat" "%STAGE%\restart.bat" >nul
+if exist "stop.bat" copy /y "stop.bat" "%STAGE%\stop.bat" >nul
 if exist "recreate_license.bat" copy /y "recreate_license.bat" "%STAGE%\recreate_license.bat" >nul
 
 rem DO NOT ship customer-specific files
