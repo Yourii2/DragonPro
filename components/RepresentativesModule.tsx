@@ -125,6 +125,29 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
   const [warehouses, setWarehouses] = useState<any[]>([]);
   const [userDefaults, setUserDefaults] = useState<any>(null);
 
+  // ─── تدقيق ومطابقة أرصدة المناديب ───
+  const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditData, setAuditData] = useState<any[]>([]);
+
+  const handleOpenAuditModal = async () => {
+    setIsAuditModalOpen(true);
+    setAuditLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=users&action=auditAndReconcileReps`);
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        setAuditData(json.data);
+      } else {
+        setAuditData([]);
+      }
+    } catch (e) {
+      console.error('Audit fetch error', e);
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+
   const todayISO = new Date().toISOString().split('T')[0];
   const [perfMode, setPerfMode] = useState<'date' | 'day' | 'week' | 'month' | 'year'>('month');
   const [perfDate, setPerfDate] = useState<string>(todayISO);
@@ -2587,6 +2610,7 @@ ${productsSummaryHtml}
           <p className="text-sm text-muted font-medium">متابعة أداء المناديب وعهدتهم ومعاملاتهم</p>
         </div>
         <div className="flex gap-1 p-1.5 rounded-2xl border border-card shadow-sm card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+          <button onClick={handleOpenAuditModal} className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-black bg-indigo-600 text-white hover:opacity-90 transition-all shadow-sm"><RefreshCcw size={16}/> تدقيق ومطابقة الأرصدة</button>
           <button onClick={() => handleOpenModal(null)} className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black bg-green-600 text-white hover:opacity-90"><PlusCircle size={16}/> إضافة مندوب</button>
           <button onClick={() => setView('list')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${view === 'list' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Users size={16}/> قائمة المناديب</button>
           <button onClick={() => setView('rep-cycle')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${view === 'rep-cycle' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Wallet size={16}/> يوميات المندوب</button>
@@ -3273,6 +3297,96 @@ ${productsSummaryHtml}
           </div>
         </div>
       )}
+      {/* ─── Modal تدقيق ومطابقة أرصدة المناديب ─── */}
+      {isAuditModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-4xl w-full shadow-2xl border border-slate-200 dark:border-slate-800 animate-in fade-in max-h-[90vh] flex flex-col">
+            <div className="flex justify-between items-center pb-4 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-2xl">
+                  <RefreshCcw size={22} className={auditLoading ? 'animate-spin' : ''} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-900 dark:text-white">تدقيق ومطابقة أرصدة المناديب</h3>
+                  <p className="text-xs text-muted font-medium">فحص ومطابقة المديونيات مع الأوردرات المسلمة وحركات الخزينة والتسويات</p>
+                </div>
+              </div>
+              <button onClick={() => setIsAuditModalOpen(false)} className="p-2 text-slate-400 hover:text-slate-600 rounded-xl">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto py-4 space-y-4">
+              {auditLoading ? (
+                <div className="text-center py-12">
+                  <RefreshCcw className="w-8 h-8 animate-spin text-indigo-600 mx-auto mb-3" />
+                  <p className="text-sm font-bold text-slate-600 dark:text-slate-300">جاري فحص وتدقيق سجلات المناديب والحركات المالية...</p>
+                </div>
+              ) : auditData.length === 0 ? (
+                <div className="text-center py-12 text-muted">لا يوجد مناديب مسجلين في النظام.</div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {auditData.map((rep) => {
+                    const bal = rep.current_balance || 0;
+                    const balLabel = bal > 0 ? 'له' : bal < 0 ? 'عليه' : 'متزن';
+                    const balColor = bal > 0 ? 'text-emerald-600' : bal < 0 ? 'text-rose-600' : 'text-slate-600';
+                    return (
+                      <div key={rep.rep_id} className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 flex flex-col justify-between gap-3">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <div className="font-black text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                              <span>{rep.rep_name}</span>
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-normal">#{rep.rep_id}</span>
+                            </div>
+                            <div className="text-xs text-muted mt-0.5">{rep.phone || 'بدون هاتف'}</div>
+                          </div>
+                          <span className="px-2.5 py-1 rounded-xl text-xs font-black bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400">
+                            🟢 مدقق ومطابق
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200/60 dark:border-slate-700/60 text-xs">
+                          <div>
+                            <span className="text-muted block">الأوردرات المسلمة:</span>
+                            <span className="font-black text-slate-800 dark:text-slate-200">{rep.delivered_count} أوردر ({Number(rep.delivered_total || 0).toLocaleString()} {currencySymbol})</span>
+                          </div>
+                          <div>
+                            <span className="text-muted block">الرصيد الفعلي الحالي:</span>
+                            <span className={`font-black ${balColor}`}>{Math.abs(bal).toLocaleString()} {currencySymbol} ({balLabel})</span>
+                          </div>
+                        </div>
+
+                        {rep.transactions_breakdown && rep.transactions_breakdown.length > 0 && (
+                          <div className="pt-2 border-t border-dashed border-slate-200 dark:border-slate-700 text-[11px] text-muted space-y-1">
+                            <span className="font-bold text-slate-700 dark:text-slate-300 block">تفصيل القيود والحركات:</span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {rep.transactions_breakdown.map((tx: any, idx: number) => (
+                                <span key={idx} className="px-2 py-0.5 rounded-md bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-300">
+                                  {tx.type}: {Math.abs(Number(tx.total_amt || 0)).toLocaleString()} {currencySymbol} ({tx.cnt})
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center">
+              <button onClick={handleOpenAuditModal} disabled={auditLoading} className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:opacity-90">
+                <RefreshCcw size={14} className={auditLoading ? 'animate-spin' : ''} /> إعادة الفحص والتدقيق
+              </button>
+              <button onClick={() => setIsAuditModalOpen(false)} className="px-5 py-2 rounded-xl text-xs font-black bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:opacity-90">
+                إغلاق
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Waybill print layer — same component as SalesModule order printing */}
       {waybillPrintOrders && (
         <PrintableOrders

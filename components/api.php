@@ -9133,6 +9133,56 @@ switch ($module) {
         break;
     case 'users':
         $action = $_GET['action'] ?? 'getAll';
+        if ($action === 'auditAndReconcileReps') {
+            check_permission_or_die($pdo, 'users', 'view');
+            $rep_related_type = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
+            $targetRepId = isset($_GET['rep_id']) ? intval($_GET['rep_id']) : (isset($input['rep_id']) ? intval($input['rep_id']) : 0);
+            $autoFix = isset($_GET['auto_fix']) ? filter_var($_GET['auto_fix'], FILTER_VALIDATE_BOOLEAN) : (isset($input['auto_fix']) ? filter_var($input['auto_fix'], FILTER_VALIDATE_BOOLEAN) : false);
+
+            $repSql = "SELECT id, name, phone, COALESCE(insurance_amount, 0) as insurance_amount FROM users WHERE role = 'representative'";
+            $params = [];
+            if ($targetRepId > 0) {
+                $repSql .= " AND id = ?";
+                $params[] = $targetRepId;
+            }
+            $repSql .= " ORDER BY name ASC";
+            $reps = execute_query($pdo, $repSql, $params)->fetchAll(PDO::FETCH_ASSOC);
+
+            $results = [];
+            foreach ($reps as $rep) {
+                $rId = intval($rep['id']);
+                
+                // 1. Sum of all transactions in DB for this rep
+                $txSumStmt = execute_query($pdo, "SELECT COALESCE(SUM(amount), 0) as cur_bal FROM transactions WHERE related_to_type = ? AND related_to_id = ?", [$rep_related_type, $rId]);
+                $currentBalance = floatval($txSumStmt->fetchColumn() ?? 0);
+
+                // 2. Breakdown of transactions by type
+                $breakdownStmt = execute_query($pdo, "SELECT type, COALESCE(SUM(amount), 0) as total_amt, COUNT(*) as cnt FROM transactions WHERE related_to_type = ? AND related_to_id = ? GROUP BY type", [$rep_related_type, $rId]);
+                $txBreakdown = $breakdownStmt->fetchAll(PDO::FETCH_ASSOC);
+
+                // 3. Delivered orders metrics
+                $ordersStmt = execute_query($pdo, "SELECT COUNT(id) as count, COALESCE(SUM(total_amount), 0) as total, COALESCE(SUM(shipping_fees), 0) as shipping FROM orders WHERE rep_id = ? AND status IN ('delivered', 'delivered_final', 'completed', 'done')", [$rId]);
+                $ordersInfo = $ordersStmt->fetch(PDO::FETCH_ASSOC);
+
+                $auditItem = [
+                    'rep_id' => $rId,
+                    'rep_name' => $rep['name'],
+                    'phone' => $rep['phone'],
+                    'current_balance' => $currentBalance,
+                    'delivered_count' => intval($ordersInfo['count'] ?? 0),
+                    'delivered_total' => floatval($ordersInfo['total'] ?? 0),
+                    'shipping_total' => floatval($ordersInfo['shipping'] ?? 0),
+                    'transactions_breakdown' => $txBreakdown,
+                    'status' => 'balanced',
+                    'reconciled' => false
+                ];
+
+                $results[] = $auditItem;
+            }
+
+            echo json_encode(['success' => true, 'data' => $results]);
+            break;
+        }
         if ($action === 'getAllWithBalance') {
             check_permission_or_die($pdo, 'users', 'view');
             $rep_related_type = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
