@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import Barcode from './Barcode';
 import { API_BASE_PATH } from '../services/apiConfig';
+import { UniversalWaybill, getSelectedTemplateId } from './UniversalWaybillRenderer';
 
 export const PrintableContent: React.FC<{ order: any, companyName: string, companyPhone: string, companyAddress?: string, terms: string, companyLogo?: string | null }> = ({ order, companyName, companyPhone, companyAddress, terms, companyLogo }) => {
     const productRows = order.products && order.products.length > 0 
@@ -238,6 +239,7 @@ export const PrintableOrdersSingle: React.FC<{ orders: any[] }> = ({ orders }) =
   const [companyTerms, setCompanyTerms] = useState<string>(localStorage.getItem('Dragon_company_terms') || 'المعاينة حق للعميل قبل الاستلام.');
   const [companyAddress, setCompanyAddress] = useState<string>(localStorage.getItem('Dragon_company_address') || '');
   const [companyLogo, setCompanyLogo] = useState<string | null>(localStorage.getItem('Dragon_company_logo') || null);
+  const templateId = getSelectedTemplateId();
 
   useEffect(() => {
     (async () => {
@@ -264,9 +266,6 @@ export const PrintableOrdersSingle: React.FC<{ orders: any[] }> = ({ orders }) =
           body { visibility: hidden; margin: 0; padding: 0; }
           #print-container { display: block !important; visibility: visible !important; position: absolute; top: 0; left: 0; width: 100%; }
           @page { size: A4; margin: 0.5cm; }
-          /* Use clearer font and larger print font size for printable container */
-          #print-container, #print-container * { font-family: 'Noto Sans Arabic', 'Noto Naskh Arabic', Arial, sans-serif !important; font-size: 28px !important; }
-          /* Avoid fixed heights for pages to prevent browsers adding blank trailing pages */
           .print-page { width: 100%; padding: 0.5cm; box-sizing: border-box; page-break-after: always; page-break-inside: avoid; break-inside: avoid; }
           .print-page:last-child { page-break-after: auto; }
           * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -276,7 +275,15 @@ export const PrintableOrdersSingle: React.FC<{ orders: any[] }> = ({ orders }) =
         <div key={order.id || order.orderNumber || Math.random()} className="print-page" style={{ padding: '0.3cm' }}>
           <div className="print-wrapper" style={{ minHeight: 0 }}>
             <div className="print-content" style={{ minHeight: 0 }}>
-              <PrintableContent order={order} companyName={companyName} companyPhone={companyPhone} companyAddress={companyAddress} terms={companyTerms} companyLogo={companyLogo} />
+              <UniversalWaybill
+                order={order}
+                companyName={companyName}
+                companyPhone={companyPhone}
+                companyAddress={companyAddress}
+                terms={companyTerms}
+                companyLogo={companyLogo}
+                templateId={templateId}
+              />
             </div>
           </div>
         </div>

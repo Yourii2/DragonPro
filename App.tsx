@@ -345,6 +345,8 @@ const App: React.FC = () => {
         return <ReportsModule initialView={activeSubSlug} />;
       case 'admin':
         return <AdminModule initialView={activeSubSlug} />;
+      case 'waybill-templates':
+        return <AdminModule initialView="waybill-templates" />;
       case 'settings':
         return <SettingsModule />;
       case 'attendance':

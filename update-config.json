@@ -2,9 +2,9 @@
   "github": {
     "owner": "Yourii2",
     "repo": "DragonPro",
-    "version": "1.4.4",
-    "buildDate": "2026-04-26",
-    "assetName": "DragonPro-V1.4.4.zip"
+    "version": "1.9.0",
+    "buildDate": "2026-08-29",
+    "assetName": "DragonPro-V1.9.0.zip"
   },
   "preserve": [
     "config.php",

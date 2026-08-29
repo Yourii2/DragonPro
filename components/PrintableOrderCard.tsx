@@ -5,6 +5,7 @@
  */
 import React from 'react';
 import Barcode from './Barcode';
+import { UniversalWaybill, getSelectedTemplateId } from './UniversalWaybillRenderer';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -259,8 +260,6 @@ export const PrintableContent: React.FC<{
   );
 };
 
-// ─── PrintableOrders ─────────────────────────────────────────────────────────
-
 export const PrintableOrders: React.FC<{
   orders: any[];
   companyName: string;
@@ -270,42 +269,70 @@ export const PrintableOrders: React.FC<{
   companyAddress?: string;
   users?: any[];
 }> = ({ orders, companyName, companyPhone, terms, companyLogo, companyAddress, users }) => {
+  const templateId = getSelectedTemplateId();
+
+  const chunks: any[][] = [];
+  for (let i = 0; i < (orders || []).length; i += 4) {
+    chunks.push(orders.slice(i, i + 4));
+  }
+
   return (
     <div className="print-root">
       <style>{`
         @media print {
           body * { visibility: hidden; }
           #print-container, #print-container * {
-            font-family: 'Noto Sans Arabic', 'Noto Naskh Arabic', Arial, sans-serif !important;
-            font-size: 28px !important;
             visibility: visible !important;
           }
-          #print-container .company-name { font-size: 48px !important; line-height: 1 !important; font-weight: 900 !important; }
-          #print-container .company-phone { font-size: 20px !important; font-weight: 800 !important; }
-          #print-container { position: absolute; left: 0; top: 0; width: 100%; margin: 0; padding: 0; }
-          @page { size: A4; margin: 0; }
-          .print-page {
+          #print-container {
+            position: absolute;
+            left: 0;
+            top: 0;
             width: 100%;
-            height: 29.6cm;
-            padding: 0.5cm;
+            margin: 0;
+            padding: 0;
+          }
+          @page {
+            size: A4 portrait;
+            margin: 4mm;
+          }
+          .print-a4-page {
+            width: 100%;
+            height: 288mm;
+            max-height: 288mm;
             box-sizing: border-box;
-            display: flex;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr 1fr;
+            gap: 3mm;
             page-break-inside: avoid;
             break-inside: avoid;
             page-break-after: always;
+            overflow: hidden;
           }
-          .print-page:last-child { page-break-after: auto; }
-          .print-page > .print-wrapper { flex: 1 1 auto; display: flex; flex-direction: column; }
-          .print-page .print-content { flex: 1 1 auto; display: flex; flex-direction: column; }
+          .print-a4-page:last-child {
+            page-break-after: auto;
+          }
+          .quarter-a4-cell {
+            width: 100%;
+            height: 141mm;
+            max-height: 141mm;
+            box-sizing: border-box;
+            overflow: hidden;
+            page-break-inside: avoid;
+            break-inside: avoid;
+            display: flex;
+            flex-direction: column;
+          }
           * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         }
       `}</style>
       <div id="print-container">
-        {orders.map((order: any) => (
-          <div key={order.id} className="print-page">
-            <div className="print-wrapper" style={{ minHeight: 0 }}>
-              <div className="print-content" style={{ minHeight: 0 }}>
-                <PrintableContent
+        {chunks.map((chunk, pageIdx) => (
+          <div key={pageIdx} className="print-a4-page">
+            {chunk.map((order: any, orderIdx: number) => (
+              <div key={order.id || orderIdx} className="quarter-a4-cell">
+                <UniversalWaybill
                   order={order}
                   companyName={companyName}
                   companyPhone={companyPhone}
@@ -313,12 +340,14 @@ export const PrintableOrders: React.FC<{
                   terms={terms}
                   companyLogo={companyLogo}
                   users={users}
+                  templateId={templateId}
                 />
               </div>
-            </div>
+            ))}
           </div>
         ))}
       </div>
     </div>
   );
 };
+

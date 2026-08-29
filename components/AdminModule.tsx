@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
 import PermissionsAdmin from './PermissionsAdmin';
-import { Lock, Search, Globe, Users as UsersIcon, Shield, ChevronRight, Plus, X, Save, Edit, Trash2, Eye, UserPlus } from 'lucide-react';
+import WaybillTemplatesManager from './WaybillTemplatesManager';
+import { Lock, Search, Globe, Users as UsersIcon, Shield, ChevronRight, Plus, X, Save, Edit, Trash2, Eye, UserPlus, LayoutTemplate } from 'lucide-react';
 import Swal from 'sweetalert2';
 import CustomSelect from './CustomSelect';
 import { API_BASE_PATH } from '../services/apiConfig';
@@ -206,6 +207,12 @@ const AdminModule: React.FC<AdminModuleProps> = ({ initialView }) => {
           >
             سجل العمليات
           </button>
+          <button 
+            onClick={() => setActiveTab('waybill-templates')} 
+            className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${activeTab === 'waybill-templates' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}
+          >
+            قوالب بوالص الشحن
+          </button>
         </div>
       </div>
 
@@ -277,6 +284,12 @@ const AdminModule: React.FC<AdminModuleProps> = ({ initialView }) => {
         </div>
       )}
 
+      {activeTab === 'waybill-templates' && (
+        <div className="animate-in fade-in">
+          <WaybillTemplatesManager />
+        </div>
+      )}
+
       {activeTab === 'logs' && (
         <div className="rounded-[3rem] p-24 border border-card card text-center animate-in slide-in-from-bottom duration-300 shadow-sm flex flex-col items-center justify-center" style={{ color: 'var(--text)' }}>
           <div className="p-8 rounded-[3rem] mb-6" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
@@ -286,6 +299,7 @@ const AdminModule: React.FC<AdminModuleProps> = ({ initialView }) => {
           <p className="text-sm font-medium max-w-sm">تتبع شفاف ومؤرشف لكافة العمليات التي قام بها المستخدمون (إضافة، حذف، تعديل) مع تحديد وقت العملية والموقع.</p>
         </div>
       )}
+
 
       {/* Add/Edit User Modal */}
       {isModalOpen && (

@@ -5,6 +5,7 @@ import { Calendar, ShoppingCart, Printer, History, Search, PlusCircle, MinusCirc
 import Swal from 'sweetalert2';
 import CustomSelect from './CustomSelect';
 import Barcode from './Barcode';
+import { UniversalWaybill, getSelectedTemplateId } from './UniversalWaybillRenderer';
 interface OrdersModuleProps {
   initialView?: string;
 }
@@ -3230,58 +3231,55 @@ const PrintableContent: React.FC<{ order: any, companyName: string, companyPhone
   );
 } */
 const PrintableOrders: React.FC<{ orders: any[], companyName: string, companyPhone: string, companyAddress?: string, terms: string, companyLogo?: string | null, users?: any[] }> = ({ orders, companyName, companyPhone, companyAddress, terms, companyLogo, users }) => {
-  // print each order on its own full A4 page without blank pages
+  const templateId = getSelectedTemplateId();
   return (
     <div className="print-root">
       <style>
         {`
         @media print {
-          /* إخفاء كل شيء في الصفحة وتفريغ مساحته */
           body * { visibility: hidden; }
-          /* استخدام خط أوضح وزيادة حجم الخط داخل حاوية الطباعة */
-          #print-container, #print-container * { font-family: 'Noto Sans Arabic', 'Noto Naskh Arabic', Arial, sans-serif !important; font-size: 28px !important; visibility: visible !important; }
-          /* تكبير اسم الشركة ورقم الهاتف فقط عند الطباعة */
-          #print-container .company-name { font-size: 48px !important; line-height: 1 !important; font-weight: 900 !important; }
-          #print-container .company-phone { font-size: 20px !important; font-weight: 800 !important; }
-          /* إظهار حاوية الطباعة فقط ونقلها لأعلى الصفحة تماماً لتجنب الصفحة البيضاء الأولى */
+          #print-container, #print-container * { visibility: visible !important; }
           #print-container { position: absolute; left: 0; top: 0; width: 100%; margin: 0; padding: 0; }
-
-          /* تصفير حواف المتصفح لمنع الصفحات الإضافية */
           @page { size: A4; margin: 0; }
-
           .print-page { 
             width: 100%; 
-            /* ارتفاع الصفحة أقل من A4 بملي واحد لمنع التسريب لصفحة فارغة بالنهاية */
             height: 29.6cm; 
-            padding: 0.5cm; /* استخدمنا البادينج هنا بدلاً من مارجن الصفحة */
+            padding: 0.5cm; 
             box-sizing: border-box; 
             display: flex; 
             page-break-inside: avoid; 
             break-inside: avoid;
             page-break-after: always; 
           }
-          
-          /* إلغاء كسر الصفحة بعد آخر بوليصة */
           .print-page:last-child { page-break-after: auto; }
-          
           .print-page > .print-wrapper { flex: 1 1 auto; display: flex; flex-direction: column; }
           .print-page .print-content { flex: 1 1 auto; display: flex; flex-direction: column; }
           * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         }
         `}
       </style>
-      {orders.map((order: any) => (
-        // شيلنا الـ inline styles عشان نقلناها جوه كلاس .print-page لضمان عدم التعارض
-        <div key={order.id} className="print-page">
-          <div className="print-wrapper" style={{ minHeight: 0 }}>
-            <div className="print-content" style={{ minHeight: 0 }}>
-              <PrintableContent order={order} companyName={companyName} companyPhone={companyPhone} companyAddress={companyAddress} terms={terms} companyLogo={companyLogo} users={users} />
+      <div id="print-container">
+        {orders.map((order: any) => (
+          <div key={order.id} className="print-page">
+            <div className="print-wrapper" style={{ minHeight: 0 }}>
+              <div className="print-content" style={{ minHeight: 0 }}>
+                <UniversalWaybill 
+                  order={order} 
+                  companyName={companyName} 
+                  companyPhone={companyPhone} 
+                  companyAddress={companyAddress} 
+                  terms={terms} 
+                  companyLogo={companyLogo} 
+                  users={users}
+                  templateId={templateId} 
+                />
+              </div>
             </div>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
-}
+};
 
 export default OrdersModule;

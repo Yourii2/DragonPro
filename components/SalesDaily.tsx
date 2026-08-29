@@ -1954,6 +1954,12 @@ const scanBarcodeAddOrder = async () => {
             html: buildShortagesHtml(completeStockCheck.shortages, 'لا يمكن إتمام اليومية لأن المخزون غير كافٍ لهذه الأوردرات:'),
             icon: 'warning'
           });
+        } else {
+          await Swal.fire({
+            title: 'تعذر التحقق من المخزون',
+            text: completeStockCheck.message || 'فشل التحقق من المخزون.',
+            icon: 'warning'
+          });
         }
         return;
       }
@@ -1994,9 +2000,19 @@ const scanBarcodeAddOrder = async () => {
         refreshPendingOrdersList();
       } else {
         console.error('Silent complete failed', jr);
+        await Swal.fire({
+          title: 'فشل إتمام اليومية',
+          text: jr?.message || 'لم تؤكد عملية اليومية من قبل الخادم.',
+          icon: 'error'
+        });
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Silent complete error', e);
+      await Swal.fire({
+        title: 'خطأ',
+        text: 'فشل إتمام اليومية: ' + (e?.message || 'حدث خطأ في الاتصال بالخادم'),
+        icon: 'error'
+      });
     }
   };
 

@@ -1,7 +1,7 @@
 
 import React from 'react';
 
-import { LayoutDashboard, Users, ShoppingCart, Package, Truck, Briefcase, Settings, ShieldCheck, Wallet, BarChart3, Fingerprint, QrCode, PhoneCall } from 'lucide-react';
+import { LayoutDashboard, Users, ShoppingCart, Package, Truck, Briefcase, Settings, ShieldCheck, Wallet, BarChart3, Fingerprint, QrCode, PhoneCall, LayoutTemplate } from 'lucide-react';
 
 export const MENU_ITEMS = [
   {
@@ -203,7 +203,8 @@ export const MENU_ITEMS = [
     subItems: [
       { label: 'اداره المستخدمين', slug: 'users' },
       { label: 'الصلاحيات', slug: 'permissions' },
-      { label: 'سجل العمليات', slug: 'logs' }
+      { label: 'سجل العمليات', slug: 'logs' },
+      { label: 'قوالب بوالص الشحن', slug: 'waybill-templates' }
     ]
   },
   {
@@ -231,6 +232,12 @@ export const MENU_ITEMS = [
     label: 'طباعة الأكواد',
     icon: <QrCode className="w-5 h-5" />,
     slug: 'barcode-print'
+  },
+  {
+    id: 'waybill-templates',
+    label: 'قوالب بوالص الشحن',
+    icon: <LayoutTemplate className="w-5 h-5" />,
+    slug: 'waybill-templates'
   },
   {
     id: 'settings',

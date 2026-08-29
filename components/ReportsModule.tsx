@@ -426,7 +426,9 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
           } else {
             setSalesByProduct([]);
             setDailySales([]);
-            Swal.fire('تنبيه', 'لم يتم العثور على بيانات لتقارير المبيعات للفترة المحددة.', 'info');
+            if (data && data.message) {
+              Swal.fire('خطأ', data.message, 'error');
+            }
           }
         }).catch(err => {
           console.error('Failed to fetch sales reports', err);

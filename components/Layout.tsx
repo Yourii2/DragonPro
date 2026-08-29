@@ -117,7 +117,7 @@ const Layout: React.FC<LayoutProps> = ({
     finance: ['treasuries', 'transactions'],
     inventory: ['stock', 'products', 'warehouses', 'product_movements'],
     hrm: ['employees'],
-    admin: ['users', 'permissions'],
+    admin: ['users', 'permissions', 'logs', 'waybill-templates', 'templates', 'قوالب بوالص الشحن'],
     attendance: ['attendance', 'attendance_devices', 'attendance_device_users', 'attendance_shifts', 'attendance_schedules', 'attendance_holidays', 'attendance_logs', 'attendance_summary'],
     sales: ['orders'],
     dispatch: ['manufacturing-management', 'manufacturing', 'dispatch', 'send_products', 'send_to_sales'],
