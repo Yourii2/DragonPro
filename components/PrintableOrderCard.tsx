@@ -7,7 +7,7 @@ import React from 'react';
 import Barcode from './Barcode';
 import { UniversalWaybill, getSelectedTemplateId } from './UniversalWaybillRenderer';
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+// ─── Helpers ───────────────────────────────────────────────────────────────
 
 export type RateType = 'percent' | 'amount';
 
@@ -132,87 +132,95 @@ export const PrintableContent: React.FC<{
   };
 
   return (
-    <div className="flex flex-col bg-white text-black font-sans box-border relative p-1" style={{ direction: 'rtl', fontSize: '28px', flex: 1, minHeight: 0 }}>
+    <div 
+      className="flex flex-col bg-white text-black font-sans box-border relative overflow-hidden w-full h-full"
+      style={{ 
+        direction: 'rtl', 
+        fontSize: '14px',
+        padding: '2mm',
+        boxSizing: 'border-box'
+      }}
+    >
 
       {/* Header: left=logo, center=barcode, right=company name+phone */}
-      <div className="flex items-center justify-between mb-1 w-full" style={{ direction: 'ltr' }}>
+      <div className="flex items-center justify-between w-full" style={{ direction: 'ltr', marginBottom: '4px', minHeight: '0', flexShrink: 0 }}>
         {/* Logo (left) */}
         <div className="w-1/4 flex flex-col items-start justify-center">
           {companyLogo ? (
-            <img src={companyLogo} alt="logo" className="h-48 max-w-full mb-1 object-contain" />
+            <img src={companyLogo} alt="logo" className="object-contain" style={{ maxHeight: '60px', maxWidth: '100%' }} />
           ) : (
-            <h1 className="company-name font-black text-4xl mb-1">{companyName}</h1>
+            <h1 className="company-name font-black" style={{ fontSize: '16px', margin: '0' }}>{companyName}</h1>
           )}
         </div>
 
         {/* Barcode & order number (center) */}
-        <div className="w-1/2 flex flex-col items-center justify-center">
-          <Barcode value={order.orderNumber} className="h-20" height={64} width={2} />
-          <div className="text-base mt-1 text-center font-bold tracking-widest">{order.orderNumber}</div>
+        <div className="w-1/2 flex flex-col items-center justify-center" style={{ gap: '2px' }}>
+          <Barcode value={order.orderNumber} className="" height={40} width={1} />
+          <div className="text-center font-bold" style={{ fontSize: '11px', letterSpacing: '1px' }}>{order.orderNumber}</div>
         </div>
 
         {/* Company info (right) */}
         <div className="w-1/4 text-right" style={{ direction: 'rtl' }}>
-          <h1 className="company-name font-black text-4xl">{companyName}</h1>
-          <p className="text-base font-bold mt-1 company-phone">{companyPhone}</p>
-          {companyAddress ? <p className="text-sm mt-1">{companyAddress}</p> : null}
+          <h1 className="company-name font-black" style={{ fontSize: '16px', margin: '0' }}>{companyName}</h1>
+          <p className="font-bold" style={{ fontSize: '11px', margin: '2px 0 0 0' }}>{companyPhone}</p>
+          {companyAddress ? <p style={{ fontSize: '9px', margin: '2px 0 0 0' }}>{companyAddress}</p> : null}
         </div>
       </div>
 
       {/* Date */}
-      <div className="text-right mb-1">
-        <p className="text-base font-bold">التاريخ: {currentDate}</p>
+      <div className="text-right" style={{ marginBottom: '4px', flexShrink: 0 }}>
+        <p className="font-bold" style={{ fontSize: '11px', margin: '0' }}>التاريخ: {currentDate}</p>
       </div>
 
       {/* Divider */}
-      <div className="w-full border-b-2 border-black border-dashed my-1"></div>
+      <div className="w-full border-b border-black border-dashed" style={{ margin: '2px 0', flexShrink: 0 }}></div>
 
       {/* Customer Info */}
-      <div className="mb-2">
-        <div className="flex justify-between items-center mb-1">
+      <div style={{ marginBottom: '6px', flexShrink: 0 }}>
+        <div className="flex justify-between items-center" style={{ marginBottom: '3px' }}>
           <div className="text-right flex-1">
-            <span className="font-bold text-base">{order.customerName || order.name}</span>
+            <span className="font-bold" style={{ fontSize: '11px' }}>{order.customerName || order.name}</span>
           </div>
-          <div className="border-2 border-black p-1 px-3">
-            <span className="font-black text-base">{order.governorate || 'غير محدد'}</span>
+          <div className="border border-black" style={{ padding: '2px 6px' }}>
+            <span className="font-black" style={{ fontSize: '10px' }}>{order.governorate || 'غير محدد'}</span>
           </div>
         </div>
-        <div className="flex justify-between items-center mb-1">
+        <div className="flex justify-between items-center" style={{ marginBottom: '3px' }}>
           <div className="text-right">
-            <span className="font-bold text-base font-mono">{pickDisplayPhone(`${order.phone || ''}\n${order.phone1 || ''}\n${order.phone2 || ''}`, '')}</span>
+            <span className="font-bold font-mono" style={{ fontSize: '10px' }}>{pickDisplayPhone(`${order.phone || ''}\n${order.phone1 || ''}\n${order.phone2 || ''}`, '')}</span>
           </div>
           <div className="text-left">
-            <span className="font-bold text-base font-mono">{normalizeNumbers(order.phone2 || '')}</span>
+            <span className="font-bold font-mono" style={{ fontSize: '10px' }}>{normalizeNumbers(order.phone2 || '')}</span>
           </div>
         </div>
         <div className="text-right">
-          <span className="font-bold text-base leading-tight">{order.address}</span>
+          <span className="font-bold" style={{ fontSize: '10px', lineHeight: '1.2' }}>{order.address}</span>
         </div>
       </div>
 
       {/* Product Table */}
-      <div className="border-2 border-black mb-1">
-        <table className="w-full text-center text-base border-collapse" style={{ fontSize: '32px' }}>
+      <div className="border border-black" style={{ marginBottom: '4px', flex: '1', minHeight: '0', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <table className="w-full border-collapse" style={{ fontSize: '11px', tableLayout: 'auto' }}>
           <thead>
-            <tr className="bg-slate-200 border-b-2 border-black">
-              <th className="border-l border-black text-base p-1">المنتج</th>
-              <th className="border-l border-black text-base p-1 w-20">السعر</th>
-              <th className="border-l border-black text-base p-1 w-16">الكمية</th>
-              <th className="p-1 w-24">الإجمالي</th>
+            <tr className="bg-slate-200 border-b border-black" style={{ flexShrink: 0 }}>
+              <th className="border-l border-black p-0.5 text-left" style={{ fontSize: '10px', fontWeight: 700 }}>المنتج</th>
+              <th className="border-l border-black p-0.5 w-12" style={{ fontSize: '10px', fontWeight: 700 }}>السعر</th>
+              <th className="border-l border-black p-0.5 w-10" style={{ fontSize: '10px', fontWeight: 700 }}>الكمية</th>
+              <th className="p-0.5 w-12" style={{ fontSize: '10px', fontWeight: 700 }}>الإجمالي</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody style={{ overflow: 'auto' }}>
             {computedRows.map((p: any, i: number) => (
               <tr key={i} className="border-b border-black">
-                <td className="border-l border-black p-1 text-right" style={{ fontSize: '36px', fontWeight: 900 }}>
-                  <b style={{ fontWeight: 900 }}>{p.name}</b>
-                  <span style={{ fontSize: '24px', fontWeight: 900, color: '#000' }}>
-                    {' '}- اللون: {p.color || '-'} - المقاس: {p.size || '-'}
-                  </span>
+                <td className="border-l border-black p-0.5 text-right" style={{ fontSize: '10px', fontWeight: 700 }}>
+                  <div style={{ fontWeight: 700 }}>{p.name}</div>
+                  <div style={{ fontSize: '8px', fontWeight: 700, color: '#000' }}>
+                    اللون: {p.color || '-'} - المقاس: {p.size || '-'}
+                  </div>
                 </td>
-                <td className="border-l border-black p-1" style={{ fontSize: '28px', fontWeight: 800 }}>{p.price.toLocaleString()}</td>
-                <td className="border-l border-black p-1" style={{ fontSize: '28px', fontWeight: 800 }}>{p.quantity}</td>
-                <td className="p-1" style={{ fontSize: '28px', fontWeight: 800 }}>{(p.lineTotal || 0).toLocaleString()}</td>
+                <td className="border-l border-black p-0.5 text-center" style={{ fontSize: '11px', fontWeight: 700 }}>{p.price.toLocaleString()}</td>
+                <td className="border-l border-black p-0.5 text-center" style={{ fontSize: '11px', fontWeight: 700 }}>{p.quantity}</td>
+                <td className="p-0.5 text-center" style={{ fontSize: '11px', fontWeight: 700 }}>{(p.lineTotal || 0).toLocaleString()}</td>
               </tr>
             ))}
           </tbody>
@@ -221,17 +229,17 @@ export const PrintableContent: React.FC<{
 
 
       {/* Totals */}
-      <div className="border-2 border-black p-2 mb-2 bg-slate-50">
-        <div className="flex justify-between items-center mb-1 px-2">
-          <div className="text-base text-left font-bold">الإجمالي (المنتجات)</div>
-          <div className="text-base font-black">{computedSubtotal.toLocaleString()} ج.م</div>
+      <div className="border border-black bg-slate-50 p-1" style={{ marginBottom: '4px', flexShrink: 0 }}>
+        <div className="flex justify-between items-center" style={{ marginBottom: '2px', fontSize: '10px' }}>
+          <div className="text-left font-bold">الإجمالي (المنتجات)</div>
+          <div className="font-black">{computedSubtotal.toLocaleString()} ج.م</div>
         </div>
-        <div className="flex justify-between items-center mb-1 px-2">
-          <div className="text-base font-bold">مصاريف الشحن</div>
-          <div className="text-base font-black">{shippingVal.toLocaleString()} ج.م</div>
+        <div className="flex justify-between items-center" style={{ marginBottom: '2px', fontSize: '10px' }}>
+          <div className="font-bold">مصاريف الشحن</div>
+          <div className="font-black">{shippingVal.toLocaleString()} ج.م</div>
         </div>
-        <div className="w-full border-t border-black my-1"></div>
-        <div className="flex justify-between items-center text-2xl font-black px-2">
+        <div className="w-full border-t border-black" style={{ margin: '2px 0' }}></div>
+        <div className="flex justify-between items-center font-black" style={{ fontSize: '12px' }}>
           <div>الإجمالي المطلوب</div>
           <div>{computedTotal.toLocaleString()} ج.م</div>
         </div>
@@ -239,22 +247,22 @@ export const PrintableContent: React.FC<{
 
       {/* Notes */}
       {order.notes && String(order.notes).trim() !== '' && (
-        <div className="mt-2 border-2 border-black p-2 bg-white text-right" style={{ fontSize: '26px' }}>
-          <div className="font-bold mb-1">ملاحظات:</div>
-          <div>{order.notes}</div>
+        <div className="border border-black p-1 bg-white text-right" style={{ marginBottom: '4px', fontSize: '11px', flexShrink: 0 }}>
+          <div className="font-bold" style={{ marginBottom: '2px' }}>ملاحظات:</div>
+          <div style={{ lineHeight: '1.2' }}>{order.notes}</div>
         </div>
       )}
 
       {/* Employee & Page (moved below notes) */}
-      <div className="flex flex-col text-sm mb-2 px-2 py-1 border-t border-b border-dashed border-black bg-slate-50 mt-1">
-        <div className="mb-1">الموظف: <span className="font-bold">{getUserDisplayName(order.employee || order.employee_raw || order.employeeName || order.employee_name)}</span></div>
+      <div className="flex flex-col border-t border-b border-dashed border-black bg-slate-50" style={{ padding: '2px 4px', marginBottom: '4px', fontSize: '9px', flexShrink: 0, gap: '1px' }}>
+        <div>الموظف: <span className="font-bold">{getUserDisplayName(order.employee || order.employee_raw || order.employeeName || order.employee_name)}</span></div>
         <div>البيدج: <span className="font-bold">{pageDisplay}</span></div>
       </div>
 
       {/* Policy */}
-      <div className="border-2 border-black p-1 text-center mt-auto">
-        <p className="font-bold text-base mb-0.5">سياسة الشركه</p>
-        <p className="text-base font-medium leading-tight">{terms}</p>
+      <div className="border border-black p-1 text-center" style={{ marginTop: 'auto', flexShrink: 0 }}>
+        <p className="font-bold" style={{ fontSize: '10px', margin: '0 0 2px 0' }}>سياسة الشركه</p>
+        <p className="font-medium" style={{ fontSize: '9px', lineHeight: '1.2', margin: '0' }}>{terms}</p>
       </div>
     </div>
   );
@@ -294,17 +302,16 @@ export const PrintableOrders: React.FC<{
           }
           @page {
             size: A4 portrait;
-            margin: 4mm;
+            margin: 2mm;
           }
           .print-a4-page {
-            width: 100%;
-            height: 288mm;
-            max-height: 288mm;
+            width: 210mm;
+            height: 297mm;
             box-sizing: border-box;
             display: grid;
             grid-template-columns: 1fr 1fr;
             grid-template-rows: 1fr 1fr;
-            gap: 3mm;
+            gap: 2mm;
             page-break-inside: avoid;
             break-inside: avoid;
             page-break-after: always;
@@ -315,8 +322,7 @@ export const PrintableOrders: React.FC<{
           }
           .quarter-a4-cell {
             width: 100%;
-            height: 141mm;
-            max-height: 141mm;
+            height: 100%;
             box-sizing: border-box;
             overflow: hidden;
             page-break-inside: avoid;
@@ -324,7 +330,11 @@ export const PrintableOrders: React.FC<{
             display: flex;
             flex-direction: column;
           }
-          * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          * { 
+            -webkit-print-color-adjust: exact; 
+            print-color-adjust: exact;
+            color-adjust: exact;
+          }
         }
       `}</style>
       <div id="print-container">
@@ -350,4 +360,3 @@ export const PrintableOrders: React.FC<{
     </div>
   );
 };
-
