@@ -53,7 +53,7 @@ const Layout: React.FC<LayoutProps> = ({
   const lastNotifFetchRef = useRef<number>(0);
 
   const userData = JSON.parse(localStorage.getItem('Dragon_user') || '{}');
-  const companyLogo = assetUrl('Dragon.png');
+  const companyLogo = (typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_logo_url') || localStorage.getItem('Dragon_company_logo')) : null) || assetUrl('Dragon.png');
   const salesDisplayMethod = (localStorage.getItem('Dragon_sales_display_method') || 'company').toString();
   const productSource = (localStorage.getItem('Dragon_product_source') || 'both').toString();
   const deliveryMethod = (localStorage.getItem('Dragon_delivery_method') || 'reps').toString();
@@ -149,7 +149,11 @@ const Layout: React.FC<LayoutProps> = ({
         if (item.subItems && item.subItems.some((s:any)=> ps.includes(normalize(s.slug)) || normalize(s.slug).includes(ps) || ps.includes(normalize(s.label)) )) return true;
         return false;
       });
-      if (!entry) return true;
+      if (!entry) {
+        const currentUser = JSON.parse(localStorage.getItem('Dragon_user') || '{}');
+        if (currentUser.role === 'admin' || currentUser.id === 1) return true;
+        return false;
+      }
       const v = entry.can_access;
       return v === 1 || v === '1' || v === true || v === 'true' || Number(v) === 1;
     }

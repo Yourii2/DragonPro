@@ -47,18 +47,19 @@ $last_check_raw = $license_data['activation_last_check'] ?? '';
 $last_check_ts = $last_check_raw ? strtotime($last_check_raw) : false;
 $input_raw = @file_get_contents('php://input');
 $input_json = $input_raw ? json_decode($input_raw, true) : [];
-$force_flag = false;
-if (is_array($input_json) && !empty($input_json['force'])) $force_flag = true;
-if (isset($_GET['force']) && ($_GET['force'] === '1' || $_GET['force'] === 'true')) $force_flag = true;
-
-$should_refresh = $force_flag || ($last_check_ts !== false && ((time() - $last_check_ts) > 86400));
+$is_recent = ($last_check_ts !== false && (time() - $last_check_ts) < 180);
+$should_refresh = !$is_recent && ($force_flag || ($last_check_ts === false) || ((time() - $last_check_ts) > 86400));
 
 $activationResult = ['success' => false, 'message' => 'Activation check skipped'];
 if ($should_refresh) {
     $activationResult = call_activation_service(
         $server_hwid,
         $license_data['company_phone'] ?? '',
-        $license_data['company_name'] ?? ''
+        $license_data['company_name'] ?? '',
+        get_program_name(),
+        get_program_version(),
+        get_program_type(),
+        $license_data['installed_date'] ?? null
     );
 }
 
@@ -69,8 +70,8 @@ if ($activationResult['success']) {
     $next_license['activation_type'] = $activationData['type'] ?? '';
     $next_license['activation_expiry'] = $activationData['expiry'] ?? '';
     $next_license['activation_account_status'] = $activationData['account_status'] ?? 'Active';
-    $next_license['activation_is_expired'] = !empty($activationData['is_expired']) ? 'true' : 'false';
-    $next_license['activation_last_check'] = date('Y-m-d H:i:s');
+    $next_license['activation_is_expired'] = (($activationData['is_expired'] ?? 'false') === 'true' || $activationData['is_expired'] === true) ? 'true' : 'false';
+    $next_license['activation_last_check'] = $activationData['server_time'] ?? date('Y-m-d H:i:s');
 
     $fields = ['hwid','activation_type','activation_expiry','activation_account_status','activation_is_expired','activation_last_check'];
     $diff = false;

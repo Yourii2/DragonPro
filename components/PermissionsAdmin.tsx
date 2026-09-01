@@ -67,26 +67,35 @@ const PermissionsAdmin: React.FC = () => {
     } catch (e) { console.error(e); Swal.fire('خطأ', 'فشل إنشاء الإجراء', 'error'); }
   };
 
+  const selectedUserObj = users.find(u => Number(u.id) === Number(selectedUser));
+  const isSuperAdminRoot = Number(selectedUser) === 1;
+
   const loadUserPerms = async (uid:number) => {
     setSelectedUser(uid);
     await ensureModulesActions();
     try {
-      const res = await fetch(`${API_BASE_PATH}/api.php?module=permissions&action=getUserPermissions&user_id=${uid}`);
-      const j = await res.json();
-      if (j.success) setUserPerms(j.data || []);
-      // load page toggles
-      try {
-        const r2 = await fetch(`${API_BASE_PATH}/api.php?module=permissions&action=getUserPages&user_id=${uid}`);
-        const j2 = await r2.json();
-        if (j2.success) setUserPages(j2.data || []);
-        else setUserPages([]);
-      } catch (e) { setUserPages([]); }
-    } catch (e) { console.error(e); }
+      const [pRes, pagesRes] = await Promise.all([
+        fetch(`${API_BASE_PATH}/api.php?module=permissions&action=getUserPermissions&user_id=${uid}`).then(r=>r.json()).catch(()=>({success:false, data:[]})),
+        fetch(`${API_BASE_PATH}/api.php?module=permissions&action=getUserPages&user_id=${uid}`).then(r=>r.json()).catch(()=>({success:false, data:[]}))
+      ]);
+
+      const fetchedPerms = (pRes && pRes.success && Array.isArray(pRes.data)) ? pRes.data : [];
+      const fetchedPages = (pagesRes && pagesRes.success && Array.isArray(pagesRes.data)) ? pagesRes.data : [];
+
+      setUserPerms(fetchedPerms);
+      setUserPages(fetchedPages);
+    } catch (e) {
+      console.error(e);
+      setUserPerms([]);
+      setUserPages([]);
+    }
   };
 
   const permAllowed = (moduleId:number, actionId:number) => {
-    const p = userPerms.find((x:any)=>x.module_id==moduleId && x.action_id==actionId);
-    return p ? Boolean(p.allowed) : false;
+    const p = userPerms.find((x:any)=>Number(x.module_id)==Number(moduleId) && Number(x.action_id)==Number(actionId));
+    if (p) return Boolean(Number(p.allowed) === 1);
+    if (isSuperAdminRoot && userPerms.length === 0) return true;
+    return false;
   };
 
   const translateAction = (act:any) => {
@@ -133,59 +142,14 @@ const PermissionsAdmin: React.FC = () => {
   };
 
   const togglePerm = (moduleId:number, actionId:number) => {
-    const exists = userPerms.find((x:any)=>x.module_id==moduleId && x.action_id==actionId);
+    const exists = userPerms.find((x:any)=>Number(x.module_id)==Number(moduleId) && Number(x.action_id)==Number(actionId));
     let next = [...userPerms];
     if (exists) {
-      next = next.map(x => x.module_id==moduleId && x.action_id==actionId ? { ...x, allowed: exists.allowed ? 0 : 1 } : x);
+      next = next.map(x => (Number(x.module_id)==Number(moduleId) && Number(x.action_id)==Number(actionId)) ? { ...x, allowed: Number(exists.allowed) === 1 ? 0 : 1 } : x);
     } else {
       next.push({ user_id: selectedUser, module_id: moduleId, action_id: actionId, allowed: 1 });
     }
     setUserPerms(next);
-  };
-
-  const savePermissions = async () => {
-    if (!selectedUser) return;
-    try {
-      // Build a complete permissions matrix (all module x action pairs) to ensure full save
-      await ensureModulesActions();
-      const fullPerms = modules.flatMap((mod: any) => actions.map((act: any) => {
-        const existing = userPerms.find((p: any) => Number(p.module_id) === Number(mod.id) && Number(p.action_id) === Number(act.id));
-        return {
-          user_id: selectedUser,
-          module_id: mod.id,
-          action_id: act.id,
-          allowed: existing ? (existing.allowed ? 1 : 0) : 0
-        };
-      }));
-
-      const body = { user_id: selectedUser, permissions: fullPerms };
-      const res = await fetch(`${API_BASE_PATH}/api.php?module=permissions&action=setUserPermissions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      const j = await res.json();
-      if (j.success) {
-        Swal.fire('تم', 'تم حفظ الصلاحيات كاملة', 'success');
-        setUserPerms(fullPerms);
-      } else Swal.fire('فشل', j.message || 'خطأ', 'error');
-    } catch (e) { console.error(e); Swal.fire('خطأ', 'فشل حفظ الصلاحيات', 'error'); }
-  };
-
-  const togglePageAccess = async (page_slug: string, allowed: boolean) => {
-    if (!selectedUser) return;
-    try {
-      const body = { user_id: selectedUser, pages: [{ page_slug, can_access: allowed ? 1 : 0 }] };
-      const res = await fetch(`${API_BASE_PATH}/api.php?module=permissions&action=setUserPages`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      const j = await res.json();
-      if (j.success) {
-        // update local state
-        setUserPages(prev => {
-          const next = prev.filter(p => (p.page_slug || '').toString().toLowerCase() !== page_slug.toLowerCase());
-          next.push({ page_slug, can_access: allowed ? 1 : 0 });
-          return next;
-        });
-        Swal.fire('تم', `تم ${allowed ? 'فتح' : 'إغلاق'} القسم.`, 'success');
-      } else {
-        Swal.fire('فشل', j.message || 'خطأ', 'error');
-      }
-    } catch (e) { console.error(e); Swal.fire('خطأ', 'فشل تحديث حالة القسم', 'error'); }
   };
 
   const moduleToPageSlug = (mod: any) => {
@@ -215,20 +179,101 @@ const PermissionsAdmin: React.FC = () => {
   const isPageAllowed = (pageSlug: string) => {
     const slug = (pageSlug || '').toString().toLowerCase();
     const entry = userPages.find((p: any) => (p.page_slug || '').toString().toLowerCase() === slug);
-    return entry ? Boolean(entry.can_access) : true;
+
+    if (entry) {
+      return Number(entry.can_access) === 1;
+    }
+
+    // Only Root Super Admin (User ID = 1) gets default true if userPages is empty
+    if (isSuperAdminRoot && userPages.length === 0) {
+      return true;
+    }
+
+    // For all other users (whether admin role or not):
+    // If they do not have an explicit entry with can_access = 1, the page is CLOSED (false)
+    return false;
+  };
+
+  const savePermissions = async () => {
+    if (!selectedUser) return;
+    try {
+      await ensureModulesActions();
+
+      // 1. Build complete action-level permissions
+      const fullPerms = modules.flatMap((mod: any) => actions.map((act: any) => {
+        const existing = userPerms.find((p: any) => Number(p.module_id) === Number(mod.id) && Number(p.action_id) === Number(act.id));
+        return {
+          user_id: selectedUser,
+          module_id: mod.id,
+          action_id: act.id,
+          allowed: existing ? (Number(existing.allowed) === 1 ? 1 : 0) : (isSuperAdminRoot ? 1 : 0)
+        };
+      }));
+
+      // 2. Build complete page-level permissions matrix
+      const pagesPayload = pageSlugsAll.map(slug => ({
+        page_slug: slug,
+        can_access: isPageAllowed(slug) ? 1 : 0
+      }));
+
+      // Save both in parallel
+      const [resPerms, resPages] = await Promise.all([
+        fetch(`${API_BASE_PATH}/api.php?module=permissions&action=setUserPermissions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: selectedUser, permissions: fullPerms })
+        }).then(r => r.json()),
+        fetch(`${API_BASE_PATH}/api.php?module=permissions&action=setUserPages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: selectedUser, pages: pagesPayload })
+        }).then(r => r.json())
+      ]);
+
+      if (resPerms.success && resPages.success) {
+        Swal.fire('تم الحفظ', 'تم حفظ وتثبيت كافة الصلاحيات والأقسام بنجاح.', 'success');
+        setUserPerms(fullPerms);
+        setUserPages(pagesPayload);
+      } else {
+        Swal.fire('تنبيه', resPerms.message || resPages.message || 'حدث خطأ أثناء حفظ الصلاحيات', 'warning');
+      }
+    } catch (e) {
+      console.error(e);
+      Swal.fire('خطأ', 'فشل حفظ الصلاحيات', 'error');
+    }
+  };
+
+  const togglePageAccess = async (page_slug: string, allowed: boolean) => {
+    if (!selectedUser) return;
+    try {
+      const body = { user_id: selectedUser, pages: [{ page_slug, can_access: allowed ? 1 : 0 }] };
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=permissions&action=setUserPages`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const j = await res.json();
+      if (j.success) {
+        setUserPages(prev => {
+          const next = prev.filter(p => (p.page_slug || '').toString().toLowerCase() !== page_slug.toLowerCase());
+          next.push({ page_slug, can_access: allowed ? 1 : 0 });
+          return next;
+        });
+      } else {
+        Swal.fire('فشل', j.message || 'خطأ', 'error');
+      }
+    } catch (e) { console.error(e); Swal.fire('خطأ', 'فشل تحديث حالة القسم', 'error'); }
   };
 
   const applyAllPermissions = async (allowed: boolean) => {
     if (!selectedUser) return;
     const confirm = await Swal.fire({
-      title: allowed ? 'تأكيد منح جميع الصلاحيات' : 'تأكيد حذف جميع الصلاحيات',
-      text: allowed ? 'سيتم تفعيل جميع الصلاحيات لهذا المستخدم.' : 'سيتم إلغاء جميع الصلاحيات لهذا المستخدم.',
+      title: allowed ? 'تأكيد تفعيل جميع الصلاحيات' : 'تأكيد إغلاق جميع الصلاحيات',
+      text: allowed ? 'سيتم فتح وتفعيل جميع الأقسام والإجراءات لهذا المستخدم.' : 'سيتم إغلاق وحظر جميع الأقسام والإجراءات لهذا المستخدم.',
       icon: 'warning',
       showCancelButton: true,
-      confirmButtonText: 'نعم',
+      confirmButtonText: 'نعم، نفذ',
       cancelButtonText: 'إلغاء'
     });
     if (!confirm.isConfirmed) return;
+
+    await ensureModulesActions();
 
     const allPerms = modules.flatMap(mod =>
       actions.map(act => ({
@@ -239,33 +284,29 @@ const PermissionsAdmin: React.FC = () => {
       }))
     );
 
-    try {
-      const body = { user_id: selectedUser, permissions: allPerms };
-      const res = await fetch(`${API_BASE_PATH}/api.php?module=permissions&action=setUserPermissions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-      const j = await res.json();
-      if (!j.success) {
-        Swal.fire('فشل', j.message || 'خطأ', 'error');
-        return;
-      }
-      setUserPerms(allPerms);
+    const pagesPayload = pageSlugsAll.map(slug => ({ page_slug: slug, can_access: allowed ? 1 : 0 }));
 
-      const pagesPayload = pageSlugsAll.map(slug => ({ page_slug: slug, can_access: allowed ? 1 : 0 }));
-      const resPages = await fetch(`${API_BASE_PATH}/api.php?module=permissions&action=setUserPages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: selectedUser, pages: pagesPayload })
-      });
-      const jPages = await resPages.json();
-      if (!jPages.success) {
-        Swal.fire('تنبيه', jPages.message || 'تم حفظ الصلاحيات ولكن فشل تحديث الصفحات', 'warning');
-      } else {
+    try {
+      const [resPerms, resPages] = await Promise.all([
+        fetch(`${API_BASE_PATH}/api.php?module=permissions&action=setUserPermissions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: selectedUser, permissions: allPerms })
+        }).then(r => r.json()),
+        fetch(`${API_BASE_PATH}/api.php?module=permissions&action=setUserPages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: selectedUser, pages: pagesPayload })
+        }).then(r => r.json())
+      ]);
+
+      if (resPerms.success && resPages.success) {
+        setUserPerms(allPerms);
         setUserPages(pagesPayload);
+        Swal.fire('تم', allowed ? 'تم تفعيل ومنح جميع الصلاحيات والأقسام بنجاح.' : 'تم إغلاق وحظر جميع الصلاحيات والأقسام بنجاح.', 'success');
+      } else {
+        Swal.fire('فشل', resPerms.message || resPages.message || 'خطأ في تنفيذ العملية', 'error');
       }
-      Swal.fire('تم', allowed ? 'تم منح جميع الصلاحيات.' : 'تم حذف جميع الصلاحيات.', 'success');
     } catch (e) {
       console.error(e);
       Swal.fire('خطأ', 'فشل تنفيذ العملية.', 'error');
@@ -323,33 +364,40 @@ const PermissionsAdmin: React.FC = () => {
                       });
 
                       return (
-                        <div key={pageSlug} className={`rounded-lg shadow-sm border ${pageAllowed ? 'ring-1 ring-green-300' : 'ring-1 ring-red-300'}`}>
+                        <div key={pageSlug} className={`rounded-xl shadow-sm border transition-all duration-200 ${pageAllowed ? 'border-emerald-500/50 ring-2 ring-emerald-500/20 bg-emerald-50/20 dark:bg-emerald-950/10' : 'border-rose-400/40 bg-rose-50/10 dark:bg-rose-950/10 opacity-80 hover:opacity-100'}`}>
                           <div
                             onClick={() => togglePageExpand(pageSlug)}
-                            className={`cursor-pointer p-3 flex items-center justify-between ${pageAllowed ? 'bg-green-50' : 'bg-red-50'} rounded-t-lg`}
+                            className={`cursor-pointer p-3.5 flex items-center justify-between ${pageAllowed ? 'bg-emerald-100/60 dark:bg-emerald-900/30' : 'bg-rose-100/60 dark:bg-rose-950/40'} ${isPageExpanded ? (pageAllowed ? 'rounded-t-xl border-b border-emerald-500/20' : 'rounded-t-xl border-b border-rose-400/20') : 'rounded-xl'}`}
                           >
-                            <div>
-                              <div className="font-medium">{s.label}</div>
-                              <div className="text-xs text-slate-500">{pageSlug}</div>
+                            <div className="flex items-center gap-2">
+                              <div>
+                                <div className="font-bold text-sm">{s.label}</div>
+                                <div className="text-[11px] text-slate-500">{pageSlug}</div>
+                              </div>
                             </div>
                             <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
-                              <div className={`px-2 py-1 rounded-full text-xs font-semibold ${pageAllowed ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
-                                {pageAllowed ? 'مفعل' : 'مغلق'}
-                              </div>
-                              <input type="checkbox" checked={pageAllowed} onChange={e => togglePageAccess(pageSlug, e.target.checked)} />
+                              <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold flex items-center gap-1 shadow-sm ${pageAllowed ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'}`}>
+                                {pageAllowed ? '✓ متاح' : '✕ مغلق'}
+                              </span>
+                              <input 
+                                type="checkbox" 
+                                className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                                checked={pageAllowed} 
+                                onChange={e => togglePageAccess(pageSlug, e.target.checked)} 
+                              />
                             </div>
                           </div>
 
-                          {/* When section is enabled and expanded, show action permissions inside */}
-                          {pageAllowed && isPageExpanded && (
-                            <div className="p-3 bg-white dark:bg-slate-900 rounded-b-lg space-y-3">
+                          {/* When section is expanded, show action permissions inside */}
+                          {isPageExpanded && (
+                            <div className="p-3.5 bg-white dark:bg-slate-900 rounded-b-xl space-y-3">
                               {sectionModules.map((mod: any) => (
-                                <div key={mod.id} className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
-                                  <div className="p-3 bg-slate-50 dark:bg-slate-800">
-                                    <div className="font-medium">{translateModule(mod)}</div>
-                                    <div className="text-xs text-slate-500">{mod.slug || mod.name}</div>
+                                <div key={mod.id} className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden shadow-xs">
+                                  <div className="p-2.5 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700">
+                                    <div className="font-bold text-xs">{translateModule(mod)}</div>
+                                    <div className="text-[10px] text-slate-500">{mod.slug || mod.name}</div>
                                   </div>
-                                  <div className="p-3">
+                                  <div className="p-2.5">
                                     <div className="flex flex-wrap gap-2">
                                       {actions.map(act => {
                                         const allowed = permAllowed(mod.id, act.id);
@@ -357,9 +405,14 @@ const PermissionsAdmin: React.FC = () => {
                                           <button
                                             key={act.id}
                                             onClick={() => togglePerm(mod.id, act.id)}
-                                            className={`px-3 py-1 rounded-full text-sm font-medium transition ${allowed ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}
+                                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-xs flex items-center gap-1 ${
+                                              allowed 
+                                                ? 'bg-emerald-600 hover:bg-emerald-700 text-white' 
+                                                : 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-slate-300 dark:border-slate-700 hover:border-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
+                                            }`}
                                           >
-                                            {translateAction(act)}
+                                            <span>{allowed ? '✓' : '✕'}</span>
+                                            <span>{translateAction(act)}</span>
                                           </button>
                                         );
                                       })}

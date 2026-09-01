@@ -1,6 +1,7 @@
 import Custom12HourTimePicker from './Custom12HourTimePicker';
 import React, { useState, useEffect, useMemo } from 'react';
 import { API_BASE_PATH } from '../services/apiConfig';
+import { assetUrl } from '../services/assetUrl';
 import { Calendar, ShoppingCart, Printer, History, Search, PlusCircle, MinusCircle, UploadCloud, FileText, RefreshCcw, ClipboardPaste, MapPin, Phone, User, CheckSquare, Square, Eye, Edit, ChevronRight } from 'lucide-react';
 import Swal from 'sweetalert2';
 import CustomSelect from './CustomSelect';
@@ -168,7 +169,9 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
   const [companyPhoneState, setCompanyPhoneState] = useState<string>(localStorage.getItem('Dragon_company_phone') || '01000000000');
   const [companyAddressState, setCompanyAddressState] = useState<string>(localStorage.getItem('Dragon_company_address') || '');
   const [companyTermsState, setCompanyTermsState] = useState<string>(localStorage.getItem('Dragon_company_terms') || 'المعاينة حق للعميل قبل الاستلام.');
-  const [companyLogoState, setCompanyLogoState] = useState<string | null>(localStorage.getItem('Dragon_company_logo') || null);
+  const [companyLogoState, setCompanyLogoState] = useState<string | null>(
+    (typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_logo_url') || localStorage.getItem('Dragon_company_logo')) : null) || assetUrl('Dragon.png')
+  );
 
   // Load company settings from server (same source as SettingsModule)
   useEffect(() => {

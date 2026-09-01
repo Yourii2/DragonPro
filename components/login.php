@@ -16,9 +16,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 require_once __DIR__ . '/../config.php';
 
-// License Guard
+// License Guard (checks Google Sheet status online if connected)
 require_once __DIR__ . '/activation_utils.php';
-$license_check = check_license_validity();
+$license_check = check_license_validity(true);
 if ($license_check['status'] !== 'ok') {
     http_response_code(403);
     echo json_encode(['success' => false, 'status' => $license_check['status'], 'message' => $license_check['message']]);

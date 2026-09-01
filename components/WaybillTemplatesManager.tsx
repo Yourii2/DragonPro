@@ -20,6 +20,7 @@ import {
   UniversalPrintableOrders 
 } from './UniversalWaybillRenderer';
 import { API_BASE_PATH } from '../services/apiConfig';
+import { assetUrl } from '../services/assetUrl';
 
 const MOCK_ORDER = {
   id: 101,
@@ -54,7 +55,7 @@ const WaybillTemplatesManager: React.FC = () => {
   const companyName = localStorage.getItem('Dragon_company_name') || 'شركة دراجون برو للتجارة';
   const companyPhone = localStorage.getItem('Dragon_company_phone') || '01000000000';
   const companyAddress = localStorage.getItem('Dragon_company_address') || 'القاهرة، جمهورية مصر العربية';
-  const companyLogo = localStorage.getItem('Dragon_company_logo') || null;
+  const companyLogo = (typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_logo_url') || localStorage.getItem('Dragon_company_logo')) : null) || assetUrl('Dragon.png');
   const companyTerms = localStorage.getItem('Dragon_company_terms') || 'تعتبر هذه البوليصة مستند استلام رسمي. يرجى التأكد من سلامة المنتجات.';
 
   useEffect(() => {

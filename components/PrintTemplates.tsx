@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import Barcode from './Barcode';
 import { API_BASE_PATH } from '../services/apiConfig';
+import { assetUrl } from '../services/assetUrl';
 import { UniversalWaybill, getSelectedTemplateId } from './UniversalWaybillRenderer';
 
 export const PrintableContent: React.FC<{ order: any, companyName: string, companyPhone: string, companyAddress?: string, terms: string, companyLogo?: string | null }> = ({ order, companyName, companyPhone, companyAddress, terms, companyLogo }) => {
@@ -175,7 +176,9 @@ export const PrintableOrders: React.FC<{ orders: any[] }> = ({ orders }) => {
   const [companyPhone, setCompanyPhone] = useState<string>(localStorage.getItem('Dragon_company_phone') || '01000000000');
   const [companyTerms, setCompanyTerms] = useState<string>(localStorage.getItem('Dragon_company_terms') || 'المعاينة حق للعميل قبل الاستلام.');
   const [companyAddress, setCompanyAddress] = useState<string>(localStorage.getItem('Dragon_company_address') || '');
-  const [companyLogo, setCompanyLogo] = useState<string | null>(localStorage.getItem('Dragon_company_logo') || null);
+  const [companyLogo, setCompanyLogo] = useState<string | null>(
+    (typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_logo_url') || localStorage.getItem('Dragon_company_logo')) : null) || assetUrl('Dragon.png')
+  );
 
   useEffect(() => {
     (async () => {
@@ -238,7 +241,9 @@ export const PrintableOrdersSingle: React.FC<{ orders: any[] }> = ({ orders }) =
   const [companyPhone, setCompanyPhone] = useState<string>(localStorage.getItem('Dragon_company_phone') || '01000000000');
   const [companyTerms, setCompanyTerms] = useState<string>(localStorage.getItem('Dragon_company_terms') || 'المعاينة حق للعميل قبل الاستلام.');
   const [companyAddress, setCompanyAddress] = useState<string>(localStorage.getItem('Dragon_company_address') || '');
-  const [companyLogo, setCompanyLogo] = useState<string | null>(localStorage.getItem('Dragon_company_logo') || null);
+  const [companyLogo, setCompanyLogo] = useState<string | null>(
+    (typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_logo_url') || localStorage.getItem('Dragon_company_logo')) : null) || assetUrl('Dragon.png')
+  );
   const templateId = getSelectedTemplateId();
 
   useEffect(() => {

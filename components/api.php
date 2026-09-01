@@ -205,17 +205,29 @@ if ($module === 'telegram' && $action === 'unlinkAccount') {
 if ($module === 'sales' && $action === 'getPendingDeliveryNotes') {
     try {
         // جلب كل أذونات التسليم التي لم يتم تسليمها بعد
-        $stmt = $pdo->prepare("SELECT dn.*, u.name as rep_name, w.name as warehouse_name FROM delivery_notes dn
+        $stmt = $pdo->prepare("SELECT dn.*, 
+            COALESCE(NULLIF(dn.note_code, ''), CONCAT('DN-', dn.id)) as note_code,
+            u.name as rep_name, w.name as warehouse_name 
+            FROM delivery_notes dn
             LEFT JOIN users u ON dn.rep_id = u.id
             LEFT JOIN warehouses w ON dn.warehouse_id = w.id
             WHERE dn.delivered = 0 ORDER BY dn.id DESC");
         $stmt->execute();
         $notes = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
         // جلب البنود لكل إذن
-        $stmtItems = $pdo->prepare("SELECT dnl.*, pv.barcode, pv.color, pv.size, p.name as product_name FROM delivery_note_lines dnl
-                LEFT JOIN product_variants pv ON dnl.product_id = pv.id
-                LEFT JOIN products p ON pv.product_id = p.id
-                WHERE dnl.delivery_note_id = ?");
+        $stmtItems = $pdo->prepare("SELECT dnl.*, 
+            COALESCE(dnl.qty, dnl.quantity, 1) as qty,
+            COALESCE(NULLIF(pv.barcode, ''), '') as barcode, 
+            COALESCE(pv.color, '') as color, 
+            COALESCE(pv.size, '') as size, 
+            COALESCE(NULLIF(pv.name, ''), p.name, p_direct.name, 'منتج') as product_name 
+            FROM delivery_note_lines dnl
+            LEFT JOIN product_variants pv ON dnl.product_id = pv.id
+            LEFT JOIN products p ON pv.product_id = p.id
+            LEFT JOIN products p_direct ON dnl.product_id = p_direct.id
+            WHERE dnl.delivery_note_id = ?");
+
         foreach ($notes as &$note) {
             $stmtItems->execute([$note['id']]);
             $items = $stmtItems->fetchAll(PDO::FETCH_ASSOC);
@@ -229,19 +241,24 @@ if ($module === 'sales' && $action === 'getPendingDeliveryNotes') {
     }
     exit;
 }
+
 if ($module === 'sales' && $action === 'getDeliveryNoteDetails') {
     try {
-        $id = isset($_GET['id']) ? $_GET['id'] : null;
+        $id = isset($_GET['id']) ? trim((string)$_GET['id']) : null;
         if (!$id) {
             echo json_encode(['success' => false, 'message' => 'رقم الإذن مطلوب']);
             exit;
         }
 
-        $stmt = $pdo->prepare("SELECT dn.*, u.name as rep_name, w.name as warehouse_name FROM delivery_notes dn
+        $cleanId = ltrim($id, '#');
+        $stmt = $pdo->prepare("SELECT dn.*, 
+            COALESCE(NULLIF(dn.note_code, ''), CONCAT('DN-', dn.id)) as note_code,
+            u.name as rep_name, w.name as warehouse_name 
+            FROM delivery_notes dn
             LEFT JOIN users u ON dn.rep_id = u.id
             LEFT JOIN warehouses w ON dn.warehouse_id = w.id
-            WHERE (dn.id = :id OR dn.note_code = :id) AND dn.delivered = 0 LIMIT 1");
-        $stmt->execute(['id' => $id]);
+            WHERE (dn.id = :id OR dn.id = :cleanId OR dn.note_code = :id OR dn.note_code = :cleanId) AND dn.delivered = 0 LIMIT 1");
+        $stmt->execute(['id' => $id, 'cleanId' => $cleanId]);
         $note = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$note) {
@@ -249,10 +266,17 @@ if ($module === 'sales' && $action === 'getDeliveryNoteDetails') {
             exit;
         }
 
-        $stmtItems = $pdo->prepare("SELECT dnl.*, pv.barcode, pv.color, pv.size, p.name as product_name FROM delivery_note_lines dnl
-                LEFT JOIN product_variants pv ON dnl.product_id = pv.id
-                LEFT JOIN products p ON pv.product_id = p.id
-                WHERE dnl.delivery_note_id = ?");
+        $stmtItems = $pdo->prepare("SELECT dnl.*, 
+            COALESCE(dnl.qty, dnl.quantity, 1) as qty,
+            COALESCE(NULLIF(pv.barcode, ''), '') as barcode, 
+            COALESCE(pv.color, '') as color, 
+            COALESCE(pv.size, '') as size, 
+            COALESCE(NULLIF(pv.name, ''), p.name, p_direct.name, 'منتج') as product_name 
+            FROM delivery_note_lines dnl
+            LEFT JOIN product_variants pv ON dnl.product_id = pv.id
+            LEFT JOIN products p ON pv.product_id = p.id
+            LEFT JOIN products p_direct ON dnl.product_id = p_direct.id
+            WHERE dnl.delivery_note_id = ?");
         $stmtItems->execute([$note['id']]);
         $items = $stmtItems->fetchAll(PDO::FETCH_ASSOC);
         
@@ -275,14 +299,17 @@ if ($module === 'sales' && $action === 'confirmDeliveryNote') {
             exit;
         }
 
+        $check = $pdo->prepare("SELECT id FROM delivery_notes WHERE id = ? LIMIT 1");
+        $check->execute([$note_id]);
+        if (!$check->fetch()) {
+            echo json_encode(['success' => false, 'message' => 'إذن التسليم غير موجود']);
+            exit;
+        }
+
         $stmt = $pdo->prepare("UPDATE delivery_notes SET delivered = 1 WHERE id = ?");
         $stmt->execute([$note_id]);
 
-        if ($stmt->rowCount() > 0) {
-            echo json_encode(['success' => true, 'message' => 'تم تأكيد التسليم بنجاح']);
-        } else {
-            echo json_encode(['success' => false, 'message' => 'لم يتم تحديث الإذن. قد يكون غير موجود أو مسلم مسبقاً']);
-        }
+        echo json_encode(['success' => true, 'message' => 'تم تأكيد التسليم بنجاح']);
     } catch (Exception $e) {
         echo json_encode(['success' => false, 'message' => 'خطأ أثناء التأكيد', 'error' => $e->getMessage()]);
     }
@@ -398,15 +425,17 @@ if (!function_exists('execute_query')) {
 
 if (!function_exists('table_exists')) {
     function table_exists($pdo, $table) {
+        static $tables_cache = [];
+        $t = strtolower(trim((string)$table));
+        if ($t === '') return false;
+        if (isset($tables_cache[$t])) return $tables_cache[$t];
+
         try {
-            $db = $pdo->query('SELECT DATABASE()')->fetchColumn();
-            if (!$db) return false;
-            $stmt = execute_query(
-                $pdo,
-                'SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? LIMIT 1',
-                [$db, $table]
-            );
-            return intval($stmt->fetchColumn()) > 0;
+            if (!($pdo instanceof PDO)) return false;
+            $stmt = $pdo->prepare("SHOW TABLES LIKE ?");
+            $stmt->execute([$table]);
+            $exists = $stmt->rowCount() > 0;
+            return $tables_cache[$t] = $exists;
         } catch (Exception $e) {
             return false;
         }
@@ -415,15 +444,20 @@ if (!function_exists('table_exists')) {
 
 if (!function_exists('column_exists')) {
     function column_exists($pdo, $table, $column) {
+        static $cols_cache = [];
+        $t = strtolower(trim((string)$table));
+        $c = strtolower(trim((string)$column));
+        if ($t === '' || $c === '') return false;
+        $key = "$t.$c";
+        if (isset($cols_cache[$key])) return $cols_cache[$key];
+
         try {
-            $db = $pdo->query('SELECT DATABASE()')->fetchColumn();
-            if (!$db) return false;
-            $stmt = execute_query(
-                $pdo,
-                'SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1',
-                [$db, $table, $column]
-            );
-            return intval($stmt->fetchColumn()) > 0;
+            if (!($pdo instanceof PDO)) return false;
+            $safeTable = str_replace('`', '``', $table);
+            $stmt = $pdo->prepare("SHOW COLUMNS FROM `$safeTable` LIKE ?");
+            $stmt->execute([$column]);
+            $exists = $stmt->rowCount() > 0;
+            return $cols_cache[$key] = $exists;
         } catch (Exception $e) {
             return false;
         }
@@ -2157,9 +2191,10 @@ function send_telegram_customer_notification($pdo, $order_id, $event_type = 'sta
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_POST, true);
         curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($payload));
-        curl_setopt($ch, CURLOPT_TIMEOUT, 8);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 2);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
         curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_exec($ch);
+        @curl_exec($ch);
         curl_close($ch);
 
         return true;
@@ -7138,10 +7173,9 @@ switch ($module) {
 
     case 'settings':
             $action = $_GET['action'] ?? '';
-            if ($action === 'get_settings') {
+            if ($action === 'get_settings' || $action === 'getAll' || $action === 'get' || $action === 'get_all') {
                 try {
                     if (table_exists($pdo, 'settings')) {
-                        // تم التعديل لاستخدام config_key و config_value
                         $stmt = $pdo->query("SELECT config_key, config_value FROM settings");
                         $settings = [];
                         while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
@@ -7152,7 +7186,24 @@ switch ($module) {
                         echo json_encode(['success' => true, 'data' => []]);
                     }
                 } catch (Exception $e) {
-                    // http_response_code(500);
+                    echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+                }
+            } elseif ($action === 'update' || $action === 'save_settings' || $action === 'save') {
+                try {
+                    if (!table_exists($pdo, 'settings')) {
+                        execute_query($pdo, "CREATE TABLE IF NOT EXISTS settings (
+                            config_key VARCHAR(255) PRIMARY KEY,
+                            config_value TEXT NULL,
+                            updated_at DATETIME DEFAULT NOW() ON UPDATE NOW()
+                        )");
+                    }
+                    foreach ($input as $k => $v) {
+                        if ($k === 'module' || $k === 'action') continue;
+                        $val = is_array($v) || is_object($v) ? json_encode($v) : strval($v);
+                        execute_query($pdo, "INSERT INTO settings (config_key, config_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE config_value = VALUES(config_value)", [$k, $val]);
+                    }
+                    echo json_encode(['success' => true]);
+                } catch (Exception $e) {
                     echo json_encode(['success' => false, 'message' => $e->getMessage()]);
                 }
             } else {
@@ -8679,6 +8730,8 @@ switch ($module) {
             }
             $rangeStart = $rangeStartObj->format('Y-m-d');
             $rangeEnd = $rangeEndObj->format('Y-m-d');
+            $rangeStartDT = $rangeStart . ' 00:00:00';
+            $rangeEndDT = $rangeEnd . ' 23:59:59';
 
             $rangeDays = $rangeStartObj->diff($rangeEndObj)->days + 1;
             $prevEndObj = clone $rangeStartObj;
@@ -8687,6 +8740,8 @@ switch ($module) {
             $prevStartObj->modify('-' . ($rangeDays - 1) . ' day');
             $prevStart = $prevStartObj->format('Y-m-d');
             $prevEnd = $prevEndObj->format('Y-m-d');
+            $prevStartDT = $prevStart . ' 00:00:00';
+            $prevEndDT = $prevEnd . ' 23:59:59';
 
             // Use updated_at (delivery date) if available, fallback to created_at
             $delivDateCol = column_exists($pdo, 'orders', 'updated_at') ? 'updated_at' : 'created_at';
@@ -8698,9 +8753,9 @@ switch ($module) {
                     "SELECT COALESCE(SUM(oi.price_per_unit * oi.quantity), 0) as total
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
-                     WHERE DATE(o.$delivDateCol) BETWEEN ? AND ?
+                     WHERE o.$delivDateCol >= ? AND o.$delivDateCol <= ?
                        AND o.status IN ('delivered', 'partial_return', 'partial')",
-                    [$rangeStart, $rangeEnd]
+                    [$rangeStartDT, $rangeEndDT]
                 );
                 $revenueRange = floatval($revRangeStmt->fetchColumn() ?? 0);
             } catch (Exception $e) { $revenueRange = 0; }
@@ -8712,30 +8767,30 @@ switch ($module) {
                     "SELECT COALESCE(SUM(oi.price_per_unit * oi.quantity), 0) as total
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
-                     WHERE DATE(o.$delivDateCol) BETWEEN ? AND ?
+                     WHERE o.$delivDateCol >= ? AND o.$delivDateCol <= ?
                        AND o.status IN ('delivered', 'partial_return', 'partial')",
-                    [$prevStart, $prevEnd]
+                    [$prevStartDT, $prevEndDT]
                 );
                 $revenuePrev = floatval($revPrevStmt->fetchColumn() ?? 0);
             } catch (Exception $e) { $revenuePrev = 0; }
 
             // Total orders count (delivered + returned) in range by delivery date
             $ordersRangeStmt = execute_query($pdo,
-                "SELECT COUNT(*) FROM orders WHERE DATE($delivDateCol) BETWEEN ? AND ? AND status IN ('delivered', 'partial_return', 'partial', 'returned', 'full_return')",
-                [$rangeStart, $rangeEnd]
+                "SELECT COUNT(*) FROM orders WHERE $delivDateCol >= ? AND $delivDateCol <= ? AND status IN ('delivered', 'partial_return', 'partial', 'returned', 'full_return')",
+                [$rangeStartDT, $rangeEndDT]
             );
             $ordersRange = intval($ordersRangeStmt->fetchColumn() ?? 0);
 
             // Delivered / returned / pending counts (by delivery date)
             $ordersDeliveredStmt = execute_query($pdo,
-                "SELECT COUNT(*) FROM orders WHERE DATE($delivDateCol) BETWEEN ? AND ? AND status IN ('delivered', 'partial_return', 'partial')",
-                [$rangeStart, $rangeEnd]
+                "SELECT COUNT(*) FROM orders WHERE $delivDateCol >= ? AND $delivDateCol <= ? AND status IN ('delivered', 'partial_return', 'partial')",
+                [$rangeStartDT, $rangeEndDT]
             );
             $ordersDelivered = intval($ordersDeliveredStmt->fetchColumn() ?? 0);
 
             $ordersReturnedStmt = execute_query($pdo,
-                "SELECT COUNT(*) FROM orders WHERE DATE($delivDateCol) BETWEEN ? AND ? AND status IN ('returned', 'full_return')",
-                [$rangeStart, $rangeEnd]
+                "SELECT COUNT(*) FROM orders WHERE $delivDateCol >= ? AND $delivDateCol <= ? AND status IN ('returned', 'full_return')",
+                [$rangeStartDT, $rangeEndDT]
             );
             $ordersReturned = intval($ordersReturnedStmt->fetchColumn() ?? 0);
 
@@ -8794,11 +8849,11 @@ switch ($module) {
                      FROM orders o
                      JOIN customers c ON c.id = o.customer_id
                      JOIN order_items oi ON oi.order_id = o.id
-                     WHERE DATE(o.$delivDateCol) BETWEEN ? AND ?
+                     WHERE o.$delivDateCol >= ? AND o.$delivDateCol <= ?
                        AND o.status IN ('delivered', 'partial_return', 'partial')
                      GROUP BY c.governorate
                      ORDER BY total DESC",
-                    [$rangeStart, $rangeEnd]
+                    [$rangeStartDT, $rangeEndDT]
                 );
                 $salesByGov = $govStmt->fetchAll(PDO::FETCH_ASSOC);
             } catch (Exception $e) {
@@ -8814,9 +8869,9 @@ switch ($module) {
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
                      JOIN product_variants pv ON pv.id = oi.product_id
-                     WHERE DATE(o.$delivDateCol) BETWEEN ? AND ?
+                     WHERE o.$delivDateCol >= ? AND o.$delivDateCol <= ?
                        AND o.status IN ('delivered', 'partial_return', 'partial')",
-                    [$rangeStart, $rangeEnd]
+                    [$rangeStartDT, $rangeEndDT]
                 );
                 $profitRange = floatval($profitStmt->fetchColumn() ?? 0);
             } catch (Exception $e) {
@@ -8831,9 +8886,9 @@ switch ($module) {
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
                      JOIN product_variants pv ON pv.id = oi.product_id
-                     WHERE DATE(o.$delivDateCol) BETWEEN ? AND ?
+                     WHERE o.$delivDateCol >= ? AND o.$delivDateCol <= ?
                        AND o.status IN ('delivered', 'partial_return', 'partial')",
-                    [$prevStart, $prevEnd]
+                    [$prevStartDT, $prevEndDT]
                 );
                 $profitPrev = floatval($profitPrevStmt->fetchColumn() ?? 0);
             } catch (Exception $e) {
@@ -8870,10 +8925,10 @@ switch ($module) {
                             COALESCE(SUM(oi.price_per_unit * oi.quantity), 0) as total
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
-                     WHERE DATE(o.$delivDateCol) BETWEEN ? AND ?
+                     WHERE o.$delivDateCol >= ? AND o.$delivDateCol <= ?
                        AND o.status IN ('delivered', 'partial_return', 'partial')
                      GROUP BY d",
-                    [$rangeStart, $rangeEnd]
+                    [$rangeStartDT, $rangeEndDT]
                 );
                 foreach ($salesStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
                     $salesByDate[$row['d']] = floatval($row['total'] ?? 0);
@@ -8890,10 +8945,10 @@ switch ($module) {
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
                      JOIN product_variants pv ON pv.id = oi.product_id
-                     WHERE DATE(o.$delivDateCol) BETWEEN ? AND ?
+                     WHERE o.$delivDateCol >= ? AND o.$delivDateCol <= ?
                        AND o.status IN ('delivered', 'partial_return', 'partial')
                      GROUP BY d",
-                    [$rangeStart, $rangeEnd]
+                    [$rangeStartDT, $rangeEndDT]
                 );
                 foreach ($profitTrendStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
                     $profitByDate[$row['d']] = floatval($row['profit'] ?? 0);
@@ -13148,11 +13203,11 @@ switch ($module) {
                     $params[] = $repId;
                 }
                 if ($reqFrom && preg_match('/^\d{4}-\d{2}-\d{2}$/', $reqFrom)) {
-                    $where[] = 'DATE(journal_date) >= ?';
+                    $where[] = 'DATE(COALESCE(journal_date, created_at)) >= ?';
                     $params[] = $reqFrom;
                 }
                 if ($reqTo && preg_match('/^\d{4}-\d{2}-\d{2}$/', $reqTo)) {
-                    $where[] = 'DATE(journal_date) <= ?';
+                    $where[] = 'DATE(COALESCE(journal_date, created_at)) <= ?';
                     $params[] = $reqTo;
                 }
 

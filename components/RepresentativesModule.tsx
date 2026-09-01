@@ -268,12 +268,16 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
   };
 
   useEffect(() => {
-    if (journalRepId) {
+    if (journalRepId !== null) {
       fetchPeriodSummary();
+      if (view === 'rep-cycle') {
+        loadRepJournal(journalRepId, journalFrom, journalTo);
+      }
     } else {
       setPeriodSummary(null);
+      setRepJournalRows([]);
     }
-  }, [journalFrom, journalTo, journalRepId]);
+  }, [view, journalFrom, journalTo, journalRepId]);
 
   const setPeriodPreset = (days: number | 'month') => {
     const to = new Date();

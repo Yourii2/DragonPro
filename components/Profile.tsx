@@ -291,7 +291,7 @@ const Profile: React.FC = () => {
           <div className="space-y-4 text-sm">
             <div className="flex items-center gap-4">
               <div className="w-16 h-16 rounded-2xl overflow-hidden border border-card">
-                <img src={avatarUrl} alt="avatar" className="w-full h-full object-cover" onError={(e: any) => { e.target.src = '/Dragon.png'; }} />
+                <img src={avatarUrl} alt="avatar" className="w-full h-full object-cover" onError={(e: any) => { e.target.src = assetUrl('Dragon.png'); }} />
               </div>
               <label className="flex-1">
                 <input

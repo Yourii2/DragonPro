@@ -111,8 +111,8 @@ const Dashboard: React.FC = () => {
   const [endDate, setEndDate] = useState(today.toISOString().split('T')[0]);
   const didAutoShiftInitialRange = useRef(false);
 
-  const companyLogo = localStorage.getItem('Dragon_company_logo') || assetUrl('Dragon.png');
-  const companyName = localStorage.getItem('Dragon_company_name') || 'Dragon Pro';
+  const companyLogo = (typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_logo_url') || localStorage.getItem('Dragon_company_logo')) : null) || assetUrl('Dragon.png');
+  const companyName = (typeof window !== 'undefined' ? localStorage.getItem('Dragon_company_name') : null) || 'Dragon Pro';
   const userName = (() => {
     try { return JSON.parse(localStorage.getItem('Dragon_user') || '{}')?.name || 'النظام'; }
     catch { return 'النظام'; }

@@ -11,7 +11,10 @@ import {
   AlertCircle, 
   Search,
   ArrowRight,
-  ClipboardList
+  ClipboardList,
+  Plus,
+  Minus,
+  CheckCheck
 } from 'lucide-react';
 
 const DeliveryConfirmation: React.FC = () => {
@@ -20,11 +23,6 @@ const DeliveryConfirmation: React.FC = () => {
   const [scanValue, setScanValue] = useState('');
   const scanInputRef = useRef<HTMLInputElement>(null);
 
-  const [reps, setReps] = useState<any[]>([]);
-  const [warehouses, setWarehouses] = useState<any[]>([]);
-  const [selectedRepId, setSelectedRepId] = useState<string>('');
-  const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>('');
-  const [notesList, setNotesList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [showOrdersModal, setShowOrdersModal] = useState(false);
   const [ordersList, setOrdersList] = useState<any[]>([]);
@@ -35,6 +33,23 @@ const DeliveryConfirmation: React.FC = () => {
       scanInputRef.current.focus();
     }
   }, [note]);
+
+  // تحميل قائمة الأذونات تلقائياً عند فتح الصفحة
+  useEffect(() => {
+    fetchPendingNotesQuiet();
+  }, []);
+
+  const fetchPendingNotesQuiet = async () => {
+    try {
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getPendingDeliveryNotes`);
+      const data = await res.json();
+      if (data && data.success && Array.isArray(data.data)) {
+        setOrdersList(data.data);
+      }
+    } catch (e) {
+      // silent
+    }
+  };
 
   const loadOrdersList = async () => {
     setLoading(true);
@@ -61,7 +76,7 @@ const DeliveryConfirmation: React.FC = () => {
     
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getDeliveryNoteDetails&id=${encodeURIComponent(useId)}`);
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getDeliveryNoteDetails&id=${encodeURIComponent(useId.trim())}`);
       const data = await res.json();
       if (data && data.success) {
         // دمج بيانات الطلب والبنود في كائن واحد
@@ -71,7 +86,8 @@ const DeliveryConfirmation: React.FC = () => {
         // تهيئة الكمية الممسوحة بـ 0
         const initializedItems = itemsData.map((it: any) => ({
           ...it,
-          scanned_qty: it.scanned_qty || 0
+          qty: Number(it.qty ?? it.quantity ?? 1),
+          scanned_qty: Number(it.scanned_qty || 0)
         }));
         
         setNote({ ...orderData, items: initializedItems });
@@ -91,93 +107,92 @@ const DeliveryConfirmation: React.FC = () => {
     e.preventDefault();
     if (!scanValue) return;
 
+    const term = scanValue.trim().toLowerCase();
+    const cleanTerm = term.replace(/^#/, '');
+
     // إذا لم يكن هناك إذن محمل، ابحث عن الإذن بالباركود
     if (!note) {
       // ابحث في قائمة الأذونات المعلقة عن إذن يحتوي على منتج بهذا الباركود
-      if (ordersList.length === 0) {
-        // إذا لم تكن قائمة الأذونات محملة، قم بتحميلها أولاً
+      let currentNotes = ordersList;
+      if (currentNotes.length === 0) {
         setLoading(true);
         try {
           const res = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getPendingDeliveryNotes`);
           const data = await res.json();
           if (data && data.success && Array.isArray(data.data)) {
-            setOrdersList(data.data);
-            // ابحث عن الإذن
-            const foundOrder = data.data.find((order: any) => {
-              if (!order.items || !Array.isArray(order.items)) return false;
-              return order.items.some((it: any) => String(it.barcode) === scanValue.trim());
-            });
-            if (foundOrder) {
-              setNoteId(String(foundOrder.note_code || foundOrder.id));
-              await loadNote(String(foundOrder.note_code || foundOrder.id));
-              setScanValue('');
-              // صوت نجاح
-              new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3').play().catch(() => {});
-              return;
-            }
+            currentNotes = data.data;
+            setOrdersList(currentNotes);
           }
         } catch (e) {
           // ignore
         } finally {
           setLoading(false);
         }
-        // إذا لم يتم العثور على إذن
-        new Audio('https://assets.mixkit.co/active_storage/sfx/2873/2873-preview.mp3').play().catch(() => {});
-        Swal.fire({
-          title: 'إذن غير موجود!',
-          text: 'لم يتم العثور على إذن تسليم يحتوي على هذا الباركود',
-          icon: 'error',
-          timer: 1500,
-          showConfirmButton: false
-        });
+      }
+
+      // 1. فحص إذا كان الباركود يطابق كود إذن تسليم مباشرة
+      const foundByCode = currentNotes.find((order: any) => {
+        const nc = String(order.note_code || '').trim().toLowerCase();
+        const oid = String(order.id || '').trim().toLowerCase();
+        return nc === term || nc === cleanTerm || oid === cleanTerm;
+      });
+
+      if (foundByCode) {
+        const val = foundByCode.note_code || foundByCode.id;
+        setNoteId(String(val));
+        await loadNote(String(val));
         setScanValue('');
         return;
-      } else {
-        // ابحث في القائمة الحالية
-        const foundOrder = ordersList.find((order: any) => {
-          if (!order.items || !Array.isArray(order.items)) return false;
-          return order.items.some((it: any) => String(it.barcode) === scanValue.trim());
-        });
-        if (foundOrder) {
-          setNoteId(String(foundOrder.note_code || foundOrder.id));
-          await loadNote(String(foundOrder.note_code || foundOrder.id));
-          setScanValue('');
-          // صوت نجاح
-          new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3').play().catch(() => {});
-          return;
-        } else {
-          new Audio('https://assets.mixkit.co/active_storage/sfx/2873/2873-preview.mp3').play().catch(() => {});
-          Swal.fire({
-            title: 'إذن غير موجود!',
-            text: 'لم يتم العثور على إذن تسليم يحتوي على هذا الباركود',
-            icon: 'error',
-            timer: 1500,
-            showConfirmButton: false
-          });
-          setScanValue('');
-          return;
-        }
       }
+
+      // 2. فحص إذا كان الباركود يطابق منتج داخل أحد الأذونات
+      const foundOrder = currentNotes.find((order: any) => {
+        if (!order.items || !Array.isArray(order.items)) return false;
+        return order.items.some((it: any) => {
+          const bc = String(it.barcode || '').trim().toLowerCase();
+          const pid = String(it.product_id || '').trim().toLowerCase();
+          return bc === term || pid === cleanTerm;
+        });
+      });
+
+      if (foundOrder) {
+        const val = foundOrder.note_code || foundOrder.id;
+        setNoteId(String(val));
+        await loadNote(String(val));
+        setScanValue('');
+        return;
+      }
+
+      Swal.fire({
+        title: 'إذن غير موجود!',
+        text: 'لم يتم العثور على إذن تسليم يحتوي على هذا الباركود أو الكود',
+        icon: 'error',
+        timer: 1800,
+        showConfirmButton: false
+      });
+      setScanValue('');
+      return;
     }
 
-    // إذا كان هناك إذن محمل، نفذ المنطق القديم لمسح المنتج
+    // إذا كان هناك إذن محمل، مسح المنتج
     const items = [...note.items];
-    const foundIdx = items.findIndex(it => String(it.barcode) === scanValue.trim());
+    const foundIdx = items.findIndex(it => {
+      const bc = String(it.barcode || '').trim().toLowerCase();
+      const pid = String(it.product_id || '').trim().toLowerCase();
+      const id = String(it.id || '').trim().toLowerCase();
+      return bc === term || pid === cleanTerm || id === cleanTerm;
+    });
 
     if (foundIdx !== -1) {
       if (items[foundIdx].scanned_qty < items[foundIdx].qty) {
         items[foundIdx].scanned_qty += 1;
         setNote({ ...note, items });
         setScanValue('');
-        // صوت نجاح
-        new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3').play().catch(() => {});
       } else {
         Swal.fire('اكتمل!', 'لقد قمت بمسح الكمية المطلوبة لهذا المنتج بالفعل', 'info');
         setScanValue('');
       }
     } else {
-      // صوت خطأ
-      new Audio('https://assets.mixkit.co/active_storage/sfx/2873/2873-preview.mp3').play().catch(() => {});
       Swal.fire({
         title: 'منتج خاطئ!',
         text: 'الباركود الذي قمت بمسحه غير موجود في هذا الإذن',
@@ -189,7 +204,25 @@ const DeliveryConfirmation: React.FC = () => {
     }
   };
 
+  const updateItemQtyManual = (idx: number, delta: number) => {
+    if (!note || !note.items || !note.items[idx]) return;
+    const items = [...note.items];
+    const newQty = Math.max(0, Math.min(items[idx].qty, (items[idx].scanned_qty || 0) + delta));
+    items[idx].scanned_qty = newQty;
+    setNote({ ...note, items });
+  };
+
+  const matchAllItems = () => {
+    if (!note || !note.items) return;
+    const items = note.items.map((it: any) => ({
+      ...it,
+      scanned_qty: it.qty
+    }));
+    setNote({ ...note, items });
+  };
+
   const saveScans = async () => {
+    if (!note || !note.id) return;
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=confirmDeliveryNote`, {
@@ -202,6 +235,7 @@ const DeliveryConfirmation: React.FC = () => {
         Swal.fire('تم التسليم', 'تم مطابقة وتسليم الإذن بنجاح للمخزن', 'success');
         setNote(null);
         setNoteId('');
+        fetchPendingNotesQuiet();
       } else {
         Swal.fire('خطأ', data.message || 'فشل في حفظ عملية التسليم', 'error');
       }
@@ -324,8 +358,8 @@ const DeliveryConfirmation: React.FC = () => {
 
           {/* Scanner Input */}
           <div className="bg-white rounded-3xl p-6 shadow-md border-2 border-indigo-100">
-            <form onSubmit={handleManualScan} className="flex gap-4">
-              <div className="relative flex-1">
+            <form onSubmit={handleManualScan} className="flex flex-wrap gap-4">
+              <div className="relative flex-1 min-w-[250px]">
                 <ScanBarcode className="absolute right-4 top-1/2 -translate-y-1/2 text-indigo-500 w-6 h-6" />
                 <input
                   ref={scanInputRef}
@@ -338,9 +372,16 @@ const DeliveryConfirmation: React.FC = () => {
               </div>
               <button 
                 type="submit"
-                className="bg-indigo-600 text-white px-8 rounded-2xl font-black hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100"
+                className="bg-indigo-600 text-white px-8 py-4 rounded-2xl font-black hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100"
               >
                 تأكيد يدوي
+              </button>
+              <button 
+                type="button"
+                onClick={matchAllItems}
+                className="bg-emerald-600 text-white px-6 py-4 rounded-2xl font-black hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 flex items-center gap-2"
+              >
+                <CheckCheck className="w-5 h-5" /> مطابقة الكل
               </button>
             </form>
           </div>
@@ -358,13 +399,13 @@ const DeliveryConfirmation: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {note.items.map((it: any) => {
+                {note.items.map((it: any, idx: number) => {
                   const isDone = it.scanned_qty === it.qty;
                   const isStarted = it.scanned_qty > 0 && !isDone;
 
                   return (
                     <tr 
-                      key={it.id} 
+                      key={it.id || idx} 
                       className={`transition-colors ${isDone ? 'bg-emerald-50/50' : isStarted ? 'bg-amber-50/50' : 'hover:bg-slate-50'}`}
                     >
                       <td className="p-5">
@@ -376,12 +417,30 @@ const DeliveryConfirmation: React.FC = () => {
                           <span className="bg-indigo-50 px-3 py-1 rounded-lg text-xs font-bold text-indigo-600">{it.size || '—'}</span>
                         </div>
                       </td>
-                      <td className="p-5 text-center font-mono text-sm text-slate-400">{it.barcode}</td>
+                      <td className="p-5 text-center font-mono text-sm text-slate-400">{it.barcode || '—'}</td>
                       <td className="p-5 text-center font-black text-slate-500">{it.qty}</td>
                       <td className="p-5 text-center">
-                        <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl font-black text-lg ${isDone ? 'text-emerald-600' : isStarted ? 'text-amber-600' : 'text-slate-300'}`}>
-                          {isDone ? <CheckCircle2 className="w-6 h-6" /> : <div className="w-6 h-6 border-2 border-dashed rounded-full border-current animate-spin-slow"></div>}
-                          {it.scanned_qty}
+                        <div className="inline-flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => updateItemQtyManual(idx, -1)}
+                            disabled={!it.scanned_qty || it.scanned_qty <= 0}
+                            className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 disabled:opacity-30 flex items-center justify-center text-slate-700 transition-colors"
+                          >
+                            <Minus className="w-4 h-4" />
+                          </button>
+                          <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-lg ${isDone ? 'text-emerald-600' : isStarted ? 'text-amber-600' : 'text-slate-400'}`}>
+                            {isDone && <CheckCircle2 className="w-5 h-5" />}
+                            {it.scanned_qty || 0}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => updateItemQtyManual(idx, 1)}
+                            disabled={it.scanned_qty >= it.qty}
+                            className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 disabled:opacity-30 flex items-center justify-center text-slate-700 transition-colors"
+                          >
+                            <Plus className="w-4 h-4" />
+                          </button>
                         </div>
                       </td>
                     </tr>

@@ -13,6 +13,7 @@
  */
 import React from 'react';
 import Barcode from './Barcode';
+import { assetUrl } from '../services/assetUrl';
 
 export interface WaybillProps {
   order: any;
@@ -1112,7 +1113,7 @@ export const UniversalPrintableOrders: React.FC<{
   const compName = companyName || localStorage.getItem('Dragon_company_name') || 'اسم الشركة';
   const compPhone = companyPhone || localStorage.getItem('Dragon_company_phone') || '';
   const compAddr = companyAddress || localStorage.getItem('Dragon_company_address') || '';
-  const compLogo = companyLogo || localStorage.getItem('Dragon_company_logo') || null;
+  const compLogo = companyLogo || (typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_logo_url') || localStorage.getItem('Dragon_company_logo')) : null) || assetUrl('Dragon.png');
   const compTerms = terms || localStorage.getItem('Dragon_company_terms') || 'المعاينة حق للعميل قبل الاستلام.';
   const currentTemplate = templateId || getSelectedTemplateId();
 

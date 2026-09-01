@@ -259,7 +259,19 @@ $stmt->execute([$input['adminName'], $input['adminUsername'], $hashed_password])
 
     require_once __DIR__ . '/activation_utils.php';
     $hwid = get_hwid();
-    $activationResult = call_activation_service($hwid, $input['companyPhone'] ?? '', $input['companyName']);
+    $realPhone = trim((string)($input['companyPhone'] ?? ''));
+    $realCompanyName = trim((string)($input['companyName'] ?? ''));
+    $startDate = date('Y-m-d H:i:s');
+
+    $activationResult = call_activation_service(
+        $hwid,
+        $realPhone,
+        $realCompanyName,
+        get_program_name(),
+        get_program_version(),
+        get_program_type(),
+        $startDate
+    );
     if (!$activationResult['success']) {
         http_response_code(502);
         if (function_exists('ob_clean')) { @ob_clean(); }
@@ -271,8 +283,8 @@ $stmt->execute([$input['adminName'], $input['adminUsername'], $hashed_password])
     $activationType = $activationData['type'] ?? 'Trial';
     $activationExpiry = $activationData['expiry'] ?? '';
     $activationAccountStatus = $activationData['account_status'] ?? 'Active';
-    $activationIsExpired = !empty($activationData['is_expired']) ? 'true' : 'false';
-    $activationLastCheck = date('Y-m-d H:i:s');
+    $activationIsExpired = (($activationData['is_expired'] ?? 'false') === 'true' || $activationData['is_expired'] === true) ? 'true' : 'false';
+    $activationLastCheck = $activationData['server_time'] ?? date('Y-m-d H:i:s');
 
     // Company Settings
     $settings = [
@@ -446,15 +458,15 @@ $stmt->execute([$input['adminName'], $input['adminUsername'], $hashed_password])
     // Create license data
     $license_data = [
         'hwid' => $hwid,
-        'company_name' => $input['companyName'],
-        'company_phone' => $input['companyPhone'],
-        'installed_date' => date('Y-m-d H:i:s'),
+        'company_name' => $realCompanyName,
+        'company_phone' => $realPhone,
+        'installed_date' => $startDate,
         'activation_type' => $activationType,
         'activation_expiry' => $activationExpiry,
         'activation_account_status' => $activationAccountStatus,
         'activation_is_expired' => $activationIsExpired,
         'activation_last_check' => $activationLastCheck,
-        'version' => '1.0.3'
+        'version' => get_program_version()
     ];
     
     // Encrypt and save license file

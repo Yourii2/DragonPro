@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { API_BASE_PATH } from '../services/apiConfig';
+import { assetUrl } from '../services/assetUrl';
 
 // Local Code128 generator ported to JS. Produces an inline SVG string.
 function code128Svg(text: string, options: { height?: number; scale?: number; barWidth?: number } = {}) {
@@ -222,7 +223,7 @@ const PrintWaybill: React.FC = () => {
             const companyName = order.companyName || localStorage.getItem('Dragon_company_name') || 'اسم الشركة';
             const companyPhone = order.companyPhone || localStorage.getItem('Dragon_company_phone') || '';
             const companyTerms = order.companyTerms || localStorage.getItem('Dragon_company_terms') || '';
-            const companyLogoSrc = order.companyLogo || localStorage.getItem('Dragon_company_logo') || '';
+            const companyLogoSrc = order.companyLogo || (typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_logo_url') || localStorage.getItem('Dragon_company_logo')) : null) || assetUrl('Dragon.png');
             const companyAddressStr = order.companyAddress || localStorage.getItem('Dragon_company_address') || '';
 
             const employeeDisplay = order.employee || order.employeeName || order.employee_name || order.created_by_name || order.created_by || '';

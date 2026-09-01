@@ -155,8 +155,8 @@ try {
     $activationType = $activationData['type'] ?? 'Trial';
     $activationExpiry = $activationData['expiry'] ?? '';
     $activationAccountStatus = $activationData['account_status'] ?? 'Active';
-    $activationIsExpired = !empty($activationData['is_expired']) ? 'true' : 'false';
-    $activationLastCheck = date('Y-m-d H:i:s');
+    $activationIsExpired = (($activationData['is_expired'] ?? 'false') === 'true' || $activationData['is_expired'] === true) ? 'true' : 'false';
+    $activationLastCheck = $activationData['server_time'] ?? date('Y-m-d H:i:s');
 
     // Update settings in database with new activation details
     if ($checkApp) {

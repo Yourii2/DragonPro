@@ -2,7 +2,7 @@ import React from 'react';
 import { assetUrl } from '../services/assetUrl';
 
 const Footer: React.FC = () => {
-  const companyLogo = assetUrl('Dragon.png');
+  const companyLogo = (typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_logo_url') || localStorage.getItem('Dragon_company_logo')) : null) || assetUrl('Dragon.png');
   const year = new Date().getFullYear();
 
   const contacts = [

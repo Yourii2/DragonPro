@@ -14,7 +14,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const companyLogo = (typeof window !== 'undefined' ? localStorage.getItem('Dragon_company_logo') : null) || assetUrl('Dragon.png');
+  const companyLogo = (typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_logo_url') || localStorage.getItem('Dragon_company_logo')) : null) || assetUrl('Dragon.png');
   const companyName = (typeof window !== 'undefined' ? localStorage.getItem('Dragon_company_name') : null) || 'دراجون برو';
 
   const handleSubmit = async (e: React.FormEvent) => {
