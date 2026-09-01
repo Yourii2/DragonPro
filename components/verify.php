@@ -9,7 +9,7 @@ header('Access-Control-Allow-Headers: Content-Type, Authorization');
 header('Access-Control-Allow-Credentials: true');
 header('Content-Type: application/json');
 
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit(0); }
+if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit(0); }
 
 require_once __DIR__ . '/encryption.php';
 require_once __DIR__ . '/activation_utils.php';
@@ -47,6 +47,10 @@ $last_check_raw = $license_data['activation_last_check'] ?? '';
 $last_check_ts = $last_check_raw ? strtotime($last_check_raw) : false;
 $input_raw = @file_get_contents('php://input');
 $input_json = $input_raw ? json_decode($input_raw, true) : [];
+$force_flag = false;
+if (is_array($input_json) && !empty($input_json['force'])) $force_flag = true;
+if (isset($_GET['force']) && ($_GET['force'] === '1' || $_GET['force'] === 'true')) $force_flag = true;
+
 $is_recent = ($last_check_ts !== false && (time() - $last_check_ts) < 180);
 $should_refresh = !$is_recent && ($force_flag || ($last_check_ts === false) || ((time() - $last_check_ts) > 86400));
 
