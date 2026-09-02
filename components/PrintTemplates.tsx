@@ -204,34 +204,15 @@ export const PrintableOrders: React.FC<{ orders: any[] }> = ({ orders }) => {
   }
 
   return (
-      <div id="print-container" className="hidden">
-          <style>
-              {`
-              @media print {
-              body { visibility: hidden; margin: 0; padding: 0; }
-              #print-container { display: block !important; visibility: visible !important; position: absolute; top: 0; left: 0; width: 100%; }
-                              @page { size: A4; margin: 0.5cm; }
-                              /* Use clearer font and larger print font size for printable container */
-                              #print-container, #print-container * { font-family: 'Noto Sans Arabic', 'Noto Naskh Arabic', Arial, sans-serif !important; font-size: 28px !important; }
-                              /* Allow content to flow naturally and avoid forcing fixed heights which can create blank pages */
-                              .print-page { page-break-after: always; page-break-inside: avoid; break-inside: avoid; }
-                              .print-page:last-child { page-break-after: auto; }
-                  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-              }
-              `}
-          </style>
-          {chunks.map((chunk, idx) => (
-            <div key={idx} className="print-page" style={{ padding: '0.3cm' }}>
-              <div className="grid grid-cols-2 gap-4" style={{ gridTemplateRows: '1fr 1fr' }}>
-                {chunk.map((order: any) => (
-                  <div key={order.id} className="break-inside-avoid border border-slate-300" style={{ overflow: 'visible' }}>
-                    <PrintableContent order={order} companyName={companyName} companyPhone={companyPhone} companyAddress={companyAddress} terms={companyTerms} companyLogo={companyLogo} />
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-      </div>
+    <UniversalPrintableOrders
+      orders={orders}
+      companyName={companyName}
+      companyPhone={companyPhone}
+      companyAddress={companyAddress}
+      companyLogo={companyLogo}
+      terms={companyTerms}
+      templateId={getSelectedTemplateId()}
+    />
   );
 };
 

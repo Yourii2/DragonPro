@@ -188,7 +188,7 @@ export const Template1_Classic: React.FC<WaybillProps> = ({ order, companyName, 
             </tr>
           </thead>
           <tbody>
-            {d.products.slice(0, 4).map((p, i) => (
+            {d.products.map((p, i) => (
               <tr key={i} className="border-b border-gray-300">
                 <td className="p-1 border border-black font-bold truncate max-w-[150px]">{p.name} {p.variant && <span className="text-[10px] text-gray-600 font-normal">({p.variant})</span>}</td>
                 <td className="p-1 border border-black text-center font-bold">{p.qty}</td>
@@ -270,7 +270,7 @@ export const Template2_Modern: React.FC<WaybillProps> = ({ order, companyName, c
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 bg-white">
-              {d.products.slice(0, 4).map((p, i) => (
+              {d.products.map((p, i) => (
                 <tr key={i} className="hover:bg-slate-50">
                   <td className="py-1 px-1.5 font-bold truncate max-w-[150px]">{p.name} {p.variant && <span className="text-[10px] text-slate-500 font-normal">({p.variant})</span>}</td>
                   <td className="py-1 px-1.5 text-center font-bold">{p.qty}</td>
@@ -334,7 +334,7 @@ export const Template3_CourierBadge: React.FC<WaybillProps> = ({ order, companyN
             <span>محتويات الشحنة:</span>
             <span>شحن: {d.shipping} ج.م</span>
           </div>
-          {d.products.slice(0, 3).map((p, i) => (
+          {d.products.map((p, i) => (
             <div key={i} className="flex justify-between py-0.5">
               <span>{p.qty}x {p.name} ({p.price} ج.م)</span>
               <span className="font-mono font-bold">{p.lineTotal.toLocaleString()} ج.م</span>
@@ -375,7 +375,7 @@ export const Template4_Thermal: React.FC<WaybillProps> = ({ order, companyName, 
         </div>
         <div className="my-1 border-b border-dashed border-black pb-1">
           <div className="font-bold mb-0.5">الأصناف (الكمية × السعر):</div>
-          {d.products.slice(0, 3).map((p, i) => (
+          {d.products.map((p, i) => (
             <div key={i} className="flex justify-between text-xs py-0.5"><span>{p.qty}x {p.name} ({p.price})</span><span>{p.lineTotal}</span></div>
           ))}
         </div>
@@ -411,7 +411,7 @@ export const Template5_CompactSlip: React.FC<WaybillProps> = ({ order, companyNa
         </div>
         <div className="border border-gray-300 p-1.5 rounded text-xs space-y-1">
           <div className="font-bold border-b pb-0.5 flex justify-between"><span>الطلبات:</span><span>شحن: {d.shipping} ج.م</span></div>
-          {d.products.slice(0, 3).map((p, i) => (<div key={i} className="flex justify-between py-0.5"><span>{p.qty}x {p.name} ({p.price})</span><span className="font-mono font-bold">{p.lineTotal} ج.م</span></div>))}
+          {d.products.map((p, i) => (<div key={i} className="flex justify-between py-0.5"><span>{p.qty}x {p.name} ({p.price})</span><span className="font-mono font-bold">{p.lineTotal} ج.م</span></div>))}
         </div>
       </div>
       <div className="space-y-1 mt-2">
@@ -445,7 +445,7 @@ export const Template6_LuxuryRoyal: React.FC<WaybillProps> = ({ order, companyNa
         </div>
         <table className="w-full text-xs border border-amber-700 mb-2">
           <thead className="bg-amber-900 text-amber-50"><tr><th className="p-1 text-right">البيان</th><th className="p-1 text-center w-10">العدد</th><th className="p-1 text-center w-12">السعر</th><th className="p-1 text-center w-14">القيمة</th></tr></thead>
-          <tbody className="divide-y divide-amber-200 bg-white">{d.products.slice(0, 3).map((p, i) => (<tr key={i}><td className="p-1 font-bold truncate max-w-[140px]">{p.name}</td><td className="p-1 text-center font-bold">{p.qty}</td><td className="p-1 text-center font-mono">{p.price}</td><td className="p-1 text-center font-mono font-bold">{p.lineTotal.toLocaleString()}</td></tr>))}</tbody>
+          <tbody className="divide-y divide-amber-200 bg-white">{d.products.map((p, i) => (<tr key={i}><td className="p-1 font-bold truncate max-w-[140px]">{p.name}</td><td className="p-1 text-center font-bold">{p.qty}</td><td className="p-1 text-center font-mono">{p.price}</td><td className="p-1 text-center font-mono font-bold">{p.lineTotal.toLocaleString()}</td></tr>))}</tbody>
         </table>
       </div>
       <div className="space-y-1.5">
@@ -475,7 +475,7 @@ export const Template7_ReceiptStub: React.FC<WaybillProps> = ({ order, companyNa
         </div>
         <div className="border border-gray-200 p-1 rounded text-xs">
           <div className="font-bold border-b pb-0.5 mb-0.5 flex justify-between"><span>المنتجات:</span><span>الشحن: {d.shipping} ج.م</span></div>
-          {d.products.slice(0, 3).map((p, i) => (<div key={i} className="flex justify-between text-xs py-0.2"><span>{p.qty}x {p.name} ({p.price})</span><span className="font-mono font-bold">{p.lineTotal}</span></div>))}
+          {d.products.map((p, i) => (<div key={i} className="flex justify-between text-xs py-0.2"><span>{p.qty}x {p.name} ({p.price})</span><span className="font-mono font-bold">{p.lineTotal}</span></div>))}
         </div>
       </div>
       <div>
@@ -499,7 +499,7 @@ export const Template8_GridDashboard: React.FC<WaybillProps> = ({ order, company
       <div className="border border-slate-800 p-1.5 rounded flex justify-between items-center"><div><div className="text-[9px] font-bold text-slate-500">البوليصة</div><div className="font-mono font-black text-xs">#{d.orderNumber}</div></div><Barcode value={d.orderNumber} height={24} width={1.1} /></div>
       <div className="border border-slate-800 p-1.5 rounded"><div className="text-[9px] font-bold text-slate-500">العميل</div><div className="font-bold truncate">{d.customerName}</div><div className="font-mono text-[10px]">{d.phone1}</div></div>
       <div className="border border-slate-800 p-1.5 rounded"><div className="text-[9px] font-bold text-slate-500">الوجهة</div><div className="font-black text-blue-800">{d.gov}</div><div className="truncate text-[10px]">{d.address}</div></div>
-      <div className="col-span-2 border border-slate-800 p-1.5 rounded"><div className="font-bold mb-0.5 border-b pb-0.5 text-xs flex justify-between"><span>المنتجات:</span><span>شحن: {d.shipping} ج.م</span></div>{d.products.slice(0, 3).map((p, i) => (<div key={i} className="flex justify-between text-xs py-0.2"><span>{p.qty}x {p.name} ({p.price})</span><span className="font-mono font-bold">{p.lineTotal} ج.م</span></div>))}</div>
+      <div className="col-span-2 border border-slate-800 p-1.5 rounded"><div className="font-bold mb-0.5 border-b pb-0.5 text-xs flex justify-between"><span>المنتجات:</span><span>شحن: {d.shipping} ج.م</span></div>{d.products.map((p, i) => (<div key={i} className="flex justify-between text-xs py-0.2"><span>{p.qty}x {p.name} ({p.price})</span><span className="font-mono font-bold">{p.lineTotal} ج.م</span></div>))}</div>
       <div className="col-span-2 border border-slate-800 p-1 rounded text-[10px]"><strong>ملاحظات: </strong>{d.notes || 'لا يوجد'}</div>
       <div className="col-span-2 bg-slate-900 text-white p-2 rounded flex justify-between items-center text-xs font-black"><span>المطلوب تحصيله:</span><span className="font-mono text-emerald-400 text-base">{d.total.toLocaleString()} ج.م</span></div>
       <div className="col-span-2 flex justify-between text-[8.5px] text-gray-500"><span>الموظف: {d.employee} | {d.page}</span><span>{terms || 'المعاينة حق للعميل'}</span></div>
@@ -523,7 +523,7 @@ export const Template9_DualBarcode: React.FC<WaybillProps> = ({ order, companyNa
         </div>
         <div className="border border-black p-1.5 mb-2 text-xs space-y-0.5">
           <div className="font-bold border-b pb-0.5 flex justify-between"><span>المنتجات:</span><span>شحن: {d.shipping} ج.م</span></div>
-          {d.products.slice(0, 3).map((p, i) => (<div key={i} className="flex justify-between py-0.2"><span>{p.qty}x {p.name} ({p.price})</span><span className="font-mono font-bold">{p.lineTotal} ج.م</span></div>))}
+          {d.products.map((p, i) => (<div key={i} className="flex justify-between py-0.2"><span>{p.qty}x {p.name} ({p.price})</span><span className="font-mono font-bold">{p.lineTotal} ج.م</span></div>))}
         </div>
       </div>
       <div className="space-y-1">
@@ -554,7 +554,7 @@ export const Template10_FormalTax: React.FC<WaybillProps> = ({ order, companyNam
         </div>
         <table className="w-full border-collapse border border-black text-xs mb-2">
           <thead className="bg-gray-200"><tr><th className="border border-black p-1 text-right">البند</th><th className="border border-black p-1 text-center w-8">كمية</th><th className="border border-black p-1 text-center w-12">سعر</th><th className="border border-black p-1 text-center w-14">إجمالي</th></tr></thead>
-          <tbody>{d.products.slice(0, 3).map((p, i) => (<tr key={i}><td className="border border-black p-1 truncate max-w-[140px]">{p.name}</td><td className="border border-black p-1 text-center font-bold">{p.qty}</td><td className="border border-black p-1 text-center font-mono">{p.price}</td><td className="border border-black p-1 text-center font-mono font-bold">{p.lineTotal}</td></tr>))}</tbody>
+          <tbody>{d.products.map((p, i) => (<tr key={i}><td className="border border-black p-1 truncate max-w-[140px]">{p.name}</td><td className="border border-black p-1 text-center font-bold">{p.qty}</td><td className="border border-black p-1 text-center font-mono">{p.price}</td><td className="border border-black p-1 text-center font-mono font-bold">{p.lineTotal}</td></tr>))}</tbody>
         </table>
       </div>
       <div className="space-y-1">
@@ -587,7 +587,7 @@ export const Template11_Minimalist: React.FC<WaybillProps> = ({ order, companyNa
           <div className="text-gray-800">{d.gov} • {d.address}</div>
         </div>
         <div className="border-t border-b border-gray-100 py-1.5 my-1 text-xs space-y-0.5">
-          {d.products.slice(0, 3).map((p, i) => (<div key={i} className="flex justify-between py-0.5"><span className="font-medium">{p.qty} × {p.name} ({p.price})</span><span className="font-mono font-bold">{p.lineTotal} ج.م</span></div>))}
+          {d.products.map((p, i) => (<div key={i} className="flex justify-between py-0.5"><span className="font-medium">{p.qty} × {p.name} ({p.price})</span><span className="font-mono font-bold">{p.lineTotal} ج.م</span></div>))}
         </div>
       </div>
       <div className="space-y-1">
@@ -621,7 +621,7 @@ export const Template12_BoxLabel: React.FC<WaybillProps> = ({ order, companyName
           <div className="text-gray-700 leading-tight">{d.address}</div>
         </div>
         <div className="border border-black p-1 rounded text-xs space-y-0.5 mb-1">
-          {d.products.slice(0, 2).map((p, i) => (<div key={i} className="flex justify-between"><span>{p.qty}x {p.name}</span><span className="font-mono">{p.lineTotal}</span></div>))}
+          {d.products.map((p, i) => (<div key={i} className="flex justify-between"><span>{p.qty}x {p.name}</span><span className="font-mono">{p.lineTotal}</span></div>))}
         </div>
       </div>
       <div className="space-y-1">
@@ -656,7 +656,7 @@ export const Template13_DarkHeader: React.FC<WaybillProps> = ({ order, companyNa
           </div>
           <div className="border rounded p-1.5 text-xs space-y-1">
             <div className="font-bold border-b pb-0.5 flex justify-between"><span>المنتجات:</span><span>شحن: {d.shipping} ج.م</span></div>
-            {d.products.slice(0, 3).map((p, i) => (<div key={i} className="flex justify-between py-0.2"><span>{p.qty}x {p.name} ({p.price})</span><span className="font-mono font-bold">{p.lineTotal} ج.م</span></div>))}
+            {d.products.map((p, i) => (<div key={i} className="flex justify-between py-0.2"><span>{p.qty}x {p.name} ({p.price})</span><span className="font-mono font-bold">{p.lineTotal} ج.م</span></div>))}
           </div>
         </div>
       </div>
@@ -695,7 +695,7 @@ export const Template14_LandscapeSplit: React.FC<WaybillProps> = ({ order, compa
           <div className="flex justify-between items-center mb-1.5"><Barcode value={d.orderNumber} height={24} width={1.1} /><span className="font-mono font-bold">#{d.orderNumber}</span></div>
           <div className="border-t border-b py-1 mb-1 space-y-0.5">
             <div className="font-bold text-[10px] flex justify-between"><span>المنتجات:</span><span>شحن: {d.shipping}</span></div>
-            {d.products.slice(0, 3).map((p, i) => (<div key={i} className="flex justify-between py-0.2"><span>{p.qty}x {p.name}</span><span>{p.lineTotal}</span></div>))}
+            {d.products.map((p, i) => (<div key={i} className="flex justify-between py-0.2"><span>{p.qty}x {p.name}</span><span>{p.lineTotal}</span></div>))}
           </div>
           {d.notes && <div className="text-[9.5px] text-red-700 font-bold mb-1">ملاحظة: {d.notes}</div>}
         </div>
@@ -726,7 +726,7 @@ export const Template15_PackingSlip: React.FC<WaybillProps> = ({ order, companyN
         </div>
         <table className="w-full border border-black mb-2 text-xs">
           <thead className="bg-gray-100"><tr><th className="border p-1 w-8 text-center">فحص</th><th className="border p-1 text-right">الصنف</th><th className="border p-1 text-center w-10">العدد</th><th className="border p-1 text-center w-12">السعر</th></tr></thead>
-          <tbody>{d.products.slice(0, 3).map((p, i) => (<tr key={i}><td className="border p-1 text-center">⬜</td><td className="border p-1 font-bold truncate max-w-[150px]">{p.name}</td><td className="border p-1 text-center font-bold">{p.qty}</td><td className="border p-1 text-center font-mono">{p.lineTotal}</td></tr>))}</tbody>
+          <tbody>{d.products.map((p, i) => (<tr key={i}><td className="border p-1 text-center">⬜</td><td className="border p-1 font-bold truncate max-w-[150px]">{p.name}</td><td className="border p-1 text-center font-bold">{p.qty}</td><td className="border p-1 text-center font-mono">{p.lineTotal}</td></tr>))}</tbody>
         </table>
       </div>
       <div className="space-y-1">
@@ -757,7 +757,7 @@ export const Template16_Geometric: React.FC<WaybillProps> = ({ order, companyNam
         </div>
         <div className="border-t border-b py-1.5 mb-2 text-xs space-y-1">
           <div className="font-bold text-[10px] flex justify-between"><span>المنتجات:</span><span>شحن: {d.shipping} ج.م</span></div>
-          {d.products.slice(0, 3).map((p, i) => (<div key={i} className="flex justify-between py-0.2"><span>{p.qty}x {p.name} ({p.price})</span><span className="font-mono font-bold">{p.lineTotal} ج.م</span></div>))}
+          {d.products.map((p, i) => (<div key={i} className="flex justify-between py-0.2"><span>{p.qty}x {p.name} ({p.price})</span><span className="font-mono font-bold">{p.lineTotal} ج.م</span></div>))}
         </div>
       </div>
       <div className="space-y-1">
@@ -786,7 +786,7 @@ export const Template17_CODBold: React.FC<WaybillProps> = ({ order, companyName,
         </div>
         <div className="border p-1 rounded text-xs space-y-0.5 mb-1">
           <div className="font-bold border-b pb-0.5 flex justify-between"><span>الأصناف:</span><span>شحن: {d.shipping} ج.م</span></div>
-          {d.products.slice(0, 2).map((p, i) => (<div key={i} className="flex justify-between"><span>{p.qty}x {p.name}</span><span className="font-mono font-bold">{p.lineTotal}</span></div>))}
+          {d.products.map((p, i) => (<div key={i} className="flex justify-between"><span>{p.qty}x {p.name}</span><span className="font-mono font-bold">{p.lineTotal}</span></div>))}
         </div>
       </div>
       <div className="space-y-1">
@@ -818,7 +818,7 @@ export const Template18_Segmented: React.FC<WaybillProps> = ({ order, companyNam
         </div>
         <div className="border border-gray-200 p-1.5 rounded text-xs space-y-0.5">
           <div className="font-bold text-blue-800 flex justify-between"><span>٢. محتويات الطلب:</span><span>الشحن: {d.shipping} ج.م</span></div>
-          {d.products.slice(0, 3).map((p, i) => (<div key={i} className="flex justify-between py-0.2"><span>{p.qty} × {p.name} ({p.price})</span><span className="font-mono font-bold">{p.lineTotal} ج.م</span></div>))}
+          {d.products.map((p, i) => (<div key={i} className="flex justify-between py-0.2"><span>{p.qty} × {p.name} ({p.price})</span><span className="font-mono font-bold">{p.lineTotal} ج.م</span></div>))}
         </div>
       </div>
       <div className="space-y-1">
@@ -848,7 +848,7 @@ export const Template19_FreightTag: React.FC<WaybillProps> = ({ order, companyNa
         </div>
         <div className="border border-black p-1 mb-1 text-xs">
           <div className="font-bold flex justify-between border-b pb-0.5"><span>MANIFEST:</span><span>SHIPPING: {d.shipping}</span></div>
-          {d.products.slice(0, 2).map((p, i) => (<div key={i} className="flex justify-between py-0.2"><span>{p.qty}x {p.name}</span><span>{p.lineTotal}</span></div>))}
+          {d.products.map((p, i) => (<div key={i} className="flex justify-between py-0.2"><span>{p.qty}x {p.name}</span><span>{p.lineTotal}</span></div>))}
         </div>
       </div>
       <div className="space-y-1 font-sans">
@@ -878,7 +878,7 @@ export const Template20_SecureStamp: React.FC<WaybillProps> = ({ order, companyN
         </div>
         <div className="border border-black p-1.5 mb-2 text-xs space-y-0.5">
           <div className="font-bold border-b pb-0.5 flex justify-between"><span>المنتجات:</span><span>شحن: {d.shipping} ج.م</span></div>
-          {d.products.slice(0, 3).map((p, i) => (<div key={i} className="flex justify-between py-0.2 font-bold"><span>{p.qty}x {p.name} ({p.price})</span><span>{p.lineTotal} ج.م</span></div>))}
+          {d.products.map((p, i) => (<div key={i} className="flex justify-between py-0.2 font-bold"><span>{p.qty}x {p.name} ({p.price})</span><span>{p.lineTotal} ج.م</span></div>))}
         </div>
       </div>
       <div className="space-y-1">
@@ -984,7 +984,7 @@ export const Template21_SuitsBoutique: React.FC<WaybillProps> = ({ order, compan
               </tr>
             </thead>
             <tbody className="divide-y divide-[#f6ebed] bg-white">
-              {d.products.slice(0, 4).map((p, i) => (
+              {d.products.map((p, i) => (
                 <tr key={i} className="hover:bg-[#fbf5f6]">
                   <td className="p-1.5 font-bold text-slate-800 truncate max-w-[140px]">
                     {p.name} {p.variant && <span className="text-[9px] text-[#914d61] bg-[#fbf5f6] px-1.5 py-0.5 rounded font-normal mr-1">({p.variant})</span>}
