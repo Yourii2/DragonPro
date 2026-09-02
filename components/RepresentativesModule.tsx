@@ -441,6 +441,32 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
       setView(initialView as any);
     }
 
+    const fetchTreasuries = async () => {
+      try {
+        const [tr, ud] = await Promise.all([
+          fetch(`${API_BASE_PATH}/api.php?module=treasuries&action=getAll`).then(r=>r.json()),
+          fetch(`${API_BASE_PATH}/api.php?module=permissions&action=getUserDefaults`).then(r=>r.json()).catch(()=>({success:false}))
+        ]);
+        const list = (tr && tr.success) ? (tr.data || []) : [];
+        const defaults = (ud && ud.success) ? (ud.data || null) : null;
+        if (defaults && defaults.default_treasury_id && !defaults.can_change_treasury) setTreasuries(list.filter((t:any)=>Number(t.id)===Number(defaults.default_treasury_id)));
+        else setTreasuries(list);
+        if (defaults && defaults.default_treasury_id && !paymentForm.treasuryId) setPaymentForm(prev => ({...prev, treasuryId: String(defaults.default_treasury_id)}));
+        if (defaults) setUserDefaults(defaults);
+      } catch (e) { console.error('Failed to fetch treasuries', e); }
+    };
+
+    const fetchUserDefaults = async () => {
+      try {
+        const r = await fetch(`${API_BASE_PATH}/api.php?module=permissions&action=getUserDefaults`);
+        const jr = await r.json();
+        if (jr && jr.success) {
+          setUserDefaults(jr.data || null);
+          if (jr.data && jr.data.default_treasury_id && !paymentForm.treasuryId) setPaymentForm(prev => ({...prev, treasuryId: String(jr.data.default_treasury_id)}));
+        }
+      } catch (e) { console.error('Failed to fetch user defaults', e); }
+    };
+
     fetchReps();
     fetchTreasuries();
     fetchUserDefaults();
