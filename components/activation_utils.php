@@ -129,7 +129,6 @@ function call_activation_service($hwid, $phone, $company, $program_name = null, 
     $lastError = $response === false ? curl_error($ch) : '';
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
-    }
 
     if ($response === false) {
         return ['success' => false, 'message' => 'Activation request failed: ' . ($lastError ?: 'unknown error')];
