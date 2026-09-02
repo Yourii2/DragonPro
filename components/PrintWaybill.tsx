@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { assetUrl } from '../services/assetUrl';
-import { UniversalPrintableOrders, getSelectedTemplateId } from './UniversalWaybillRenderer';
+import { PrintableOrders } from './PrintableOrderCard';
 
 const PrintWaybill: React.FC = () => {
   const [orders, setOrders] = useState<any[]>([]);
@@ -108,14 +108,13 @@ const PrintWaybill: React.FC = () => {
   }
 
   return (
-    <UniversalPrintableOrders
+    <PrintableOrders
       orders={orders}
       companyName={companyName}
       companyPhone={companyPhone}
       companyAddress={companyAddress}
       companyLogo={companyLogo}
       terms={companyTerms}
-      templateId={getSelectedTemplateId()}
     />
   );
 };

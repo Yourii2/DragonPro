@@ -5,7 +5,6 @@
  */
 import React from 'react';
 import Barcode from './Barcode';
-import { UniversalWaybill, getSelectedTemplateId } from './UniversalWaybillRenderer';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -77,7 +76,7 @@ export const PrintableContent: React.FC<{
   companyName: string;
   companyPhone: string;
   terms: string;
-  companyLogo?: string;
+  companyLogo?: string | null;
   companyAddress?: string;
   users?: any[];
 }> = ({ order, companyName, companyPhone, terms, companyLogo, companyAddress, users }) => {
@@ -155,8 +154,8 @@ export const PrintableContent: React.FC<{
 
         {/* Barcode & order number (center) */}
         <div className="w-1/2 flex flex-col items-center justify-center" style={{ gap: '2px' }}>
-          <Barcode value={order.orderNumber} className="" height={40} width={1} />
-          <div className="text-center font-bold" style={{ fontSize: '11px', letterSpacing: '1px' }}>{order.orderNumber}</div>
+          <Barcode value={order.orderNumber || order.order_number || ''} className="" height={40} width={1} />
+          <div className="text-center font-bold" style={{ fontSize: '11px', letterSpacing: '1px' }}>{order.orderNumber || order.order_number}</div>
         </div>
 
         {/* Company info (right) */}
@@ -227,7 +226,6 @@ export const PrintableContent: React.FC<{
         </table>
       </div>
 
-
       {/* Totals */}
       <div className="border border-black bg-slate-50 p-1" style={{ marginBottom: '4px', flexShrink: 0 }}>
         <div className="flex justify-between items-center" style={{ marginBottom: '2px', fontSize: '10px' }}>
@@ -268,6 +266,92 @@ export const PrintableContent: React.FC<{
   );
 };
 
-import { UniversalPrintableOrders } from './UniversalWaybillRenderer';
+export const PrintableOrders: React.FC<{
+  orders: any[];
+  companyName: string;
+  companyPhone: string;
+  terms: string;
+  companyLogo?: string | null;
+  companyAddress?: string;
+  users?: any[];
+}> = ({ orders, companyName, companyPhone, terms, companyLogo, companyAddress, users }) => {
+  const chunks: any[][] = [];
+  for (let i = 0; i < (orders || []).length; i += 4) {
+    chunks.push(orders.slice(i, i + 4));
+  }
 
-export { UniversalPrintableOrders as PrintableOrders };
+  return (
+    <div className="print-root">
+      <style>{`
+        @media print {
+          body * { visibility: hidden; }
+          #print-container, #print-container * {
+            visibility: visible !important;
+          }
+          #print-container {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            margin: 0;
+            padding: 0;
+          }
+          @page {
+            size: A4 portrait;
+            margin: 2mm;
+          }
+          .print-a4-page {
+            width: 210mm;
+            height: 297mm;
+            box-sizing: border-box;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr 1fr;
+            gap: 2mm;
+            page-break-inside: avoid;
+            break-inside: avoid;
+            page-break-after: always;
+            overflow: hidden;
+          }
+          .print-a4-page:last-child {
+            page-break-after: auto;
+          }
+          .quarter-a4-cell {
+            width: 100%;
+            height: 100%;
+            box-sizing: border-box;
+            overflow: hidden;
+            page-break-inside: avoid;
+            break-inside: avoid;
+            display: flex;
+            flex-direction: column;
+          }
+          * { 
+            -webkit-print-color-adjust: exact; 
+            print-color-adjust: exact;
+            color-adjust: exact;
+          }
+        }
+      `}</style>
+      <div id="print-container">
+        {chunks.map((chunk, pageIdx) => (
+          <div key={pageIdx} className="print-a4-page">
+            {chunk.map((order: any, orderIdx: number) => (
+              <div key={order.id || orderIdx} className="quarter-a4-cell">
+                <PrintableContent
+                  order={order}
+                  companyName={companyName}
+                  companyPhone={companyPhone}
+                  companyAddress={companyAddress}
+                  terms={terms}
+                  companyLogo={companyLogo}
+                  users={users}
+                />
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
