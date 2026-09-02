@@ -257,10 +257,14 @@ const SettingsModule: React.FC = () => {
               last_check: settings.activation_last_check || ''
             });
           }
-          if (settings.company_logo_url) {
-            setLogoPreview(settings.company_logo_url);
-          } else if (settings.company_logo) {
-            setLogoPreview(settings.company_logo);
+          const logoVal = settings.company_logo_url || settings.company_logo || '';
+          if (logoVal) {
+            setLogoPreview(logoVal);
+            try {
+              localStorage.setItem('Dragon_company_logo', logoVal);
+              localStorage.setItem('Dragon_company_logo_url', logoVal);
+              window.dispatchEvent(new Event('storage'));
+            } catch (_) {}
           }
         }
       } catch (error) {
@@ -721,7 +725,25 @@ const SettingsModule: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Upload the file to server to get a persistent URL/path instead of embedding a large data URL
+    const saveLogo = (dataUri: string) => {
+      setLogoPreview(dataUri);
+      try {
+        localStorage.setItem('Dragon_company_logo', dataUri);
+        localStorage.setItem('Dragon_company_logo_url', dataUri);
+        // Notify Layout and other components immediately
+        window.dispatchEvent(new Event('storage'));
+      } catch (_) {}
+    };
+
+    // First give instant local preview via FileReader
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const localUri = reader.result as string;
+      saveLogo(localUri);
+    };
+    reader.readAsDataURL(file);
+
+    // Then also upload to server so it persists in DB across sessions/devices
     try {
       const form = new FormData();
       form.append('logo', file);
@@ -730,21 +752,14 @@ const SettingsModule: React.FC = () => {
       const j = await res.json();
       Swal.close();
       if (j && j.success && j.url) {
-        setLogoPreview(j.url);
+        // Server returned base64 URI – use it (may be same or different encoding)
+        saveLogo(j.url);
       } else {
-        // fallback: show preview as data URL if upload failed
-        const reader = new FileReader();
-        reader.onloadend = () => setLogoPreview(reader.result as string);
-        reader.readAsDataURL(file);
-        Swal.fire('فشل الرفع', j.message || 'تعذّر رفع الشعار، سيتم عرض معاينة محلية فقط.', 'warning');
+        Swal.fire('تنبيه', j?.message || 'تم حفظ الشعار محلياً فقط. سيتم مزامنته عند الحفظ.', 'warning');
       }
-    } catch (err) {
-      // fallback to data URL preview on any error
-      const reader = new FileReader();
-      reader.onloadend = () => setLogoPreview(reader.result as string);
-      reader.readAsDataURL(file);
+    } catch (_err) {
       Swal.close();
-      Swal.fire('خطأ', 'تعذر الاتصال بالخادم لرفع الشعار. سيتم استخدام معاينة محلية فقط.', 'error');
+      // local preview was already saved, no further action needed
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = '';
     }

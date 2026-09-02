@@ -124,6 +124,30 @@ try {
         }
     }
 
+    // Post-process: ensure company_logo is always a data URI if present
+    $rawLogo = $settings['company_logo'] ?? '';
+    if (!empty($rawLogo)) {
+        if (str_starts_with($rawLogo, 'data:')) {
+            // Already base64 - set company_logo_url as well for front-end compatibility
+            $settings['company_logo_url'] = $rawLogo;
+            $settings['company_logo'] = $rawLogo;
+        } elseif (str_starts_with($rawLogo, 'uploads/')) {
+            // Legacy path stored instead of base64 - convert now
+            $diskPath = __DIR__ . '/../' . $rawLogo;
+            if (file_exists($diskPath)) {
+                $binData = @file_get_contents($diskPath);
+                if ($binData !== false && strlen($binData) > 0) {
+                    $ext = strtolower(pathinfo($diskPath, PATHINFO_EXTENSION));
+                    $mimeMap = ['png'=>'image/png','jpg'=>'image/jpeg','jpeg'=>'image/jpeg','gif'=>'image/gif','webp'=>'image/webp','svg'=>'image/svg+xml'];
+                    $mimeType = $mimeMap[$ext] ?? 'image/png';
+                    $dataUri = 'data:' . $mimeType . ';base64,' . base64_encode($binData);
+                    $settings['company_logo'] = $dataUri;
+                    $settings['company_logo_url'] = $dataUri;
+                }
+            }
+        }
+    }
+
     echo json_encode(['success' => true, 'data' => $settings]);
 } catch (PDOException $e) {
     http_response_code(500);

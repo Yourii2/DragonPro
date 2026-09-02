@@ -53,7 +53,11 @@ const Layout: React.FC<LayoutProps> = ({
   const lastNotifFetchRef = useRef<number>(0);
 
   const userData = JSON.parse(localStorage.getItem('Dragon_user') || '{}');
-  const companyLogo = (typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_logo_url') || localStorage.getItem('Dragon_company_logo')) : null) || assetUrl('Dragon.png');
+  const getStoredLogo = () =>
+    (typeof window !== 'undefined'
+      ? (localStorage.getItem('Dragon_company_logo_url') || localStorage.getItem('Dragon_company_logo'))
+      : null) || '';
+  const [companyLogo, setCompanyLogo] = useState<string>(getStoredLogo);
   const salesDisplayMethod = (localStorage.getItem('Dragon_sales_display_method') || 'company').toString();
   const productSource = (localStorage.getItem('Dragon_product_source') || 'both').toString();
   const deliveryMethod = (localStorage.getItem('Dragon_delivery_method') || 'reps').toString();
@@ -67,6 +71,16 @@ const Layout: React.FC<LayoutProps> = ({
     };
     window.addEventListener('themeChange', handler);
     return () => window.removeEventListener('themeChange', handler);
+  }, []);
+
+  // Update logo in real-time when SettingsModule writes to localStorage
+  useEffect(() => {
+    const onStorage = () => {
+      const freshLogo = getStoredLogo();
+      if (freshLogo) setCompanyLogo(freshLogo);
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, []);
 
   useEffect(() => {
@@ -494,7 +508,11 @@ const Layout: React.FC<LayoutProps> = ({
                 className="flex items-center gap-2.5 mr-2 p-1.5 pr-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-all duration-200 hover:shadow-md hover:scale-[1.02] active:scale-95 group"
               >
                 {companyLogo ? (
-                  <img src={companyLogo} className="w-9 h-9 rounded-xl object-cover border-2 border-blue-500/30 dark:border-blue-400/30 shadow-md group-hover:border-blue-500/50 transition-all" />
+                  <img 
+                    src={companyLogo} 
+                    className="w-9 h-9 rounded-xl object-cover border-2 border-blue-500/30 dark:border-blue-400/30 shadow-md group-hover:border-blue-500/50 transition-all" 
+                    onError={(e: React.SyntheticEvent<HTMLImageElement>) => { e.currentTarget.onerror = null; e.currentTarget.src = assetUrl('Dragon.png'); }}
+                  />
                 ) : (
                   <div className="w-9 h-9 bg-gradient-to-br from-blue-600 to-blue-500 rounded-xl flex items-center justify-center text-white shadow-lg group-hover:shadow-xl transition-all">
                     <UserIcon size={18}/>
