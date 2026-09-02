@@ -738,6 +738,7 @@ if (!function_exists('finance_create_journal_entry')) {
 // - Fallback to first $allowedValues entry.
 if (!function_exists('pick_allowed_enum')) {
     function pick_allowed_enum($pdo, $table, $column, $value, $allowedValues) {
+        static $enum_options_cache = [];
         $allowedValues = is_array($allowedValues) ? array_values($allowedValues) : [];
         if (count($allowedValues) === 0) return $value;
 
@@ -749,25 +750,30 @@ if (!function_exists('pick_allowed_enum')) {
                 return in_array($candidate, $allowedValues, true) ? $candidate : $allowedValues[0];
             }
 
-            // If table/column not present, fallback.
-            if (!table_exists($pdo, $table) || !column_exists($pdo, $table, $column)) {
-                return in_array($candidate, $allowedValues, true) ? $candidate : $allowedValues[0];
-            }
+            $cacheKey = strtolower("{$table}.{$column}");
+            if (!isset($enum_options_cache[$cacheKey])) {
+                // If table/column not present, fallback.
+                if (!table_exists($pdo, $table) || !column_exists($pdo, $table, $column)) {
+                    $enum_options_cache[$cacheKey] = false;
+                } else {
+                    // MySQL: SHOW COLUMNS returns Type like: enum('a','b') or set('a','b')
+                    $row = execute_query($pdo, "SHOW COLUMNS FROM `$table` LIKE ?", [$column])->fetch(PDO::FETCH_ASSOC);
+                    $type = isset($row['Type']) ? strtolower((string)$row['Type']) : '';
 
-            // MySQL: SHOW COLUMNS returns Type like: enum('a','b') or set('a','b')
-            $row = execute_query($pdo, "SHOW COLUMNS FROM `$table` LIKE ?", [$column])->fetch(PDO::FETCH_ASSOC);
-            $type = isset($row['Type']) ? strtolower((string)$row['Type']) : '';
-
-            $dbOptions = [];
-            if (strpos($type, 'enum(') === 0 || strpos($type, 'set(') === 0) {
-                if (preg_match_all("/'((?:\\\\'|[^'])*)'/", $type, $m)) {
-                    foreach ($m[1] as $opt) {
-                        $dbOptions[] = str_replace("\\'", "'", $opt);
+                    $dbOptions = [];
+                    if (strpos($type, 'enum(') === 0 || strpos($type, 'set(') === 0) {
+                        if (preg_match_all("/'((?:\\\\'|[^'])*)'/", $type, $m)) {
+                            foreach ($m[1] as $opt) {
+                                $dbOptions[] = str_replace("\\'", "'", $opt);
+                            }
+                        }
                     }
+                    $enum_options_cache[$cacheKey] = count($dbOptions) > 0 ? $dbOptions : false;
                 }
             }
 
-            if (count($dbOptions) > 0) {
+            $dbOptions = $enum_options_cache[$cacheKey];
+            if (is_array($dbOptions) && count($dbOptions) > 0) {
                 if (in_array($candidate, $allowedValues, true) && in_array($candidate, $dbOptions, true)) {
                     return $candidate;
                 }
@@ -12463,45 +12469,31 @@ switch ($module) {
         if ($action === 'getConfirmationRepSummary') {
             try {
                 ensure_order_confirmation_assignments_table($pdo);
-                confirmation_clear_old_assignments($pdo);
-                $repRows = execute_query(
-                    $pdo,
-                    "SELECT id, name, phone, role
-                     FROM users
-                     WHERE role = 'representative'
-                     ORDER BY name ASC"
-                )->fetchAll(PDO::FETCH_ASSOC);
-
-                $counts = [];
-                $countRows = execute_query(
-                    $pdo,
-                    "SELECT oca.rep_id, COUNT(*) AS orders_count
-                     FROM order_confirmation_assignments oca
-                     JOIN orders o ON o.id = oca.order_id
-                     WHERE oca.status = 'assigned'
-                       AND DATE(oca.assigned_at) = CURDATE()
-                       AND o.status IN ('pending','returned','postponed')
-                     GROUP BY oca.rep_id"
-                )->fetchAll(PDO::FETCH_ASSOC);
-                foreach ($countRows as $countRow) {
-                    $counts[intval($countRow['rep_id'] ?? 0)] = intval($countRow['orders_count'] ?? 0);
+                $sql = "SELECT 
+                            u.id, u.name, u.phone, u.role,
+                            COALESCE(cnt.orders_count, 0) AS orders_count
+                        FROM users u
+                        LEFT JOIN (
+                            SELECT oca.rep_id, COUNT(*) AS orders_count
+                            FROM order_confirmation_assignments oca
+                            JOIN orders o ON o.id = oca.order_id
+                            WHERE oca.status = 'assigned'
+                              AND oca.assigned_at >= CURDATE()
+                              AND oca.assigned_at < DATE_ADD(CURDATE(), INTERVAL 1 DAY)
+                              AND o.status IN ('pending','returned','postponed')
+                            GROUP BY oca.rep_id
+                        ) cnt ON cnt.rep_id = u.id
+                        WHERE u.role = 'representative'
+                        ORDER BY u.name ASC";
+                $data = execute_query($pdo, $sql)->fetchAll(PDO::FETCH_ASSOC);
+                foreach ($data as &$r) {
+                    $r['id'] = intval($r['id']);
+                    $r['orders_count'] = intval($r['orders_count']);
                 }
-
-                $data = [];
-                foreach ($repRows as $repRow) {
-                    $repId = intval($repRow['id'] ?? 0);
-                    $data[] = [
-                        'id' => $repId,
-                        'name' => $repRow['name'] ?? '',
-                        'phone' => $repRow['phone'] ?? '',
-                        'role' => $repRow['role'] ?? '',
-                        'orders_count' => intval($counts[$repId] ?? 0),
-                    ];
-                }
+                unset($r);
 
                 echo json_encode(['success' => true, 'data' => $data]);
             } catch (Exception $e) {
-                // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Failed to load confirmation rep summary: ' . $e->getMessage()]);
             }
             break;

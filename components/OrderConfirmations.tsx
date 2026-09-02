@@ -545,6 +545,35 @@ const OrderConfirmations: React.FC = () => {
     })();
   }, []);
 
+  const loadAssignmentsForRep = async (repId: number) => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getConfirmationAssignments&rep_id=${repId}`).then(r => r.json());
+      const assignmentRows: AssignmentRow[] = res?.success ? res.data || [] : [];
+      setAssignments(assignmentRows);
+      setSelectedActiveOrderIds((prev) => {
+        const validIds = new Set(
+          assignmentRows
+            .filter((assignment) => String(assignment.status || '').toLowerCase() === 'assigned')
+            .map((assignment) => Number(assignment.order_id))
+        );
+        return prev.filter((id) => validIds.has(Number(id)));
+      });
+      setSelectedCancelledOrderIds((prev) => {
+        const validIds = new Set(
+          assignmentRows
+            .filter((assignment) => String(assignment.status || '').toLowerCase() === 'cancelled')
+            .map((assignment) => Number(assignment.order_id))
+        );
+        return prev.filter((id) => validIds.has(Number(id)));
+      });
+    } catch (error) {
+      console.error('Failed to load rep assignments', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const loadData = async (preferredRepId?: number | null, options?: LoadDataOptions) => {
     setLoading(true);
     try {
@@ -582,13 +611,12 @@ const OrderConfirmations: React.FC = () => {
         );
         return prev.filter((id) => validIds.has(Number(id)));
       });
-      if (!options?.preserveStaged) {
-        // no-op for current auto-save flow
-      }
 
       if (nextRepId && repRows.some((rep) => Number(rep.id) === Number(nextRepId))) {
-        setSelectedRepId(Number(nextRepId));
-      } else {
+        if (selectedRepId !== Number(nextRepId)) {
+          setSelectedRepId(Number(nextRepId));
+        }
+      } else if (nextRepId && !repRows.some((rep) => Number(rep.id) === Number(nextRepId))) {
         setSelectedRepId(null);
         setAssignments([]);
       }
@@ -606,9 +634,9 @@ const OrderConfirmations: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    // When selectedRepId changes and it exists, fetch its assignments explicitly.
+    // When selectedRepId changes, fetch only its assignments without reloading the entire rep summary list
     if (selectedRepId) {
-      loadData(selectedRepId, { preserveStaged: true });
+      loadAssignmentsForRep(selectedRepId);
     } else {
       setAssignments([]);
     }

@@ -234,27 +234,19 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
     try {
       const repParam = journalRepId === 'all' ? '' : journalRepId;
       
-      // 1. جلب الإحصائيات الإجمالية
+      // 1. جلب الإحصائيات الإجمالية بسرعة فائقة
       const statsUrl = `${API_BASE_PATH}/api.php?module=reports&action=getOrderStats&start_date=${journalFrom}&end_date=${journalTo}&rep_id=${repParam}`;
       const statsRes = await fetch(statsUrl).then(r => r.json()).catch(() => ({ success: false, data: null }));
-      
-      // 2. جلب قوائم الأوردرات (للتفاصيل)
-      const listUrl = `${API_BASE_PATH}/api.php?module=reports&action=sales&start_date=${journalFrom}&end_date=${journalTo}&rep_id=${repParam}`;
-      const listRes = await fetch(listUrl).then(r => r.json()).catch(() => ({ success: false, data: null }));
 
       if (statsRes.success && statsRes.data?.totals) {
         const t = statsRes.data.totals;
-        const allRecords = listRes.success && listRes.data?.invoiceRecords ? listRes.data.invoiceRecords : [];
-        
         setPeriodSummary({
           deliveredCount: t.delivered_orders || 0,
           deliveredValue: t.delivered_amount || 0,
           returnedCount: t.returned_orders || 0,
           returnedValue: t.returned_amount || 0,
           deliveredPieces: t.delivered_pieces || 0,
-          returnedPieces: t.returned_pieces || 0,
-          _delivered_list: allRecords.filter((r: any) => r.status === 'delivered'),
-          _returned_list: allRecords.filter((r: any) => ['returned', 'full_return', 'partial_return'].includes(r.status))
+          returnedPieces: t.returned_pieces || 0
         });
       } else {
         setPeriodSummary({ deliveredCount: 0, deliveredValue: 0, returnedCount: 0, returnedValue: 0 });
@@ -268,14 +260,14 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
   };
 
   useEffect(() => {
-    if (journalRepId !== null) {
-      fetchPeriodSummary();
-      if (view === 'rep-cycle') {
+    if (view === 'rep-cycle') {
+      if (journalRepId !== null) {
+        fetchPeriodSummary();
         loadRepJournal(journalRepId, journalFrom, journalTo);
+      } else {
+        setPeriodSummary(null);
+        setRepJournalRows([]);
       }
-    } else {
-      setPeriodSummary(null);
-      setRepJournalRows([]);
     }
   }, [view, journalFrom, journalTo, journalRepId]);
 
@@ -292,11 +284,39 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
     setJournalTo(f(to));
   };
 
-  const showPeriodDetails = (type: 'delivered' | 'returned') => {
+  const showPeriodDetails = async (type: 'delivered' | 'returned') => {
     if (!periodSummary) return;
-    const list = type === 'delivered' ? (periodSummary._delivered_list || []) : (periodSummary._returned_list || []);
+    
+    // تحميل تفاصيل الطلبات عند الطلب فقط (Lazy Loading)
+    let list: any[] = [];
+    if (type === 'delivered' && periodSummary._delivered_list) {
+      list = periodSummary._delivered_list;
+    } else if (type === 'returned' && periodSummary._returned_list) {
+      list = periodSummary._returned_list;
+    } else {
+      Swal.fire({
+        title: 'جارٍ جلب تفاصيل الطلبات...',
+        allowOutsideClick: false,
+        didOpen: () => { Swal.showLoading(); }
+      });
+      try {
+        const repParam = journalRepId === 'all' ? '' : journalRepId;
+        const listUrl = `${API_BASE_PATH}/api.php?module=reports&action=sales&start_date=${journalFrom}&end_date=${journalTo}&rep_id=${repParam}`;
+        const listRes = await fetch(listUrl).then(r => r.json()).catch(() => ({ success: false, data: null }));
+        const allRecords = listRes.success && listRes.data?.invoiceRecords ? listRes.data.invoiceRecords : [];
+        const delList = allRecords.filter((r: any) => r.status === 'delivered');
+        const retList = allRecords.filter((r: any) => ['returned', 'full_return', 'partial_return'].includes(r.status));
+        setPeriodSummary(prev => prev ? ({ ...prev, _delivered_list: delList, _returned_list: retList }) : null);
+        list = type === 'delivered' ? delList : retList;
+        Swal.close();
+      } catch (e) {
+        Swal.fire('خطأ', 'فشل تحميل التفاصيل', 'error');
+        return;
+      }
+    }
+
     if (list.length === 0) {
-      Swal.fire('تنبيه', 'لا توجد طلبات لعرض تفاصيلها.', 'info');
+      Swal.fire('تنبيه', 'لا توجد طلبات لعرض تفاصيلها في هذه الفترة.', 'info');
       return;
     }
 
