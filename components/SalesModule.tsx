@@ -187,6 +187,9 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
           if (s.company_terms) setCompanyTermsState(s.company_terms);
           if (s.company_logo_url) setCompanyLogoState(s.company_logo_url);
           else if (s.company_logo) setCompanyLogoState(s.company_logo);
+          if (s.waybill_template) {
+            localStorage.setItem('Dragon_waybill_template', String(s.waybill_template));
+          }
         }
       } catch (e) { console.debug('Failed to load company settings for printing', e); }
     })();

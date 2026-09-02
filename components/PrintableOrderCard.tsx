@@ -5,6 +5,7 @@
  */
 import React from 'react';
 import Barcode from './Barcode';
+import { UniversalWaybill, getSelectedTemplateId } from './UniversalWaybillRenderer';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -274,7 +275,10 @@ export const PrintableOrders: React.FC<{
   companyLogo?: string | null;
   companyAddress?: string;
   users?: any[];
-}> = ({ orders, companyName, companyPhone, terms, companyLogo, companyAddress, users }) => {
+  templateId?: number | string;
+}> = ({ orders, companyName, companyPhone, terms, companyLogo, companyAddress, users, templateId }) => {
+  const currentTemplate = Number(templateId || getSelectedTemplateId() || 1);
+
   const chunks: any[][] = [];
   for (let i = 0; i < (orders || []).length; i += 4) {
     chunks.push(orders.slice(i, i + 4));
@@ -303,6 +307,7 @@ export const PrintableOrders: React.FC<{
           .print-a4-page {
             width: 210mm;
             height: 297mm;
+            max-height: 297mm;
             box-sizing: border-box;
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -338,15 +343,28 @@ export const PrintableOrders: React.FC<{
           <div key={pageIdx} className="print-a4-page">
             {chunk.map((order: any, orderIdx: number) => (
               <div key={order.id || orderIdx} className="quarter-a4-cell">
-                <PrintableContent
-                  order={order}
-                  companyName={companyName}
-                  companyPhone={companyPhone}
-                  companyAddress={companyAddress}
-                  terms={terms}
-                  companyLogo={companyLogo}
-                  users={users}
-                />
+                {currentTemplate === 1 ? (
+                  <PrintableContent
+                    order={order}
+                    companyName={companyName}
+                    companyPhone={companyPhone}
+                    companyAddress={companyAddress}
+                    terms={terms}
+                    companyLogo={companyLogo}
+                    users={users}
+                  />
+                ) : (
+                  <UniversalWaybill
+                    order={order}
+                    companyName={companyName}
+                    companyPhone={companyPhone}
+                    companyAddress={companyAddress}
+                    terms={terms}
+                    companyLogo={companyLogo}
+                    templateId={currentTemplate}
+                    users={users}
+                  />
+                )}
               </div>
             ))}
           </div>

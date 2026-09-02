@@ -42,6 +42,9 @@ const PrintWaybill: React.FC = () => {
           if (!compAddress && sv.data.company_address) compAddress = sv.data.company_address;
           if (!compLogo && sv.data.company_logo_url) compLogo = sv.data.company_logo_url;
           else if (!compLogo && sv.data.company_logo) compLogo = sv.data.company_logo;
+          if (sv.data.waybill_template) {
+            localStorage.setItem('Dragon_waybill_template', String(sv.data.waybill_template));
+          }
         }
       } catch (e) {
         // ignore

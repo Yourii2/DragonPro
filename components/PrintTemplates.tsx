@@ -2,11 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { assetUrl } from '../services/assetUrl';
 import { PrintableContent, PrintableOrders } from './PrintableOrderCard';
+import { UniversalWaybill, getSelectedTemplateId } from './UniversalWaybillRenderer';
 
 export { PrintableContent, PrintableOrders };
 
 // Print one order per A4 page (used for shipping-labels single-per-page)
-export const PrintableOrdersSingle: React.FC<{ orders: any[] }> = ({ orders }) => {
+export const PrintableOrdersSingle: React.FC<{ orders: any[]; templateId?: number | string }> = ({ orders, templateId }) => {
   const [companyName, setCompanyName] = useState<string>(localStorage.getItem('Dragon_company_name') || 'اسم الشركة');
   const [companyPhone, setCompanyPhone] = useState<string>(localStorage.getItem('Dragon_company_phone') || '01000000000');
   const [companyTerms, setCompanyTerms] = useState<string>(localStorage.getItem('Dragon_company_terms') || 'المعاينة حق للعميل قبل الاستلام.');
@@ -14,6 +15,7 @@ export const PrintableOrdersSingle: React.FC<{ orders: any[] }> = ({ orders }) =
   const [companyLogo, setCompanyLogo] = useState<string | null>(
     (typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_logo_url') || localStorage.getItem('Dragon_company_logo')) : null) || assetUrl('Dragon.png')
   );
+  const [activeTemplate, setActiveTemplate] = useState<number>(() => Number(templateId || getSelectedTemplateId() || 1));
 
   useEffect(() => {
     (async () => {
@@ -28,10 +30,19 @@ export const PrintableOrdersSingle: React.FC<{ orders: any[] }> = ({ orders }) =
           if (s.company_address) setCompanyAddress(s.company_address);
           if (s.company_logo_url) setCompanyLogo(s.company_logo_url);
           else if (s.company_logo) setCompanyLogo(s.company_logo);
+          if (s.waybill_template) {
+            const id = Number(s.waybill_template);
+            if (id >= 1 && id <= 21) {
+              setActiveTemplate(id);
+              localStorage.setItem('Dragon_waybill_template', String(id));
+            }
+          }
         }
       } catch (e) { console.debug('Failed to load print settings', e); }
     })();
   }, []);
+
+  const currentTemplate = Number(templateId || activeTemplate || 1);
 
   return (
     <div id="print-container" className="hidden">
@@ -49,7 +60,11 @@ export const PrintableOrdersSingle: React.FC<{ orders: any[] }> = ({ orders }) =
         <div key={order.id || order.orderNumber || Math.random()} className="print-page" style={{ padding: '0.3cm' }}>
           <div className="print-wrapper" style={{ minHeight: 0 }}>
             <div className="print-content" style={{ minHeight: 0 }}>
-              <PrintableContent order={order} companyName={companyName} companyPhone={companyPhone} companyAddress={companyAddress} terms={companyTerms} companyLogo={companyLogo} />
+              {currentTemplate === 1 ? (
+                <PrintableContent order={order} companyName={companyName} companyPhone={companyPhone} companyAddress={companyAddress} terms={companyTerms} companyLogo={companyLogo} />
+              ) : (
+                <UniversalWaybill order={order} companyName={companyName} companyPhone={companyPhone} companyAddress={companyAddress} terms={companyTerms} companyLogo={companyLogo} templateId={currentTemplate} />
+              )}
             </div>
           </div>
         </div>

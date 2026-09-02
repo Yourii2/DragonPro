@@ -175,6 +175,9 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
             terms: s.company_terms || prev.terms,
             logo: s.company_logo_url || s.company_logo || prev.logo
           }));
+          if (s.waybill_template) {
+            localStorage.setItem('Dragon_waybill_template', String(s.waybill_template));
+          }
         }
       } catch (e) {}
     })();

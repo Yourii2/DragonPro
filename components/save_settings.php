@@ -65,6 +65,13 @@ try {
         $stmt = $pdo->prepare("INSERT INTO settings (config_key, config_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE config_value = VALUES(config_value)");
     }
 
+    // If saving a single setting key-value pair (e.g. from WaybillTemplatesManager or other quick updates)
+    if (isset($input['key']) && isset($input['value'])) {
+        $stmt->execute([$input['key'], (string)$input['value']]);
+        echo json_encode(['success' => true, 'message' => 'Setting updated successfully']);
+        exit;
+    }
+
     // Load current settings into $current for verification of verified emails etc.
     $current = [];
     if ($appCols) {
@@ -124,7 +131,8 @@ try {
         'telegram_ai_api_key' => $input['telegram_ai_api_key'] ?? '',
         'telegram_ai_provider' => $input['telegram_ai_provider'] ?? 'gemini',
         'telegram_notify_customers' => $input['telegram_notify_customers'] ?? 'true',
-        'tg_templates' => $input['tg_templates'] ?? ''
+        'tg_templates' => $input['tg_templates'] ?? '',
+        'waybill_template' => $input['waybill_template'] ?? ($current['waybill_template'] ?? '1')
     ];
 
     // If company logo is a data URL, persist it to app_files and set company_logo_file_id
