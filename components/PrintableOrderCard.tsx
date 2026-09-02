@@ -4,6 +4,7 @@
  * Extracted so multiple modules can render the same print layout.
  */
 import React from 'react';
+import { createPortal } from 'react-dom';
 import Barcode from './Barcode';
 import { UniversalWaybill, getSelectedTemplateId } from './UniversalWaybillRenderer';
 
@@ -269,55 +270,64 @@ export const PrintableContent: React.FC<{
 
 export const PrintableOrders: React.FC<{
   orders: any[];
-  companyName: string;
-  companyPhone: string;
-  terms: string;
+  companyName?: string;
+  companyPhone?: string;
+  terms?: string;
   companyLogo?: string | null;
   companyAddress?: string;
   users?: any[];
   templateId?: number | string;
 }> = ({ orders, companyName, companyPhone, terms, companyLogo, companyAddress, users, templateId }) => {
   const currentTemplate = Number(templateId || getSelectedTemplateId() || 1);
+  const compName = companyName || (typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_name') || 'اسم الشركة') : 'اسم الشركة');
+  const compPhone = companyPhone || (typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_phone') || '') : '');
+  const compTerms = terms || (typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_terms') || 'المعاينة حق للعميل قبل الاستلام.') : 'المعاينة حق للعميل قبل الاستلام.');
+  const compAddress = companyAddress || (typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_address') || '') : '');
+  const compLogo = companyLogo !== undefined ? companyLogo : (typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_logo_url') || localStorage.getItem('Dragon_company_logo')) : null);
 
   const chunks: any[][] = [];
   for (let i = 0; i < (orders || []).length; i += 4) {
     chunks.push(orders.slice(i, i + 4));
   }
 
-  return (
-    <div className="print-root">
+  const content = (
+    <div id="print-container" className="print-root">
       <style>{`
+        @media screen {
+          #print-container {
+            display: none !important;
+          }
+        }
         @media print {
           @page {
             size: A4 portrait;
-            margin: 2mm;
+            margin: 0;
           }
           html, body {
             margin: 0 !important;
             padding: 0 !important;
             height: auto !important;
             min-height: 0 !important;
+            width: 100% !important;
             background: #fff !important;
             overflow: visible !important;
           }
-          body * {
-            visibility: hidden;
-          }
-          #print-container, #print-container * {
-            visibility: visible !important;
+          #root {
+            display: none !important;
           }
           #print-container {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100%;
+            display: block !important;
+            visibility: visible !important;
+            position: static !important;
+            width: 100% !important;
             margin: 0 !important;
             padding: 0 !important;
           }
           .print-a4-page {
-            width: 100%;
-            height: 291mm;
-            max-height: 291mm;
+            width: 210mm;
+            height: 296mm;
+            max-height: 296mm;
+            padding: 2.5mm;
             box-sizing: border-box;
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -344,13 +354,13 @@ export const PrintableOrders: React.FC<{
             flex-direction: column;
           }
           * { 
-            -webkit-print-color-adjust: exact; 
-            print-color-adjust: exact;
-            color-adjust: exact;
+            -webkit-print-color-adjust: exact !important; 
+            print-color-adjust: exact !important;
+            color-adjust: exact !important;
           }
         }
       `}</style>
-      <div id="print-container">
+      <div>
         {chunks.map((chunk, pageIdx) => (
           <div key={pageIdx} className="print-a4-page">
             {chunk.map((order: any, orderIdx: number) => (
@@ -358,21 +368,21 @@ export const PrintableOrders: React.FC<{
                 {currentTemplate === 1 ? (
                   <PrintableContent
                     order={order}
-                    companyName={companyName}
-                    companyPhone={companyPhone}
-                    companyAddress={companyAddress}
-                    terms={terms}
-                    companyLogo={companyLogo}
+                    companyName={compName}
+                    companyPhone={compPhone}
+                    companyAddress={compAddress}
+                    terms={compTerms}
+                    companyLogo={compLogo}
                     users={users}
                   />
                 ) : (
                   <UniversalWaybill
                     order={order}
-                    companyName={companyName}
-                    companyPhone={companyPhone}
-                    companyAddress={companyAddress}
-                    terms={terms}
-                    companyLogo={companyLogo}
+                    companyName={compName}
+                    companyPhone={compPhone}
+                    companyAddress={compAddress}
+                    terms={compTerms}
+                    companyLogo={compLogo}
                     templateId={currentTemplate}
                     users={users}
                   />
@@ -384,4 +394,9 @@ export const PrintableOrders: React.FC<{
       </div>
     </div>
   );
+
+  if (typeof document !== 'undefined') {
+    return createPortal(content, document.body);
+  }
+  return content;
 };

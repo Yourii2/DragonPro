@@ -12,6 +12,7 @@
  * Perfectly fitted for Quarter-A4 (1/4 ورقة A4 - 4 بوالص في كل ورقة A4).
  */
 import React from 'react';
+import { createPortal } from 'react-dom';
 import Barcode from './Barcode';
 import { assetUrl } from '../services/assetUrl';
 
@@ -1123,40 +1124,44 @@ export const UniversalPrintableOrders: React.FC<{
     chunks.push(orders.slice(i, i + 4));
   }
 
-  return (
+  const content = (
     <div id="print-container" className="print-root">
       <style>{`
+        @media screen {
+          #print-container {
+            display: none !important;
+          }
+        }
         @media print {
           @page {
             size: A4 portrait;
-            margin: 2mm;
+            margin: 0;
           }
           html, body {
             margin: 0 !important;
             padding: 0 !important;
             height: auto !important;
             min-height: 0 !important;
+            width: 100% !important;
             background: #fff !important;
             overflow: visible !important;
           }
-          body * {
-            visibility: hidden;
-          }
-          #print-container, #print-container * {
-            visibility: visible !important;
+          #root {
+            display: none !important;
           }
           #print-container {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100%;
+            display: block !important;
+            visibility: visible !important;
+            position: static !important;
+            width: 100% !important;
             margin: 0 !important;
             padding: 0 !important;
           }
           .print-a4-page {
-            width: 100%;
-            height: 291mm;
-            max-height: 291mm;
+            width: 210mm;
+            height: 296mm;
+            max-height: 296mm;
+            padding: 2.5mm;
             box-sizing: border-box;
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -1182,7 +1187,11 @@ export const UniversalPrintableOrders: React.FC<{
             display: flex;
             flex-direction: column;
           }
-          * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          * { 
+            -webkit-print-color-adjust: exact !important; 
+            print-color-adjust: exact !important; 
+            color-adjust: exact !important; 
+          }
         }
       `}</style>
       <div id="print-container-inner">
@@ -1207,4 +1216,9 @@ export const UniversalPrintableOrders: React.FC<{
       </div>
     </div>
   );
+
+  if (typeof document !== 'undefined') {
+    return createPortal(content, document.body);
+  }
+  return content;
 };
