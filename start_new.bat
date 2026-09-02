@@ -139,22 +139,26 @@ echo.
 :: ---------------------------------------------------------
 :: المرحلة الرابعة: تشغيل السيرفر وفتح المتصفح
 :: ---------------------------------------------------------
-call :Log "[4/4] Starting development server..."
-echo Starting development server...
-start "Dragon Dev Server" cmd /k "cd /d %~dp0 && npm.cmd run dev"
+call :Log "[4/4] Starting production server..."
+echo Starting production server...
+if not exist "dist" (
+    call :Log "[Wait] Building application for the first time..."
+    call npm.cmd run build >> %LOGFILE% 2>&1
+)
+start "Dragon Pro Server" cmd /k "cd /d %~dp0 && npm.cmd run preview"
 
 call :Log "Waiting for server to start..."
-timeout /t 5 /nobreak >nul
+timeout /t 3 /nobreak >nul
 
 call :Log "Opening browser..."
 start http://localhost:3000
 
 echo.
 call :Log "===================================="
-call :Log "  Dragon started (development mode)"
+call :Log "   Dragon Pro is now RUNNING!"
 call :Log "===================================="
 call :Log "Server is running at: http://localhost:3000"
-call :Log "To stop the server, close the development server window."
+call :Log "To stop the server, close the server window."
 
 if exist "C:\xampp\php\php.exe" (
     call :Log "Verifying daily report/backup scheduler..."

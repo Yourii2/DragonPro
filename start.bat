@@ -120,10 +120,14 @@ if not exist "node_modules" (
 
 echo.
 rem ---------------------------------------------------------
-rem 4. Start Development Server & Launch Browser
+rem 4. Start Production Server & Launch Browser
 rem ---------------------------------------------------------
 call :Log "[4/4] Starting server and launching application..."
-start "Dragon Dev Server" cmd /k "cd /d %~dp0 && npm.cmd run dev"
+if not exist "dist" (
+    call :Log "[Wait] Building application for the first time..."
+    call npm.cmd run build >> "%LOGFILE%" 2>&1
+)
+start "Dragon Pro Server" cmd /k "cd /d %~dp0 && npm.cmd run preview"
 
 timeout /t 3 /nobreak >nul
 call :Log "Opening browser at http://localhost:3000..."

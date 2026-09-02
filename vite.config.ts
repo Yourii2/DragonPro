@@ -47,22 +47,9 @@ export default defineConfig(({ mode }) => {
       host: '0.0.0.0',
       // Allow all external hosts when accessed via a public hostname (e.g. Cloudflare tunnels)
       allowedHosts: true,
-      // Fix: Cloudflare Tunnel sends X-Forwarded-Proto: https
-      // Vite must not redirect to HTTPS since CF handles it
-      /* hmr: {
-        host: 'harmony.dragon-systems.online',
-        protocol: 'wss',
-        clientPort: 443,
-      }, */
       proxy: {
-        // Dev-only: proxy only PHP endpoints under /components to Apache.
-        // Use a regex key so TS/TSX module requests (e.g. /components/*.tsx)
-        // are NOT proxied and remain served by Vite.
-        // Note: Vite matches against req.url (can include query string),
-        // so we must allow optional `?query` for routes like api.php?module=...
         '^/components/.*\\.php(\\?.*)?$': {
-          // target: `http://localhost${phpBasePath}`,
-          target: `http://127.0.0.1${phpBasePath}`, // استخدام الـ IP الصريح أفضل أحياناً من localhost مع الـ Proxy
+          target: `http://127.0.0.1${phpBasePath}`,
           changeOrigin: true,
           secure: false,
           configure: (proxy, _options) => {
@@ -80,6 +67,21 @@ export default defineConfig(({ mode }) => {
       port: 3000,
       host: '0.0.0.0',
       allowedHosts: true,
+      proxy: {
+        '^/components/.*\\.php(\\?.*)?$': {
+          target: `http://127.0.0.1${phpBasePath}`,
+          changeOrigin: true,
+          secure: false,
+          configure: (proxy, _options) => {
+            proxy.on('error', (err, _req, _res) => {
+              console.log('proxy error', err);
+            });
+            proxy.on('proxyReq', (proxyReq, req, _res) => {
+              proxyReq.setHeader('X-Forwarded-Host', req.headers.host || '');
+            });
+          },
+        }
+      },
     },
     plugins: [react()],
     define: {
