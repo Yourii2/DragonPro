@@ -29,23 +29,27 @@ echo "=====================================================\n";
 echo "   DragonPro — Database Migration & Index Optimizer  \n";
 echo "=====================================================\n\n";
 
-function indexExists($pdo, $table, $index) {
-    try {
-        $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?");
-        $stmt->execute([$table, $index]);
-        return $stmt->fetchColumn() > 0;
-    } catch (Exception $e) {
-        return false;
+if (!function_exists('indexExists')) {
+    function indexExists($pdo, $table, $index) {
+        try {
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?");
+            $stmt->execute([$table, $index]);
+            return $stmt->fetchColumn() > 0;
+        } catch (Exception $e) {
+            return false;
+        }
     }
 }
 
-function tableExists($pdo, $table) {
-    try {
-        $stmt = $pdo->prepare("SHOW TABLES LIKE ?");
-        $stmt->execute([$table]);
-        return $stmt->rowCount() > 0;
-    } catch (Exception $e) {
-        return false;
+if (!function_exists('tableExists')) {
+    function tableExists($pdo, $table) {
+        try {
+            $stmt = $pdo->prepare("SHOW TABLES LIKE ?");
+            $stmt->execute([$table]);
+            return $stmt->rowCount() > 0;
+        } catch (Exception $e) {
+            return false;
+        }
     }
 }
 

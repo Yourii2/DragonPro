@@ -54,103 +54,115 @@ if (file_exists($createFile)) {
 }
 
 // Second: new tables added in v1.1.x (rep_daily_journal, product_variants, stock, etc.)
-function run_sql_migration_file(PDO $pdo, string $path, string $label): void {
-    if (!file_exists($path)) {
-        echo "SKIP (file not found): $label\n";
-        return;
-    }
-    echo "Executing migration: $label\n";
-    $sql = file_get_contents($path);
-    $sql = preg_replace('/SET FOREIGN_KEY_CHECKS\s*=\s*[01];/i', "", $sql);
-    $sql = preg_replace('/--[^\n]*\n/u', "\n", $sql); // strip single-line comments
-    $parts = preg_split('/;\s*\n/', $sql);
-    $ok = 0; $warn = 0;
-    foreach ($parts as $part) {
-        $stmt = trim($part);
-        if (!$stmt || $stmt === ';') continue;
-        try {
-            $pdo->exec($stmt . ';');
-            $ok++;
-        } catch (Exception $e) {
-            $warn++;
-            echo "  WARN: " . $e->getMessage() . "\n";
+if (!function_exists('run_sql_migration_file')) {
+    function run_sql_migration_file(PDO $pdo, string $path, string $label): void {
+        if (!file_exists($path)) {
+            echo "SKIP (file not found): $label\n";
+            return;
         }
+        echo "Executing migration: $label\n";
+        $sql = file_get_contents($path);
+        $sql = preg_replace('/SET FOREIGN_KEY_CHECKS\s*=\s*[01];/i', "", $sql);
+        $sql = preg_replace('/--[^\n]*\n/u', "\n", $sql); // strip single-line comments
+        $parts = preg_split('/;\s*\n/', $sql);
+        $ok = 0; $warn = 0;
+        foreach ($parts as $part) {
+            $stmt = trim($part);
+            if (!$stmt || $stmt === ';') continue;
+            try {
+                $pdo->exec($stmt . ';');
+                $ok++;
+            } catch (Exception $e) {
+                $warn++;
+                echo "  WARN: " . $e->getMessage() . "\n";
+            }
+        }
+        echo "  Done: $ok OK, $warn warnings.\n";
     }
-    echo "  Done: $ok OK, $warn warnings.\n";
 }
 
 run_sql_migration_file($pdo, __DIR__ . '/20260302_new_tables.sql', '20260302_new_tables (v1.1.x)');
 
-function columnExists($pdo, $table, $col) {
-    $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?");
-    $stmt->execute([$table, $col]);
-    return $stmt->fetchColumn() > 0;
+if (!function_exists('columnExists')) {
+    function columnExists($pdo, $table, $col) {
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?");
+        $stmt->execute([$table, $col]);
+        return $stmt->fetchColumn() > 0;
+    }
 }
 
-function indexExists($pdo, $table, $index) {
-    $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?");
-    $stmt->execute([$table, $index]);
-    return $stmt->fetchColumn() > 0;
+if (!function_exists('indexExists')) {
+    function indexExists($pdo, $table, $index) {
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?");
+        $stmt->execute([$table, $index]);
+        return $stmt->fetchColumn() > 0;
+    }
 }
 
-function fkExists($pdo, $table, $fk) {
-    $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = ? AND CONSTRAINT_NAME = ? AND CONSTRAINT_TYPE = 'FOREIGN KEY'");
-    $stmt->execute([$table, $fk]);
-    return $stmt->fetchColumn() > 0;
+if (!function_exists('fkExists')) {
+    function fkExists($pdo, $table, $fk) {
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = ? AND CONSTRAINT_NAME = ? AND CONSTRAINT_TYPE = 'FOREIGN KEY'");
+        $stmt->execute([$table, $fk]);
+        return $stmt->fetchColumn() > 0;
+    }
 }
 
-function hasPrimaryKey($pdo, $table) {
-    $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = ? AND CONSTRAINT_TYPE = 'PRIMARY KEY'");
-    $stmt->execute([$table]);
-    return $stmt->fetchColumn() > 0;
+if (!function_exists('hasPrimaryKey')) {
+    function hasPrimaryKey($pdo, $table) {
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = ? AND CONSTRAINT_TYPE = 'PRIMARY KEY'");
+        $stmt->execute([$table]);
+        return $stmt->fetchColumn() > 0;
+    }
 }
 
 // Ensure function exists: reset AUTO_INCREMENT for empty tables, with per-table overrides
-function resetAutoIncrementForEmptyTables(PDO $pdo) {
-    echo "\n*** Resetting AUTO_INCREMENT for empty tables (installer-safe) ***\n";
-    // Per-table desired start values (do not change unless intentional)
-    $specialStarts = [
-        'accessories' => 3,
-        'accessory_movements' => 11,
-        'user_permissions' => 1885,
-        'treasuries' => 4,
-        'warehouses' => 4,
-        'worker_salaries' => 3,
-        'worker_transactions' => 5,
-        'workers' => 3,
-    ];
+if (!function_exists('resetAutoIncrementForEmptyTables')) {
+    function resetAutoIncrementForEmptyTables(PDO $pdo) {
+        echo "\n*** Resetting AUTO_INCREMENT for empty tables (installer-safe) ***\n";
+        // Per-table desired start values (do not change unless intentional)
+        $specialStarts = [
+            'accessories' => 3,
+            'accessory_movements' => 11,
+            'user_permissions' => 1885,
+            'treasuries' => 4,
+            'warehouses' => 4,
+            'worker_salaries' => 3,
+            'worker_transactions' => 5,
+            'workers' => 3,
+        ];
 
-    try {
-        $tables = $pdo->query("SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'")->fetchAll(PDO::FETCH_COLUMN);
-    } catch (Exception $e) {
-        echo "  ERROR reading table list: " . $e->getMessage() . "\n";
-        return;
-    }
-
-    if (!$tables) {
-        echo "  No tables found.\n";
-        return;
-    }
-
-    foreach ($tables as $t) {
-        // Skip migrations/internal helper tables if any
         try {
-            $count = (int)$pdo->query("SELECT COUNT(*) FROM `" . str_replace('`', '``', $t) . "`")->fetchColumn();
+            $tables = $pdo->query("SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'")->fetchAll(PDO::FETCH_COLUMN);
         } catch (Exception $e) {
-            echo "  SKIP $t (count failed): " . $e->getMessage() . "\n";
-            continue;
+            echo "  ERROR reading table list: " . $e->getMessage() . "\n";
+            return;
         }
 
-        if ($count === 0) {
-            $start = isset($specialStarts[$t]) ? (int)$specialStarts[$t] : 1;
+        if (!$tables) {
+            echo "  No tables found.\n";
+            return;
+        }
+
+        foreach ($tables as $t) {
+            // Skip migrations/internal helper tables if any
             try {
-                $pdo->exec("ALTER TABLE `" . str_replace('`', '``', $t) . "` AUTO_INCREMENT = " . intval($start));
-                echo "  SET $t AUTO_INCREMENT=$start\n";
+                $count = (int)$pdo->query("SELECT COUNT(*) FROM `" . str_replace('`', '``', $t) . "`")->fetchColumn();
             } catch (Exception $e) {
-                echo "  WARN: failed to set AUTO_INCREMENT for $t: " . $e->getMessage() . "\n";
+                echo "  SKIP $t (count failed): " . $e->getMessage() . "\n";
+                continue;
             }
-        } else {
-            echo "  SKIP $t (has $count rows)\n";
+
+            if ($count === 0) {
+                $startVal = isset($specialStarts[$t]) ? $specialStarts[$t] : 1;
+                try {
+                    $pdo->exec("ALTER TABLE `" . str_replace('`', '``', $t) . "` AUTO_INCREMENT = $startVal");
+                    echo "  SET $t AUTO_INCREMENT=$startVal\n";
+                } catch (Exception $e) {
+                    echo "  WARN: could not set AUTO_INCREMENT on $t: " . $e->getMessage() . "\n";
+                }
+            } else {
+                echo "  SKIP $t (has $count rows)\n";
+            }
         }
     }
 }
