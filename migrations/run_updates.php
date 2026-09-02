@@ -465,11 +465,14 @@ $perfIndexes = [
     ['customers', 'idx_customers_phone2', '`phone2`'],
     ['customers', 'idx_customers_gov', '`governorate`'],
     ['rep_daily_journal', 'idx_rdj_rep_date', '`rep_id`, `journal_date`'],
-    ['rep_daily_journal', 'idx_rdj_date', '`journal_date`'],
     ['rep_daily_journal', 'idx_rdj_rep_closed', '`rep_id`, `is_closed`'],
     ['rep_delivery_sessions', 'idx_rds_rep_date', '`rep_id`, `session_date`'],
     ['rep_delivery_sessions', 'idx_rds_date', '`session_date`'],
     ['order_status_history', 'idx_osh_order_created', '`order_id`, `created_at`'],
+    ['order_status_history', 'idx_osh_order_status', '`order_id`, `status`, `created_at`'],
+    ['order_confirmation_assignments', 'idx_oca_rep_assigned', '`rep_id`, `status`, `assigned_at`'],
+    ['rep_journal_orders', 'idx_rjo_rep_journal', '`rep_id`, `journal_id`, `status`'],
+    ['transactions', 'idx_tx_rep', '`related_to_type`, `related_to_id`, `amount`'],
 ];
 
 foreach ($perfIndexes as $pIdx) {
