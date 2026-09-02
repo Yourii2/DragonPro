@@ -1823,6 +1823,36 @@ if (!function_exists('normalize_date_ymd')) {
     }
 }
 
+if (!function_exists('user_has_any_operational_permission')) {
+    function user_has_any_operational_permission($pdo, $user_id) {
+        if (!$user_id) return false;
+        if (user_is_admin($pdo, $user_id)) return true;
+
+        try {
+            if (table_exists($pdo, 'user_permissions')) {
+                $has = execute_query($pdo, "SELECT 1 FROM user_permissions WHERE user_id = ? AND allowed = 1 LIMIT 1", [$user_id])->fetchColumn();
+                if ($has) return true;
+            }
+            if (table_exists($pdo, 'user_page_permissions')) {
+                $hasPage = execute_query($pdo, "SELECT 1 FROM user_page_permissions WHERE user_id = ? AND (can_view = 1 OR can_access = 1) LIMIT 1", [$user_id])->fetchColumn();
+                if ($hasPage) return true;
+            }
+            if (column_exists($pdo, 'users', 'permissions')) {
+                $permsJson = execute_query($pdo, "SELECT permissions FROM users WHERE id = ? LIMIT 1", [$user_id])->fetchColumn();
+                if (!empty($permsJson)) {
+                    $dec = @json_decode($permsJson, true);
+                    if (is_array($dec) && !empty($dec)) return true;
+                }
+            }
+            $u = $_SESSION['user'] ?? null;
+            if (is_array($u) && !empty($u['role'])) return true;
+        } catch (Exception $e) {
+            return true;
+        }
+        return false;
+    }
+}
+
 if (!function_exists('check_permission_or_die')) {
     function check_permission_or_die($pdo, $module_name, $action_code) {
         $user_id = $_SESSION['user_id'] ?? null;
@@ -1847,12 +1877,24 @@ if (!function_exists('check_permission_or_die')) {
             // ignore
         }
 
-        if (!user_has_permission($pdo, $user_id, $module_name, $action_code)) {
-            http_response_code(403);
-            echo json_encode(['success' => false, 'message' => 'Insufficient permissions.']);
-            exit;
+        if (user_has_permission($pdo, $user_id, $module_name, $action_code)) {
+            return true;
         }
-        return true;
+
+        // Shared / Reference Data READ access:
+        // Any authenticated employee with active permissions needs to view products, warehouses, treasuries, customers, representatives, shipping companies, sales offices in order to perform their daily operations (e.g. returns, sales, delivery, invoices) without being blocked.
+        if ($action_code === 'view' && in_array($module_name, [
+            'products', 'users', 'warehouses', 'treasuries', 'customers', 
+            'sales_offices', 'shipping_companies', 'colors', 'sizes', 'production_stages'
+        ], true)) {
+            if (user_has_any_operational_permission($pdo, $user_id)) {
+                return true;
+            }
+        }
+
+        http_response_code(403);
+        echo json_encode(['success' => false, 'message' => 'Insufficient permissions.']);
+        exit;
     }
 }
 
