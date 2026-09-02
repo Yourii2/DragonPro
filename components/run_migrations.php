@@ -80,6 +80,8 @@ $indexes = [
     ['order_status_history', 'idx_osh_order_status', '`order_id`, `status`, `created_at`'],
     ['order_confirmation_assignments', 'idx_oca_rep_assigned', '`rep_id`, `status`, `assigned_at`'],
     ['rep_journal_orders', 'idx_rjo_rep_journal', '`rep_id`, `journal_id`, `status`'],
+    ['order_items', 'idx_order_items_order_id', '`order_id`'],
+    ['order_items', 'idx_order_items_product_id', '`product_id`'],
 ];
 
 echo "[1/2] Checking and creating Performance Indexes...\n";

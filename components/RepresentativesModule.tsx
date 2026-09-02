@@ -115,7 +115,6 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
   const [editingRep, setEditingRep] = useState<any>(null);
   const [formData, setFormData] = useState({ name: '', phone: '', insurance_paid: false, insurance_amount: '' });
   const [representatives, setRepresentatives] = useState<any[]>([]);
-  const [pendingOrders, setPendingOrders] = useState<any[]>([]);
   const [repAssignedOrders, setRepAssignedOrders] = useState<any[]>([]);
   const [selectedRepId, setSelectedRepId] = useState<number | null>(null);
   const currencySymbol = 'ج.م';
@@ -442,42 +441,7 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
       setView(initialView as any);
     }
 
-    const fetchPending = async () => {
-      try {
-        const r = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=pending`);
-        const jr = await r.json();
-        if (jr.success) setPendingOrders(jr.data || []);
-      } catch (e) { console.error('Failed to fetch pending orders', e); }
-    };
-
-    const fetchTreasuries = async () => {
-      try {
-        const [tr, ud] = await Promise.all([
-          fetch(`${API_BASE_PATH}/api.php?module=treasuries&action=getAll`).then(r=>r.json()),
-          fetch(`${API_BASE_PATH}/api.php?module=permissions&action=getUserDefaults`).then(r=>r.json()).catch(()=>({success:false}))
-        ]);
-        const list = (tr && tr.success) ? (tr.data || []) : [];
-        const defaults = (ud && ud.success) ? (ud.data || null) : null;
-        if (defaults && defaults.default_treasury_id && !defaults.can_change_treasury) setTreasuries(list.filter((t:any)=>Number(t.id)===Number(defaults.default_treasury_id)));
-        else setTreasuries(list);
-        if (defaults && defaults.default_treasury_id && !paymentForm.treasuryId) setPaymentForm(prev => ({...prev, treasuryId: String(defaults.default_treasury_id)}));
-        if (defaults) setUserDefaults(defaults);
-      } catch (e) { console.error('Failed to fetch treasuries', e); }
-    };
-
-    const fetchUserDefaults = async () => {
-      try {
-        const r = await fetch(`${API_BASE_PATH}/api.php?module=permissions&action=getUserDefaults`);
-        const jr = await r.json();
-        if (jr && jr.success) {
-          setUserDefaults(jr.data || null);
-          if (jr.data && jr.data.default_treasury_id && !paymentForm.treasuryId) setPaymentForm(prev => ({...prev, treasuryId: String(jr.data.default_treasury_id)}));
-        }
-      } catch (e) { console.error('Failed to fetch user defaults', e); }
-    };
-
     fetchReps();
-    fetchPending();
     fetchTreasuries();
     fetchUserDefaults();
     // fetch warehouses for returns/restock

@@ -9986,7 +9986,11 @@ switch ($module) {
             // ignore migration failure
         }
         if ($action === 'getAll') {
-            $statusFilter = isset($_GET['status']) ? $_GET['status'] : null;
+            $statusFilter = isset($_GET['status']) ? trim($_GET['status']) : null;
+            $statusInRaw = isset($_GET['status_in']) ? trim($_GET['status_in']) : null;
+            $limit = isset($_GET['limit']) ? intval($_GET['limit']) : 0;
+            $summaryOnly = !empty($_GET['summary_only']);
+
             $ordersHasDiscountType = column_exists($pdo, 'orders', 'discount_type');
             $ordersHasDiscountValue = column_exists($pdo, 'orders', 'discount_value');
             $ordersHasDiscountAmount = column_exists($pdo, 'orders', 'discount_amount');
@@ -9996,11 +10000,7 @@ switch ($module) {
             $ordersHasEmployee = column_exists($pdo, 'orders', 'employee');
             $ordersHasPage = column_exists($pdo, 'orders', 'page');
             $ordersHasSalesOfficeId = column_exists($pdo, 'orders', 'sales_office_id');
-            $ordersHasEmployee = column_exists($pdo, 'orders', 'employee');
-            $ordersHasPage = column_exists($pdo, 'orders', 'page');
             $ordersHasShippingCompanyId = column_exists($pdo, 'orders', 'shipping_company_id');
-            $ordersHasEmployee = column_exists($pdo, 'orders', 'employee');
-            $ordersHasPage = column_exists($pdo, 'orders', 'page');
 
             $extraCols = [];
             if ($ordersHasDiscountType) $extraCols[] = 'o.discount_type';
@@ -10013,8 +10013,6 @@ switch ($module) {
             if ($ordersHasPage) $extraCols[] = 'o.page';
             if ($ordersHasSalesOfficeId) $extraCols[] = 'o.sales_office_id';
             if ($ordersHasShippingCompanyId) $extraCols[] = 'o.shipping_company_id';
-            if ($ordersHasEmployee) $extraCols[] = 'o.employee';
-            if ($ordersHasPage) $extraCols[] = 'o.page';
             $extraColsSql = count($extraCols) > 0 ? (', ' . implode(', ', $extraCols)) : '';
 
             $ordersHasItemsJson = column_exists($pdo, 'orders', 'items_json');
@@ -10023,16 +10021,44 @@ switch ($module) {
                 FROM orders o 
                 LEFT JOIN customers c ON o.customer_id = c.id
                 LEFT JOIN users u ON o.rep_id = u.id";
+            
+            $where = [];
             if ($statusFilter) {
-                $sql .= " WHERE o.status = '" . str_replace("'", "\'", $statusFilter) . "'";
+                $where[] = "o.status = '" . str_replace("'", "\'", $statusFilter) . "'";
+            } elseif ($statusInRaw) {
+                $statuses = array_filter(array_map('trim', explode(',', $statusInRaw)));
+                if (!empty($statuses)) {
+                    $escaped = array_map(function($s) { return "'" . str_replace("'", "\'", $s) . "'"; }, $statuses);
+                    $where[] = "o.status IN (" . implode(',', $escaped) . ")";
+                }
+            }
+
+            if (!empty($where)) {
+                $sql .= " WHERE " . implode(' AND ', $where);
             }
             $sql .= " ORDER BY o.created_at DESC";
+            if ($limit > 0) {
+                $sql .= " LIMIT " . $limit;
+            }
+
             $stmt = $pdo->query($sql);
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
             // attach items per order
             $ordersMap = [];
+            $missingItemsIds = [];
             foreach ($rows as $r) {
                 $oid = $r['id'];
+                $prods = [];
+                if (!empty($r['items_json'])) {
+                    $dec = @json_decode($r['items_json'], true);
+                    if (is_array($dec)) {
+                        $prods = $dec;
+                    }
+                }
+                if (empty($prods) && !$summaryOnly) {
+                    $missingItemsIds[] = (int)$oid;
+                }
                 $ordersMap[$oid] = [
                     'id' => $r['id'],
                     'orderNumber' => $r['order_number'],
@@ -10063,34 +10089,40 @@ switch ($module) {
                     'repName' => $r['rep_name'],
                     'employee' => $r['employee'] ?? null,
                     'page' => $r['page'] ?? null,
-                    'products' => []
+                    'products' => $prods
                 ];
             }
-            if (!empty($ordersMap)) {
-                $ids = array_keys($ordersMap);
-                $in = implode(',', array_map('intval', $ids));
-                // Some DB schemas may not have `order_items.total_price` column.
-                // Detect column existence and select appropriately to avoid SQL errors.
+
+            // Fetch items from DB only for orders lacking items_json, in chunks of 200
+            if (!$summaryOnly && !empty($missingItemsIds)) {
+                $chunks = array_chunk($missingItemsIds, 200);
                 $order_items_has_total_col = column_exists($pdo, 'order_items', 'total_price');
-                if ($order_items_has_total_col) {
-                    $itSql = "SELECT oi.order_id, oi.product_id, oi.quantity, oi.price_per_unit, oi.total_price as line_total, ppar.name, pv.color, pv.size FROM order_items oi LEFT JOIN product_variants pv ON oi.product_id = pv.id LEFT JOIN products ppar ON pv.product_id = ppar.id WHERE oi.order_id IN ($in)";
-                } else {
-                    $itSql = "SELECT oi.order_id, oi.product_id, oi.quantity, oi.price_per_unit, (oi.quantity * oi.price_per_unit) as line_total, ppar.name, pv.color, pv.size FROM order_items oi LEFT JOIN product_variants pv ON oi.product_id = pv.id LEFT JOIN products ppar ON pv.product_id = ppar.id WHERE oi.order_id IN ($in)";
-                }
-                $itStmt = $pdo->query($itSql);
-                $items = $itStmt->fetchAll(PDO::FETCH_ASSOC);
-                foreach ($items as $it) {
-                    $ordersMap[$it['order_id']]['products'][] = [
-                        'productId' => $it['product_id'],
-                        'name' => $it['name'],
-                        'color' => $it['color'],
-                        'size' => $it['size'],
-                        'quantity' => $it['quantity'],
-                        'price' => $it['price_per_unit'],
-                        'total' => $it['line_total']
-                    ];
+                $totalColSql = $order_items_has_total_col ? 'oi.total_price as line_total' : '(oi.quantity * oi.price_per_unit) as line_total';
+
+                foreach ($chunks as $chunk) {
+                    $in = implode(',', $chunk);
+                    $itSql = "SELECT oi.order_id, oi.product_id, oi.quantity, oi.price_per_unit, {$totalColSql}, ppar.name, pv.color, pv.size 
+                              FROM order_items oi 
+                              LEFT JOIN product_variants pv ON oi.product_id = pv.id 
+                              LEFT JOIN products ppar ON pv.product_id = ppar.id 
+                              WHERE oi.order_id IN ($in)";
+                    $items = $pdo->query($itSql)->fetchAll(PDO::FETCH_ASSOC);
+                    foreach ($items as $it) {
+                        if (isset($ordersMap[$it['order_id']])) {
+                            $ordersMap[$it['order_id']]['products'][] = [
+                                'productId' => $it['product_id'],
+                                'name' => $it['name'],
+                                'color' => $it['color'],
+                                'size' => $it['size'],
+                                'quantity' => $it['quantity'],
+                                'price' => $it['price_per_unit'],
+                                'total' => $it['line_total']
+                            ];
+                        }
+                    }
                 }
             }
+
             echo json_encode(['success' => true, 'data' => array_values($ordersMap)]);
             break;
         }

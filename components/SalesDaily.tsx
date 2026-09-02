@@ -325,38 +325,9 @@ const SalesDaily: React.FC = () => {
       }
 
       try {
-        // سحب قيد الانتظار
-        const prPending = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=pending`);
-        const jrPending = await prPending.json().catch(() => ({ success: false }));
-        const listPending = jrPending.success ? (jrPending.data || []) : [];
-
-        // سحب المرتجع
-        const prReturned = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=returned`);
-        const jrReturned = await prReturned.json().catch(() => ({ success: false }));
-        const listReturned = jrReturned.success ? (jrReturned.data || []) : [];
-
-        // سحب المؤجل
-        const prPostponed = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=postponed`);
-        const jrPostponed = await prPostponed.json().catch(() => ({ success: false }));
-        const listPostponed = jrPostponed.success ? (jrPostponed.data || []) : [];
-
-        // سحب الملغي
-        const prCancelled = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=cancelled`);
-        const jrCancelled = await prCancelled.json().catch(() => ({ success: false }));
-        const listCancelled = jrCancelled.success ? (jrCancelled.data || []) : [];
-
-        // سحب المؤكد من تأكيد الأوردرات
-        const prConfirmed = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=confirmed`);
-        const jrConfirmed = await prConfirmed.json().catch(() => ({ success: false }));
-        const listConfirmed = jrConfirmed.success ? (jrConfirmed.data || []) : [];
-
-        // سحب لا يرد من تأكيد الأوردرات
-        const prNoAnswer = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=no_answer`);
-        const jrNoAnswer = await prNoAnswer.json().catch(() => ({ success: false }));
-        const listNoAnswer = jrNoAnswer.success ? (jrNoAnswer.data || []) : [];
-
-        // دمجهم مع بعض
-        setPendingOrdersList([...listPending, ...listReturned, ...listPostponed, ...listCancelled, ...listConfirmed, ...listNoAnswer]);
+        const pr = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status_in=pending,returned,postponed,cancelled,confirmed,no_answer&limit=500`);
+        const jr = await pr.json().catch(() => ({ success: false }));
+        setPendingOrdersList(jr.success ? (jr.data || []) : []);
       } catch (e) {
         console.debug('Failed to load orders lists', e);
       }
@@ -490,25 +461,11 @@ const SalesDaily: React.FC = () => {
     }
   };
 
-  // Re-fetch pending/returned orders from DB so the available list reflects the latest DB state.
-  // Called after completeDaily so newly-assigned orders (now with_rep) disappear immediately.
   const refreshPendingOrdersList = async () => {
     try {
-      const [rPending, rReturned, rCancelled, rConfirmed, rNoAnswer, rPostponed] = await Promise.all([
-        fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=pending`).then(r => r.json()).catch(() => ({ success: false })),
-        fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=returned`).then(r => r.json()).catch(() => ({ success: false })),
-        fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=cancelled`).then(r => r.json()).catch(() => ({ success: false })),
-        fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=confirmed`).then(r => r.json()).catch(() => ({ success: false })),
-        fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=no_answer`).then(r => r.json()).catch(() => ({ success: false })),
-        fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=postponed`).then(r => r.json()).catch(() => ({ success: false }))
-      ]);
-      const listPending   = rPending.success   ? (rPending.data   || []) : [];
-      const listReturned  = rReturned.success  ? (rReturned.data  || []) : [];
-      const listCancelled = rCancelled.success ? (rCancelled.data || []) : [];
-      const listConfirmed = rConfirmed.success ? (rConfirmed.data || []) : [];
-      const listNoAnswer  = rNoAnswer.success  ? (rNoAnswer.data  || []) : [];
-      const listPostponed = rPostponed.success ? (rPostponed.data || []) : [];
-      setPendingOrdersList([...listPending, ...listReturned, ...listPostponed, ...listCancelled, ...listConfirmed, ...listNoAnswer]);
+      const pr = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status_in=pending,returned,postponed,cancelled,confirmed,no_answer&limit=500`);
+      const jr = await pr.json().catch(() => ({ success: false }));
+      setPendingOrdersList(jr.success ? (jr.data || []) : []);
     } catch (e) {
       console.debug('refreshPendingOrdersList failed', e);
     }
