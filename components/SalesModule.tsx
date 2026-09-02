@@ -1825,9 +1825,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       
       {/* Hidden Print Container */}
       {ordersToPrint && (
-        <div id="print-container">
-           <PrintableOrders orders={ordersToPrint} companyName={effectiveHeaderName} companyPhone={effectiveHeaderPhone} terms={companyTermsState} companyAddress={companyAddressState} companyLogo={companyLogoState} users={users} />
-        </div>
+        <PrintableOrders orders={ordersToPrint} companyName={effectiveHeaderName} companyPhone={effectiveHeaderPhone} terms={companyTermsState} companyAddress={companyAddressState} companyLogo={companyLogoState} users={users} />
       )}
 
       {isOrderDetailsOpen && selectedOrder && (

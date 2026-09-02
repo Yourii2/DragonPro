@@ -48,12 +48,50 @@ export const PrintableOrdersSingle: React.FC<{ orders: any[]; templateId?: numbe
     <div id="print-container" className="hidden">
       <style>{`
         @media print {
-          body { visibility: hidden; margin: 0; padding: 0; }
-          #print-container { display: block !important; visibility: visible !important; position: absolute; top: 0; left: 0; width: 100%; }
-          @page { size: A4; margin: 0.5cm; }
-          .print-page { width: 100%; padding: 0.5cm; box-sizing: border-box; page-break-after: always; page-break-inside: avoid; break-inside: avoid; }
-          .print-page:last-child { page-break-after: auto; }
-          * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          @page {
+            size: A4 portrait;
+            margin: 0.5cm;
+          }
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            height: auto !important;
+            min-height: 0 !important;
+            background: #fff !important;
+            overflow: visible !important;
+          }
+          body {
+            visibility: hidden;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+          #print-container {
+            display: block !important;
+            visibility: visible !important;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+          .print-page {
+            width: 100%;
+            padding: 0.5cm;
+            box-sizing: border-box;
+            page-break-inside: avoid;
+            break-inside: avoid;
+            page-break-after: auto;
+            break-after: auto;
+          }
+          .print-page:not(:last-child) {
+            page-break-after: always;
+            break-after: page;
+          }
+          * {
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
         }
       `}</style>
       {orders.map((order: any) => (

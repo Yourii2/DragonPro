@@ -1127,7 +1127,21 @@ export const UniversalPrintableOrders: React.FC<{
     <div id="print-container" className="print-root">
       <style>{`
         @media print {
-          body * { visibility: hidden; }
+          @page {
+            size: A4 portrait;
+            margin: 2mm;
+          }
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            height: auto !important;
+            min-height: 0 !important;
+            background: #fff !important;
+            overflow: visible !important;
+          }
+          body * {
+            visibility: hidden;
+          }
           #print-container, #print-container * {
             visibility: visible !important;
           }
@@ -1136,34 +1150,31 @@ export const UniversalPrintableOrders: React.FC<{
             left: 0;
             top: 0;
             width: 100%;
-            margin: 0;
-            padding: 0;
-          }
-          @page {
-            size: A4 portrait;
-            margin: 4mm;
+            margin: 0 !important;
+            padding: 0 !important;
           }
           .print-a4-page {
             width: 100%;
-            height: 288mm;
-            max-height: 288mm;
+            height: 291mm;
+            max-height: 291mm;
             box-sizing: border-box;
             display: grid;
             grid-template-columns: 1fr 1fr;
             grid-template-rows: 1fr 1fr;
-            gap: 3mm;
+            gap: 2mm;
             page-break-inside: avoid;
             break-inside: avoid;
-            page-break-after: always;
+            page-break-after: auto;
+            break-after: auto;
             overflow: hidden;
           }
-          .print-a4-page:last-child {
-            page-break-after: auto;
+          .print-a4-page:not(:last-child) {
+            page-break-after: always;
+            break-after: page;
           }
           .quarter-a4-cell {
             width: 100%;
-            height: 141mm;
-            max-height: 141mm;
+            height: 100%;
             box-sizing: border-box;
             overflow: hidden;
             page-break-inside: avoid;
