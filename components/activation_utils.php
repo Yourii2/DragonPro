@@ -32,6 +32,11 @@ function get_program_type() {
 }
 
 function get_hwid() {
+    static $cached_hwid = null;
+    if ($cached_hwid !== null) {
+        return $cached_hwid;
+    }
+
     $sources = [];
     $sources[] = gethostname();
     $envName = getenv('COMPUTERNAME');
@@ -42,14 +47,14 @@ function get_hwid() {
     $os = strtoupper(substr(PHP_OS, 0, 3));
     if ($os === 'WIN') {
         if (function_exists('shell_exec')) {
-            $uuidRaw = shell_exec('wmic csproduct get uuid 2>NUL');
+            $uuidRaw = @shell_exec('wmic csproduct get uuid 2>NUL');
             if ($uuidRaw) {
                 $lines = array_values(array_filter(array_map('trim', explode("\n", $uuidRaw))));
                 if (isset($lines[1])) {
                     $sources[] = $lines[1];
                 }
             }
-            $biosRaw = shell_exec('wmic bios get serialnumber 2>NUL');
+            $biosRaw = @shell_exec('wmic bios get serialnumber 2>NUL');
             if ($biosRaw) {
                 $lines = array_values(array_filter(array_map('trim', explode("\n", $biosRaw))));
                 if (isset($lines[1])) {
@@ -59,11 +64,11 @@ function get_hwid() {
         }
     } else {
         if (function_exists('shell_exec')) {
-            $machineId = trim((string)shell_exec('cat /etc/machine-id 2>/dev/null'));
+            $machineId = trim((string)@shell_exec('cat /etc/machine-id 2>/dev/null'));
             if (!empty($machineId)) {
                 $sources[] = $machineId;
             }
-            $dbusId = trim((string)shell_exec('cat /var/lib/dbus/machine-id 2>/dev/null'));
+            $dbusId = trim((string)@shell_exec('cat /var/lib/dbus/machine-id 2>/dev/null'));
             if (!empty($dbusId)) {
                 $sources[] = $dbusId;
             }
@@ -82,7 +87,7 @@ function get_hwid() {
     if ($raw === '') {
         $raw = php_uname();
     }
-    return hash('sha256', $raw);
+    return $cached_hwid = hash('sha256', $raw);
 }
 
 function call_activation_service($hwid, $phone, $company, $program_name = null, $program_version = null, $program_type = null, $start_date = null) {
@@ -104,40 +109,26 @@ function call_activation_service($hwid, $phone, $company, $program_name = null, 
 
     $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
 
-    $attempts = 0;
-    $maxAttempts = 3;
-    $response = false;
-    $lastError = '';
+    $ch = curl_init(ACTIVATION_SCRIPT_URL);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonPayload);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        'Content-Type: application/json; charset=utf-8',
+        'Accept: application/json'
+    ]);
+    // 3 seconds timeout to avoid freezing user UI
+    curl_setopt($ch, CURLOPT_TIMEOUT, 3);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+    curl_setopt($ch, CURLOPT_MAXREDIRS, 3);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_USERAGENT, 'DragonERP/1.0');
 
-    while ($attempts < $maxAttempts) {
-        $ch = curl_init(ACTIVATION_SCRIPT_URL);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonPayload);
-        curl_setopt($ch, CURLOPT_HTTPHEADER, [
-            'Content-Type: application/json; charset=utf-8',
-            'Accept: application/json'
-        ]);
-        // Increase timeouts to be tolerant of slow networks; keep reasonable limits
-        curl_setopt($ch, CURLOPT_TIMEOUT, 20);
-        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 6);
-        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-        curl_setopt($ch, CURLOPT_MAXREDIRS, 5);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($ch, CURLOPT_USERAGENT, 'DragonERP/1.0');
-
-        $response = curl_exec($ch);
-        if ($response === false) {
-            $lastError = curl_error($ch);
-            curl_close($ch);
-            $attempts++;
-            if ($attempts < $maxAttempts) usleep(250000); // 250ms
-            continue;
-        }
-
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-        break;
+    $response = @curl_exec($ch);
+    $lastError = $response === false ? curl_error($ch) : '';
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
     }
 
     if ($response === false) {
@@ -266,11 +257,16 @@ function self_heal_license_from_db() {
 }
 
 function check_license_validity($force_online = false) {
+    static $cached_license_result = null;
+    if (!$force_online && $cached_license_result !== null) {
+        return $cached_license_result;
+    }
+
     $config_path = __DIR__ . '/../config.php';
     $license_path = __DIR__ . '/../Dragon.lic';
 
     if (!file_exists($config_path)) {
-        return ['status' => 'not_installed', 'message' => 'النظام غير مثبت بعد.'];
+        return $cached_license_result = ['status' => 'not_installed', 'message' => 'النظام غير مثبت بعد.'];
     }
 
     require_once __DIR__ . '/encryption.php';
@@ -286,7 +282,7 @@ function check_license_validity($force_online = false) {
             $encrypted_license = encrypt_data(json_encode($license_data));
             @file_put_contents($license_path, $encrypted_license);
         } else {
-            return ['status' => 'tampered', 'message' => 'ملف الترخيص غير موجود أو تالف.'];
+            return $cached_license_result = ['status' => 'tampered', 'message' => 'ملف الترخيص غير موجود أو تالف.'];
         }
     } else {
         // Upgrade license file to standardized encrypted format if needed
@@ -359,7 +355,7 @@ function check_license_validity($force_online = false) {
 
     // 1. Account status check
     if (strtolower(trim((string)$activation_account_status)) === 'blocked') {
-        return ['status' => 'activation_blocked', 'message' => 'تم حظر هذا الترخيص.'];
+        return $cached_license_result = ['status' => 'activation_blocked', 'message' => 'تم حظر هذا الترخيص.'];
     }
 
     // 2. Clock tampering check
@@ -375,7 +371,7 @@ function check_license_validity($force_online = false) {
                 $encrypted_license = encrypt_data(json_encode($license_data));
                 @file_put_contents($license_path, $encrypted_license);
             } else {
-                return ['status' => 'tampered', 'message' => 'تم العبث بتاريخ النظام أو ملف الترخيص.'];
+                return $cached_license_result = ['status' => 'tampered', 'message' => 'تم العبث بتاريخ النظام أو ملف الترخيص.'];
             }
         }
     }
@@ -383,14 +379,14 @@ function check_license_validity($force_online = false) {
     // 3. Trial expiration check
     if ($is_trial) {
         if (empty($activation_expiry)) {
-            return ['status' => 'activation_expired', 'message' => 'انتهت صلاحية الترخيص التجريبي.'];
+            return $cached_license_result = ['status' => 'activation_expired', 'message' => 'انتهت صلاحية الترخيص التجريبي.'];
         }
         $expiry_ts = strtotime($activation_expiry);
         if ($expiry_ts === false || time() > $expiry_ts || $activation_is_expired) {
-            return ['status' => 'activation_expired', 'message' => 'انتهت صلاحية الترخيص التجريبي.'];
+            return $cached_license_result = ['status' => 'activation_expired', 'message' => 'انتهت صلاحية الترخيص التجريبي.'];
         }
     }
 
-    return ['status' => 'ok', 'license_data' => $license_data];
+    return $cached_license_result = ['status' => 'ok', 'license_data' => $license_data];
 }
 

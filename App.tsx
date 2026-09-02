@@ -134,7 +134,7 @@ const App: React.FC = () => {
       const response = await fetch(`${API_BASE_PATH}/verify.php`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ force: true })
+        body: JSON.stringify({ force: false })
       });
       const result = await response.json();
 
