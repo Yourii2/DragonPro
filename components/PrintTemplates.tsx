@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import Barcode from './Barcode';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { assetUrl } from '../services/assetUrl';
-import { UniversalWaybill, getSelectedTemplateId } from './UniversalWaybillRenderer';
+import { UniversalWaybill, UniversalPrintableOrders, getSelectedTemplateId } from './UniversalWaybillRenderer';
 
 export const PrintableContent: React.FC<{ order: any, companyName: string, companyPhone: string, companyAddress?: string, terms: string, companyLogo?: string | null }> = ({ order, companyName, companyPhone, companyAddress, terms, companyLogo }) => {
     const productRows = order.products && order.products.length > 0 
