@@ -145,8 +145,8 @@ export const PrintableContent: React.FC<{
       <div className="flex items-center justify-between w-full" style={{ direction: 'ltr', marginBottom: '4px', minHeight: '0', flexShrink: 0 }}>
         {/* Logo (left) */}
         <div className="w-1/4 flex flex-col items-start justify-center">
-          {companyLogo ? (
-            <img src={companyLogo} alt="logo" className="object-contain" style={{ maxHeight: '60px', maxWidth: '100%' }} />
+          {companyLogo && typeof companyLogo === 'string' && companyLogo.trim() !== '' ? (
+            <img src={companyLogo} alt="" className="object-contain" style={{ maxHeight: '60px', maxWidth: '100%' }} />
           ) : (
             <h1 className="company-name font-black" style={{ fontSize: '16px', margin: '0' }}>{companyName}</h1>
           )}

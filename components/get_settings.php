@@ -72,20 +72,27 @@ try {
                 $settings[$r['name']] = $r['value'];
             }
         }
-        // If a logo file id is present, expose a resolvable URL for frontend
+        // If a logo file id is present, fetch the base64 data directly from app_files so it renders immediately across all hosts/ports/printers
+        $logoId = null;
         if (!empty($settings['company_logo_file_id']) && is_numeric($settings['company_logo_file_id'])) {
-            // Check if app_files table exists
+            $logoId = intval($settings['company_logo_file_id']);
+        }
+        if ($logoId) {
             try {
                 $checkFiles = $pdo->query("SHOW TABLES LIKE 'app_files'");
                 if ($checkFiles && $checkFiles->fetch()) {
-                    $id = intval($settings['company_logo_file_id']);
-                    $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-                    $host = $_SERVER['HTTP_HOST'] ?? '';
-                    $base = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/');
-                    $settings['company_logo_url'] = $proto . '://' . $host . $base . '/get_file.php?id=' . $id;
+                    $fstmt = $pdo->prepare("SELECT mime, data FROM app_files WHERE id = :id LIMIT 1");
+                    $fstmt->execute([':id' => $logoId]);
+                    $frow = $fstmt->fetch(PDO::FETCH_ASSOC);
+                    if ($frow && !empty($frow['data'])) {
+                        $mime = $frow['mime'] ?: 'image/png';
+                        $base64Data = 'data:' . $mime . ';base64,' . base64_encode($frow['data']);
+                        $settings['company_logo_url'] = $base64Data;
+                        $settings['company_logo'] = $base64Data;
+                    }
                 }
             } catch (Exception $e) {
-                // app_files table not accessible, skip logo URL
+                // skip
             }
         }
     } else {
@@ -97,18 +104,22 @@ try {
         }
         // legacy settings table may contain company_logo_file_id as config_key
         if (!empty($settings['company_logo_file_id']) && is_numeric($settings['company_logo_file_id'])) {
-            // Check if app_files table exists
             try {
                 $checkFiles = $pdo->query("SHOW TABLES LIKE 'app_files'");
                 if ($checkFiles && $checkFiles->fetch()) {
                     $id = intval($settings['company_logo_file_id']);
-                    $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-                    $host = $_SERVER['HTTP_HOST'] ?? '';
-                    $base = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/');
-                    $settings['company_logo_url'] = $proto . '://' . $host . $base . '/get_file.php?id=' . $id;
+                    $fstmt = $pdo->prepare("SELECT mime, data FROM app_files WHERE id = :id LIMIT 1");
+                    $fstmt->execute([':id' => $id]);
+                    $frow = $fstmt->fetch(PDO::FETCH_ASSOC);
+                    if ($frow && !empty($frow['data'])) {
+                        $mime = $frow['mime'] ?: 'image/png';
+                        $base64Data = 'data:' . $mime . ';base64,' . base64_encode($frow['data']);
+                        $settings['company_logo_url'] = $base64Data;
+                        $settings['company_logo'] = $base64Data;
+                    }
                 }
             } catch (Exception $e) {
-                // app_files table not accessible, skip logo URL
+                // skip
             }
         }
     }

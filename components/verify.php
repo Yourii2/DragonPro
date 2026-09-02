@@ -200,10 +200,15 @@ try {
             $checkFiles = $pdo->query("SHOW TABLES LIKE 'app_files'");
             if ($checkFiles && $checkFiles->fetch()) {
                 $fileId = intval($settings['company_logo_file_id']);
-                $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-                $host = $_SERVER['HTTP_HOST'] ?? '';
-                $base = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? ''), '/');
-                $settings['company_logo_url'] = $proto . '://' . $host . $base . '/get_file.php?id=' . $fileId;
+                $fstmt = $pdo->prepare("SELECT mime, data FROM app_files WHERE id = :id LIMIT 1");
+                $fstmt->execute([':id' => $fileId]);
+                $frow = $fstmt->fetch(PDO::FETCH_ASSOC);
+                if ($frow && !empty($frow['data'])) {
+                    $mime = $frow['mime'] ?: 'image/png';
+                    $base64Data = 'data:' . $mime . ';base64,' . base64_encode($frow['data']);
+                    $settings['company_logo_url'] = $base64Data;
+                    $settings['company_logo'] = $base64Data;
+                }
             }
         } catch (Exception $e) {}
     }
