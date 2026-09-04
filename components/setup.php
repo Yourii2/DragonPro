@@ -6,6 +6,11 @@ session_start();
 @ini_set('html_errors', '0');
 @ini_set('log_errors', '1');
 error_reporting(0);
+
+// Increase limits for large SQL schema import
+@ini_set('memory_limit', '256M');
+@ini_set('max_execution_time', '300');
+@set_time_limit(300);
 if (function_exists('ob_start')) { @ob_start(); }
 
 // CORS (needed when running frontend on Vite dev server)
@@ -272,11 +277,24 @@ $stmt->execute([$input['adminName'], $input['adminUsername'], $hashed_password])
         get_program_type(),
         $startDate
     );
+
+    // NON-FATAL: if activation server is unreachable, continue with offline Trial mode.
+    // The user can activate later from Settings. Do NOT block installation.
     if (!$activationResult['success']) {
-        http_response_code(502);
-        if (function_exists('ob_clean')) { @ob_clean(); }
-        echo json_encode(['success' => false, 'message' => $activationResult['message']]);
-        exit;
+        error_log('[Setup] Activation failed (non-fatal): ' . ($activationResult['message'] ?? 'unknown'));
+        $activationResult = [
+            'success' => true,
+            'data' => [
+                'type'             => 'Trial',
+                'license_type'     => 'Trial',
+                'expiry'           => date('Y-m-d', strtotime('+30 days')),
+                'end_date'         => date('Y-m-d', strtotime('+30 days')),
+                'account_status'   => 'Active',
+                'is_expired'       => 'false',
+                'server_time'      => date('Y-m-d H:i:s'),
+                'message'          => 'Offline trial - activate later from Settings',
+            ]
+        ];
     }
 
     $activationData = $activationResult['data'];
