@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9.5 (2026-09-04)
+- Fix: إصلاح ملف قاعدة البيانات المُستخدم في التثبيت الأول (`current_schema_struct.sql`) - كان ناقصاً 14 جدول و14 عمود.
+- Fix: تحديث ملف schema التثبيت ليشمل جميع الجداول الـ 88 الموجودة في قاعدة البيانات الحية.
+- Fix: إضافة الجداول الناقصة: `app_settings`, `app_files`, `app_feedback`, `delivery_notes`, `delivery_note_lines`, `order_confirmation_assignments`, `product_variants`, `rep_close_events`, `rep_daily_journal`, `rep_delivery_sessions`, `rep_journal_orders`, `rep_return_events`, `selected_products`, `user_preferences`.
+- Fix: إضافة الأعمدة الناقصة في جدول `orders` (discount, tax, employee, page, items_json) وجدول `products` (is_archived, created_at) وجدول `transactions` (category, created_by) وجدول `treasuries` (type).
+- Update: أي مستخدم يثبّت DragonPro لأول مرة يحصل الآن على قاعدة بيانات كاملة ومحدثة بدون الحاجة لتشغيل migrations يدوياً.
+- Tool: إضافة أدوات `Database/generate_schema_struct.php` و `Database/compare_columns.php` لمقارنة وتوليد schema التثبيت تلقائياً من قاعدة البيانات الحية.
+
 ## 1.9.4 (2026-09-02)
 - Fix: إصلاح ظهور شعار الشركة (اللوجو) في جميع مناطق النظام (شريط التنقل، صفحة الإعدادات، بوالص الشحن، الفواتير).
 - Fix: الشعار يُحفظ الآن كـ Base64 Data URI مباشرةً بدلاً من مسار نسبي، مما يضمن ظهوره بغض النظر عن المنفذ أو الجهاز.

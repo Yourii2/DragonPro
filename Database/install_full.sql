@@ -1,7 +1,20 @@
-SET NAMES utf8mb4;
-SET FOREIGN_KEY_CHECKS = 0;
+-- ============================================================
+-- DragonPro - Full Installation SQL
+-- Generated: 2026-09-04 14:32:22
+-- This file creates ALL tables needed for a fresh installation
+-- ============================================================
 
-CREATE TABLE `accessories` (
+SET FOREIGN_KEY_CHECKS = 0;
+SET NAMES utf8mb4;
+SET CHARACTER SET utf8mb4;
+
+-- ============================================================
+-- SECTION 1: ALL TABLES (CREATE IF NOT EXISTS)
+-- ============================================================
+
+-- Table: accessories
+DROP TABLE IF EXISTS `accessories`;
+CREATE TABLE IF NOT EXISTS `accessories` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `code` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -17,7 +30,9 @@ CREATE TABLE `accessories` (
   UNIQUE KEY `code` (`code`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `accessory_movements` (
+-- Table: accessory_movements
+DROP TABLE IF EXISTS `accessory_movements`;
+CREATE TABLE IF NOT EXISTS `accessory_movements` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `accessory_id` int(11) NOT NULL,
   `warehouse_id` int(11) NOT NULL,
@@ -36,7 +51,9 @@ CREATE TABLE `accessory_movements` (
   KEY `created_at` (`created_at`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `accessory_stock` (
+-- Table: accessory_stock
+DROP TABLE IF EXISTS `accessory_stock`;
+CREATE TABLE IF NOT EXISTS `accessory_stock` (
   `accessory_id` int(11) NOT NULL,
   `warehouse_id` int(11) NOT NULL,
   `quantity` int(11) DEFAULT '0',
@@ -46,7 +63,9 @@ CREATE TABLE `accessory_stock` (
   CONSTRAINT `fk_accessory_stock_warehouse` FOREIGN KEY (`warehouse_id`) REFERENCES `warehouses` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `accounts` (
+-- Table: accounts
+DROP TABLE IF EXISTS `accounts`;
+CREATE TABLE IF NOT EXISTS `accounts` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `code` varchar(30) COLLATE utf8mb4_unicode_ci NOT NULL,
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -60,7 +79,9 @@ CREATE TABLE `accounts` (
   CONSTRAINT `accounts_ibfk_1` FOREIGN KEY (`parent_id`) REFERENCES `accounts` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `app_feedback` (
+-- Table: app_feedback
+DROP TABLE IF EXISTS `app_feedback`;
+CREATE TABLE IF NOT EXISTS `app_feedback` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `rating` int(11) NOT NULL,
   `comment` text,
@@ -68,7 +89,9 @@ CREATE TABLE `app_feedback` (
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE `app_files` (
+-- Table: app_files
+DROP TABLE IF EXISTS `app_files`;
+CREATE TABLE IF NOT EXISTS `app_files` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `filename` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `mime` varchar(120) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -80,7 +103,9 @@ CREATE TABLE `app_files` (
   KEY `idx_app_files_filename` (`filename`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE `app_settings` (
+-- Table: app_settings
+DROP TABLE IF EXISTS `app_settings`;
+CREATE TABLE IF NOT EXISTS `app_settings` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `k` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
   `v` text COLLATE utf8mb4_unicode_ci,
@@ -90,7 +115,9 @@ CREATE TABLE `app_settings` (
   UNIQUE KEY `uk_app_settings_k` (`k`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `attendance_daily_summary` (
+-- Table: attendance_daily_summary
+DROP TABLE IF EXISTS `attendance_daily_summary`;
+CREATE TABLE IF NOT EXISTS `attendance_daily_summary` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `employee_id` int(11) NOT NULL,
   `shift_id` int(11) DEFAULT NULL,
@@ -112,7 +139,39 @@ CREATE TABLE `attendance_daily_summary` (
   CONSTRAINT `attendance_daily_summary_ibfk_2` FOREIGN KEY (`shift_id`) REFERENCES `attendance_shifts` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `attendance_devices` (
+-- Table: attendance_device_users
+DROP TABLE IF EXISTS `attendance_device_users`;
+CREATE TABLE IF NOT EXISTS `attendance_device_users` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `device_id` int(11) NOT NULL,
+  `employee_id` int(11) NOT NULL,
+  `device_user_id` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE KEY `device_id` (`device_id`,`device_user_id`) USING BTREE,
+  UNIQUE KEY `device_id_2` (`device_id`,`employee_id`) USING BTREE,
+  KEY `employee_id` (`employee_id`) USING BTREE,
+  CONSTRAINT `attendance_device_users_ibfk_1` FOREIGN KEY (`device_id`) REFERENCES `attendance_devices` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `attendance_device_users_ibfk_2` FOREIGN KEY (`employee_id`) REFERENCES `employees` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+
+-- Table: attendance_device_workers
+DROP TABLE IF EXISTS `attendance_device_workers`;
+CREATE TABLE IF NOT EXISTS `attendance_device_workers` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `device_id` int(11) NOT NULL,
+  `worker_id` int(11) NOT NULL,
+  `device_user_id` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE KEY `device_id` (`device_id`,`device_user_id`) USING BTREE,
+  UNIQUE KEY `device_id_2` (`device_id`,`worker_id`) USING BTREE,
+  KEY `worker_id` (`worker_id`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+
+-- Table: attendance_devices
+DROP TABLE IF EXISTS `attendance_devices`;
+CREATE TABLE IF NOT EXISTS `attendance_devices` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `vendor` enum('hikvision','zkteco','adms','other') COLLATE utf8mb4_unicode_ci DEFAULT 'other',
@@ -132,33 +191,9 @@ CREATE TABLE `attendance_devices` (
   KEY `idx_attendance_devices_vendor` (`vendor`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `attendance_device_users` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `device_id` int(11) NOT NULL,
-  `employee_id` int(11) NOT NULL,
-  `device_user_id` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`) USING BTREE,
-  UNIQUE KEY `device_id` (`device_id`,`device_user_id`) USING BTREE,
-  UNIQUE KEY `device_id_2` (`device_id`,`employee_id`) USING BTREE,
-  KEY `employee_id` (`employee_id`) USING BTREE,
-  CONSTRAINT `attendance_device_users_ibfk_1` FOREIGN KEY (`device_id`) REFERENCES `attendance_devices` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `attendance_device_users_ibfk_2` FOREIGN KEY (`employee_id`) REFERENCES `employees` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
-
-CREATE TABLE `attendance_device_workers` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `device_id` int(11) NOT NULL,
-  `worker_id` int(11) NOT NULL,
-  `device_user_id` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`) USING BTREE,
-  UNIQUE KEY `device_id` (`device_id`,`device_user_id`) USING BTREE,
-  UNIQUE KEY `device_id_2` (`device_id`,`worker_id`) USING BTREE,
-  KEY `worker_id` (`worker_id`) USING BTREE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
-
-CREATE TABLE `attendance_holidays` (
+-- Table: attendance_holidays
+DROP TABLE IF EXISTS `attendance_holidays`;
+CREATE TABLE IF NOT EXISTS `attendance_holidays` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `holiday_date` date NOT NULL,
@@ -168,7 +203,9 @@ CREATE TABLE `attendance_holidays` (
   UNIQUE KEY `holiday_date` (`holiday_date`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `attendance_logs` (
+-- Table: attendance_logs
+DROP TABLE IF EXISTS `attendance_logs`;
+CREATE TABLE IF NOT EXISTS `attendance_logs` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `employee_id` int(11) DEFAULT NULL,
   `device_id` int(11) DEFAULT NULL,
@@ -186,7 +223,9 @@ CREATE TABLE `attendance_logs` (
   CONSTRAINT `attendance_logs_ibfk_2` FOREIGN KEY (`device_id`) REFERENCES `attendance_devices` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `attendance_schedules` (
+-- Table: attendance_schedules
+DROP TABLE IF EXISTS `attendance_schedules`;
+CREATE TABLE IF NOT EXISTS `attendance_schedules` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `employee_id` int(11) NOT NULL,
   `shift_id` int(11) NOT NULL,
@@ -201,7 +240,9 @@ CREATE TABLE `attendance_schedules` (
   CONSTRAINT `attendance_schedules_ibfk_2` FOREIGN KEY (`shift_id`) REFERENCES `attendance_shifts` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `attendance_shifts` (
+-- Table: attendance_shifts
+DROP TABLE IF EXISTS `attendance_shifts`;
+CREATE TABLE IF NOT EXISTS `attendance_shifts` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `start_time` time NOT NULL,
@@ -219,7 +260,9 @@ CREATE TABLE `attendance_shifts` (
   PRIMARY KEY (`id`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `attendance_worker_daily_summary` (
+-- Table: attendance_worker_daily_summary
+DROP TABLE IF EXISTS `attendance_worker_daily_summary`;
+CREATE TABLE IF NOT EXISTS `attendance_worker_daily_summary` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `worker_id` int(11) NOT NULL,
   `shift_id` int(11) DEFAULT NULL,
@@ -239,7 +282,9 @@ CREATE TABLE `attendance_worker_daily_summary` (
   KEY `worker_id_2` (`worker_id`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `audit_logs` (
+-- Table: audit_logs
+DROP TABLE IF EXISTS `audit_logs`;
+CREATE TABLE IF NOT EXISTS `audit_logs` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `user_id` int(11) DEFAULT NULL,
   `module` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -255,7 +300,9 @@ CREATE TABLE `audit_logs` (
   KEY `created_at` (`created_at`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `backup_email_otps` (
+-- Table: backup_email_otps
+DROP TABLE IF EXISTS `backup_email_otps`;
+CREATE TABLE IF NOT EXISTS `backup_email_otps` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `user_id` int(11) NOT NULL,
   `email` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -268,7 +315,9 @@ CREATE TABLE `backup_email_otps` (
   KEY `email` (`email`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `colors` (
+-- Table: colors
+DROP TABLE IF EXISTS `colors`;
+CREATE TABLE IF NOT EXISTS `colors` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
   `code` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -277,7 +326,9 @@ CREATE TABLE `colors` (
   UNIQUE KEY `code` (`code`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `composite_product_items` (
+-- Table: composite_product_items
+DROP TABLE IF EXISTS `composite_product_items`;
+CREATE TABLE IF NOT EXISTS `composite_product_items` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `composite_id` int(11) NOT NULL,
   `product_id` int(11) NOT NULL,
@@ -289,7 +340,24 @@ CREATE TABLE `composite_product_items` (
   CONSTRAINT `composite_product_items_ibfk_2` FOREIGN KEY (`product_id`) REFERENCES `factory_products` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `customers` (
+-- Table: customer_interactions
+DROP TABLE IF EXISTS `customer_interactions`;
+CREATE TABLE IF NOT EXISTS `customer_interactions` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `customer_id` int(11) NOT NULL,
+  `interaction_type` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `note` text COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_by` int(11) DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `customer_id` (`customer_id`) USING BTREE,
+  KEY `created_at` (`created_at`) USING BTREE,
+  CONSTRAINT `customer_interactions_ibfk_1` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+
+-- Table: customers
+DROP TABLE IF EXISTS `customers`;
+CREATE TABLE IF NOT EXISTS `customers` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `phone1` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -307,20 +375,9 @@ CREATE TABLE `customers` (
   KEY `idx_customers_gov` (`governorate`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `customer_interactions` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `customer_id` int(11) NOT NULL,
-  `interaction_type` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `note` text COLLATE utf8mb4_unicode_ci NOT NULL,
-  `created_by` int(11) DEFAULT NULL,
-  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`) USING BTREE,
-  KEY `customer_id` (`customer_id`) USING BTREE,
-  KEY `created_at` (`created_at`) USING BTREE,
-  CONSTRAINT `customer_interactions_ibfk_1` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
-
-CREATE TABLE `cutting_orders` (
+-- Table: cutting_orders
+DROP TABLE IF EXISTS `cutting_orders`;
+CREATE TABLE IF NOT EXISTS `cutting_orders` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `code` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
   `warehouse_id` int(11) DEFAULT NULL,
@@ -342,7 +399,25 @@ CREATE TABLE `cutting_orders` (
   KEY `warehouse_id` (`warehouse_id`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `delivery_notes` (
+-- Table: delivery_note_lines
+DROP TABLE IF EXISTS `delivery_note_lines`;
+CREATE TABLE IF NOT EXISTS `delivery_note_lines` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `delivery_note_id` int(11) NOT NULL,
+  `product_id` int(11) NOT NULL,
+  `quantity` int(11) NOT NULL,
+  `qty` int(11) DEFAULT NULL,
+  `journal_code` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `delivery_note_id` (`delivery_note_id`),
+  KEY `product_id` (`product_id`),
+  KEY `created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Table: delivery_notes
+DROP TABLE IF EXISTS `delivery_notes`;
+CREATE TABLE IF NOT EXISTS `delivery_notes` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `note_code` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `order_id` int(11) NOT NULL,
@@ -360,40 +435,26 @@ CREATE TABLE `delivery_notes` (
   KEY `created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE `delivery_note_lines` (
+-- Table: dispatch_order_items
+DROP TABLE IF EXISTS `dispatch_order_items`;
+CREATE TABLE IF NOT EXISTS `dispatch_order_items` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `delivery_note_id` int(11) NOT NULL,
-  `product_id` int(11) NOT NULL,
-  `quantity` int(11) NOT NULL,
-  `qty` int(11) DEFAULT NULL,
-  `journal_code` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  KEY `delivery_note_id` (`delivery_note_id`),
-  KEY `product_id` (`product_id`),
-  KEY `created_at` (`created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE `dispatches` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `order_id` int(11) NOT NULL,
   `factory_product_id` int(11) NOT NULL,
-  `warehouse_id` int(11) NOT NULL,
-  `quantity` int(11) NOT NULL,
-  `notes` text COLLATE utf8mb4_unicode_ci,
-  `created_by` int(11) DEFAULT NULL,
-  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` timestamp NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+  `qty_sent` int(11) NOT NULL,
+  `qty_received` int(11) DEFAULT NULL,
+  `size_id` int(11) NOT NULL DEFAULT '0',
+  `color` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
   PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE KEY `ux_order_variant` (`order_id`,`factory_product_id`,`size_id`,`color`) USING BTREE,
+  KEY `order_id` (`order_id`) USING BTREE,
   KEY `factory_product_id` (`factory_product_id`) USING BTREE,
-  KEY `warehouse_id` (`warehouse_id`) USING BTREE,
-  KEY `created_at` (`created_at`) USING BTREE,
-  KEY `created_by` (`created_by`) USING BTREE,
-  CONSTRAINT `dispatches_ibfk_1` FOREIGN KEY (`factory_product_id`) REFERENCES `factory_products` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `dispatches_ibfk_2` FOREIGN KEY (`warehouse_id`) REFERENCES `warehouses` (`id`),
-  CONSTRAINT `dispatches_ibfk_3` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`)
+  KEY `size_id` (`size_id`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `dispatch_orders` (
+-- Table: dispatch_orders
+DROP TABLE IF EXISTS `dispatch_orders`;
+CREATE TABLE IF NOT EXISTS `dispatch_orders` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `code` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `from_warehouse_id` int(11) NOT NULL,
@@ -413,36 +474,30 @@ CREATE TABLE `dispatch_orders` (
   KEY `created_at` (`created_at`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `dispatch_order_items` (
+-- Table: dispatches
+DROP TABLE IF EXISTS `dispatches`;
+CREATE TABLE IF NOT EXISTS `dispatches` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `order_id` int(11) NOT NULL,
   `factory_product_id` int(11) NOT NULL,
-  `qty_sent` int(11) NOT NULL,
-  `qty_received` int(11) DEFAULT NULL,
-  `size_id` int(11) NOT NULL DEFAULT '0',
-  `color` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
-  PRIMARY KEY (`id`) USING BTREE,
-  UNIQUE KEY `ux_order_variant` (`order_id`,`factory_product_id`,`size_id`,`color`) USING BTREE,
-  KEY `order_id` (`order_id`) USING BTREE,
-  KEY `factory_product_id` (`factory_product_id`) USING BTREE,
-  KEY `size_id` (`size_id`) USING BTREE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
-
-CREATE TABLE `employees` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `job_title` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `salary` decimal(10,2) DEFAULT NULL,
-  `hire_date` date DEFAULT NULL,
-  `phone` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `status` enum('active','inactive','on_leave') COLLATE utf8mb4_unicode_ci DEFAULT 'active',
+  `warehouse_id` int(11) NOT NULL,
+  `quantity` int(11) NOT NULL,
+  `notes` text COLLATE utf8mb4_unicode_ci,
+  `created_by` int(11) DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `attendance_enabled` tinyint(1) DEFAULT '1',
-  `default_shift_id` int(11) DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE
+  `updated_at` timestamp NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `factory_product_id` (`factory_product_id`) USING BTREE,
+  KEY `warehouse_id` (`warehouse_id`) USING BTREE,
+  KEY `created_at` (`created_at`) USING BTREE,
+  KEY `created_by` (`created_by`) USING BTREE,
+  CONSTRAINT `dispatches_ibfk_1` FOREIGN KEY (`factory_product_id`) REFERENCES `factory_products` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `dispatches_ibfk_2` FOREIGN KEY (`warehouse_id`) REFERENCES `warehouses` (`id`),
+  CONSTRAINT `dispatches_ibfk_3` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `employee_advances` (
+-- Table: employee_advances
+DROP TABLE IF EXISTS `employee_advances`;
+CREATE TABLE IF NOT EXISTS `employee_advances` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `employee_id` int(11) NOT NULL,
   `amount` decimal(10,2) NOT NULL,
@@ -456,7 +511,9 @@ CREATE TABLE `employee_advances` (
   CONSTRAINT `employee_advances_ibfk_1` FOREIGN KEY (`employee_id`) REFERENCES `employees` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `employee_salaries` (
+-- Table: employee_salaries
+DROP TABLE IF EXISTS `employee_salaries`;
+CREATE TABLE IF NOT EXISTS `employee_salaries` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `employee_id` int(11) NOT NULL,
   `month` varchar(7) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -472,7 +529,9 @@ CREATE TABLE `employee_salaries` (
   CONSTRAINT `employee_salaries_ibfk_1` FOREIGN KEY (`employee_id`) REFERENCES `employees` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `employee_transactions` (
+-- Table: employee_transactions
+DROP TABLE IF EXISTS `employee_transactions`;
+CREATE TABLE IF NOT EXISTS `employee_transactions` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `employee_id` int(11) NOT NULL,
   `treasury_id` int(11) DEFAULT NULL,
@@ -489,23 +548,25 @@ CREATE TABLE `employee_transactions` (
   CONSTRAINT `employee_transactions_ibfk_2` FOREIGN KEY (`treasury_id`) REFERENCES `treasuries` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `fabrics` (
+-- Table: employees
+DROP TABLE IF EXISTS `employees`;
+CREATE TABLE IF NOT EXISTS `employees` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `code` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `color` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `size` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `material` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `quantity` int(11) DEFAULT '0',
-  `min_stock` int(1) DEFAULT '0',
-  `unit` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT 'Ù…ØªØ±',
-  `cost_price` decimal(10,2) DEFAULT '0.00',
+  `job_title` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `salary` decimal(10,2) DEFAULT NULL,
+  `hire_date` date DEFAULT NULL,
+  `phone` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `status` enum('active','inactive','on_leave') COLLATE utf8mb4_unicode_ci DEFAULT 'active',
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`) USING BTREE,
-  UNIQUE KEY `code` (`code`) USING BTREE
+  `attendance_enabled` tinyint(1) DEFAULT '1',
+  `default_shift_id` int(11) DEFAULT NULL,
+  PRIMARY KEY (`id`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `fabric_movements` (
+-- Table: fabric_movements
+DROP TABLE IF EXISTS `fabric_movements`;
+CREATE TABLE IF NOT EXISTS `fabric_movements` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `fabric_id` int(11) NOT NULL,
   `warehouse_id` int(11) NOT NULL,
@@ -528,7 +589,9 @@ CREATE TABLE `fabric_movements` (
   CONSTRAINT `fabric_movements_ibfk_3` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `fabric_stock` (
+-- Table: fabric_stock
+DROP TABLE IF EXISTS `fabric_stock`;
+CREATE TABLE IF NOT EXISTS `fabric_stock` (
   `fabric_id` int(11) NOT NULL,
   `warehouse_id` int(11) NOT NULL,
   `quantity` decimal(10,4) NOT NULL DEFAULT '0.0000',
@@ -538,20 +601,27 @@ CREATE TABLE `fabric_stock` (
   CONSTRAINT `fk_fabric_stock_warehouse` FOREIGN KEY (`warehouse_id`) REFERENCES `warehouses` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `factory_products` (
+-- Table: fabrics
+DROP TABLE IF EXISTS `fabrics`;
+CREATE TABLE IF NOT EXISTS `fabrics` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `code` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `type` enum('individual','composite') COLLATE utf8mb4_unicode_ci NOT NULL,
-  `description` text COLLATE utf8mb4_unicode_ci,
+  `color` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `size` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `material` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `quantity` int(11) DEFAULT '0',
+  `min_stock` int(1) DEFAULT '0',
+  `unit` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT 'Ù…ØªØ±',
+  `cost_price` decimal(10,2) DEFAULT '0.00',
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `sale_price` decimal(10,2) DEFAULT '0.00',
-  `min_stock` int(11) DEFAULT '0',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE KEY `code` (`code`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `factory_product_movements` (
+-- Table: factory_product_movements
+DROP TABLE IF EXISTS `factory_product_movements`;
+CREATE TABLE IF NOT EXISTS `factory_product_movements` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `factory_product_id` int(11) NOT NULL,
   `warehouse_id` int(11) NOT NULL,
@@ -570,7 +640,9 @@ CREATE TABLE `factory_product_movements` (
   KEY `created_at` (`created_at`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `factory_product_sizes` (
+-- Table: factory_product_sizes
+DROP TABLE IF EXISTS `factory_product_sizes`;
+CREATE TABLE IF NOT EXISTS `factory_product_sizes` (
   `factory_product_id` int(11) NOT NULL,
   `size_id` int(11) NOT NULL,
   PRIMARY KEY (`factory_product_id`,`size_id`) USING BTREE,
@@ -579,16 +651,9 @@ CREATE TABLE `factory_product_sizes` (
   CONSTRAINT `factory_product_sizes_ibfk_2` FOREIGN KEY (`size_id`) REFERENCES `sizes` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `factory_product_stages` (
-  `factory_product_id` int(11) NOT NULL,
-  `stage_id` int(11) NOT NULL,
-  PRIMARY KEY (`factory_product_id`,`stage_id`) USING BTREE,
-  KEY `stage_id` (`stage_id`) USING BTREE,
-  CONSTRAINT `factory_product_stages_ibfk_1` FOREIGN KEY (`factory_product_id`) REFERENCES `factory_products` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `factory_product_stages_ibfk_2` FOREIGN KEY (`stage_id`) REFERENCES `production_stages` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
-
-CREATE TABLE `factory_product_stage_accessories` (
+-- Table: factory_product_stage_accessories
+DROP TABLE IF EXISTS `factory_product_stage_accessories`;
+CREATE TABLE IF NOT EXISTS `factory_product_stage_accessories` (
   `factory_product_id` int(11) NOT NULL,
   `stage_id` int(11) NOT NULL,
   `accessory_id` int(11) NOT NULL,
@@ -601,7 +666,35 @@ CREATE TABLE `factory_product_stage_accessories` (
   CONSTRAINT `factory_product_stage_accessories_ibfk_3` FOREIGN KEY (`accessory_id`) REFERENCES `accessories` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `factory_receiving` (
+-- Table: factory_product_stages
+DROP TABLE IF EXISTS `factory_product_stages`;
+CREATE TABLE IF NOT EXISTS `factory_product_stages` (
+  `factory_product_id` int(11) NOT NULL,
+  `stage_id` int(11) NOT NULL,
+  PRIMARY KEY (`factory_product_id`,`stage_id`) USING BTREE,
+  KEY `stage_id` (`stage_id`) USING BTREE,
+  CONSTRAINT `factory_product_stages_ibfk_1` FOREIGN KEY (`factory_product_id`) REFERENCES `factory_products` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `factory_product_stages_ibfk_2` FOREIGN KEY (`stage_id`) REFERENCES `production_stages` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+
+-- Table: factory_products
+DROP TABLE IF EXISTS `factory_products`;
+CREATE TABLE IF NOT EXISTS `factory_products` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `code` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `type` enum('individual','composite') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `description` text COLLATE utf8mb4_unicode_ci,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `sale_price` decimal(10,2) DEFAULT '0.00',
+  `min_stock` int(11) DEFAULT '0',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE KEY `code` (`code`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+
+-- Table: factory_receiving
+DROP TABLE IF EXISTS `factory_receiving`;
+CREATE TABLE IF NOT EXISTS `factory_receiving` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `order_id` int(11) NOT NULL,
   `received_by` int(11) DEFAULT NULL,
@@ -612,7 +705,9 @@ CREATE TABLE `factory_receiving` (
   CONSTRAINT `factory_receiving_ibfk_1` FOREIGN KEY (`order_id`) REFERENCES `manufacturing_orders` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `factory_stock` (
+-- Table: factory_stock
+DROP TABLE IF EXISTS `factory_stock`;
+CREATE TABLE IF NOT EXISTS `factory_stock` (
   `factory_product_id` int(11) NOT NULL,
   `warehouse_id` int(11) NOT NULL,
   `quantity` int(11) DEFAULT '0',
@@ -622,23 +717,9 @@ CREATE TABLE `factory_stock` (
   CONSTRAINT `factory_stock_ibfk_2` FOREIGN KEY (`warehouse_id`) REFERENCES `warehouses` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `inventory_audits` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `warehouse_id` int(11) NOT NULL,
-  `status` enum('draft','pending','approved','rejected') COLLATE utf8mb4_unicode_ci DEFAULT 'draft',
-  `notes` text COLLATE utf8mb4_unicode_ci,
-  `rejection_reason` text COLLATE utf8mb4_unicode_ci,
-  `created_by` int(11) DEFAULT NULL,
-  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `submitted_at` datetime DEFAULT NULL,
-  `approved_by` int(11) DEFAULT NULL,
-  `approved_at` datetime DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE,
-  KEY `warehouse_id` (`warehouse_id`) USING BTREE,
-  CONSTRAINT `inventory_audits_ibfk_1` FOREIGN KEY (`warehouse_id`) REFERENCES `warehouses` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
-
-CREATE TABLE `inventory_audit_items` (
+-- Table: inventory_audit_items
+DROP TABLE IF EXISTS `inventory_audit_items`;
+CREATE TABLE IF NOT EXISTS `inventory_audit_items` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `audit_id` int(11) NOT NULL,
   `product_id` int(11) NOT NULL,
@@ -654,7 +735,27 @@ CREATE TABLE `inventory_audit_items` (
   CONSTRAINT `inventory_audit_items_ibfk_2` FOREIGN KEY (`product_id`) REFERENCES `product_variants` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `journal_entries` (
+-- Table: inventory_audits
+DROP TABLE IF EXISTS `inventory_audits`;
+CREATE TABLE IF NOT EXISTS `inventory_audits` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `warehouse_id` int(11) NOT NULL,
+  `status` enum('draft','pending','approved','rejected') COLLATE utf8mb4_unicode_ci DEFAULT 'draft',
+  `notes` text COLLATE utf8mb4_unicode_ci,
+  `rejection_reason` text COLLATE utf8mb4_unicode_ci,
+  `created_by` int(11) DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `submitted_at` datetime DEFAULT NULL,
+  `approved_by` int(11) DEFAULT NULL,
+  `approved_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `warehouse_id` (`warehouse_id`) USING BTREE,
+  CONSTRAINT `inventory_audits_ibfk_1` FOREIGN KEY (`warehouse_id`) REFERENCES `warehouses` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+
+-- Table: journal_entries
+DROP TABLE IF EXISTS `journal_entries`;
+CREATE TABLE IF NOT EXISTS `journal_entries` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `entry_date` date NOT NULL,
   `memo` text COLLATE utf8mb4_unicode_ci,
@@ -668,7 +769,9 @@ CREATE TABLE `journal_entries` (
   KEY `entry_date` (`entry_date`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `journal_lines` (
+-- Table: journal_lines
+DROP TABLE IF EXISTS `journal_lines`;
+CREATE TABLE IF NOT EXISTS `journal_lines` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `entry_id` int(11) NOT NULL,
   `account_id` int(11) NOT NULL,
@@ -682,21 +785,9 @@ CREATE TABLE `journal_lines` (
   CONSTRAINT `journal_lines_ibfk_2` FOREIGN KEY (`account_id`) REFERENCES `accounts` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `manufacturing_orders` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `cutting_order_id` int(11) DEFAULT NULL,
-  `product_id` int(11) NOT NULL,
-  `quantity` int(11) NOT NULL,
-  `status` enum('draft','in_progress','completed','cancelled') COLLATE utf8mb4_unicode_ci DEFAULT 'draft',
-  `notes` text COLLATE utf8mb4_unicode_ci,
-  `created_by` int(11) DEFAULT NULL,
-  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`) USING BTREE,
-  KEY `product_id` (`product_id`) USING BTREE,
-  CONSTRAINT `manufacturing_orders_ibfk_1` FOREIGN KEY (`product_id`) REFERENCES `factory_products` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
-
-CREATE TABLE `manufacturing_order_stages` (
+-- Table: manufacturing_order_stages
+DROP TABLE IF EXISTS `manufacturing_order_stages`;
+CREATE TABLE IF NOT EXISTS `manufacturing_order_stages` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `order_id` int(11) NOT NULL,
   `stage_id` int(11) NOT NULL,
@@ -713,7 +804,93 @@ CREATE TABLE `manufacturing_order_stages` (
   CONSTRAINT `manufacturing_order_stages_ibfk_3` FOREIGN KEY (`worker_id`) REFERENCES `workers` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `orders` (
+-- Table: manufacturing_orders
+DROP TABLE IF EXISTS `manufacturing_orders`;
+CREATE TABLE IF NOT EXISTS `manufacturing_orders` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `cutting_order_id` int(11) DEFAULT NULL,
+  `product_id` int(11) NOT NULL,
+  `quantity` int(11) NOT NULL,
+  `status` enum('draft','in_progress','completed','cancelled') COLLATE utf8mb4_unicode_ci DEFAULT 'draft',
+  `notes` text COLLATE utf8mb4_unicode_ci,
+  `created_by` int(11) DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `product_id` (`product_id`) USING BTREE,
+  CONSTRAINT `manufacturing_orders_ibfk_1` FOREIGN KEY (`product_id`) REFERENCES `factory_products` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+
+-- Table: order_confirmation_assignments
+DROP TABLE IF EXISTS `order_confirmation_assignments`;
+CREATE TABLE IF NOT EXISTS `order_confirmation_assignments` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `order_id` int(11) NOT NULL,
+  `rep_id` int(11) NOT NULL,
+  `assigned_by` int(11) DEFAULT NULL,
+  `notes` text COLLATE utf8mb4_unicode_ci,
+  `status` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'assigned',
+  `assigned_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `warehouse_id` int(11) DEFAULT NULL,
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE KEY `uk_order_confirmation_order` (`order_id`) USING BTREE,
+  KEY `idx_order_confirmation_rep_status` (`rep_id`,`status`) USING BTREE,
+  KEY `idx_order_confirmation_status` (`status`) USING BTREE,
+  KEY `idx_oca_rep_assigned` (`rep_id`,`status`,`assigned_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+
+-- Table: order_documents
+DROP TABLE IF EXISTS `order_documents`;
+CREATE TABLE IF NOT EXISTS `order_documents` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `order_id` int(11) NOT NULL,
+  `doc_type` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `doc_url` text COLLATE utf8mb4_unicode_ci NOT NULL,
+  `notes` text COLLATE utf8mb4_unicode_ci,
+  `created_by` int(11) DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `order_id` (`order_id`) USING BTREE,
+  CONSTRAINT `order_documents_ibfk_1` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+
+-- Table: order_items
+DROP TABLE IF EXISTS `order_items`;
+CREATE TABLE IF NOT EXISTS `order_items` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `order_id` int(11) NOT NULL,
+  `product_id` int(11) NOT NULL,
+  `quantity` int(11) NOT NULL,
+  `price_per_unit` decimal(10,2) NOT NULL,
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `order_id` (`order_id`) USING BTREE,
+  KEY `product_id` (`product_id`) USING BTREE,
+  CONSTRAINT `order_items_ibfk_1` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `order_items_ibfk_2` FOREIGN KEY (`product_id`) REFERENCES `product_variants` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+
+-- Table: order_status_history
+DROP TABLE IF EXISTS `order_status_history`;
+CREATE TABLE IF NOT EXISTS `order_status_history` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `order_id` int(11) NOT NULL,
+  `status` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `action` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `notes` text COLLATE utf8mb4_unicode_ci,
+  `rep_id` int(11) DEFAULT NULL,
+  `created_by` int(11) DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `order_id` (`order_id`) USING BTREE,
+  KEY `status` (`status`) USING BTREE,
+  KEY `idx_osh_order_created` (`order_id`,`created_at`),
+  KEY `idx_osh_order_status` (`order_id`,`status`,`created_at`),
+  CONSTRAINT `order_status_history_ibfk_1` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+
+-- Table: orders
+DROP TABLE IF EXISTS `orders`;
+CREATE TABLE IF NOT EXISTS `orders` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `order_number` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
   `customer_id` int(11) NOT NULL,
@@ -750,67 +927,9 @@ CREATE TABLE `orders` (
   CONSTRAINT `orders_ibfk_2` FOREIGN KEY (`rep_id`) REFERENCES `users` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `order_confirmation_assignments` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `order_id` int(11) NOT NULL,
-  `rep_id` int(11) NOT NULL,
-  `assigned_by` int(11) DEFAULT NULL,
-  `notes` text COLLATE utf8mb4_unicode_ci,
-  `status` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'assigned',
-  `assigned_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `warehouse_id` int(11) DEFAULT NULL,
-  PRIMARY KEY (`id`) USING BTREE,
-  UNIQUE KEY `uk_order_confirmation_order` (`order_id`) USING BTREE,
-  KEY `idx_order_confirmation_rep_status` (`rep_id`,`status`) USING BTREE,
-  KEY `idx_order_confirmation_status` (`status`) USING BTREE,
-  KEY `idx_oca_rep_assigned` (`rep_id`,`status`,`assigned_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
-
-CREATE TABLE `order_documents` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `order_id` int(11) NOT NULL,
-  `doc_type` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `doc_url` text COLLATE utf8mb4_unicode_ci NOT NULL,
-  `notes` text COLLATE utf8mb4_unicode_ci,
-  `created_by` int(11) DEFAULT NULL,
-  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`) USING BTREE,
-  KEY `order_id` (`order_id`) USING BTREE,
-  CONSTRAINT `order_documents_ibfk_1` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
-
-CREATE TABLE `order_items` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `order_id` int(11) NOT NULL,
-  `product_id` int(11) NOT NULL,
-  `quantity` int(11) NOT NULL,
-  `price_per_unit` decimal(10,2) NOT NULL,
-  PRIMARY KEY (`id`) USING BTREE,
-  KEY `order_id` (`order_id`) USING BTREE,
-  KEY `product_id` (`product_id`) USING BTREE,
-  CONSTRAINT `order_items_ibfk_1` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `order_items_ibfk_2` FOREIGN KEY (`product_id`) REFERENCES `product_variants` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
-
-CREATE TABLE `order_status_history` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `order_id` int(11) NOT NULL,
-  `status` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `action` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `notes` text COLLATE utf8mb4_unicode_ci,
-  `rep_id` int(11) DEFAULT NULL,
-  `created_by` int(11) DEFAULT NULL,
-  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`) USING BTREE,
-  KEY `order_id` (`order_id`) USING BTREE,
-  KEY `status` (`status`) USING BTREE,
-  KEY `idx_osh_order_created` (`order_id`,`created_at`),
-  KEY `idx_osh_order_status` (`order_id`,`status`,`created_at`),
-  CONSTRAINT `order_status_history_ibfk_1` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
-
-CREATE TABLE `permission_actions` (
+-- Table: permission_actions
+DROP TABLE IF EXISTS `permission_actions`;
+CREATE TABLE IF NOT EXISTS `permission_actions` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
   `code` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -818,7 +937,9 @@ CREATE TABLE `permission_actions` (
   UNIQUE KEY `code` (`code`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `permission_modules` (
+-- Table: permission_modules
+DROP TABLE IF EXISTS `permission_modules`;
+CREATE TABLE IF NOT EXISTS `permission_modules` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL,
   `parent_id` int(11) DEFAULT NULL,
@@ -828,27 +949,9 @@ CREATE TABLE `permission_modules` (
   KEY `parent_id` (`parent_id`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `production_stages` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `order_num` int(11) DEFAULT '1',
-  `description` text COLLATE utf8mb4_unicode_ci,
-  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`) USING BTREE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
-
-CREATE TABLE `products` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `category` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `description` text COLLATE utf8mb4_unicode_ci,
-  `is_archived` tinyint(1) NOT NULL DEFAULT '0',
-  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`) USING BTREE,
-  KEY `idx_products_name` (`name`(191)) USING BTREE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
-
-CREATE TABLE `product_movements` (
+-- Table: product_movements
+DROP TABLE IF EXISTS `product_movements`;
+CREATE TABLE IF NOT EXISTS `product_movements` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `product_id` int(11) NOT NULL,
   `warehouse_id` int(11) NOT NULL,
@@ -871,7 +974,9 @@ CREATE TABLE `product_movements` (
   CONSTRAINT `product_movements_ibfk_2` FOREIGN KEY (`warehouse_id`) REFERENCES `warehouses` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `product_tracking` (
+-- Table: product_tracking
+DROP TABLE IF EXISTS `product_tracking`;
+CREATE TABLE IF NOT EXISTS `product_tracking` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `manufacturing_order_id` int(11) NOT NULL,
   `product_id` int(11) NOT NULL,
@@ -899,7 +1004,9 @@ CREATE TABLE `product_tracking` (
   CONSTRAINT `product_tracking_ibfk_5` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `product_variants` (
+-- Table: product_variants
+DROP TABLE IF EXISTS `product_variants`;
+CREATE TABLE IF NOT EXISTS `product_variants` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `product_id` int(11) NOT NULL DEFAULT '0',
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -918,34 +1025,33 @@ CREATE TABLE `product_variants` (
   KEY `idx_pv_product_id` (`product_id`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `report_archives` (
+-- Table: production_stages
+DROP TABLE IF EXISTS `production_stages`;
+CREATE TABLE IF NOT EXISTS `production_stages` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `report_date` date NOT NULL,
-  `report_type` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `sections` text COLLATE utf8mb4_unicode_ci,
-  `html` longtext COLLATE utf8mb4_unicode_ci,
-  `sent` tinyint(1) DEFAULT '0',
+  `name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `order_num` int(11) DEFAULT '1',
+  `description` text COLLATE utf8mb4_unicode_ci,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`) USING BTREE,
-  KEY `report_date` (`report_date`) USING BTREE,
-  KEY `report_type` (`report_type`) USING BTREE,
-  KEY `created_at` (`created_at`) USING BTREE
+  PRIMARY KEY (`id`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `report_email_otps` (
+-- Table: products
+DROP TABLE IF EXISTS `products`;
+CREATE TABLE IF NOT EXISTS `products` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `user_id` int(11) NOT NULL,
-  `email` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `code` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `category` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `description` text COLLATE utf8mb4_unicode_ci,
+  `is_archived` tinyint(1) NOT NULL DEFAULT '0',
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `expires_at` datetime NOT NULL,
-  `verified_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`) USING BTREE,
-  KEY `user_id` (`user_id`) USING BTREE,
-  KEY `email` (`email`) USING BTREE
+  KEY `idx_products_name` (`name`(191)) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `rep_cash_custody` (
+-- Table: rep_cash_custody
+DROP TABLE IF EXISTS `rep_cash_custody`;
+CREATE TABLE IF NOT EXISTS `rep_cash_custody` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `rep_id` int(11) NOT NULL,
   `amount` decimal(15,2) NOT NULL,
@@ -961,7 +1067,9 @@ CREATE TABLE `rep_cash_custody` (
   CONSTRAINT `rep_cash_custody_ibfk_2` FOREIGN KEY (`treasury_id`) REFERENCES `treasuries` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `rep_close_events` (
+-- Table: rep_close_events
+DROP TABLE IF EXISTS `rep_close_events`;
+CREATE TABLE IF NOT EXISTS `rep_close_events` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `rep_id` int(11) NOT NULL,
   `treasury_id` int(11) DEFAULT NULL,
@@ -975,7 +1083,9 @@ CREATE TABLE `rep_close_events` (
   PRIMARY KEY (`id`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `rep_daily_journal` (
+-- Table: rep_daily_journal
+DROP TABLE IF EXISTS `rep_daily_journal`;
+CREATE TABLE IF NOT EXISTS `rep_daily_journal` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `rep_id` int(11) NOT NULL,
   `journal_date` date NOT NULL,
@@ -1023,7 +1133,9 @@ CREATE TABLE `rep_daily_journal` (
   KEY `idx_rdj_rep_closed` (`rep_id`,`is_closed`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `rep_delivery_sessions` (
+-- Table: rep_delivery_sessions
+DROP TABLE IF EXISTS `rep_delivery_sessions`;
+CREATE TABLE IF NOT EXISTS `rep_delivery_sessions` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `session_date` datetime DEFAULT CURRENT_TIMESTAMP,
   `rep_id` int(11) NOT NULL,
@@ -1050,7 +1162,9 @@ CREATE TABLE `rep_delivery_sessions` (
   KEY `idx_rds_date` (`session_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `rep_journal_orders` (
+-- Table: rep_journal_orders
+DROP TABLE IF EXISTS `rep_journal_orders`;
+CREATE TABLE IF NOT EXISTS `rep_journal_orders` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `journal_id` int(11) DEFAULT NULL,
   `rep_id` int(11) NOT NULL,
@@ -1069,7 +1183,9 @@ CREATE TABLE `rep_journal_orders` (
   KEY `idx_rjo_rep_journal` (`rep_id`,`journal_id`,`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `rep_return_events` (
+-- Table: rep_return_events
+DROP TABLE IF EXISTS `rep_return_events`;
+CREATE TABLE IF NOT EXISTS `rep_return_events` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `rep_id` int(11) NOT NULL,
   `user_id` int(11) DEFAULT NULL,
@@ -1081,7 +1197,9 @@ CREATE TABLE `rep_return_events` (
   PRIMARY KEY (`id`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `rep_stock_custody` (
+-- Table: rep_stock_custody
+DROP TABLE IF EXISTS `rep_stock_custody`;
+CREATE TABLE IF NOT EXISTS `rep_stock_custody` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `rep_id` int(11) NOT NULL,
   `product_id` int(11) NOT NULL,
@@ -1094,7 +1212,40 @@ CREATE TABLE `rep_stock_custody` (
   CONSTRAINT `rep_stock_custody_ibfk_2` FOREIGN KEY (`product_id`) REFERENCES `product_variants` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `sales_offices` (
+-- Table: report_archives
+DROP TABLE IF EXISTS `report_archives`;
+CREATE TABLE IF NOT EXISTS `report_archives` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `report_date` date NOT NULL,
+  `report_type` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `sections` text COLLATE utf8mb4_unicode_ci,
+  `html` longtext COLLATE utf8mb4_unicode_ci,
+  `sent` tinyint(1) DEFAULT '0',
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `report_date` (`report_date`) USING BTREE,
+  KEY `report_type` (`report_type`) USING BTREE,
+  KEY `created_at` (`created_at`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+
+-- Table: report_email_otps
+DROP TABLE IF EXISTS `report_email_otps`;
+CREATE TABLE IF NOT EXISTS `report_email_otps` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `email` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `code` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `expires_at` datetime NOT NULL,
+  `verified_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `user_id` (`user_id`) USING BTREE,
+  KEY `email` (`email`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+
+-- Table: sales_offices
+DROP TABLE IF EXISTS `sales_offices`;
+CREATE TABLE IF NOT EXISTS `sales_offices` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `phones` text COLLATE utf8mb4_unicode_ci,
@@ -1102,7 +1253,9 @@ CREATE TABLE `sales_offices` (
   PRIMARY KEY (`id`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `selected_products` (
+-- Table: selected_products
+DROP TABLE IF EXISTS `selected_products`;
+CREATE TABLE IF NOT EXISTS `selected_products` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `user_id` int(11) NOT NULL,
   `product_id` int(11) DEFAULT NULL,
@@ -1114,13 +1267,17 @@ CREATE TABLE `selected_products` (
   PRIMARY KEY (`id`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `settings` (
+-- Table: settings
+DROP TABLE IF EXISTS `settings`;
+CREATE TABLE IF NOT EXISTS `settings` (
   `config_key` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
   `config_value` text COLLATE utf8mb4_unicode_ci,
   PRIMARY KEY (`config_key`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `shipping_companies` (
+-- Table: shipping_companies
+DROP TABLE IF EXISTS `shipping_companies`;
+CREATE TABLE IF NOT EXISTS `shipping_companies` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `phones` text COLLATE utf8mb4_unicode_ci,
@@ -1128,7 +1285,9 @@ CREATE TABLE `shipping_companies` (
   PRIMARY KEY (`id`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `sizes` (
+-- Table: sizes
+DROP TABLE IF EXISTS `sizes`;
+CREATE TABLE IF NOT EXISTS `sizes` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
   `code` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -1137,7 +1296,9 @@ CREATE TABLE `sizes` (
   UNIQUE KEY `code` (`code`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `stock` (
+-- Table: stock
+DROP TABLE IF EXISTS `stock`;
+CREATE TABLE IF NOT EXISTS `stock` (
   `product_id` int(11) NOT NULL,
   `warehouse_id` int(11) NOT NULL,
   `quantity` int(11) DEFAULT '0',
@@ -1147,7 +1308,9 @@ CREATE TABLE `stock` (
   CONSTRAINT `stock_ibfk_2` FOREIGN KEY (`warehouse_id`) REFERENCES `warehouses` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `suppliers` (
+-- Table: suppliers
+DROP TABLE IF EXISTS `suppliers`;
+CREATE TABLE IF NOT EXISTS `suppliers` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `phone` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -1157,7 +1320,9 @@ CREATE TABLE `suppliers` (
   PRIMARY KEY (`id`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `transactions` (
+-- Table: transactions
+DROP TABLE IF EXISTS `transactions`;
+CREATE TABLE IF NOT EXISTS `transactions` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `type` enum('sale','purchase','return_in','return_out','payment_in','payment_out','transfer_in','transfer_out','other','rep_bonus_in','rep_penalty') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `category` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -1182,7 +1347,9 @@ CREATE TABLE `transactions` (
   CONSTRAINT `transactions_ibfk_2` FOREIGN KEY (`treasury_id`) REFERENCES `treasuries` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `treasuries` (
+-- Table: treasuries
+DROP TABLE IF EXISTS `treasuries`;
+CREATE TABLE IF NOT EXISTS `treasuries` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `current_balance` decimal(15,2) DEFAULT '0.00',
@@ -1190,7 +1357,78 @@ CREATE TABLE `treasuries` (
   PRIMARY KEY (`id`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `users` (
+-- Table: user_defaults
+DROP TABLE IF EXISTS `user_defaults`;
+CREATE TABLE IF NOT EXISTS `user_defaults` (
+  `user_id` int(11) NOT NULL,
+  `default_warehouse_id` int(11) DEFAULT NULL,
+  `default_treasury_id` int(11) DEFAULT NULL,
+  `can_change_warehouse` tinyint(1) DEFAULT '0',
+  `can_change_treasury` tinyint(1) DEFAULT '0',
+  `default_sales_office_id` int(11) DEFAULT NULL,
+  `can_change_sales_office` tinyint(1) DEFAULT '0',
+  PRIMARY KEY (`user_id`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+
+-- Table: user_notifications
+DROP TABLE IF EXISTS `user_notifications`;
+CREATE TABLE IF NOT EXISTS `user_notifications` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `type` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `title` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `text` text COLLATE utf8mb4_unicode_ci,
+  `data` longtext COLLATE utf8mb4_unicode_ci,
+  `is_read` tinyint(1) NOT NULL DEFAULT '0',
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `user_id` (`user_id`) USING BTREE,
+  KEY `is_read` (`is_read`) USING BTREE,
+  KEY `created_at` (`created_at`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+
+-- Table: user_page_permissions
+DROP TABLE IF EXISTS `user_page_permissions`;
+CREATE TABLE IF NOT EXISTS `user_page_permissions` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `page_slug` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `can_access` tinyint(1) DEFAULT '0',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE KEY `user_id` (`user_id`,`page_slug`) USING BTREE,
+  CONSTRAINT `user_page_permissions_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+
+-- Table: user_permissions
+DROP TABLE IF EXISTS `user_permissions`;
+CREATE TABLE IF NOT EXISTS `user_permissions` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `module_id` int(11) NOT NULL,
+  `action_id` int(11) NOT NULL,
+  `allowed` tinyint(1) DEFAULT '0',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE KEY `ux_user_module_action` (`user_id`,`module_id`,`action_id`) USING BTREE,
+  KEY `user_id` (`user_id`) USING BTREE,
+  KEY `module_id` (`module_id`) USING BTREE,
+  KEY `action_id` (`action_id`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+
+-- Table: user_preferences
+DROP TABLE IF EXISTS `user_preferences`;
+CREATE TABLE IF NOT EXISTS `user_preferences` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `pref_key` varchar(100) NOT NULL,
+  `pref_value` text,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_user_pref` (`user_id`,`pref_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Table: users
+DROP TABLE IF EXISTS `users`;
+CREATE TABLE IF NOT EXISTS `users` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `username` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -1208,73 +1446,53 @@ CREATE TABLE `users` (
   UNIQUE KEY `username` (`username`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `user_defaults` (
-  `user_id` int(11) NOT NULL,
-  `default_warehouse_id` int(11) DEFAULT NULL,
-  `default_treasury_id` int(11) DEFAULT NULL,
-  `can_change_warehouse` tinyint(1) DEFAULT '0',
-  `can_change_treasury` tinyint(1) DEFAULT '0',
-  `default_sales_office_id` int(11) DEFAULT NULL,
-  `can_change_sales_office` tinyint(1) DEFAULT '0',
-  PRIMARY KEY (`user_id`) USING BTREE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
-
-CREATE TABLE `user_notifications` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `user_id` int(11) NOT NULL,
-  `type` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `title` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `text` text COLLATE utf8mb4_unicode_ci,
-  `data` longtext COLLATE utf8mb4_unicode_ci,
-  `is_read` tinyint(1) NOT NULL DEFAULT '0',
-  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`) USING BTREE,
-  KEY `user_id` (`user_id`) USING BTREE,
-  KEY `is_read` (`is_read`) USING BTREE,
-  KEY `created_at` (`created_at`) USING BTREE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
-
-CREATE TABLE `user_page_permissions` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `user_id` int(11) NOT NULL,
-  `page_slug` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `can_access` tinyint(1) DEFAULT '0',
-  PRIMARY KEY (`id`) USING BTREE,
-  UNIQUE KEY `user_id` (`user_id`,`page_slug`) USING BTREE,
-  CONSTRAINT `user_page_permissions_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
-
-CREATE TABLE `user_permissions` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `user_id` int(11) NOT NULL,
-  `module_id` int(11) NOT NULL,
-  `action_id` int(11) NOT NULL,
-  `allowed` tinyint(1) DEFAULT '0',
-  PRIMARY KEY (`id`) USING BTREE,
-  UNIQUE KEY `ux_user_module_action` (`user_id`,`module_id`,`action_id`) USING BTREE,
-  KEY `user_id` (`user_id`) USING BTREE,
-  KEY `module_id` (`module_id`) USING BTREE,
-  KEY `action_id` (`action_id`) USING BTREE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
-
-CREATE TABLE `user_preferences` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `user_id` int(11) NOT NULL,
-  `pref_key` varchar(100) NOT NULL,
-  `pref_value` text,
-  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_user_pref` (`user_id`,`pref_key`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE TABLE `warehouses` (
+-- Table: warehouses
+DROP TABLE IF EXISTS `warehouses`;
+CREATE TABLE IF NOT EXISTS `warehouses` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `location` text COLLATE utf8mb4_unicode_ci,
   PRIMARY KEY (`id`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `workers` (
+-- Table: worker_salaries
+DROP TABLE IF EXISTS `worker_salaries`;
+CREATE TABLE IF NOT EXISTS `worker_salaries` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `worker_id` int(11) NOT NULL,
+  `period_type` enum('day','week','month','piecework') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `period_value` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `base_salary` decimal(10,2) NOT NULL,
+  `deductions` decimal(10,2) DEFAULT '0.00',
+  `bonuses` decimal(10,2) DEFAULT '0.00',
+  `net_salary` decimal(10,2) NOT NULL,
+  `status` enum('pending','paid') COLLATE utf8mb4_unicode_ci DEFAULT 'pending',
+  `paid_at` timestamp NULL DEFAULT NULL,
+  `notes` text COLLATE utf8mb4_unicode_ci,
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE KEY `uniq_worker_period` (`worker_id`,`period_type`,`period_value`) USING BTREE,
+  CONSTRAINT `worker_salaries_ibfk_1` FOREIGN KEY (`worker_id`) REFERENCES `workers` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+
+-- Table: worker_transactions
+DROP TABLE IF EXISTS `worker_transactions`;
+CREATE TABLE IF NOT EXISTS `worker_transactions` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `worker_id` int(11) NOT NULL,
+  `amount` decimal(10,2) NOT NULL,
+  `type` enum('advance','bonus','penalty','piecework','salary') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `date` date NOT NULL,
+  `notes` text COLLATE utf8mb4_unicode_ci,
+  `status` enum('pending','paid','deducted') COLLATE utf8mb4_unicode_ci DEFAULT 'pending',
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `worker_id` (`worker_id`) USING BTREE,
+  CONSTRAINT `worker_transactions_ibfk_1` FOREIGN KEY (`worker_id`) REFERENCES `workers` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+
+-- Table: workers
+DROP TABLE IF EXISTS `workers`;
+CREATE TABLE IF NOT EXISTS `workers` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `job_title` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -1292,35 +1510,35 @@ CREATE TABLE `workers` (
   KEY `idx_workers_fingerprint_no` (`fingerprint_no`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
-CREATE TABLE `worker_salaries` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `worker_id` int(11) NOT NULL,
-  `period_type` enum('day','week','month','piecework') COLLATE utf8mb4_unicode_ci NOT NULL,
-  `period_value` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `base_salary` decimal(10,2) NOT NULL,
-  `deductions` decimal(10,2) DEFAULT '0.00',
-  `bonuses` decimal(10,2) DEFAULT '0.00',
-  `net_salary` decimal(10,2) NOT NULL,
-  `status` enum('pending','paid') COLLATE utf8mb4_unicode_ci DEFAULT 'pending',
-  `paid_at` timestamp NULL DEFAULT NULL,
-  `notes` text COLLATE utf8mb4_unicode_ci,
-  PRIMARY KEY (`id`) USING BTREE,
-  UNIQUE KEY `uniq_worker_period` (`worker_id`,`period_type`,`period_value`) USING BTREE,
-  CONSTRAINT `worker_salaries_ibfk_1` FOREIGN KEY (`worker_id`) REFERENCES `workers` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+-- ============================================================
+-- SECTION 2: DEFAULT SEED DATA
+-- ============================================================
 
-CREATE TABLE `worker_transactions` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `worker_id` int(11) NOT NULL,
-  `amount` decimal(10,2) NOT NULL,
-  `type` enum('advance','bonus','penalty','piecework','salary') COLLATE utf8mb4_unicode_ci NOT NULL,
-  `date` date NOT NULL,
-  `notes` text COLLATE utf8mb4_unicode_ci,
-  `status` enum('pending','paid','deducted') COLLATE utf8mb4_unicode_ci DEFAULT 'pending',
-  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`) USING BTREE,
-  KEY `worker_id` (`worker_id`) USING BTREE,
-  CONSTRAINT `worker_transactions_ibfk_1` FOREIGN KEY (`worker_id`) REFERENCES `workers` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+-- Default admin user (username: admin, password: admin123)
+INSERT IGNORE INTO `users` (`id`, `name`, `username`, `password`, `role`, `phone`, `is_active`, `created_at`)
+VALUES (1, 'مدير النظام', 'admin', MD5('admin123'), 'admin', '', 1, NOW());
 
+-- Default warehouse
+INSERT IGNORE INTO `warehouses` (`id`, `name`, `location`, `is_default`, `created_at`)
+VALUES (1, 'المستودع الرئيسي', '', 1, NOW());
+
+-- Default treasury
+INSERT IGNORE INTO `treasuries` (`id`, `name`, `balance`, `type`, `created_at`)
+VALUES (1, 'الخزينة الرئيسية', 0.00, 'نقدي', NOW());
+
+-- Default app settings
+INSERT IGNORE INTO `settings` (`config_key`, `config_value`) VALUES
+  ('company_name', 'شركتي'),
+  ('company_phone', ''),
+  ('company_address', ''),
+  ('currency', 'ج.م'),
+  ('auto_backup', 'false'),
+  ('sales_display_method', 'company'),
+  ('product_source', 'both'),
+  ('delivery_method', 'reps'),
+  ('purchase_price_type', 'cost');
+
+-- Default permission modules
 SET FOREIGN_KEY_CHECKS = 1;
+
+-- Installation complete. DragonPro is ready!
