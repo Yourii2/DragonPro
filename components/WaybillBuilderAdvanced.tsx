@@ -67,6 +67,8 @@ const MOCK_ORDER = {
 const DYNAMIC_FIELDS = [
   { key: 'companyName', label: 'اسم الشركة', sample: 'شركة دراجون' },
   { key: 'companyPhone', label: 'هاتف الشركة', sample: '01000000000' },
+  { key: 'companyTerms', label: 'سياسة الشركة / الشروط', sample: 'تعتبر هذه البوليصة مستند استلام رسمي. المعاينة حق للعميل قبل الاستلام.' },
+  { key: 'date', label: 'التاريخ', sample: new Date().toISOString().slice(0, 10) },
   { key: 'orderNumber', label: 'رقم الأوردر', sample: '2024-001' },
   { key: 'customerName', label: 'اسم العميل', sample: 'أحمد محمد علي' },
   { key: 'phone1', label: 'الهاتف الأول', sample: '01012345678' },

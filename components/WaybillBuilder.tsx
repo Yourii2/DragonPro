@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Layout, Palette, Zap } from 'lucide-react';
+import { Layout, Palette, Zap, LayoutTemplate } from 'lucide-react';
 import WaybillBuilderQuick from './WaybillBuilderQuick';
 import WaybillBuilderAdvanced from './WaybillBuilderAdvanced';
+import WaybillTemplatesManager from './WaybillTemplatesManager';
 
 const WaybillBuilder: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'quick' | 'advanced'>('advanced');
+  const [activeTab, setActiveTab] = useState<'quick' | 'advanced' | 'templates'>('advanced');
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 p-4" dir="rtl">
@@ -16,14 +17,24 @@ const WaybillBuilder: React.FC = () => {
           </div>
           <div>
             <h1 className="text-xl font-black text-slate-800 dark:text-white">مصمم بوليصة الشحن</h1>
-            <p className="text-xs text-slate-500">اختر النظام الذي يناسبك لتصميم البوليصة</p>
+            <p className="text-xs text-slate-500">اختر من بين 50 قالباً جنيهاً جاهزاً أو صمّم بوليصتك الخاصة</p>
           </div>
         </div>
 
-        <div className="flex bg-slate-100 dark:bg-slate-900 p-1 rounded-2xl">
+        <div className="flex bg-slate-100 dark:bg-slate-900 p-1 rounded-2xl flex-wrap gap-1">
+          <button
+            onClick={() => setActiveTab('templates')}
+            className={`flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-bold transition-all ${
+              activeTab === 'templates' 
+                ? 'bg-white dark:bg-slate-800 text-amber-600 dark:text-amber-400 shadow-sm' 
+                : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+            }`}
+          >
+            <LayoutTemplate size={16} /> معرض الـ 50 نموذج
+          </button>
           <button
             onClick={() => setActiveTab('quick')}
-            className={`flex items-center gap-2 px-6 py-2 rounded-xl text-sm font-bold transition-all ${
+            className={`flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-bold transition-all ${
               activeTab === 'quick' 
                 ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-sm' 
                 : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
@@ -33,7 +44,7 @@ const WaybillBuilder: React.FC = () => {
           </button>
           <button
             onClick={() => setActiveTab('advanced')}
-            className={`flex items-center gap-2 px-6 py-2 rounded-xl text-sm font-bold transition-all ${
+            className={`flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-bold transition-all ${
               activeTab === 'advanced' 
                 ? 'bg-white dark:bg-slate-800 text-purple-600 dark:text-purple-400 shadow-sm' 
                 : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
@@ -46,7 +57,9 @@ const WaybillBuilder: React.FC = () => {
 
       {/* Content */}
       <div className="animate-in fade-in zoom-in duration-300">
-        {activeTab === 'quick' ? <WaybillBuilderQuick /> : <WaybillBuilderAdvanced />}
+        {activeTab === 'templates' && <WaybillTemplatesManager onEditTemplate={() => setActiveTab('advanced')} />}
+        {activeTab === 'quick' && <WaybillBuilderQuick />}
+        {activeTab === 'advanced' && <WaybillBuilderAdvanced />}
       </div>
     </div>
   );

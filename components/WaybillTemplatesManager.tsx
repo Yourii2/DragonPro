@@ -11,7 +11,8 @@ import {
   LayoutTemplate, 
   Sparkles,
   Layers,
-  FileCheck
+  FileCheck,
+  Pencil
 } from 'lucide-react';
 import { 
   WAYBILL_TEMPLATES_INFO, 
@@ -19,6 +20,7 @@ import {
   getSelectedTemplateId,
   UniversalPrintableOrders 
 } from './UniversalWaybillRenderer';
+import { CanvasItem } from './WaybillBuilderAdvanced';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { assetUrl } from '../services/assetUrl';
 
@@ -46,7 +48,378 @@ const MOCK_ORDER = {
   page: 'صفحة فيسبوك الرئيسية'
 };
 
-const WaybillTemplatesManager: React.FC = () => {
+export function convertTemplateToCanvasItems(templateId: number): CanvasItem[] {
+  const info = WAYBILL_TEMPLATES_INFO.find(t => t.id === templateId);
+  const templateName = info ? info.name : `نموذج ${templateId}`;
+
+  let primaryColor = '#0f172a';
+  let headerBg = '#f8fafc';
+  let headerTextColor = '#0f172a';
+  let borderColor = '#cbd5e1';
+  let borderRadius = 6;
+
+  if (templateId >= 6 && templateId <= 10) { // Royal / Gold
+    primaryColor = '#92400e';
+    headerBg = '#fffbeb';
+    headerTextColor = '#78350f';
+    borderColor = '#fde68a';
+    borderRadius = 8;
+  } else if (templateId >= 11 && templateId <= 20) { // Modern Blue
+    primaryColor = '#1e40af';
+    headerBg = '#eff6ff';
+    headerTextColor = '#1e3a8a';
+    borderColor = '#bfdbfe';
+    borderRadius = 12;
+  } else if (templateId >= 21 && templateId <= 30) { // Courier Green
+    primaryColor = '#065f46';
+    headerBg = '#ecfdf5';
+    headerTextColor = '#064e3b';
+    borderColor = '#a7f3d0';
+    borderRadius = 8;
+  } else if (templateId >= 31 && templateId <= 40) { // Thermal Style
+    primaryColor = '#000000';
+    headerBg = '#f1f5f9';
+    headerTextColor = '#000000';
+    borderColor = '#000000';
+    borderRadius = 2;
+  } else if (templateId >= 41 && templateId <= 50) { // Purple / Special
+    primaryColor = '#581c87';
+    headerBg = '#faf5ff';
+    headerTextColor = '#3b0764';
+    borderColor = '#e9d5ff';
+    borderRadius = 10;
+  }
+
+  return [
+    {
+      id: 'item_border',
+      type: 'rect',
+      x: 6,
+      y: 6,
+      width: 368,
+      height: 518,
+      style: {
+        borderColor: primaryColor,
+        borderWidth: 2,
+        borderStyle: 'solid',
+        backgroundColor: 'transparent',
+        borderRadius: borderRadius,
+        zIndex: 1
+      }
+    },
+    {
+      id: 'item_header_bg',
+      type: 'rect',
+      x: 12,
+      y: 12,
+      width: 356,
+      height: 65,
+      style: {
+        backgroundColor: headerBg,
+        borderColor: borderColor,
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderRadius: Math.max(2, borderRadius - 2),
+        zIndex: 2
+      }
+    },
+    {
+      id: 'item_logo',
+      type: 'logo',
+      x: 20,
+      y: 18,
+      width: 50,
+      height: 50,
+      style: { zIndex: 3 }
+    },
+    {
+      id: 'item_company',
+      type: 'dynamic',
+      dynamicKey: 'companyName',
+      x: 76,
+      y: 20,
+      width: 145,
+      height: 22,
+      style: {
+        fontSize: 13,
+        fontWeight: 'bold',
+        color: headerTextColor,
+        textAlign: 'right',
+        zIndex: 3
+      }
+    },
+    {
+      id: 'item_company_phone',
+      type: 'dynamic',
+      dynamicKey: 'companyPhone',
+      x: 76,
+      y: 44,
+      width: 145,
+      height: 18,
+      style: {
+        fontSize: 10,
+        fontWeight: 'normal',
+        color: headerTextColor,
+        textAlign: 'right',
+        zIndex: 3
+      }
+    },
+    {
+      id: 'item_barcode',
+      type: 'barcode',
+      x: 228,
+      y: 16,
+      width: 132,
+      height: 42,
+      style: { zIndex: 3 }
+    },
+    {
+      id: 'item_customer_bg',
+      type: 'rect',
+      x: 12,
+      y: 84,
+      width: 356,
+      height: 96,
+      style: {
+        backgroundColor: '#ffffff',
+        borderColor: borderColor,
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderRadius: Math.max(2, borderRadius - 2),
+        zIndex: 2
+      }
+    },
+    {
+      id: 'item_gov',
+      type: 'dynamic',
+      dynamicKey: 'governorate',
+      x: 20,
+      y: 92,
+      width: 105,
+      height: 24,
+      style: {
+        backgroundColor: primaryColor,
+        color: '#ffffff',
+        fontSize: 11,
+        fontWeight: 'bold',
+        borderRadius: 12,
+        textAlign: 'center',
+        padding: 2,
+        zIndex: 4
+      }
+    },
+    {
+      id: 'item_customer_name',
+      type: 'dynamic',
+      dynamicKey: 'customerName',
+      x: 135,
+      y: 92,
+      width: 225,
+      height: 24,
+      style: {
+        fontSize: 13,
+        fontWeight: 'bold',
+        color: '#0f172a',
+        textAlign: 'right',
+        zIndex: 4
+      }
+    },
+    {
+      id: 'item_phone1',
+      type: 'dynamic',
+      dynamicKey: 'phone1',
+      x: 20,
+      y: 122,
+      width: 170,
+      height: 20,
+      style: {
+        fontSize: 11,
+        fontWeight: 'bold',
+        color: '#334155',
+        textAlign: 'right',
+        zIndex: 4
+      }
+    },
+    {
+      id: 'item_phone2',
+      type: 'dynamic',
+      dynamicKey: 'phone2',
+      x: 195,
+      y: 122,
+      width: 165,
+      height: 20,
+      style: {
+        fontSize: 11,
+        fontWeight: 'bold',
+        color: '#64748b',
+        textAlign: 'right',
+        zIndex: 4
+      }
+    },
+    {
+      id: 'item_address',
+      type: 'dynamic',
+      dynamicKey: 'address',
+      x: 20,
+      y: 146,
+      width: 340,
+      height: 28,
+      style: {
+        fontSize: 10,
+        color: '#475569',
+        textAlign: 'right',
+        zIndex: 4
+      }
+    },
+    {
+      id: 'item_table',
+      type: 'table',
+      x: 12,
+      y: 188,
+      width: 356,
+      height: 138,
+      style: {
+        borderColor: borderColor,
+        borderWidth: 1,
+        borderStyle: 'solid',
+        fontSize: 10,
+        backgroundColor: '#ffffff',
+        zIndex: 3
+      }
+    },
+    {
+      id: 'item_total_bg',
+      type: 'rect',
+      x: 12,
+      y: 334,
+      width: 356,
+      height: 44,
+      style: {
+        backgroundColor: primaryColor,
+        borderRadius: Math.max(2, borderRadius - 2),
+        zIndex: 2
+      }
+    },
+    {
+      id: 'item_shipping',
+      type: 'dynamic',
+      dynamicKey: 'shipping',
+      x: 22,
+      y: 344,
+      width: 120,
+      height: 24,
+      style: {
+        color: '#ffffff',
+        fontSize: 11,
+        fontWeight: 'bold',
+        textAlign: 'right',
+        zIndex: 3
+      }
+    },
+    {
+      id: 'item_total',
+      type: 'dynamic',
+      dynamicKey: 'total',
+      x: 195,
+      y: 342,
+      width: 165,
+      height: 28,
+      style: {
+        color: '#ffffff',
+        fontSize: 14,
+        fontWeight: 'bold',
+        textAlign: 'left',
+        zIndex: 3
+      }
+    },
+    {
+      id: 'item_notes_bg',
+      type: 'rect',
+      x: 12,
+      y: 384,
+      width: 356,
+      height: 44,
+      style: {
+        backgroundColor: '#f8fafc',
+        borderColor: '#e2e8f0',
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderRadius: Math.max(2, borderRadius - 2),
+        zIndex: 2
+      }
+    },
+    {
+      id: 'item_notes',
+      type: 'dynamic',
+      dynamicKey: 'notes',
+      x: 20,
+      y: 390,
+      width: 340,
+      height: 32,
+      style: {
+        fontSize: 10,
+        color: '#334155',
+        textAlign: 'right',
+        zIndex: 3
+      }
+    },
+    {
+      id: 'item_employee',
+      type: 'dynamic',
+      dynamicKey: 'employee',
+      x: 16,
+      y: 434,
+      width: 170,
+      height: 18,
+      style: {
+        fontSize: 9,
+        color: '#64748b',
+        textAlign: 'right',
+        zIndex: 3
+      }
+    },
+    {
+      id: 'item_date',
+      type: 'dynamic',
+      dynamicKey: 'date',
+      x: 195,
+      y: 434,
+      width: 170,
+      height: 18,
+      style: {
+        fontSize: 9,
+        color: '#64748b',
+        textAlign: 'left',
+        zIndex: 3
+      }
+    },
+    {
+      id: 'item_terms',
+      type: 'dynamic',
+      dynamicKey: 'companyTerms',
+      x: 12,
+      y: 458,
+      width: 356,
+      height: 60,
+      style: {
+        fontSize: 8,
+        color: '#64748b',
+        textAlign: 'center',
+        borderWidth: 1,
+        borderColor: '#f1f5f9',
+        borderStyle: 'solid',
+        padding: 4,
+        zIndex: 3
+      }
+    }
+  ];
+}
+
+interface WaybillTemplatesManagerProps {
+  onEditTemplate?: (templateId: number) => void;
+}
+
+const WaybillTemplatesManager: React.FC<WaybillTemplatesManagerProps> = ({ onEditTemplate }) => {
   const [selectedId, setSelectedId] = useState<number>(() => getSelectedTemplateId());
   const [previewId, setPreviewId] = useState<number>(() => getSelectedTemplateId());
   const [loading, setLoading] = useState<boolean>(false);
@@ -104,6 +477,33 @@ const WaybillTemplatesManager: React.FC = () => {
     }
   };
 
+  const handleEditInAdvancedBuilder = (templateId: number) => {
+    const items = convertTemplateToCanvasItems(templateId);
+    const info = WAYBILL_TEMPLATES_INFO.find(t => t.id === templateId);
+    const templateName = info ? info.name : `نموذج ${templateId}`;
+    
+    const templateData = {
+      name: `تعديل ${templateName}`,
+      items,
+      savedAt: new Date().toISOString()
+    };
+
+    localStorage.setItem('Dragon_advanced_waybill_template', JSON.stringify(templateData));
+    localStorage.setItem('Dragon_waybill_template', '51');
+
+    Swal.fire({
+      title: 'جاري التحويل للمصمم المتقدم...',
+      text: `تم تحميل تصميم "${templateName}" في المصمم المتقدم لتعديل أماكن وأحجام العناصر.`,
+      icon: 'success',
+      timer: 1800,
+      showConfirmButton: false
+    });
+
+    if (onEditTemplate) {
+      onEditTemplate(templateId);
+    }
+  };
+
   const handleTestPrint = (templateId: number) => {
     setPrintOrder([MOCK_ORDER]);
     setTimeout(() => {
@@ -136,7 +536,7 @@ const WaybillTemplatesManager: React.FC = () => {
             </div>
             <div>
               <h1 className="text-2xl font-black tracking-tight">نماذج وقوالب بوالص الشحن والفواتير</h1>
-              <p className="text-sm text-blue-200">اختر من بين 50 قالباً مختلفاً كلياً في التنسيق والهيكل بما يمنح شركتك هوية فريدة أمام العملاء والمناديب.</p>
+              <p className="text-sm text-blue-200">اختر من بين 50 قالباً مختلفاً كلياً أو اضغط "تعديل" لتخصيص مكان أي عنصر في المصمم المتقدم.</p>
             </div>
           </div>
         </div>
@@ -175,7 +575,7 @@ const WaybillTemplatesManager: React.FC = () => {
                   }`}
                 >
                   <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-start gap-3">
+                    <div className="flex items-start gap-3 flex-1">
                       <span className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-sm flex-shrink-0 ${
                         isCurrent
                           ? 'bg-emerald-600 text-white'
@@ -197,6 +597,18 @@ const WaybillTemplatesManager: React.FC = () => {
                         <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{item.desc}</p>
                       </div>
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleEditInAdvancedBuilder(item.id);
+                      }}
+                      className="px-3 py-1.5 bg-purple-100 dark:bg-purple-900/40 hover:bg-purple-600 hover:text-white text-purple-700 dark:text-purple-300 rounded-xl text-xs font-bold flex items-center gap-1 transition-all shrink-0"
+                      title="تعديل هذا التصميم في المصمم المتقدم"
+                    >
+                      <Pencil size={13} /> تعديل
+                    </button>
                   </div>
                 </div>
               );
@@ -218,19 +630,26 @@ const WaybillTemplatesManager: React.FC = () => {
                 <p className="text-xs text-slate-500 mt-0.5">معاينة واقعية لشكل البوليصة كما ستخرج على الورق عند الطباعة.</p>
               </div>
 
-              <div className="flex items-center gap-2 w-full sm:w-auto">
+              <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
                 <button
                   type="button"
                   onClick={() => handleTestPrint(previewId)}
-                  className="flex-1 sm:flex-initial px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-xl font-bold text-xs hover:bg-slate-200 flex items-center justify-center gap-1.5 transition-colors"
+                  className="flex-1 sm:flex-initial px-3.5 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-xl font-bold text-xs hover:bg-slate-200 flex items-center justify-center gap-1.5 transition-colors"
                 >
                   <Printer size={15} /> طباعة تجريبية
                 </button>
                 <button
                   type="button"
+                  onClick={() => handleEditInAdvancedBuilder(previewId)}
+                  className="flex-1 sm:flex-initial px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-purple-500/20 transition-all"
+                >
+                  <Pencil size={15} /> تعديل في المصمم المتقدم
+                </button>
+                <button
+                  type="button"
                   disabled={loading || selectedId === previewId}
                   onClick={() => handleSelectTemplate(previewId)}
-                  className={`flex-1 sm:flex-initial px-5 py-2 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 shadow-lg transition-all ${
+                  className={`flex-1 sm:flex-initial px-4 py-2 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 shadow-lg transition-all ${
                     selectedId === previewId
                       ? 'bg-emerald-600 text-white cursor-default'
                       : 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-500/20'

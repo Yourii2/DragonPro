@@ -2347,6 +2347,8 @@ const Template51_CustomDragDrop: React.FC<WaybillProps> = (props) => {
     switch(dynamicKey) {
       case 'companyName': return companyName;
       case 'companyPhone': return companyPhone;
+      case 'companyTerms': return terms || 'تعتبر هذه البوليصة مستند استلام رسمي. المعاينة حق للعميل.';
+      case 'date': return d.date;
       case 'orderNumber': return d.orderNumber;
       case 'customerName': return d.customerName;
       case 'phone1': return d.phone1;

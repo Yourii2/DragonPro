@@ -3,6 +3,7 @@ import Swal from 'sweetalert2';
 import { ArrowDownAZ, ArrowUpAZ, CheckCircle2, CheckSquare, Clock, Lock, MapPin, Package2, Phone, PhoneCall, PhoneOff, Printer, RotateCcw, Save, ScanLine, ShieldCheck, Trash2, UserCheck, Users2, WalletCards, XCircle, MessageCircle } from 'lucide-react';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { PrintableOrders } from './PrintableOrderCard';
+import CustomSelect from './CustomSelect';
 
 type RepSummary = {
   id: number;
@@ -1321,34 +1322,36 @@ const OrderConfirmations: React.FC = () => {
             ) : (
               <>
                 <label className="mb-2 block text-xs font-black text-slate-600 dark:text-slate-300">اختر اسم المندوب</label>
-                <select
-                  value={selectedRepId ?? ''}
-                  onChange={(event) => setSelectedRepId(event.target.value ? Number(event.target.value) : null)}
-                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-black outline-none focus:border-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
-                >
-                  <option value="">اختر مندوب...</option>
-                  {reps.map((rep) => (
-                    <option key={rep.id} value={rep.id}>
-                      {rep.name} {rep.phone ? `- ${rep.phone}` : ''}
-                    </option>
-                  ))}
-                </select>
+                <CustomSelect
+                  value={selectedRepId ? String(selectedRepId) : ''}
+                  onChange={(v) => setSelectedRepId(v ? Number(v) : null)}
+                  options={[
+                    { value: '', label: 'اختر مندوب...' },
+                    ...reps.map((rep) => ({
+                      value: String(rep.id),
+                      label: `${rep.name}${rep.phone ? ` - ${rep.phone}` : ''}`,
+                      searchLabel: `${rep.name} ${rep.phone || ''}`
+                    }))
+                  ]}
+                  className="w-full"
+                />
 
                 {/* تم نقل قائمة المناديب المسند لهم إلى اليسار */}
 
                 <label className="mb-2 mt-3 block text-xs font-black text-slate-600 dark:text-slate-300">اختر المخزن</label>
-                <select
-                  value={selectedWarehouseId ?? ''}
-                  onChange={(event) => setSelectedWarehouseId(event.target.value ? Number(event.target.value) : null)}
-                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-black outline-none focus:border-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
-                >
-                  <option value="">اختر مخزن...</option>
-                  {warehouses.map((warehouse) => (
-                    <option key={warehouse.id} value={warehouse.id}>
-                      {warehouse.name}
-                    </option>
-                  ))}
-                </select>
+                <CustomSelect
+                  value={selectedWarehouseId ? String(selectedWarehouseId) : ''}
+                  onChange={(v) => setSelectedWarehouseId(v ? Number(v) : null)}
+                  options={[
+                    { value: '', label: 'اختر مخزن...' },
+                    ...warehouses.map((warehouse) => ({
+                      value: String(warehouse.id),
+                      label: warehouse.name,
+                      searchLabel: warehouse.name
+                    }))
+                  ]}
+                  className="w-full"
+                />
               </>
             )}
           </div>
