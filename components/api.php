@@ -2561,7 +2561,7 @@ function confirmation_resolve_order_variant(PDO $pdo, int $currentProductId, int
     $stmt->execute([$currentProductId]);
     $curr = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    if ($curr && intval($curr['is_archived']) === 0 && intval($curr['stock_qty']) > 0) {
+    if ($curr && intval($curr['is_archived']) === 0) {
         return [
             'id' => intval($curr['id']),
             'product_name' => $curr['parent_name'] ?: $curr['name'],
@@ -2699,9 +2699,12 @@ function confirmation_collect_order_requirements(PDO $pdo, array $orderIds, int 
         $resolved = confirmation_resolve_order_variant($pdo, $rawPid, $warehouseId);
         $resolvedId = intval($resolved['id'] ?? $rawPid);
 
-        // If rawPid was resolved to a better active variant, fix order_items row
+        // Only update if it's actually an archived product moving to an active one, not just swapping sizes
         if ($resolvedId > 0 && $resolvedId !== $rawPid) {
-            execute_query($pdo, "UPDATE order_items SET product_id = ? WHERE id = ?", [$resolvedId, $item['id']]);
+            $isSameProduct = execute_query($pdo, "SELECT id FROM product_variants WHERE id = ? AND (product_id = (SELECT product_id FROM product_variants WHERE id = ?) OR product_id = ?)", [$resolvedId, $rawPid, $rawPid])->fetch(PDO::FETCH_ASSOC);
+            if ($isSameProduct) {
+                execute_query($pdo, "UPDATE order_items SET product_id = ? WHERE id = ?", [$resolvedId, $item['id']]);
+            }
         }
 
         $key = $resolvedId;

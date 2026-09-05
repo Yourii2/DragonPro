@@ -252,7 +252,7 @@ const syncStagedDecisionsWithAssignments = (
   }, {});
 };
 
-const StatCard: React.FC<{ title: string; value: string | number; sub?: string; iconBoxClass: string; iconColorClass: string; icon: React.ElementType; iconClassName?: string }> = ({
+const StatCard: React.FC<{ title: string; value: string | number; sub?: string; iconBoxClass: string; iconColorClass: string; icon: React.ElementType; iconClassName?: string }> = React.memo(({
   title,
   value,
   sub,
@@ -273,7 +273,7 @@ const StatCard: React.FC<{ title: string; value: string | number; sub?: string; 
       </div>
     </div>
   </div>
-);
+));
 
 const ScanPanel: React.FC<{
   title: string;
@@ -341,7 +341,7 @@ const SmallOrderCard: React.FC<{
   onToggleSelect?: (assignment: AssignmentRow, selected: boolean) => void;
   onWhatsApp?: (assignment: AssignmentRow) => void;
   onUpdateDecision?: (assignment: AssignmentRow, decision: 'wrong_number' | 'confirm' | 'close' | 'no_answer' | 'postponed' | 'cancel' | 'assign') => void;
-}> = ({ assignment, badgeLabel, badgeClass, iconClass, actionIcon: ActionIcon, actionLabel, actionClass, onAction, actionDisabled = false, selectable = false, selected = false, onToggleSelect, onWhatsApp, onUpdateDecision }) => {
+}> = React.memo(({ assignment, badgeLabel, badgeClass, iconClass, actionIcon: ActionIcon, actionLabel, actionClass, onAction, actionDisabled = false, selectable = false, selected = false, onToggleSelect, onWhatsApp, onUpdateDecision }) => {
   const order = assignment.order || { id: assignment.order_id };
   const orderProducts = getOrderProducts(order);
 
@@ -494,7 +494,13 @@ const SmallOrderCard: React.FC<{
       </div>
     </div>
   );
-};
+}, (prevProps, nextProps) => {
+  return (
+    prevProps.selected === nextProps.selected &&
+    prevProps.assignment.id === nextProps.assignment.id &&
+    prevProps.actionDisabled === nextProps.actionDisabled
+  );
+});
 
 const OrderConfirmations: React.FC = () => {
   const [reps, setReps] = useState<RepSummary[]>([]);

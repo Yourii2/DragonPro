@@ -2267,25 +2267,47 @@ export const UniversalPrintableOrders: React.FC<{
             print-color-adjust: exact !important; 
             color-adjust: exact !important; 
           }
+          
+          /* Dynamic Shrinking for Many Products */
+          .many-products-medium table { font-size: 9px !important; }
+          .many-products-medium table th, .many-products-medium table td { padding: 2px !important; }
+          
+          .many-products-high table { font-size: 8px !important; }
+          .many-products-high table th, .many-products-high table td { padding: 1px !important; line-height: 1 !important; }
+          .many-products-high .waybill-container, .many-products-high .waybill-content { gap: 2px !important; }
+          
+          .many-products-extreme table { font-size: 7px !important; }
+          .many-products-extreme table th, .many-products-extreme table td { padding: 0px 1px !important; line-height: 1 !important; }
+          .many-products-extreme .waybill-container, .many-products-extreme .waybill-content { gap: 0px !important; }
+          .many-products-extreme .mb-2, .many-products-extreme .mb-4 { margin-bottom: 2px !important; }
+          .many-products-extreme .p-2, .many-products-extreme .p-4 { padding: 2px !important; }
         }
       `}</style>
       <div id="print-container-inner">
         {chunks.map((chunk, pageIdx) => (
           <div key={pageIdx} className="print-a4-page">
-            {chunk.map((order: any, orderIdx: number) => (
-              <div key={order.id || orderIdx} className="quarter-a4-cell">
-                <UniversalWaybill
-                  order={order}
-                  companyName={compName}
-                  companyPhone={compPhone}
-                  companyAddress={compAddr}
-                  companyLogo={compLogo}
-                  terms={compTerms}
-                  templateId={currentTemplate}
-                  users={users}
-                />
-              </div>
-            ))}
+            {chunk.map((order: any, orderIdx: number) => {
+              const pCount = (order.products || order.cart || []).length;
+              let sizeClass = '';
+              if (pCount > 6) sizeClass = 'many-products-extreme';
+              else if (pCount > 4) sizeClass = 'many-products-high';
+              else if (pCount > 2) sizeClass = 'many-products-medium';
+
+              return (
+                <div key={order.id || orderIdx} className={`quarter-a4-cell ${sizeClass}`}>
+                  <UniversalWaybill
+                    order={order}
+                    companyName={compName}
+                    companyPhone={compPhone}
+                    companyAddress={compAddr}
+                    companyLogo={compLogo}
+                    terms={compTerms}
+                    templateId={currentTemplate}
+                    users={users}
+                  />
+                </div>
+              );
+            })}
           </div>
         ))}
       </div>

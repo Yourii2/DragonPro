@@ -130,7 +130,7 @@ const getOrderStatusLabelAr = (statusRaw: any) => {
   }
 };
 
-const StatCard: React.FC<{ label: string; value: React.ReactNode; hint?: string; className?: string }> = ({
+const StatCard: React.FC<{ label: string; value: React.ReactNode; hint?: string; className?: string }> = React.memo(({
   label,
   value,
   hint,
@@ -145,7 +145,7 @@ const StatCard: React.FC<{ label: string; value: React.ReactNode; hint?: string;
     <div className="mt-1 text-lg font-black text-slate-900 dark:text-white">{value}</div>
     {hint ? <div className="mt-1 text-xs text-slate-400">{hint}</div> : null}
   </div>
-);
+));
 
 const formatOrderTime = (dateStr?: string | null): string => {
   if (!dateStr) return '';
