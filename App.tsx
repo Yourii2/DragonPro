@@ -11,6 +11,7 @@ import InventoryModule from './components/InventoryModule';
 import OrdersModule from './components/SalesModule';
 import PrintWaybill from './components/PrintWaybill';
 import AdminModule from './components/AdminModule';
+import WaybillBuilder from './components/WaybillBuilder';
 import FinanceModule from './components/FinanceModule';
 import HRMModule from './components/HRMModule';
 import RepresentativesModule from './components/RepresentativesModule';
@@ -347,6 +348,8 @@ const App: React.FC = () => {
         return <AdminModule initialView={activeSubSlug} />;
       case 'waybill-templates':
         return <AdminModule initialView="waybill-templates" />;
+      case 'waybill-builder':
+        return <WaybillBuilder />;
       case 'settings':
         return <SettingsModule />;
       case 'attendance':

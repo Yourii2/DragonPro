@@ -1,7 +1,7 @@
 
 import React from 'react';
 
-import { LayoutDashboard, Users, ShoppingCart, Package, Truck, Briefcase, Settings, ShieldCheck, Wallet, BarChart3, Fingerprint, QrCode, PhoneCall, LayoutTemplate } from 'lucide-react';
+import { LayoutDashboard, Users, ShoppingCart, Package, Truck, Briefcase, Settings, ShieldCheck, Wallet, BarChart3, Fingerprint, QrCode, PhoneCall, LayoutTemplate, Palette } from 'lucide-react';
 
 export const MENU_ITEMS = [
   {
@@ -238,6 +238,12 @@ export const MENU_ITEMS = [
     label: 'قوالب بوالص الشحن',
     icon: <LayoutTemplate className="w-5 h-5" />,
     slug: 'waybill-templates'
+  },
+  {
+    id: 'waybill-builder',
+    label: 'مصمم البوليصة',
+    icon: <Palette className="w-5 h-5" />,
+    slug: 'waybill-builder'
   },
   {
     id: 'settings',

@@ -365,28 +365,16 @@ export const PrintableOrders: React.FC<{
           <div key={pageIdx} className="print-a4-page">
             {chunk.map((order: any, orderIdx: number) => (
               <div key={order.id || orderIdx} className="quarter-a4-cell">
-                {currentTemplate === 1 ? (
-                  <PrintableContent
-                    order={order}
-                    companyName={compName}
-                    companyPhone={compPhone}
-                    companyAddress={compAddress}
-                    terms={compTerms}
-                    companyLogo={compLogo}
-                    users={users}
-                  />
-                ) : (
-                  <UniversalWaybill
-                    order={order}
-                    companyName={compName}
-                    companyPhone={compPhone}
-                    companyAddress={compAddress}
-                    terms={compTerms}
-                    companyLogo={compLogo}
-                    templateId={currentTemplate}
-                    users={users}
-                  />
-                )}
+                <UniversalWaybill
+                  order={order}
+                  companyName={compName}
+                  companyPhone={compPhone}
+                  companyAddress={compAddress}
+                  terms={compTerms}
+                  companyLogo={compLogo}
+                  templateId={currentTemplate}
+                  users={users}
+                />
               </div>
             ))}
           </div>

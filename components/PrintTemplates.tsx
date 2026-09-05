@@ -33,7 +33,7 @@ export const PrintableOrdersSingle: React.FC<{ orders: any[]; templateId?: numbe
           else if (s.company_logo) setCompanyLogo(s.company_logo);
           if (s.waybill_template) {
             const id = Number(s.waybill_template);
-            if (id >= 1 && id <= 21) {
+            if (id >= 1 && id <= 50) {
               setActiveTemplate(id);
               localStorage.setItem('Dragon_waybill_template', String(id));
             }

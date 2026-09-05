@@ -66,7 +66,7 @@ const WaybillTemplatesManager: React.FC = () => {
         const json = await res.json();
         if (json?.success && json?.data?.waybill_template) {
           const id = Number(json.data.waybill_template);
-          if (id >= 1 && id <= 21) {
+          if (id >= 1 && id <= 50) {
             setSelectedId(id);
             setPreviewId(id);
             localStorage.setItem('Dragon_waybill_template', String(id));
@@ -136,7 +136,7 @@ const WaybillTemplatesManager: React.FC = () => {
             </div>
             <div>
               <h1 className="text-2xl font-black tracking-tight">نماذج وقوالب بوالص الشحن والفواتير</h1>
-              <p className="text-sm text-blue-200">اختر من بين 21 قالباً مختلفاً كلياً في التنسيق والهيكل بما يمنح شركتك هوية فريدة أمام العملاء والمناديب.</p>
+              <p className="text-sm text-blue-200">اختر من بين 50 قالباً مختلفاً كلياً في التنسيق والهيكل بما يمنح شركتك هوية فريدة أمام العملاء والمناديب.</p>
             </div>
           </div>
         </div>
@@ -156,7 +156,7 @@ const WaybillTemplatesManager: React.FC = () => {
         <div className="lg:col-span-5 space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-              <Layers className="w-5 h-5 text-blue-500" /> قائمة القوالب المتوفرة (21 قالباً)
+              <Layers className="w-5 h-5 text-blue-500" /> قائمة القوالب المتوفرة (50 قالباً)
             </h2>
           </div>
           
