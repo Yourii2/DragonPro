@@ -278,7 +278,7 @@ export const PrintableOrders: React.FC<{
   users?: any[];
   templateId?: number | string;
 }> = ({ orders, companyName, companyPhone, terms, companyLogo, companyAddress, users, templateId }) => {
-  const currentTemplate = Number(templateId || getSelectedTemplateId() || 1);
+  const currentTemplate = templateId || getSelectedTemplateId() || 1;
   const compName = companyName || (typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_name') || 'اسم الشركة') : 'اسم الشركة');
   const compPhone = companyPhone || (typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_phone') || '') : '');
   const compTerms = terms || (typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_terms') || 'المعاينة حق للعميل قبل الاستلام.') : 'المعاينة حق للعميل قبل الاستلام.');

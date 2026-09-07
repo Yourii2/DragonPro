@@ -3,10 +3,14 @@ import Swal from 'sweetalert2';
 import {
   Palette, Type, Layout, Eye, Save, RotateCcw, Download, Upload,
   ChevronDown, ChevronUp, Printer, Sliders, CheckSquare, Square,
-  Building, Barcode as BarcodeIcon, MapPin, Package, StickyNote, User, FileText, Zap
+  Building, Barcode as BarcodeIcon, MapPin, Package, StickyNote, User, FileText, Zap, ArrowRight
 } from 'lucide-react';
 import Barcode from './Barcode';
-import { getOrderData } from './UniversalWaybillRenderer';
+import { 
+  getOrderData, 
+  saveCustomWaybillTemplate, 
+  CustomWaybillTemplate 
+} from './UniversalWaybillRenderer';
 import { assetUrl } from '../services/assetUrl';
 
 interface WaybillSection {
@@ -225,7 +229,7 @@ const QuickWaybillPreview: React.FC<{
             <tbody>
               {d.products.map((p, i) => (
                 <tr key={i} style={{ borderBottom: `1px solid ${style.borderColor}`, backgroundColor: i % 2 === 0 ? 'transparent' : `${style.primaryColor}08` }}>
-                  <td className="p-1 font-bold truncate max-w-[140px]">{p.name} {p.variant && <span className="text-[9px] opacity-60">({p.variant})</span>}</td>
+                  <td className="p-1 font-bold break-words leading-tight whitespace-normal" style={{ wordBreak: 'break-word' }}>{p.name} {p.variant && <span className="text-[9px] opacity-60">({p.variant})</span>}</td>
                   <td className="p-1 text-center font-bold">{p.qty}</td>
                   <td className="p-1 text-center font-mono">{p.price}</td>
                   <td className="p-1 text-center font-mono font-bold">{p.lineTotal}</td>
@@ -272,28 +276,71 @@ const QuickWaybillPreview: React.FC<{
   );
 };
 
-const WaybillBuilderQuick: React.FC = () => {
-  const [style, setStyle] = useState<WaybillStyle>(DEFAULT_STYLE);
-  const [sections, setSections] = useState<WaybillSection[]>(DEFAULT_SECTIONS);
-  const [templateName, setTemplateName] = useState('القالب السريع');
+export interface WaybillBuilderQuickProps {
+  initialPayload?: {
+    type: 'advanced' | 'quick';
+    templateId?: number | string;
+    customTemplate?: CustomWaybillTemplate;
+    initialData?: any;
+  };
+  onBackToTemplates?: () => void;
+}
 
-  const companyName = localStorage.getItem('Dragon_company_name') || 'اسم الشركة';
-  const companyPhone = localStorage.getItem('Dragon_company_phone') || '01000000000';
-  const companyTerms = localStorage.getItem('Dragon_company_terms') || 'المعاينة حق للعميل قبل الاستلام.';
-  const companyLogo = localStorage.getItem('Dragon_company_logo_url') || localStorage.getItem('Dragon_company_logo') || assetUrl('Dragon.png');
+const WaybillBuilderQuick: React.FC<WaybillBuilderQuickProps> = ({
+  initialPayload,
+  onBackToTemplates
+}) => {
+  const [editingCustomId, setEditingCustomId] = useState<string | number | null>(() => {
+    if (initialPayload?.customTemplate?.id) return initialPayload.customTemplate.id;
+    if (initialPayload?.templateId && String(initialPayload.templateId).startsWith('custom_')) {
+      return initialPayload.templateId;
+    }
+    return null;
+  });
 
-  // Load saved
-  React.useEffect(() => {
+  const [style, setStyle] = useState<WaybillStyle>(() => {
+    if (initialPayload?.customTemplate?.data?.style) return initialPayload.customTemplate.data.style;
+    if (initialPayload?.initialData?.style) return initialPayload.initialData.style;
     try {
       const saved = localStorage.getItem('Dragon_quick_waybill_template');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed.style) setStyle(parsed.style);
-        if (parsed.sections) setSections(parsed.sections);
-        if (parsed.name) setTemplateName(parsed.name);
+        if (parsed.style) return parsed.style;
       }
-    } catch (e) { }
-  }, []);
+    } catch (e) {}
+    return DEFAULT_STYLE;
+  });
+
+  const [sections, setSections] = useState<WaybillSection[]>(() => {
+    if (initialPayload?.customTemplate?.data?.sections) return initialPayload.customTemplate.data.sections;
+    if (initialPayload?.initialData?.sections) return initialPayload.initialData.sections;
+    try {
+      const saved = localStorage.getItem('Dragon_quick_waybill_template');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.sections) return parsed.sections;
+      }
+    } catch (e) {}
+    return DEFAULT_SECTIONS;
+  });
+
+  const [templateName, setTemplateName] = useState<string>(() => {
+    if (initialPayload?.customTemplate?.name) return initialPayload.customTemplate.name;
+    if (initialPayload?.initialData?.name) return initialPayload.initialData.name;
+    try {
+      const saved = localStorage.getItem('Dragon_quick_waybill_template');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.name) return parsed.name;
+      }
+    } catch (e) {}
+    return 'القالب السريع';
+  });
+
+  const companyName = (typeof window !== 'undefined' ? localStorage.getItem('Dragon_company_name') : null) || 'اسم الشركة';
+  const companyPhone = (typeof window !== 'undefined' ? localStorage.getItem('Dragon_company_phone') : null) || '01000000000';
+  const companyTerms = (typeof window !== 'undefined' ? localStorage.getItem('Dragon_company_terms') : null) || 'المعاينة حق للعميل قبل الاستلام.';
+  const companyLogo = (typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_logo_url') || localStorage.getItem('Dragon_company_logo')) : null) || assetUrl('Dragon.png');
 
   const updateStyle = (key: keyof WaybillStyle, value: any) => {
     setStyle(prev => ({ ...prev, [key]: value }));
@@ -336,17 +383,31 @@ const WaybillBuilderQuick: React.FC = () => {
     setSections(prev => prev.map(s => s.id === id ? { ...s, enabled: !s.enabled } : s));
   };
 
-  const saveTemplate = () => {
+  const saveTemplate = (saveAsNew: boolean = false) => {
     const templateData = { name: templateName, style, sections };
-    localStorage.setItem('Dragon_quick_waybill_template', JSON.stringify(templateData));
-    localStorage.setItem('Dragon_waybill_template', '52');
-    
+    const targetId = saveAsNew ? undefined : (editingCustomId || undefined);
+
+    const savedCustom = saveCustomWaybillTemplate({
+      id: targetId,
+      name: templateName.trim() || 'قالب سريع مخصص',
+      type: 'quick',
+      data: templateData
+    });
+    setEditingCustomId(savedCustom.id);
+
     Swal.fire({
-      title: '✅ تم الحفظ',
-      text: 'تم حفظ القالب السريع بنجاح كقالب رقم 52 الافتراضي',
+      title: '✅ تم حفظ القالب بنجاح!',
+      text: `تم حفظ "${savedCustom.name}" في قائمة قوالب المستخدم الخاصة بك وتعيينه كافتراضي.`,
       icon: 'success',
-      timer: 2000,
-      showConfirmButton: false,
+      showCancelButton: true,
+      confirmButtonText: 'الذهاب لقائمة القوالب',
+      cancelButtonText: 'متابعة التعديل',
+      confirmButtonColor: '#2563eb',
+      cancelButtonColor: '#64748b'
+    }).then((result) => {
+      if (result.isConfirmed && onBackToTemplates) {
+        onBackToTemplates();
+      }
     });
   };
 
@@ -360,12 +421,34 @@ const WaybillBuilderQuick: React.FC = () => {
             type="text" 
             value={templateName}
             onChange={e => setTemplateName(e.target.value)}
-            className="flex-1 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm font-bold"
+            className="flex-1 min-w-[110px] bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-xs font-bold"
             placeholder="اسم القالب السريع..."
           />
-          <button onClick={saveTemplate} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2">
-            <Save size={16} /> حفظ 
+          <button 
+            onClick={() => saveTemplate(false)} 
+            className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shrink-0"
+            title="حفظ في قائمة قوالب المستخدم"
+          >
+            <Save size={14} /> {editingCustomId ? 'حفظ التعديل' : 'حفظ القالب'}
           </button>
+          {editingCustomId && (
+            <button 
+              onClick={() => saveTemplate(true)} 
+              className="bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-700 dark:text-slate-200 px-2 py-1.5 rounded-lg text-xs font-bold shrink-0"
+              title="حفظ كقالب جديد منفصل"
+            >
+              نسخة جديدة
+            </button>
+          )}
+          {onBackToTemplates && (
+            <button 
+              onClick={onBackToTemplates} 
+              className="bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-700 dark:text-slate-200 px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shrink-0"
+              title="العودة لمعرض القوالب"
+            >
+              <ArrowRight size={14} /> القوالب
+            </button>
+          )}
         </div>
 
         <CollapseSection title="سمات جاهزة" icon={<Zap size={15} />}>

@@ -345,11 +345,10 @@ const App: React.FC = () => {
       case 'reports':
         return <ReportsModule initialView={activeSubSlug} />;
       case 'admin':
-        return <AdminModule initialView={activeSubSlug} />;
+        return <AdminModule initialView={activeSubSlug === 'waybill-templates' ? 'waybill-builder' : activeSubSlug} />;
       case 'waybill-templates':
-        return <AdminModule initialView="waybill-templates" />;
       case 'waybill-builder':
-        return <WaybillBuilder />;
+        return <AdminModule initialView="waybill-builder" />;
       case 'settings':
         return <SettingsModule />;
       case 'attendance':

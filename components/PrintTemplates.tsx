@@ -16,7 +16,7 @@ export const PrintableOrdersSingle: React.FC<{ orders: any[]; templateId?: numbe
   const [companyLogo, setCompanyLogo] = useState<string | null>(
     (typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_logo_url') || localStorage.getItem('Dragon_company_logo')) : null) || assetUrl('Dragon.png')
   );
-  const [activeTemplate, setActiveTemplate] = useState<number>(() => Number(templateId || getSelectedTemplateId() || 1));
+  const [activeTemplate, setActiveTemplate] = useState<number | string>(() => templateId || getSelectedTemplateId() || 1);
 
   useEffect(() => {
     (async () => {
@@ -32,11 +32,8 @@ export const PrintableOrdersSingle: React.FC<{ orders: any[]; templateId?: numbe
           if (s.company_logo_url) setCompanyLogo(s.company_logo_url);
           else if (s.company_logo) setCompanyLogo(s.company_logo);
           if (s.waybill_template) {
-            const id = Number(s.waybill_template);
-            if (id >= 1 && id <= 50) {
-              setActiveTemplate(id);
-              localStorage.setItem('Dragon_waybill_template', String(id));
-            }
+            setActiveTemplate(s.waybill_template);
+            localStorage.setItem('Dragon_waybill_template', String(s.waybill_template));
           }
         }
       } catch (e) { console.debug('Failed to load print settings', e); }

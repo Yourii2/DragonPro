@@ -1,6 +1,9 @@
 /**
  * WaybillTemplatesManager.tsx
- * Management page for browsing, previewing, and selecting from 20 distinct waybill templates.
+ * Management page for browsing, previewing, and selecting waybill templates.
+ * Provides separate tabs for:
+ * 1. Pre-designed Built-in Templates (50 Templates)
+ * 2. User Custom Templates (Created via Drag & Drop or Quick Designer)
  */
 import React, { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
@@ -12,15 +15,27 @@ import {
   Sparkles,
   Layers,
   FileCheck,
-  Pencil
+  Pencil,
+  Trash2,
+  Plus,
+  Search,
+  User,
+  Zap,
+  Sliders,
+  Calendar,
+  AlertCircle
 } from 'lucide-react';
 import { 
   WAYBILL_TEMPLATES_INFO, 
   UniversalWaybill, 
   getSelectedTemplateId,
+  setSelectedTemplateId,
+  getCustomWaybillTemplates,
+  deleteCustomWaybillTemplate,
+  convertTemplateToCanvasItems,
+  CustomWaybillTemplate,
   UniversalPrintableOrders 
 } from './UniversalWaybillRenderer';
-import { CanvasItem } from './WaybillBuilderAdvanced';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { assetUrl } from '../services/assetUrl';
 
@@ -33,7 +48,7 @@ const MOCK_ORDER = {
   phone2: '01198765432',
   governorate: 'القاهرة - مدينة نصر',
   address: 'شارع عباس العقاد - عمارة 14 - الدور الثالث شقة 6',
-  notes: 'يرجى الاتصال قبل الوصول بنصف ساعة. العميل يطلب المعاينة.',
+  notes: 'يرجى الاتصال قبل الوصول بنصف ساعة. العميل يطلب المعاينة قبل الاستلام.',
   created_at: new Date().toISOString(),
   products: [
     { name: 'قميص قطن أكسفورد كلاسيك', color: 'أزرق سماوي', size: 'XL', qty: 2, price: 450, total: 900 },
@@ -48,380 +63,28 @@ const MOCK_ORDER = {
   page: 'صفحة فيسبوك الرئيسية'
 };
 
-export function convertTemplateToCanvasItems(templateId: number): CanvasItem[] {
-  const info = WAYBILL_TEMPLATES_INFO.find(t => t.id === templateId);
-  const templateName = info ? info.name : `نموذج ${templateId}`;
-
-  let primaryColor = '#0f172a';
-  let headerBg = '#f8fafc';
-  let headerTextColor = '#0f172a';
-  let borderColor = '#cbd5e1';
-  let borderRadius = 6;
-
-  if (templateId >= 6 && templateId <= 10) { // Royal / Gold
-    primaryColor = '#92400e';
-    headerBg = '#fffbeb';
-    headerTextColor = '#78350f';
-    borderColor = '#fde68a';
-    borderRadius = 8;
-  } else if (templateId >= 11 && templateId <= 20) { // Modern Blue
-    primaryColor = '#1e40af';
-    headerBg = '#eff6ff';
-    headerTextColor = '#1e3a8a';
-    borderColor = '#bfdbfe';
-    borderRadius = 12;
-  } else if (templateId >= 21 && templateId <= 30) { // Courier Green
-    primaryColor = '#065f46';
-    headerBg = '#ecfdf5';
-    headerTextColor = '#064e3b';
-    borderColor = '#a7f3d0';
-    borderRadius = 8;
-  } else if (templateId >= 31 && templateId <= 40) { // Thermal Style
-    primaryColor = '#000000';
-    headerBg = '#f1f5f9';
-    headerTextColor = '#000000';
-    borderColor = '#000000';
-    borderRadius = 2;
-  } else if (templateId >= 41 && templateId <= 50) { // Purple / Special
-    primaryColor = '#581c87';
-    headerBg = '#faf5ff';
-    headerTextColor = '#3b0764';
-    borderColor = '#e9d5ff';
-    borderRadius = 10;
-  }
-
-  return [
-    {
-      id: 'item_border',
-      type: 'rect',
-      x: 6,
-      y: 6,
-      width: 368,
-      height: 518,
-      style: {
-        borderColor: primaryColor,
-        borderWidth: 2,
-        borderStyle: 'solid',
-        backgroundColor: 'transparent',
-        borderRadius: borderRadius,
-        zIndex: 1
-      }
-    },
-    {
-      id: 'item_header_bg',
-      type: 'rect',
-      x: 12,
-      y: 12,
-      width: 356,
-      height: 65,
-      style: {
-        backgroundColor: headerBg,
-        borderColor: borderColor,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderRadius: Math.max(2, borderRadius - 2),
-        zIndex: 2
-      }
-    },
-    {
-      id: 'item_logo',
-      type: 'logo',
-      x: 20,
-      y: 18,
-      width: 50,
-      height: 50,
-      style: { zIndex: 3 }
-    },
-    {
-      id: 'item_company',
-      type: 'dynamic',
-      dynamicKey: 'companyName',
-      x: 76,
-      y: 20,
-      width: 145,
-      height: 22,
-      style: {
-        fontSize: 13,
-        fontWeight: 'bold',
-        color: headerTextColor,
-        textAlign: 'right',
-        zIndex: 3
-      }
-    },
-    {
-      id: 'item_company_phone',
-      type: 'dynamic',
-      dynamicKey: 'companyPhone',
-      x: 76,
-      y: 44,
-      width: 145,
-      height: 18,
-      style: {
-        fontSize: 10,
-        fontWeight: 'normal',
-        color: headerTextColor,
-        textAlign: 'right',
-        zIndex: 3
-      }
-    },
-    {
-      id: 'item_barcode',
-      type: 'barcode',
-      x: 228,
-      y: 16,
-      width: 132,
-      height: 42,
-      style: { zIndex: 3 }
-    },
-    {
-      id: 'item_customer_bg',
-      type: 'rect',
-      x: 12,
-      y: 84,
-      width: 356,
-      height: 96,
-      style: {
-        backgroundColor: '#ffffff',
-        borderColor: borderColor,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderRadius: Math.max(2, borderRadius - 2),
-        zIndex: 2
-      }
-    },
-    {
-      id: 'item_gov',
-      type: 'dynamic',
-      dynamicKey: 'governorate',
-      x: 20,
-      y: 92,
-      width: 105,
-      height: 24,
-      style: {
-        backgroundColor: primaryColor,
-        color: '#ffffff',
-        fontSize: 11,
-        fontWeight: 'bold',
-        borderRadius: 12,
-        textAlign: 'center',
-        padding: 2,
-        zIndex: 4
-      }
-    },
-    {
-      id: 'item_customer_name',
-      type: 'dynamic',
-      dynamicKey: 'customerName',
-      x: 135,
-      y: 92,
-      width: 225,
-      height: 24,
-      style: {
-        fontSize: 13,
-        fontWeight: 'bold',
-        color: '#0f172a',
-        textAlign: 'right',
-        zIndex: 4
-      }
-    },
-    {
-      id: 'item_phone1',
-      type: 'dynamic',
-      dynamicKey: 'phone1',
-      x: 20,
-      y: 122,
-      width: 170,
-      height: 20,
-      style: {
-        fontSize: 11,
-        fontWeight: 'bold',
-        color: '#334155',
-        textAlign: 'right',
-        zIndex: 4
-      }
-    },
-    {
-      id: 'item_phone2',
-      type: 'dynamic',
-      dynamicKey: 'phone2',
-      x: 195,
-      y: 122,
-      width: 165,
-      height: 20,
-      style: {
-        fontSize: 11,
-        fontWeight: 'bold',
-        color: '#64748b',
-        textAlign: 'right',
-        zIndex: 4
-      }
-    },
-    {
-      id: 'item_address',
-      type: 'dynamic',
-      dynamicKey: 'address',
-      x: 20,
-      y: 146,
-      width: 340,
-      height: 28,
-      style: {
-        fontSize: 10,
-        color: '#475569',
-        textAlign: 'right',
-        zIndex: 4
-      }
-    },
-    {
-      id: 'item_table',
-      type: 'table',
-      x: 12,
-      y: 188,
-      width: 356,
-      height: 138,
-      style: {
-        borderColor: borderColor,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        fontSize: 10,
-        backgroundColor: '#ffffff',
-        zIndex: 3
-      }
-    },
-    {
-      id: 'item_total_bg',
-      type: 'rect',
-      x: 12,
-      y: 334,
-      width: 356,
-      height: 44,
-      style: {
-        backgroundColor: primaryColor,
-        borderRadius: Math.max(2, borderRadius - 2),
-        zIndex: 2
-      }
-    },
-    {
-      id: 'item_shipping',
-      type: 'dynamic',
-      dynamicKey: 'shipping',
-      x: 22,
-      y: 344,
-      width: 120,
-      height: 24,
-      style: {
-        color: '#ffffff',
-        fontSize: 11,
-        fontWeight: 'bold',
-        textAlign: 'right',
-        zIndex: 3
-      }
-    },
-    {
-      id: 'item_total',
-      type: 'dynamic',
-      dynamicKey: 'total',
-      x: 195,
-      y: 342,
-      width: 165,
-      height: 28,
-      style: {
-        color: '#ffffff',
-        fontSize: 14,
-        fontWeight: 'bold',
-        textAlign: 'left',
-        zIndex: 3
-      }
-    },
-    {
-      id: 'item_notes_bg',
-      type: 'rect',
-      x: 12,
-      y: 384,
-      width: 356,
-      height: 44,
-      style: {
-        backgroundColor: '#f8fafc',
-        borderColor: '#e2e8f0',
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderRadius: Math.max(2, borderRadius - 2),
-        zIndex: 2
-      }
-    },
-    {
-      id: 'item_notes',
-      type: 'dynamic',
-      dynamicKey: 'notes',
-      x: 20,
-      y: 390,
-      width: 340,
-      height: 32,
-      style: {
-        fontSize: 10,
-        color: '#334155',
-        textAlign: 'right',
-        zIndex: 3
-      }
-    },
-    {
-      id: 'item_employee',
-      type: 'dynamic',
-      dynamicKey: 'employee',
-      x: 16,
-      y: 434,
-      width: 170,
-      height: 18,
-      style: {
-        fontSize: 9,
-        color: '#64748b',
-        textAlign: 'right',
-        zIndex: 3
-      }
-    },
-    {
-      id: 'item_date',
-      type: 'dynamic',
-      dynamicKey: 'date',
-      x: 195,
-      y: 434,
-      width: 170,
-      height: 18,
-      style: {
-        fontSize: 9,
-        color: '#64748b',
-        textAlign: 'left',
-        zIndex: 3
-      }
-    },
-    {
-      id: 'item_terms',
-      type: 'dynamic',
-      dynamicKey: 'companyTerms',
-      x: 12,
-      y: 458,
-      width: 356,
-      height: 60,
-      style: {
-        fontSize: 8,
-        color: '#64748b',
-        textAlign: 'center',
-        borderWidth: 1,
-        borderColor: '#f1f5f9',
-        borderStyle: 'solid',
-        padding: 4,
-        zIndex: 3
-      }
-    }
-  ];
+export interface EditTemplatePayload {
+  type: 'advanced' | 'quick';
+  templateId?: number | string;
+  customTemplate?: CustomWaybillTemplate;
+  initialData?: any;
 }
 
 interface WaybillTemplatesManagerProps {
-  onEditTemplate?: (templateId: number) => void;
+  onEditTemplate?: (payload: EditTemplatePayload) => void;
+  onCreateNewTemplate?: (type: 'advanced' | 'quick') => void;
 }
 
-const WaybillTemplatesManager: React.FC<WaybillTemplatesManagerProps> = ({ onEditTemplate }) => {
-  const [selectedId, setSelectedId] = useState<number>(() => getSelectedTemplateId());
-  const [previewId, setPreviewId] = useState<number>(() => getSelectedTemplateId());
+const WaybillTemplatesManager: React.FC<WaybillTemplatesManagerProps> = ({ 
+  onEditTemplate, 
+  onCreateNewTemplate 
+}) => {
+  const [activeTab, setActiveTab] = useState<'presets' | 'custom'>('presets');
+  const [customTemplates, setCustomTemplates] = useState<CustomWaybillTemplate[]>(() => getCustomWaybillTemplates());
+  const [selectedId, setSelectedId] = useState<number | string>(() => getSelectedTemplateId());
+  const [previewId, setPreviewId] = useState<number | string>(() => getSelectedTemplateId());
+  const [presetSearch, setPresetSearch] = useState('');
+  const [customSearch, setCustomSearch] = useState('');
   const [loading, setLoading] = useState<boolean>(false);
   const [printOrder, setPrintOrder] = useState<any[] | null>(null);
 
@@ -432,40 +95,38 @@ const WaybillTemplatesManager: React.FC<WaybillTemplatesManagerProps> = ({ onEdi
   const companyTerms = localStorage.getItem('Dragon_company_terms') || 'تعتبر هذه البوليصة مستند استلام رسمي. يرجى التأكد من سلامة المنتجات.';
 
   useEffect(() => {
-    // Load from settings API or localStorage
+    // Refresh custom templates list on mount
+    setCustomTemplates(getCustomWaybillTemplates());
+    
+    // Sync settings from server if available
     const loadSaved = async () => {
       try {
         const res = await fetch(`${API_BASE_PATH}/get_settings.php?_t=${Date.now()}`);
         const json = await res.json();
         if (json?.success && json?.data?.waybill_template) {
-          const id = Number(json.data.waybill_template);
-          if (id >= 1 && id <= 50) {
-            setSelectedId(id);
-            setPreviewId(id);
-            localStorage.setItem('Dragon_waybill_template', String(id));
-          }
+          const sId = json.data.waybill_template;
+          setSelectedId(sId);
+          setPreviewId(sId);
         }
       } catch (e) {}
     };
     loadSaved();
   }, []);
 
-  const handleSelectTemplate = async (templateId: number) => {
+  const handleSelectTemplate = async (templateId: number | string) => {
     setLoading(true);
     try {
-      localStorage.setItem('Dragon_waybill_template', String(templateId));
+      setSelectedTemplateId(templateId);
       setSelectedId(templateId);
 
-      // Save to database settings table via save_settings.php
-      await fetch(`${API_BASE_PATH}/save_settings.php`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: 'waybill_template', value: String(templateId) })
-      }).catch(() => null);
+      const customMatch = customTemplates.find(t => String(t.id) === String(templateId));
+      const tName = customMatch 
+        ? customMatch.name 
+        : (WAYBILL_TEMPLATES_INFO.find(t => t.id === Number(templateId))?.name || `نموذج ${templateId}`);
 
       Swal.fire({
         title: 'تم تفعيل النموذج بنجاح!',
-        text: `تم تعيين "${WAYBILL_TEMPLATES_INFO.find(t => t.id === templateId)?.name}" كنموذج افتراضي لجميع بوالص الشحن والفواتير.`,
+        text: `تم تعيين "${tName}" كنموذج افتراضي لجميع بوالص الشحن والفواتير.`,
         icon: 'success',
         timer: 2000,
         showConfirmButton: false
@@ -477,34 +138,84 @@ const WaybillTemplatesManager: React.FC<WaybillTemplatesManagerProps> = ({ onEdi
     }
   };
 
-  const handleEditInAdvancedBuilder = (templateId: number) => {
+  const handleEditPresetTemplate = (templateId: number) => {
     const items = convertTemplateToCanvasItems(templateId);
     const info = WAYBILL_TEMPLATES_INFO.find(t => t.id === templateId);
     const templateName = info ? info.name : `نموذج ${templateId}`;
     
     const templateData = {
-      name: `تعديل ${templateName}`,
+      name: `تخصيص ${templateName}`,
       items,
       savedAt: new Date().toISOString()
     };
 
-    localStorage.setItem('Dragon_advanced_waybill_template', JSON.stringify(templateData));
-    localStorage.setItem('Dragon_waybill_template', '51');
-
-    Swal.fire({
-      title: 'جاري التحويل للمصمم المتقدم...',
-      text: `تم تحميل تصميم "${templateName}" في المصمم المتقدم لتعديل أماكن وأحجام العناصر.`,
-      icon: 'success',
-      timer: 1800,
-      showConfirmButton: false
-    });
+    try {
+      localStorage.setItem('Dragon_advanced_waybill_template', JSON.stringify(templateData));
+    } catch (e) {}
 
     if (onEditTemplate) {
-      onEditTemplate(templateId);
+      onEditTemplate({
+        type: 'advanced',
+        templateId,
+        initialData: templateData
+      });
     }
   };
 
-  const handleTestPrint = (templateId: number) => {
+  const handleEditCustomTemplate = (custom: CustomWaybillTemplate) => {
+    try {
+      if (custom.type === 'advanced') {
+        localStorage.setItem('Dragon_advanced_waybill_template', JSON.stringify(custom.data));
+      } else {
+        localStorage.setItem('Dragon_quick_waybill_template', JSON.stringify(custom.data));
+      }
+    } catch (e) {}
+
+    if (onEditTemplate) {
+      onEditTemplate({
+        type: custom.type,
+        templateId: custom.id,
+        customTemplate: custom,
+        initialData: custom.data
+      });
+    }
+  };
+
+  const handleDeleteCustomTemplate = (custom: CustomWaybillTemplate) => {
+    Swal.fire({
+      title: 'هل أنت متأكد من حذف هذا القالب؟',
+      text: `سيتم حذف القالب "${custom.name}" نهائياً من قائمة قوالب المستخدم.`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#ef4444',
+      cancelButtonColor: '#64748b',
+      confirmButtonText: 'نعم، احذف القالب',
+      cancelButtonText: 'إلغاء'
+    }).then((result) => {
+      if (result.isConfirmed) {
+        deleteCustomWaybillTemplate(custom.id);
+        const updated = getCustomWaybillTemplates();
+        setCustomTemplates(updated);
+
+        if (String(selectedId) === String(custom.id)) {
+          setSelectedId(1);
+          setPreviewId(1);
+        } else if (String(previewId) === String(custom.id)) {
+          setPreviewId(1);
+        }
+
+        Swal.fire({
+          title: 'تم الحذف!',
+          text: 'تم حذف القالب المخصص بنجاح.',
+          icon: 'success',
+          timer: 1500,
+          showConfirmButton: false
+        });
+      }
+    });
+  };
+
+  const handleTestPrint = (templateId: number | string) => {
     setPrintOrder([MOCK_ORDER]);
     setTimeout(() => {
       window.print();
@@ -512,8 +223,63 @@ const WaybillTemplatesManager: React.FC<WaybillTemplatesManagerProps> = ({ onEdi
     }, 300);
   };
 
+  const handlePromptCreateNew = () => {
+    Swal.fire({
+      title: 'إنشاء قالب مخصص جديد',
+      text: 'اختر نوع المصمم الذي ترغب في استخدامه لتصميم بوليصتك:',
+      icon: 'question',
+      showCancelButton: true,
+      showDenyButton: true,
+      confirmButtonText: 'المصمم المتقدم (سحب وإفلات حر)',
+      denyButtonText: 'المصمم السريع (ترتيب الأقسام والأنماط)',
+      cancelButtonText: 'إلغاء',
+      confirmButtonColor: '#7c3aed',
+      denyButtonColor: '#2563eb'
+    }).then((result) => {
+      if (result.isConfirmed) {
+        if (onCreateNewTemplate) {
+          onCreateNewTemplate('advanced');
+        } else if (onEditTemplate) {
+          onEditTemplate({ type: 'advanced', templateId: 'new' });
+        }
+      } else if (result.isDenied) {
+        if (onCreateNewTemplate) {
+          onCreateNewTemplate('quick');
+        } else if (onEditTemplate) {
+          onEditTemplate({ type: 'quick', templateId: 'new' });
+        }
+      }
+    });
+  };
+
+  // Filter presets
+  const filteredPresets = WAYBILL_TEMPLATES_INFO.filter(item => {
+    if (!presetSearch.trim()) return true;
+    const query = presetSearch.toLowerCase();
+    return (
+      item.name.toLowerCase().includes(query) ||
+      item.desc.toLowerCase().includes(query) ||
+      String(item.id).includes(query)
+    );
+  });
+
+  // Filter custom templates
+  const filteredCustom = customTemplates.filter(item => {
+    if (!customSearch.trim()) return true;
+    const query = customSearch.toLowerCase();
+    return item.name.toLowerCase().includes(query) || String(item.id).includes(query);
+  });
+
+  // Determine currently previewed template details
+  const previewCustom = customTemplates.find(t => String(t.id) === String(previewId));
+  const previewPreset = !previewCustom ? WAYBILL_TEMPLATES_INFO.find(t => t.id === Number(previewId)) : null;
+  const previewTitle = previewCustom 
+    ? previewCustom.name 
+    : (previewPreset ? `نموذج ${previewPreset.id}: ${previewPreset.name}` : `نموذج ${previewId}`);
+  const isCurrentActive = String(selectedId) === String(previewId);
+
   return (
-    <div className="p-4 md:p-8 space-y-8 animate-in fade-in" dir="rtl">
+    <div className="p-4 md:p-6 space-y-6 animate-in fade-in" dir="rtl">
       {/* Hidden printable container for test printing */}
       {printOrder && (
         <UniversalPrintableOrders
@@ -527,7 +293,7 @@ const WaybillTemplatesManager: React.FC<WaybillTemplatesManagerProps> = ({ onEdi
         />
       )}
 
-      {/* Header Banner */}
+      {/* Top Main Banner */}
       <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white p-6 md:p-8 rounded-3xl shadow-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div className="space-y-2">
           <div className="flex items-center gap-3">
@@ -535,127 +301,350 @@ const WaybillTemplatesManager: React.FC<WaybillTemplatesManagerProps> = ({ onEdi
               <LayoutTemplate className="w-8 h-8 text-blue-300" />
             </div>
             <div>
-              <h1 className="text-2xl font-black tracking-tight">نماذج وقوالب بوالص الشحن والفواتير</h1>
-              <p className="text-sm text-blue-200">اختر من بين 50 قالباً مختلفاً كلياً أو اضغط "تعديل" لتخصيص مكان أي عنصر في المصمم المتقدم.</p>
+              <h1 className="text-2xl font-black tracking-tight">إدارة ونماذج قوالب بوالص الشحن</h1>
+              <p className="text-sm text-blue-200">
+                تصفح القوالب الجاهزة الـ 50 أو أنشئ وخصص قوالبك الخاصة واحفظها في قائمة قوالب المستخدم.
+              </p>
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-3 bg-white/10 backdrop-blur px-4 py-2 rounded-2xl border border-white/20">
-          <Sparkles className="w-5 h-5 text-amber-300" />
-          <span className="text-sm font-bold">النموذج النشط حالياً: </span>
-          <span className="bg-amber-400 text-slate-950 px-3 py-0.5 rounded-full font-black text-xs">
-            نموذج رقم {selectedId} ({WAYBILL_TEMPLATES_INFO.find(t => t.id === selectedId)?.name})
-          </span>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto">
+          <div className="flex items-center gap-3 bg-white/10 backdrop-blur px-4 py-2 rounded-2xl border border-white/20">
+            <Sparkles className="w-5 h-5 text-amber-300 shrink-0" />
+            <div className="text-right">
+              <span className="text-xs text-blue-200 block">النموذج النشط حالياً:</span>
+              <span className="text-xs font-black text-white">
+                {customTemplates.find(t => String(t.id) === String(selectedId))?.name ||
+                 WAYBILL_TEMPLATES_INFO.find(t => t.id === Number(selectedId))?.name ||
+                 `نموذج ${selectedId}`}
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handlePromptCreateNew}
+            className="px-4 py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-2xl font-black text-xs flex items-center justify-center gap-2 shadow-lg transition-all"
+          >
+            <Plus size={16} /> إنشاء قالب مخصص جديد
+          </button>
         </div>
       </div>
 
-      {/* Main Grid & Preview Section */}
+      {/* Tabs Switcher: القوالب الجاهزة vs قوالب المستخدم */}
+      <div className="flex bg-slate-100 dark:bg-slate-800/80 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700 max-w-fit gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('presets');
+            if (previewCustom) {
+              setPreviewId(1);
+            }
+          }}
+          className={`flex items-center gap-2.5 px-6 py-2.5 rounded-xl text-sm font-black transition-all ${
+            activeTab === 'presets'
+              ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+          }`}
+        >
+          <Layers size={18} />
+          <span>القوالب الجاهزة</span>
+          <span className="px-2 py-0.5 rounded-full text-xs font-mono bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
+            50
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('custom');
+            if (customTemplates.length > 0 && !previewCustom) {
+              setPreviewId(customTemplates[0].id);
+            }
+          }}
+          className={`flex items-center gap-2.5 px-6 py-2.5 rounded-xl text-sm font-black transition-all ${
+            activeTab === 'custom'
+              ? 'bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+          }`}
+        >
+          <User size={18} />
+          <span>قوالب المستخدم المخصصة</span>
+          <span className={`px-2 py-0.5 rounded-full text-xs font-mono ${
+            customTemplates.length > 0 
+              ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300' 
+              : 'bg-slate-200 dark:bg-slate-700 text-slate-500'
+          }`}>
+            {customTemplates.length}
+          </span>
+        </button>
+      </div>
+
+      {/* Main Grid: Left List (5 cols) & Right Preview (7 cols) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         
-        {/* Left Side: Template Selector Cards (5 Cols) */}
+        {/* Left Side: Template Selector Cards */}
         <div className="lg:col-span-5 space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-              <Layers className="w-5 h-5 text-blue-500" /> قائمة القوالب المتوفرة (50 قالباً)
-            </h2>
-          </div>
-          
-          <div className="space-y-3 max-h-[750px] overflow-y-auto pr-1">
-            {WAYBILL_TEMPLATES_INFO.map((item) => {
-              const isCurrent = selectedId === item.id;
-              const isPreviewing = previewId === item.id;
-              return (
-                <div
-                  key={item.id}
-                  onClick={() => setPreviewId(item.id)}
-                  className={`p-4 rounded-2xl cursor-pointer border transition-all ${
-                    isPreviewing
-                      ? 'border-blue-600 bg-blue-50/60 dark:bg-blue-900/20 shadow-md ring-2 ring-blue-500/20'
-                      : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-start gap-3 flex-1">
-                      <span className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-sm flex-shrink-0 ${
-                        isCurrent
-                          ? 'bg-emerald-600 text-white'
-                          : isPreviewing
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-                      }`}>
-                        {item.id}
-                      </span>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-bold text-sm text-slate-900 dark:text-white">{item.name}</h3>
-                          {isCurrent && (
-                            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-black rounded-full flex items-center gap-1">
-                              <CheckCircle2 size={10} /> المفعل
-                            </span>
-                          )}
+
+          {/* TAB 1: PRESETS */}
+          {activeTab === 'presets' && (
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                <h2 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
+                  <Layers className="w-5 h-5 text-blue-500" /> النماذج الجاهزة المعتمدة (50 قالباً)
+                </h2>
+                <div className="relative">
+                  <Search size={15} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={presetSearch}
+                    onChange={e => setPresetSearch(e.target.value)}
+                    placeholder="بحث برقم أو اسم النموذج..."
+                    className="w-full sm:w-56 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl pr-9 pl-3 py-1.5 text-xs outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-3 max-h-[750px] overflow-y-auto pr-1 custom-scrollbar">
+                {filteredPresets.map((item) => {
+                  const isCurrent = String(selectedId) === String(item.id);
+                  const isPreviewing = String(previewId) === String(item.id);
+
+                  return (
+                    <div
+                      key={item.id}
+                      onClick={() => setPreviewId(item.id)}
+                      className={`p-4 rounded-2xl cursor-pointer border transition-all ${
+                        isPreviewing
+                          ? 'border-blue-600 bg-blue-50/60 dark:bg-blue-900/20 shadow-md ring-2 ring-blue-500/20'
+                          : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-3 flex-1">
+                          <span className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-sm flex-shrink-0 ${
+                            isCurrent
+                              ? 'bg-emerald-600 text-white'
+                              : isPreviewing
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                          }`}>
+                            {item.id}
+                          </span>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h3 className="font-bold text-sm text-slate-900 dark:text-white">{item.name}</h3>
+                              {isCurrent && (
+                                <span className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 text-[10px] font-black rounded-full flex items-center gap-1">
+                                  <CheckCircle2 size={10} /> المفعل
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{item.desc}</p>
+                          </div>
                         </div>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{item.desc}</p>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEditPresetTemplate(item.id);
+                            }}
+                            className="px-3 py-1.5 bg-purple-100 dark:bg-purple-900/40 hover:bg-purple-600 hover:text-white text-purple-700 dark:text-purple-300 rounded-xl text-xs font-bold flex items-center gap-1 transition-all"
+                            title="تعديل وتخصيص هذا التصميم في المصمم المتقدم"
+                          >
+                            <Pencil size={13} /> تعديل
+                          </button>
+                        </div>
                       </div>
                     </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleEditInAdvancedBuilder(item.id);
-                      }}
-                      className="px-3 py-1.5 bg-purple-100 dark:bg-purple-900/40 hover:bg-purple-600 hover:text-white text-purple-700 dark:text-purple-300 rounded-xl text-xs font-bold flex items-center gap-1 transition-all shrink-0"
-                      title="تعديل هذا التصميم في المصمم المتقدم"
-                    >
-                      <Pencil size={13} /> تعديل
-                    </button>
-                  </div>
+          {/* TAB 2: USER CUSTOM TEMPLATES */}
+          {activeTab === 'custom' && (
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                <h2 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
+                  <User className="w-5 h-5 text-purple-500" /> قوالب المستخدم المخصصة ({customTemplates.length})
+                </h2>
+                <div className="relative">
+                  <Search size={15} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={customSearch}
+                    onChange={e => setCustomSearch(e.target.value)}
+                    placeholder="بحث في قوالب المستخدم..."
+                    className="w-full sm:w-56 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl pr-9 pl-3 py-1.5 text-xs outline-none focus:border-purple-500"
+                  />
                 </div>
-              );
-            })}
-          </div>
+              </div>
+
+              {customTemplates.length === 0 ? (
+                <div className="bg-white dark:bg-slate-900 rounded-2xl p-8 text-center border-2 border-dashed border-slate-200 dark:border-slate-800 space-y-4">
+                  <div className="w-16 h-16 bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 rounded-3xl flex items-center justify-center mx-auto">
+                    <User size={32} />
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="font-black text-base text-slate-800 dark:text-white">لا توجد قوالب مخصصة حتى الآن</h3>
+                    <p className="text-xs text-slate-500 max-w-xs mx-auto">
+                      يمكنك تعديل أي قالب من الـ 50 قالباً الجاهزة وحفظه باسمك، أو إنشاء بوليصة جديدة تماماً بالسحب والإفلات.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handlePromptCreateNew}
+                    className="px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold text-xs inline-flex items-center gap-2 shadow-md transition-all"
+                  >
+                    <Plus size={16} /> صمّم قالبك الأول الآن
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-3 max-h-[750px] overflow-y-auto pr-1 custom-scrollbar">
+                  {filteredCustom.map((custom) => {
+                    const isCurrent = String(selectedId) === String(custom.id);
+                    const isPreviewing = String(previewId) === String(custom.id);
+
+                    return (
+                      <div
+                        key={custom.id}
+                        onClick={() => setPreviewId(custom.id)}
+                        className={`p-4 rounded-2xl cursor-pointer border transition-all ${
+                          isPreviewing
+                            ? 'border-purple-600 bg-purple-50/60 dark:bg-purple-900/20 shadow-md ring-2 ring-purple-500/20'
+                            : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-start gap-3 flex-1">
+                            <span className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-sm flex-shrink-0 ${
+                              isCurrent
+                                ? 'bg-emerald-600 text-white'
+                                : isPreviewing
+                                ? 'bg-purple-600 text-white'
+                                : 'bg-slate-100 dark:bg-slate-800 text-purple-600 dark:text-purple-400'
+                            }`}>
+                              {custom.type === 'advanced' ? <Sliders size={16} /> : <Zap size={16} />}
+                            </span>
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h3 className="font-bold text-sm text-slate-900 dark:text-white">{custom.name}</h3>
+                                {isCurrent && (
+                                  <span className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 text-[10px] font-black rounded-full flex items-center gap-1">
+                                    <CheckCircle2 size={10} /> المفعل
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-500 flex-wrap">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                  custom.type === 'advanced' 
+                                    ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300' 
+                                    : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                                }`}>
+                                  {custom.type === 'advanced' ? 'مصمم متقدم' : 'مصمم سريع'}
+                                </span>
+                                {custom.updatedAt && (
+                                  <span className="flex items-center gap-1 text-slate-400">
+                                    <Calendar size={11} /> {new Date(custom.updatedAt).toLocaleDateString('ar-EG')}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEditCustomTemplate(custom);
+                              }}
+                              className="p-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-purple-600 hover:text-white text-slate-600 dark:text-slate-300 rounded-lg text-xs transition-all"
+                              title="تعديل هذا القالب"
+                            >
+                              <Pencil size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteCustomTemplate(custom);
+                              }}
+                              className="p-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-red-600 hover:text-white text-slate-600 dark:text-slate-300 rounded-lg text-xs transition-all"
+                              title="حذف هذا القالب"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
         </div>
 
-        {/* Right Side: Live Interactive Preview (7 Cols) */}
+        {/* Right Side: Live Interactive Preview */}
         <div className="lg:col-span-7 space-y-4">
           <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+            
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
               <div>
                 <div className="flex items-center gap-2">
                   <Eye className="w-5 h-5 text-blue-500" />
                   <h2 className="text-lg font-black text-slate-900 dark:text-white">
-                    معاينة حية: {WAYBILL_TEMPLATES_INFO.find(t => t.id === previewId)?.name}
+                    معاينة حية: {previewTitle}
                   </h2>
                 </div>
-                <p className="text-xs text-slate-500 mt-0.5">معاينة واقعية لشكل البوليصة كما ستخرج على الورق عند الطباعة.</p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  معاينة فورية مطابقة تماماً لمخرجات الطباعة الحقيقية لربع ورقة A4.
+                </p>
               </div>
 
               <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
                 <button
                   type="button"
                   onClick={() => handleTestPrint(previewId)}
-                  className="flex-1 sm:flex-initial px-3.5 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-xl font-bold text-xs hover:bg-slate-200 flex items-center justify-center gap-1.5 transition-colors"
+                  className="flex-1 sm:flex-initial px-3 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-xl font-bold text-xs hover:bg-slate-200 flex items-center justify-center gap-1.5 transition-colors"
                 >
                   <Printer size={15} /> طباعة تجريبية
                 </button>
+
+                {previewCustom ? (
+                  <button
+                    type="button"
+                    onClick={() => handleEditCustomTemplate(previewCustom)}
+                    className="flex-1 sm:flex-initial px-3.5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-purple-500/20 transition-all"
+                  >
+                    <Pencil size={14} /> تعديل في المصمم
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleEditPresetTemplate(Number(previewId))}
+                    className="flex-1 sm:flex-initial px-3.5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-purple-500/20 transition-all"
+                  >
+                    <Pencil size={14} /> تخصيص في المصمم
+                  </button>
+                )}
+
                 <button
                   type="button"
-                  onClick={() => handleEditInAdvancedBuilder(previewId)}
-                  className="flex-1 sm:flex-initial px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-purple-500/20 transition-all"
-                >
-                  <Pencil size={15} /> تعديل في المصمم المتقدم
-                </button>
-                <button
-                  type="button"
-                  disabled={loading || selectedId === previewId}
+                  disabled={loading || isCurrentActive}
                   onClick={() => handleSelectTemplate(previewId)}
                   className={`flex-1 sm:flex-initial px-4 py-2 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 shadow-lg transition-all ${
-                    selectedId === previewId
+                    isCurrentActive
                       ? 'bg-emerald-600 text-white cursor-default'
                       : 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-500/20'
                   }`}
                 >
-                  {selectedId === previewId ? (
+                  {isCurrentActive ? (
                     <><CheckCircle2 size={15} /> النموذج الافتراضي المفعل</>
                   ) : (
                     <><FileCheck size={15} /> تفعيل هذا النموذج</>
@@ -669,7 +658,7 @@ const WaybillTemplatesManager: React.FC<WaybillTemplatesManagerProps> = ({ onEdi
               <div className="flex items-center gap-2 text-xs font-bold text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-900 px-3 py-1 rounded-full border border-slate-200 dark:border-slate-800 shadow-sm">
                 <span>📄 مقاس ربع ورقة A4 (105×148 مم) — يتم طباعة 4 بوالص متجاورة في كل ورقة A4</span>
               </div>
-              <div className="bg-white text-black shadow-2xl rounded-sm p-1 w-[370px] min-h-[480px] border border-gray-300 flex flex-col">
+              <div className="bg-white text-black shadow-2xl rounded-sm p-1 w-full max-w-[395px] min-h-[480px] border border-gray-300 flex flex-col items-center justify-center">
                 <UniversalWaybill
                   order={MOCK_ORDER}
                   companyName={companyName}
@@ -678,6 +667,7 @@ const WaybillTemplatesManager: React.FC<WaybillTemplatesManagerProps> = ({ onEdi
                   companyLogo={companyLogo}
                   terms={companyTerms}
                   templateId={previewId}
+                  customTemplateData={previewCustom ? (previewCustom.data || previewCustom) : undefined}
                 />
               </div>
             </div>

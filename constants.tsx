@@ -204,7 +204,7 @@ export const MENU_ITEMS = [
       { label: 'اداره المستخدمين', slug: 'users' },
       { label: 'الصلاحيات', slug: 'permissions' },
       { label: 'سجل العمليات', slug: 'logs' },
-      { label: 'قوالب بوالص الشحن', slug: 'waybill-templates' }
+      { label: 'مصمم البوليصة', slug: 'waybill-builder' }
     ]
   },
   {
@@ -232,18 +232,6 @@ export const MENU_ITEMS = [
     label: 'طباعة الأكواد',
     icon: <QrCode className="w-5 h-5" />,
     slug: 'barcode-print'
-  },
-  {
-    id: 'waybill-templates',
-    label: 'قوالب بوالص الشحن',
-    icon: <LayoutTemplate className="w-5 h-5" />,
-    slug: 'waybill-templates'
-  },
-  {
-    id: 'waybill-builder',
-    label: 'مصمم البوليصة',
-    icon: <Palette className="w-5 h-5" />,
-    slug: 'waybill-builder'
   },
   {
     id: 'settings',

@@ -7,10 +7,15 @@ import {
   Palette, Type, Layout, Save, Trash2, Copy, AlignLeft, AlignCenter, AlignRight,
   Bold, Italic, Square, Circle, Minus, Barcode as BarcodeIcon, Undo2, Redo2,
   ArrowUpToLine, ArrowDownToLine, Lock, Unlock, MousePointer2, Image as ImageIcon,
-  Download, QrCode, AlignVerticalSpaceAround, AlignHorizontalSpaceAround
+  Download, QrCode, AlignVerticalSpaceAround, AlignHorizontalSpaceAround, ArrowRight
 } from 'lucide-react';
 import Barcode from './Barcode';
-import { getOrderData } from './UniversalWaybillRenderer';
+import { 
+  getOrderData, 
+  saveCustomWaybillTemplate, 
+  convertTemplateToCanvasItems, 
+  CustomWaybillTemplate 
+} from './UniversalWaybillRenderer';
 import { assetUrl } from '../services/assetUrl';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -85,14 +90,99 @@ const DYNAMIC_FIELDS = [
 const CANVAS_WIDTH = 380;
 const CANVAS_HEIGHT = 530;
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+export interface WaybillBuilderAdvancedProps {
+  initialPayload?: {
+    type: 'advanced' | 'quick';
+    templateId?: number | string;
+    customTemplate?: CustomWaybillTemplate;
+    initialData?: any;
+  };
+  onBackToTemplates?: () => void;
+}
 
-const WaybillBuilderAdvanced: React.FC = () => {
-  const [items, setItems] = useState<CanvasItem[]>([]);
-  const [history, setHistory] = useState<CanvasItem[][]>([[]]);
+const WaybillBuilderAdvanced: React.FC<WaybillBuilderAdvancedProps> = ({
+  initialPayload,
+  onBackToTemplates
+}) => {
+  const [editingCustomId, setEditingCustomId] = useState<string | number | null>(() => {
+    if (initialPayload?.customTemplate?.id) return initialPayload.customTemplate.id;
+    if (initialPayload?.templateId && String(initialPayload.templateId).startsWith('custom_')) {
+      return initialPayload.templateId;
+    }
+    return null;
+  });
+
+  const [items, setItems] = useState<CanvasItem[]>(() => {
+    if (initialPayload?.initialData?.items && Array.isArray(initialPayload.initialData.items)) {
+      return initialPayload.initialData.items;
+    }
+    if (initialPayload?.customTemplate?.data?.items && Array.isArray(initialPayload.customTemplate.data.items)) {
+      return initialPayload.customTemplate.data.items;
+    }
+    if (initialPayload?.templateId && typeof initialPayload.templateId === 'number' && initialPayload.templateId <= 50) {
+      return convertTemplateToCanvasItems(initialPayload.templateId);
+    }
+    try {
+      const saved = localStorage.getItem('Dragon_advanced_waybill_template');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.items && Array.isArray(parsed.items)) return parsed.items;
+      }
+    } catch (e) {}
+    return convertTemplateToCanvasItems(1);
+  });
+
+  const [templateName, setTemplateName] = useState<string>(() => {
+    if (initialPayload?.initialData?.name) return initialPayload.initialData.name;
+    if (initialPayload?.customTemplate?.name) return initialPayload.customTemplate.name;
+    try {
+      const saved = localStorage.getItem('Dragon_advanced_waybill_template');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.name) return parsed.name;
+      }
+    } catch (e) {}
+    return 'قالب مخصص متقدم';
+  });
+
+  const [history, setHistory] = useState<CanvasItem[][]>([[...items]]);
   const [historyIndex, setHistoryIndex] = useState(0);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [templateName, setTemplateName] = useState('القالب المتقدم الاحترافي');
+  
+  // Keep editor state in 100% sync if initialPayload changes
+  useEffect(() => {
+    if (initialPayload) {
+      if (initialPayload.customTemplate?.id) {
+        setEditingCustomId(initialPayload.customTemplate.id);
+      } else if (initialPayload.templateId && String(initialPayload.templateId).startsWith('custom_')) {
+        setEditingCustomId(initialPayload.templateId);
+      } else {
+        setEditingCustomId(null);
+      }
+
+      let loadedItems: CanvasItem[] | null = null;
+      if (initialPayload.initialData?.items && Array.isArray(initialPayload.initialData.items)) {
+        loadedItems = initialPayload.initialData.items;
+      } else if (initialPayload.customTemplate?.data?.items && Array.isArray(initialPayload.customTemplate.data.items)) {
+        loadedItems = initialPayload.customTemplate.data.items;
+      } else if (initialPayload.templateId && typeof initialPayload.templateId === 'number' && initialPayload.templateId <= 50) {
+        loadedItems = convertTemplateToCanvasItems(initialPayload.templateId);
+      }
+
+      if (loadedItems) {
+        setItems(loadedItems);
+        setHistory([[...loadedItems]]);
+        setHistoryIndex(0);
+        setSelectedIds([]);
+      }
+
+      if (initialPayload.initialData?.name) {
+        setTemplateName(initialPayload.initialData.name);
+      } else if (initialPayload.customTemplate?.name) {
+        setTemplateName(initialPayload.customTemplate.name);
+      }
+    }
+  }, [initialPayload]);
   
   // Smart Guides State
   const [guideLines, setGuideLines] = useState<{ axis: 'x'|'y', pos: number }[]>([]);
@@ -103,21 +193,6 @@ const WaybillBuilderAdvanced: React.FC = () => {
   
   const companyLogo = localStorage.getItem('Dragon_company_logo_url') || localStorage.getItem('Dragon_company_logo') || assetUrl('Dragon.png');
   const d = getOrderData(MOCK_ORDER);
-
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem('Dragon_advanced_waybill_template');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.items && Array.isArray(parsed.items)) {
-          setItems(parsed.items);
-          setHistory([parsed.items]);
-          setHistoryIndex(0);
-          if (parsed.name) setTemplateName(parsed.name);
-        }
-      }
-    } catch (e) { }
-  }, []);
 
   // --- History & State Management ---
   const pushState = (newItems: CanvasItem[]) => {
@@ -341,17 +416,31 @@ const WaybillBuilderAdvanced: React.FC = () => {
     }, 100);
   };
 
-  const saveTemplate = () => {
+  const saveTemplate = (saveAsNew: boolean = false) => {
     const templateData = { name: templateName, items, savedAt: new Date().toISOString() };
-    localStorage.setItem('Dragon_advanced_waybill_template', JSON.stringify(templateData));
-    localStorage.setItem('Dragon_waybill_template', '51');
-    
+    const targetId = saveAsNew ? undefined : (editingCustomId || undefined);
+
+    const savedCustom = saveCustomWaybillTemplate({
+      id: targetId,
+      name: templateName.trim() || 'قالب مخصص متقدم',
+      type: 'advanced',
+      data: templateData
+    });
+    setEditingCustomId(savedCustom.id);
+
     Swal.fire({
-      title: '✅ تم الحفظ',
-      text: `تم حفظ القالب المخصص وجعله القالب الافتراضي برقم 51`,
+      title: '✅ تم حفظ القالب بنجاح!',
+      text: `تم حفظ "${savedCustom.name}" في قائمة قوالب المستخدم وجعله القالب الافتراضي.`,
       icon: 'success',
-      timer: 2000,
-      showConfirmButton: false,
+      showCancelButton: true,
+      confirmButtonText: 'الذهاب لقائمة القوالب',
+      cancelButtonText: 'متابعة التعديل',
+      confirmButtonColor: '#7c3aed',
+      cancelButtonColor: '#64748b'
+    }).then((result) => {
+      if (result.isConfirmed && onBackToTemplates) {
+        onBackToTemplates();
+      }
     });
   };
 
@@ -362,7 +451,7 @@ const WaybillBuilderAdvanced: React.FC = () => {
     if (type === 'barcode') {
       return (
         <div className="w-full h-full flex flex-col items-center justify-center pointer-events-none">
-          <Barcode value={d.orderNumber} height={Math.max(20, (parseInt(height as string) || 40) - 15)} width={1.5} />
+          <Barcode value={d.orderNumber} height={Math.max(16, (parseInt(height as string) || 30) - 10)} width={1.05} displayValue={false} />
           {style.fontSize && style.fontSize > 0 && <span style={{ fontSize: style.fontSize, marginTop: 2 }}>{d.orderNumber}</span>}
         </div>
       );
@@ -385,25 +474,43 @@ const WaybillBuilderAdvanced: React.FC = () => {
     }
     
     if (type === 'table') {
+      const headerColor = style.color || (style.backgroundColor && (style.backgroundColor.includes('#0') || style.backgroundColor.includes('#1') || style.backgroundColor.includes('#2') || style.backgroundColor.includes('#31') || style.backgroundColor.includes('#9') || style.backgroundColor.includes('#6') || style.backgroundColor.includes('#7') || style.backgroundColor.includes('#8') || style.backgroundColor.includes('#dc') || style.backgroundColor.includes('#ea')) ? '#ffffff' : '#0f172a');
       return (
-        <table className="w-full h-full border-collapse pointer-events-none" style={{ fontSize: style.fontSize }}>
+        <table className="w-full h-full border-collapse pointer-events-none text-right" style={{ fontSize: style.fontSize || 8.5 }}>
           <thead>
-            <tr style={{ backgroundColor: style.backgroundColor || '#f1f5f9' }}>
-              <th className="p-1 border text-right" style={{ borderColor: style.borderColor }}>المنتج</th>
-              <th className="p-1 border text-center w-[30px]" style={{ borderColor: style.borderColor }}>الكمية</th>
-              <th className="p-1 border text-center w-[50px]" style={{ borderColor: style.borderColor }}>الإجمالي</th>
+            <tr style={{ backgroundColor: style.backgroundColor || '#f1f5f9', color: headerColor }}>
+              <th className="p-1 border font-bold text-right" style={{ borderColor: style.borderColor || '#cbd5e1' }}>المنتج</th>
+              <th className="p-0.5 border font-bold text-center w-[32px]" style={{ borderColor: style.borderColor || '#cbd5e1' }}>المقاس</th>
+              <th className="p-0.5 border font-bold text-center w-[36px]" style={{ borderColor: style.borderColor || '#cbd5e1' }}>اللون</th>
+              <th className="p-0.5 border font-bold text-center w-[26px]" style={{ borderColor: style.borderColor || '#cbd5e1' }}>الكمية</th>
+              <th className="p-0.5 border font-bold text-center w-[36px]" style={{ borderColor: style.borderColor || '#cbd5e1' }}>السعر</th>
+              <th className="p-0.5 border font-bold text-center w-[40px]" style={{ borderColor: style.borderColor || '#cbd5e1' }}>الإجمالي</th>
             </tr>
           </thead>
           <tbody>
-            <tr>
-              <td className="p-1 border" style={{ borderColor: style.borderColor }}>قميص قطن</td>
-              <td className="p-1 border text-center" style={{ borderColor: style.borderColor }}>2</td>
-              <td className="p-1 border text-center" style={{ borderColor: style.borderColor }}>500</td>
+            <tr className="bg-white">
+              <td className="p-1 border truncate font-medium max-w-[90px]" style={{ borderColor: style.borderColor || '#cbd5e1' }}>قميص أكسفورد</td>
+              <td className="p-0.5 border text-center font-bold" style={{ borderColor: style.borderColor || '#cbd5e1' }}>XL</td>
+              <td className="p-0.5 border text-center" style={{ borderColor: style.borderColor || '#cbd5e1' }}>أزرق</td>
+              <td className="p-0.5 border text-center font-bold" style={{ borderColor: style.borderColor || '#cbd5e1' }}>2</td>
+              <td className="p-0.5 border text-center" style={{ borderColor: style.borderColor || '#cbd5e1' }}>450</td>
+              <td className="p-0.5 border text-center font-bold" style={{ borderColor: style.borderColor || '#cbd5e1' }}>900</td>
             </tr>
-            <tr>
-              <td className="p-1 border" style={{ borderColor: style.borderColor }}>بنطلون جينز</td>
-              <td className="p-1 border text-center" style={{ borderColor: style.borderColor }}>1</td>
-              <td className="p-1 border text-center" style={{ borderColor: style.borderColor }}>350</td>
+            <tr className="bg-slate-50/50">
+              <td className="p-1 border truncate font-medium max-w-[90px]" style={{ borderColor: style.borderColor || '#cbd5e1' }}>بنطلون جينز</td>
+              <td className="p-0.5 border text-center font-bold" style={{ borderColor: style.borderColor || '#cbd5e1' }}>34</td>
+              <td className="p-0.5 border text-center" style={{ borderColor: style.borderColor || '#cbd5e1' }}>كحلي</td>
+              <td className="p-0.5 border text-center font-bold" style={{ borderColor: style.borderColor || '#cbd5e1' }}>1</td>
+              <td className="p-0.5 border text-center" style={{ borderColor: style.borderColor || '#cbd5e1' }}>650</td>
+              <td className="p-0.5 border text-center font-bold" style={{ borderColor: style.borderColor || '#cbd5e1' }}>650</td>
+            </tr>
+            <tr className="bg-white">
+              <td className="p-1 border truncate font-medium max-w-[90px]" style={{ borderColor: style.borderColor || '#cbd5e1' }}>حزام جلد</td>
+              <td className="p-0.5 border text-center font-bold" style={{ borderColor: style.borderColor || '#cbd5e1' }}>L</td>
+              <td className="p-0.5 border text-center" style={{ borderColor: style.borderColor || '#cbd5e1' }}>أسود</td>
+              <td className="p-0.5 border text-center font-bold" style={{ borderColor: style.borderColor || '#cbd5e1' }}>1</td>
+              <td className="p-0.5 border text-center" style={{ borderColor: style.borderColor || '#cbd5e1' }}>200</td>
+              <td className="p-0.5 border text-center font-bold" style={{ borderColor: style.borderColor || '#cbd5e1' }}>200</td>
             </tr>
           </tbody>
         </table>
@@ -416,13 +523,22 @@ const WaybillBuilderAdvanced: React.FC = () => {
 
     let displayContent = content;
     if (type === 'dynamic' && dynamicKey) {
-      const field = DYNAMIC_FIELDS.find(f => f.key === dynamicKey);
-      displayContent = field ? field.sample : '';
+      if (dynamicKey === 'companyName') {
+        displayContent = localStorage.getItem('Dragon_company_name') || 'شركة دراجون';
+      } else if (dynamicKey === 'companyPhone') {
+        displayContent = localStorage.getItem('Dragon_company_phone') || '01000000000';
+      } else {
+        const field = DYNAMIC_FIELDS.find(f => f.key === dynamicKey);
+        displayContent = field ? field.sample : '';
+      }
     }
 
     return (
       <div className="w-full h-full pointer-events-none whitespace-pre-wrap flex items-center" style={{ 
         lineHeight: 1.2, 
+        fontSize: style.fontSize,
+        fontWeight: style.fontWeight,
+        color: style.color,
         justifyContent: style.textAlign === 'center' ? 'center' : style.textAlign === 'left' ? 'flex-start' : 'flex-end'
       }}>
         {displayContent}
@@ -535,17 +651,39 @@ const WaybillBuilderAdvanced: React.FC = () => {
             </>
           )}
         </div>
-        <div className="flex items-center gap-3 flex-1 max-w-sm ml-4">
+        <div className="flex items-center gap-2 flex-1 max-w-md ml-4">
           <input
             type="text"
             value={templateName}
             onChange={e => setTemplateName(e.target.value)}
-            className="flex-1 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-sm font-bold outline-none focus:border-purple-400"
+            className="flex-1 min-w-[120px] bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-xs font-bold outline-none focus:border-purple-400"
             placeholder="اسم القالب المتقدم..."
           />
-          <button onClick={saveTemplate} className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-1.5 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors">
-            <Save size={16} /> حفظ (قالب 51)
+          <button 
+            onClick={() => saveTemplate(false)} 
+            className="bg-purple-600 hover:bg-purple-700 text-white px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors shrink-0"
+            title="حفظ في قائمة قوالب المستخدم"
+          >
+            <Save size={14} /> {editingCustomId ? 'حفظ التعديل' : 'حفظ القالب'}
           </button>
+          {editingCustomId && (
+            <button 
+              onClick={() => saveTemplate(true)} 
+              className="bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-700 dark:text-slate-200 px-2.5 py-1.5 rounded-lg text-xs font-bold shrink-0"
+              title="حفظ كقالب جديد منفصل"
+            >
+              نسخة جديدة
+            </button>
+          )}
+          {onBackToTemplates && (
+            <button 
+              onClick={onBackToTemplates} 
+              className="bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-700 dark:text-slate-200 px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shrink-0"
+              title="العودة إلى معرض القوالب"
+            >
+              <ArrowRight size={14} /> القوالب
+            </button>
+          )}
         </div>
       </div>
 

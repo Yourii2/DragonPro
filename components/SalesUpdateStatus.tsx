@@ -921,27 +921,35 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
     const html = `<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>إذن تسليم بضاعة</title>` +
       `<style>
         @page { size: 80mm auto; margin: 0; }
+        @media print {
+          html, body {
+            width: 70mm !important;
+            max-width: 70mm !important;
+            margin: 0 auto !important;
+            padding: 2mm 1mm !important;
+          }
+        }
         * { box-sizing: border-box; margin: 0; padding: 0; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-        body { font-family: 'Cairo', 'Segoe UI', Tahoma, Arial, sans-serif; direction: rtl; width: 74mm; max-width: 74mm; margin: 0 auto; padding: 4mm 1mm; font-size: 11px; color: #000; background: #fff; line-height: 1.3; }
-        .receipt-header { text-align: center; border-bottom: 2px dashed #000; padding-bottom: 5px; margin-bottom: 6px; }
-        .comp-title { font-size: 13px; font-weight: 900; margin-bottom: 2px; }
-        .doc-badge { display: inline-block; font-size: 14px; font-weight: 900; border: 1.5px solid #000; padding: 2px 10px; border-radius: 4px; margin: 2px 0; }
-        .meta-table { width: 100%; margin: 4px 0; font-size: 11px; border-collapse: collapse; }
-        .meta-table td { padding: 2px 0; vertical-align: top; }
+        html, body { font-family: 'Cairo', 'Segoe UI', Tahoma, Arial, sans-serif; direction: rtl; width: 70mm; max-width: 70mm; margin: 0 auto; padding: 2mm 1mm; font-size: 10.5px; color: #000; background: #fff; line-height: 1.3; overflow-x: hidden; }
+        .receipt-header { text-align: center; border-bottom: 1.5px dashed #000; padding-bottom: 4px; margin-bottom: 5px; }
+        .comp-title { font-size: 12.5px; font-weight: 900; margin-bottom: 2px; }
+        .doc-badge { display: inline-block; font-size: 13px; font-weight: 900; border: 1.5px solid #000; padding: 2px 8px; border-radius: 4px; margin: 2px 0; }
+        .meta-table { width: 100%; margin: 3px 0; font-size: 10px; border-collapse: collapse; }
+        .meta-table td { padding: 1.5px 0; vertical-align: top; }
         .meta-lbl { font-weight: bold; color: #222; }
         .meta-val { font-weight: 900; color: #000; }
-        .divider { border-bottom: 1px dashed #000; margin: 5px 0; }
-        table.items-table { width: 100%; border-collapse: collapse; margin: 6px 0; table-layout: fixed; }
-        table.items-table th, table.items-table td { border: 1px solid #000; padding: 4px 2px; font-size: 10.5px; }
+        .divider { border-bottom: 1px dashed #000; margin: 4px 0; }
+        table.items-table { width: 100%; border-collapse: collapse; margin: 5px 0; table-layout: fixed; }
+        table.items-table th, table.items-table td { border: 1px solid #000; padding: 3px 2px; font-size: 10px; }
         table.items-table th { background-color: #f0f0f0; font-weight: 900; text-align: center; }
-        table.items-table td.col-prod { text-align: right; font-weight: bold; word-break: break-word; overflow-wrap: break-word; width: 44%; padding-right: 3px; }
+        table.items-table td.col-prod { text-align: right; font-weight: bold; word-break: break-word; overflow-wrap: break-word; width: 42%; padding-right: 2px; }
         table.items-table td.col-color { text-align: center; width: 20%; word-break: break-word; }
-        table.items-table td.col-size { text-align: center; width: 16%; word-break: break-word; }
-        table.items-table td.col-qty { text-align: center; font-weight: 900; font-size: 12px; width: 20%; background-color: #fafafa; }
-        .summary-card { border: 1.5px solid #000; background: #f8f8f8; padding: 5px; margin: 6px 0; border-radius: 4px; }
-        .summary-line { display: flex; justify-content: space-between; font-size: 11.5px; font-weight: 900; padding: 1px 0; }
-        .summary-line.grand-total { border-top: 1px dashed #555; margin-top: 3px; padding-top: 3px; font-size: 13px; }
-        .signatures { margin-top: 12px; padding-top: 6px; border-top: 1px dashed #000; display: flex; justify-content: space-between; font-size: 9.5px; font-weight: bold; }
+        table.items-table td.col-size { text-align: center; width: 18%; word-break: break-word; }
+        table.items-table td.col-qty { text-align: center; font-weight: 900; font-size: 11px; width: 20%; background-color: #fafafa; }
+        .summary-card { border: 1.5px solid #000; background: #f8f8f8; padding: 4px 5px; margin: 5px 0; border-radius: 4px; }
+        .summary-line { display: flex; justify-content: space-between; font-size: 11px; font-weight: 900; padding: 1px 0; }
+        .summary-line.grand-total { border-top: 1px dashed #555; margin-top: 2px; padding-top: 2px; font-size: 12px; }
+        .signatures { margin-top: 10px; padding-top: 5px; border-top: 1px dashed #000; display: flex; justify-content: space-between; font-size: 9px; font-weight: bold; }
       </style></head><body>` +
       `<div class="receipt-header">` +
       (compName ? `<div class="comp-title">${compName}</div>` : '') +
@@ -949,11 +957,11 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
       `</div>` +
       `<table class="meta-table">` +
       `<tr><td style="width:100%; text-align:right;"><span class="meta-lbl">${assigneeLabel}: </span><span class="meta-val">${repName || '—'}</span></td></tr>` +
-      `<tr><td style="text-align:center; font-size:10px; padding-top:2px;"><span class="meta-lbl">التاريخ والوقت: </span><span>${dateStr}</span></td></tr>` +
+      `<tr><td style="text-align:center; font-size:9.5px; padding-top:2px;"><span class="meta-lbl">التاريخ والوقت: </span><span>${dateStr}</span></td></tr>` +
       `</table>` +
       `<div class="divider"></div>` +
       `<table class="items-table">` +
-      `<thead><tr><th style="width:44%;">المنتج</th><th style="width:20%;">اللون</th><th style="width:16%;">المقاس</th><th style="width:20%;">الكمية</th></tr></thead>` +
+      `<thead><tr><th style="width:42%;">المنتج</th><th style="width:20%;">اللون</th><th style="width:18%;">المقاس</th><th style="width:20%;">الكمية</th></tr></thead>` +
       `<tbody>` +
       rows.map(r => `<tr><td class="col-prod">${r.name}</td><td class="col-color">${r.color || '—'}</td><td class="col-size">${r.size || '—'}</td><td class="col-qty">${r.qty}</td></tr>`).join('') +
       `</tbody></table>` +

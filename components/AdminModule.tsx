@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
 import PermissionsAdmin from './PermissionsAdmin';
-import WaybillTemplatesManager from './WaybillTemplatesManager';
+import WaybillTemplatesManager, { EditTemplatePayload } from './WaybillTemplatesManager';
+import WaybillBuilder from './WaybillBuilder';
 import { Lock, Search, Globe, Users as UsersIcon, Shield, ChevronRight, Plus, X, Save, Edit, Trash2, Eye, UserPlus, LayoutTemplate } from 'lucide-react';
 import Swal from 'sweetalert2';
 import CustomSelect from './CustomSelect';
@@ -12,7 +13,11 @@ interface AdminModuleProps {
 }
 
 const AdminModule: React.FC<AdminModuleProps> = ({ initialView }) => {
-  const [activeTab, setActiveTab] = useState<string>(initialView || 'users');
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    if (initialView === 'waybill-templates') return 'waybill-builder';
+    return initialView || 'users';
+  });
+  const [waybillEditPayload, setWaybillEditPayload] = useState<EditTemplatePayload | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<any>(null);
@@ -208,10 +213,10 @@ const AdminModule: React.FC<AdminModuleProps> = ({ initialView }) => {
             سجل العمليات
           </button>
           <button 
-            onClick={() => setActiveTab('waybill-templates')} 
-            className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${activeTab === 'waybill-templates' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}
+            onClick={() => setActiveTab('waybill-builder')} 
+            className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${activeTab === 'waybill-builder' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}
           >
-            قوالب بوالص الشحن
+            مصمم البوليصة
           </button>
         </div>
       </div>
@@ -284,9 +289,12 @@ const AdminModule: React.FC<AdminModuleProps> = ({ initialView }) => {
         </div>
       )}
 
-      {activeTab === 'waybill-templates' && (
+      {(activeTab === 'waybill-builder' || activeTab === 'waybill-templates') && (
         <div className="animate-in fade-in">
-          <WaybillTemplatesManager />
+          <WaybillBuilder 
+            initialPayload={waybillEditPayload}
+            onClearPayload={() => setWaybillEditPayload(null)}
+          />
         </div>
       )}
 
