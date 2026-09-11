@@ -180,7 +180,7 @@ const CustomSelect: React.FC<Props> = ({
         ref={btnRef}
         type="button"
         onClick={handleToggle}
-        className={`w-full text-left rounded-2xl px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 ${
+        className={`w-full text-left rounded-2xl px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 ${
           disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:border-slate-300 dark:hover:border-slate-600'
         }`}
         aria-required={required}

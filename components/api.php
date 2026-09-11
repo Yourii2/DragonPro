@@ -1277,7 +1277,7 @@ if (!function_exists('hik_isapi_request')) {
             CURLOPT_SSL_VERIFYPEER => false,
             CURLOPT_SSL_VERIFYHOST => false,
             CURLOPT_CUSTOMREQUEST  => strtoupper($method),
-            CURLOPT_HTTPHEADER     => ['Content-Type: application/json', 'Accept: application/json'],
+            CURLOPT_HTTPHEADER     => ['Content-Type: application/json; charset=utf-8', 'Accept: application/json'],
         ]);
 
         if ($body !== null && in_array(strtoupper($method), ['POST', 'PUT'])) {
@@ -1300,6 +1300,17 @@ if (!function_exists('hik_isapi_request')) {
         if (!is_array($j)) return ['_raw' => $resp, '_http_code' => $code];
         $j['_http_code'] = $code;
         return $j;
+    }
+}
+
+if (!function_exists('hik_safe_name')) {
+    function hik_safe_name($name, $maxBytes = 32) {
+        $name = trim((string)$name);
+        if ($name === '') return 'Employee';
+        while (strlen($name) > $maxBytes && mb_strlen($name, 'UTF-8') > 0) {
+            $name = mb_substr($name, 0, mb_strlen($name, 'UTF-8') - 1, 'UTF-8');
+        }
+        return $name;
     }
 }
 
@@ -1380,9 +1391,10 @@ if (!function_exists('hik_push_user')) {
      */
     function hik_push_user(array $device, string $employeeNo, string $name, ?string $validFrom = null, ?string $validTo = null): array {
         try {
+            $safeName = hik_safe_name($name, 32);
             $userInfo = [
-                'employeeNo'  => $employeeNo,
-                'name'        => mb_substr($name, 0, 32),
+                'employeeNo'  => trim((string)$employeeNo),
+                'name'        => $safeName,
                 'userType'    => 'normal',
                 'localUIRight'=> false,
                 'numOfCard'   => 0,
@@ -1553,53 +1565,114 @@ if (!function_exists('attendance_driver_pull_logs')) {
             return ['success' => true, 'message' => 'تم سحب السجلات.', 'items' => $logs];
         }
 
-        // Hikvision ISAPI best-effort pull (AcsEvent)
+        // Hikvision ISAPI robust pull (AcsEvent)
         if ($driver === 'hikvision_isapi') {
             $ip = trim((string)($device['ip'] ?? ''));
-            $port = intval($device['port'] ?? 80);
-            $proto = trim((string)($device['protocol'] ?? 'http'));
-            $user = (string)($device['username'] ?? 'admin');
-            $pass = (string)($device['password'] ?? '');
             if ($ip === '') return ['success' => false, 'message' => 'IP غير محدد للجهاز.', 'items' => []];
 
-            // Allow override path
             $path = trim((string)($cfg['path'] ?? '/ISAPI/AccessControl/AcsEvent?format=json'));
             if (strpos($path, '/') !== 0) $path = '/' . $path;
 
-            $url = $proto . '://' . $ip . ':' . $port . $path;
-            $payload = [
-                // Hikvision commonly expects this structure
-                'AcsEventCond' => [
-                    'searchID' => uniqid('nexus_', true),
-                    'searchResultPosition' => 0,
-                    'maxResults' => intval($cfg['max_results'] ?? 2000),
-                    'startTime' => $start . 'T00:00:00+02:00',
-                    'endTime' => $end . 'T23:59:59+02:00'
-                ]
-            ];
+            // Clean local date format without timezone offset (many Hikvision terminals reject +02:00)
+            $startFormatted = date('Y-m-d\T00:00:00', strtotime($start));
+            $endFormatted   = date('Y-m-d\T23:59:59', strtotime($end));
+            $searchId       = uniqid('dp_', true);
+            $batchSize      = intval($cfg['max_results'] ?? 50);
+            if ($batchSize <= 0 || $batchSize > 100) $batchSize = 50;
 
-            $j = attendance_http_request_json($url, 'POST', $payload, $user, $pass, 30);
-            $itemsRaw = $j['AcsEvent'] ?? $j['AcsEventList'] ?? $j['Data'] ?? $j['data'] ?? [];
-            // Normalize different wrappers
-            if (isset($j['AcsEventList']) && is_array($j['AcsEventList']) && isset($j['AcsEventList']['AcsEvent']) && is_array($j['AcsEventList']['AcsEvent'])) {
-                $itemsRaw = $j['AcsEventList']['AcsEvent'];
-            }
             $logs = [];
-            if (is_array($itemsRaw)) {
-                foreach ($itemsRaw as $row) {
-                    if (!is_array($row)) continue;
-                    $du = $row['employeeNoString'] ?? $row['employeeNo'] ?? $row['cardNo'] ?? null;
-                    $ct = $row['time'] ?? $row['checkTime'] ?? $row['eventTime'] ?? null;
-                    if (!$du || !$ct) continue;
-                    $logs[] = [
-                        'device_user_id' => (string)$du,
-                        'check_time' => (string)$ct,
-                        'direction' => 'unknown',
-                        'raw_payload' => $row
-                    ];
+            $position = 0;
+            $hasMore = true;
+            $loopLimit = 25; // max 1250 records per pull
+
+            while ($hasMore && $loopLimit-- > 0) {
+                $payload = [
+                    'AcsEventCond' => [
+                        'searchID' => $searchId,
+                        'searchResultPosition' => $position,
+                        'maxResults' => $batchSize,
+                        'major' => 5, // Access Control Event
+                        'minor' => 0,
+                        'startTime' => $startFormatted,
+                        'endTime' => $endFormatted
+                    ]
+                ];
+
+                $j = null;
+                try {
+                    $j = hik_isapi_request($device, $path, 'POST', $payload, 15);
+                } catch (Exception $e) {
+                    // If major/minor filter is not supported by terminal firmware, retry without them
+                    try {
+                        $fallbackPayload = [
+                            'AcsEventCond' => [
+                                'searchID' => $searchId,
+                                'searchResultPosition' => $position,
+                                'maxResults' => $batchSize,
+                                'startTime' => $startFormatted,
+                                'endTime' => $endFormatted
+                            ]
+                        ];
+                        $j = hik_isapi_request($device, $path, 'POST', $fallbackPayload, 15);
+                    } catch (Exception $ex) {
+                        if (empty($logs)) {
+                            return ['success' => false, 'message' => 'خطأ في سحب حركات الجهاز: ' . $ex->getMessage(), 'items' => []];
+                        }
+                        break;
+                    }
+                }
+
+                if (!is_array($j)) break;
+
+                $wrapper = $j['AcsEvent'] ?? $j['AcsEventList'] ?? $j['Data'] ?? $j['data'] ?? [];
+                $infoList = $wrapper['InfoList'] ?? $wrapper['AcsEvent'] ?? $wrapper['items'] ?? [];
+                if (!is_array($infoList) && is_array($wrapper)) {
+                    $infoList = isset($wrapper[0]) ? $wrapper : [];
+                }
+
+                $batchCount = 0;
+                if (is_array($infoList)) {
+                    foreach ($infoList as $row) {
+                        if (!is_array($row)) continue;
+                        $du = $row['employeeNoString'] ?? $row['employeeNo'] ?? $row['cardNo'] ?? null;
+                        $ct = $row['time'] ?? $row['checkTime'] ?? $row['eventTime'] ?? null;
+                        if (!$du || !$ct) continue;
+
+                        $timeClean = str_replace('T', ' ', substr(trim((string)$ct), 0, 19));
+
+                        // Parse direction
+                        $dir = 'unknown';
+                        $attStatus = strtolower((string)($row['attendanceStatus'] ?? ''));
+                        if (in_array($attStatus, ['checkin', 'in', '1'])) {
+                            $dir = 'in';
+                        } elseif (in_array($attStatus, ['checkout', 'out', '2'])) {
+                            $dir = 'out';
+                        } else {
+                            $readerNo = intval($row['cardReaderNo'] ?? 1);
+                            if ($readerNo === 1) $dir = 'in';
+                            elseif ($readerNo === 2) $dir = 'out';
+                        }
+
+                        $logs[] = [
+                            'device_user_id' => (string)$du,
+                            'check_time' => $timeClean,
+                            'direction' => $dir,
+                            'raw_payload' => $row
+                        ];
+                        $batchCount++;
+                    }
+                }
+
+                $responseStatus = strtoupper((string)($wrapper['responseStatusStrg'] ?? $j['responseStatusStrg'] ?? ''));
+                $totalMatches = intval($wrapper['totalMatches'] ?? $j['totalMatches'] ?? 0);
+                $position += $batchCount;
+
+                if ($batchCount === 0 || $responseStatus === 'OK' || ($totalMatches > 0 && $position >= $totalMatches)) {
+                    $hasMore = false;
                 }
             }
-            return ['success' => true, 'message' => 'تم سحب السجلات (Hikvision ISAPI).', 'items' => $logs];
+
+            return ['success' => true, 'message' => 'تم سحب ' . count($logs) . ' حركة (Hikvision ISAPI).', 'items' => $logs];
         }
 
         return ['success' => false, 'message' => 'Driver غير مدعوم: ' . $driver, 'items' => []];
@@ -1625,32 +1698,37 @@ if (!function_exists('attendance_pull_and_store')) {
         $items = $result['items'] ?? [];
         if (!is_array($items) || count($items) === 0) {
             execute_query($pdo, "UPDATE attendance_devices SET last_sync_at = NOW() WHERE id = ?", [$device_id]);
-            return ['success' => true, 'message' => 'لا توجد سجلات جديدة.', 'inserted' => 0];
+            return ['success' => true, 'message' => 'لا توجد سجلات جديدة في هذه الفترة.', 'inserted' => 0];
         }
 
         $insert = $pdo->prepare("INSERT INTO attendance_logs (employee_id, device_id, device_user_id, check_time, direction, source, raw_payload) VALUES (?, ?, ?, ?, ?, ?, ?)");
         $mapEmp = $pdo->prepare("SELECT employee_id FROM attendance_device_users WHERE device_id = ? AND device_user_id = ? LIMIT 1");
+        $checkDup = $pdo->prepare("SELECT id FROM attendance_logs WHERE device_id = ? AND device_user_id = ? AND check_time = ? LIMIT 1");
+
         $inserted = 0;
+        $mappedEmployees = 0;
         foreach ($items as $it) {
             if (!is_array($it)) continue;
             $device_user_id = trim((string)($it['device_user_id'] ?? ''));
             $check_time = trim((string)($it['check_time'] ?? ''));
             if ($device_user_id === '' || $check_time === '') continue;
 
+            // Prevent duplicate records on repeated pulls
+            $checkDup->execute([$device_id, $device_user_id, $check_time]);
+            if ($checkDup->fetchColumn()) {
+                continue;
+            }
+
             $employee_id = null;
             try {
                 $mapEmp->execute([$device_id, $device_user_id]);
                 $employee_id = $mapEmp->fetchColumn() ?: null;
+                if ($employee_id) $mappedEmployees++;
             } catch (Exception $e) {
                 $employee_id = null;
             }
 
-            $raw = null;
-            if (isset($it['raw_payload'])) {
-                $raw = json_encode($it['raw_payload']);
-            } else {
-                $raw = json_encode($it);
-            }
+            $raw = isset($it['raw_payload']) ? json_encode($it['raw_payload'], JSON_UNESCAPED_UNICODE) : json_encode($it, JSON_UNESCAPED_UNICODE);
 
             $insert->execute([
                 $employee_id,
@@ -1665,7 +1743,13 @@ if (!function_exists('attendance_pull_and_store')) {
         }
 
         execute_query($pdo, "UPDATE attendance_devices SET last_sync_at = NOW() WHERE id = ?", [$device_id]);
-        return ['success' => true, 'message' => 'تم سحب وتخزين السجلات.', 'inserted' => $inserted];
+
+        $msg = "تم سحب $inserted حركة جديدة بنجاح.";
+        if ($mappedEmployees > 0) {
+            $msg .= " (تم ربط $mappedEmployees حركة بموظفين).";
+        }
+
+        return ['success' => true, 'message' => $msg, 'inserted' => $inserted, 'mapped_employees' => $mappedEmployees];
     }
 }
 
@@ -2095,6 +2179,23 @@ function log_order_history($pdo, $order_id, $status, $action, $notes = null, $re
     }
 }
 
+if (!function_exists('get_arabic_status')) {
+    function get_arabic_status($status) {
+        switch (strtolower((string)$status)) {
+            case 'pending': return 'قيد الانتظار ⏳';
+            case 'with_rep': return 'مع المندوب 🚴';
+            case 'delivered': return 'تم التسليم بنجاح ✅';
+            case 'returned': return 'مرتجع بالكامل ❌';
+            case 'partial': return 'مرتجع جزئي ⚠️';
+            case 'postponed': return 'مؤجل 📅';
+            case 'cancelled': return 'ملغي 🚫';
+            case 'confirmed': return 'تم التأكيد 👍';
+            case 'closed': return 'مغلق 🔒';
+            default: return (string)$status;
+        }
+    }
+}
+
 function send_telegram_customer_notification($pdo, $order_id, $event_type = 'status_update') {
     try {
         if (!column_exists($pdo, 'customers', 'telegram_chat_id')) {
@@ -2460,38 +2561,25 @@ function confirmation_fetch_order_by_barcode(PDO $pdo, $barcode) {
     $barcode = trim((string)$barcode);
     if ($barcode === '') return null;
 
-    $order = null;
-    if (preg_match('/^\d+$/', $barcode)) {
+    // 1. First search by exact order_number (supports both numeric and alphanumeric codes e.g. ORD-101, 1005)
+    $order = execute_query(
+        $pdo,
+        "SELECT id, order_number, status, rep_id, total_amount, shipping_fees, notes, created_at
+         FROM orders WHERE order_number = ? LIMIT 1",
+        [$barcode]
+    )->fetch(PDO::FETCH_ASSOC);
+
+    // 2. If not found and barcode consists only of digits, fallback to matching orders.id
+    if (!$order && preg_match('/^\d+$/', $barcode)) {
         $order = execute_query(
             $pdo,
             "SELECT id, order_number, status, rep_id, total_amount, shipping_fees, notes, created_at
-             FROM orders WHERE order_number = ? LIMIT 1",
-            [$barcode]
-        )->fetch(PDO::FETCH_ASSOC);
-        if (!$order) {
-            $order = execute_query(
-                $pdo,
-                "SELECT id, order_number, status, rep_id, total_amount, shipping_fees, notes, created_at
-                 FROM orders WHERE id = ? LIMIT 1",
-                [intval($barcode)]
-            )->fetch(PDO::FETCH_ASSOC);
-        }
-    }
-
-    if (!$order && table_exists($pdo, 'product_variants') && column_exists($pdo, 'product_variants', 'barcode')) {
-        $order = execute_query(
-            $pdo,
-            "SELECT DISTINCT o.id, o.order_number, o.status, o.rep_id, o.total_amount, o.shipping_fees, o.notes, o.created_at
-             FROM orders o
-             JOIN order_items oi ON oi.order_id = o.id
-             JOIN product_variants pv ON pv.id = oi.product_id
-             WHERE pv.barcode = ?
-             ORDER BY o.id DESC
-             LIMIT 1",
-            [$barcode]
+             FROM orders WHERE id = ? LIMIT 1",
+            [intval($barcode)]
         )->fetch(PDO::FETCH_ASSOC);
     }
 
+    // Never fallback to product_variants for resolving an order!
     return $order ?: null;
 }
 
@@ -9307,10 +9395,12 @@ switch ($module) {
                             related_to_id, 
                             SUM(amount) as balance 
                         FROM transactions 
-                        WHERE related_to_type = ?
                         GROUP BY related_to_id
                     ) t ON u.id = t.related_to_id
-                    WHERE u.role = 'representative'
+                    WHERE u.role = 'representative' OR u.id IN (
+                        SELECT DISTINCT rep_id FROM orders 
+                        WHERE rep_id IS NOT NULL AND status IN ('with_rep', 'partial', 'in_delivery')
+                    )
                     ORDER BY u.name ASC";
 
             $stmt = execute_query($pdo, $sql, [$rep_related_type]);
@@ -10491,7 +10581,7 @@ switch ($module) {
             $params = [$repId];
             if ($statusFilter !== '') {
                 if ($statusFilter === 'active') {
-                    $where[] = "(o.status = 'with_rep' OR o.status = 'partial')";
+                    $where[] = "(o.status = 'with_rep' OR o.status = 'partial' OR o.status = 'in_delivery')";
                 } else {
                     $where[] = 'o.status = ?';
                     $params[] = $statusFilter;
@@ -10554,9 +10644,9 @@ switch ($module) {
                 $in = implode(',', array_map('intval', $ids));
                 $order_items_has_total_col = column_exists($pdo, 'order_items', 'total_price');
                 if ($order_items_has_total_col) {
-                    $itSql = "SELECT oi.order_id, oi.product_id, oi.quantity, oi.price_per_unit, oi.total_price as line_total, ppar.name, pv.color, pv.size FROM order_items oi LEFT JOIN product_variants pv ON oi.product_id = pv.id LEFT JOIN products ppar ON pv.product_id = ppar.id WHERE oi.order_id IN ($in)";
+                    $itSql = "SELECT oi.order_id, oi.product_id, oi.quantity, oi.price_per_unit, oi.total_price as line_total, ppar.name, pv.color, pv.size, pv.barcode FROM order_items oi LEFT JOIN product_variants pv ON oi.product_id = pv.id LEFT JOIN products ppar ON pv.product_id = ppar.id WHERE oi.order_id IN ($in)";
                 } else {
-                    $itSql = "SELECT oi.order_id, oi.product_id, oi.quantity, oi.price_per_unit, (oi.quantity * oi.price_per_unit) as line_total, ppar.name, pv.color, pv.size FROM order_items oi LEFT JOIN product_variants pv ON oi.product_id = pv.id LEFT JOIN products ppar ON pv.product_id = ppar.id WHERE oi.order_id IN ($in)";
+                    $itSql = "SELECT oi.order_id, oi.product_id, oi.quantity, oi.price_per_unit, (oi.quantity * oi.price_per_unit) as line_total, ppar.name, pv.color, pv.size, pv.barcode FROM order_items oi LEFT JOIN product_variants pv ON oi.product_id = pv.id LEFT JOIN products ppar ON pv.product_id = ppar.id WHERE oi.order_id IN ($in)";
                 }
                 $itStmt = $pdo->query($itSql);
                 $items = $itStmt->fetchAll(PDO::FETCH_ASSOC);
@@ -10566,6 +10656,7 @@ switch ($module) {
                         'name' => $it['name'],
                         'color' => $it['color'],
                         'size' => $it['size'],
+                        'barcode' => $it['barcode'] ?? '',
                         'quantity' => $it['quantity'],
                         'price' => $it['price_per_unit'],
                         'total' => $it['line_total']
@@ -12595,6 +12686,14 @@ switch ($module) {
 
                 $order = confirmation_fetch_order_by_barcode($pdo, $barcode);
                 if (!$order) {
+                    if (table_exists($pdo, 'product_variants') && column_exists($pdo, 'product_variants', 'barcode')) {
+                        $isProduct = execute_query($pdo, "SELECT id FROM product_variants WHERE barcode = ? LIMIT 1", [$barcode])->fetchColumn();
+                        if ($isProduct) {
+                            http_response_code(400);
+                            echo json_encode(['success' => false, 'message' => 'هذا الباركود خاص بمنتج/صنف وليس بوليصة أوردر.']);
+                            break;
+                        }
+                    }
                     http_response_code(404);
                     echo json_encode(['success' => false, 'message' => 'لم يتم العثور على أوردر بهذا الباركود.']);
                     break;
@@ -12833,6 +12932,14 @@ switch ($module) {
 
                 $order = confirmation_fetch_order_by_barcode($pdo, $barcode);
                 if (!$order) {
+                    if (table_exists($pdo, 'product_variants') && column_exists($pdo, 'product_variants', 'barcode')) {
+                        $isProduct = execute_query($pdo, "SELECT id FROM product_variants WHERE barcode = ? LIMIT 1", [$barcode])->fetchColumn();
+                        if ($isProduct) {
+                            http_response_code(400);
+                            echo json_encode(['success' => false, 'message' => 'هذا الباركود خاص بمنتج/صنف وليس بوليصة أوردر.']);
+                            break;
+                        }
+                    }
                     http_response_code(404);
                     echo json_encode(['success' => false, 'message' => 'لم يتم العثور على أوردر بهذا الباركود.']);
                     break;
@@ -12926,7 +13033,12 @@ switch ($module) {
                 }
 
                 $order = null;
-                if ($orderIdInput > 0) {
+                // If barcode is provided, resolve order strictly by barcode (order_number first, then ID)
+                if ($barcode !== '') {
+                    $order = confirmation_fetch_order_by_barcode($pdo, $barcode);
+                }
+                // If not resolved by barcode or barcode was empty, try explicit orderIdInput
+                if (!$order && $orderIdInput > 0) {
                     $order = execute_query(
                         $pdo,
                         "SELECT id, order_number, status, rep_id, total_amount, shipping_fees, notes, created_at
@@ -12934,27 +13046,15 @@ switch ($module) {
                         [$orderIdInput]
                     )->fetch(PDO::FETCH_ASSOC);
                 }
-                if (!$order && $barcode !== '') {
-                    if (preg_match('/^\d+$/', $barcode)) {
-                        $matchingAssignmentOrderId = execute_query(
-                            $pdo,
-                            "SELECT order_id FROM order_confirmation_assignments WHERE rep_id = ? AND order_id = ? AND status <> 'unassigned' LIMIT 1",
-                            [$repId, intval($barcode)]
-                        )->fetchColumn();
-                        if ($matchingAssignmentOrderId) {
-                            $order = execute_query(
-                                $pdo,
-                                "SELECT id, order_number, status, rep_id, total_amount, shipping_fees, notes, created_at
-                                 FROM orders WHERE id = ? LIMIT 1",
-                                [intval($matchingAssignmentOrderId)]
-                            )->fetch(PDO::FETCH_ASSOC);
+                if (!$order) {
+                    if ($barcode !== '' && table_exists($pdo, 'product_variants') && column_exists($pdo, 'product_variants', 'barcode')) {
+                        $isProduct = execute_query($pdo, "SELECT id FROM product_variants WHERE barcode = ? LIMIT 1", [$barcode])->fetchColumn();
+                        if ($isProduct) {
+                            http_response_code(400);
+                            echo json_encode(['success' => false, 'message' => 'هذا الباركود خاص بمنتج/صنف وليس بوليصة أوردر.']);
+                            break;
                         }
                     }
-                    if (!$order) {
-                        $order = confirmation_fetch_order_by_barcode($pdo, $barcode);
-                    }
-                }
-                if (!$order) {
                     http_response_code(404);
                     echo json_encode(['success' => false, 'message' => 'لم يتم العثور على أوردر بهذا الباركود.']);
                     break;
@@ -15759,6 +15859,15 @@ switch ($module) {
                 $monthStart = $month . '-01';
                 $monthEnd = date('Y-m-t', strtotime($monthStart));
 
+                $generateAttendance = filter_var($_GET['generate_attendance'] ?? 'true', FILTER_VALIDATE_BOOLEAN);
+                if ($generateAttendance && function_exists('attendance_generate_summary_range')) {
+                    try {
+                        attendance_generate_summary_range($pdo, $monthStart, $monthEnd);
+                    } catch (Throwable $eAtt) {
+                        // ignore if attendance calculation fails to avoid blocking the salary report
+                    }
+                }
+
                 $attendanceStmt = execute_query(
                     $pdo,
                     "SELECT s.*, sh.name as shift_name,
@@ -16586,17 +16695,26 @@ switch ($module) {
             }
 
             try {
+                $hasPV = table_exists($pdo, 'product_variants');
+                $costExpr = $hasPV
+                    ? "COALESCE(NULLIF(pv.cost_price, 0), NULLIF(pv.purchase_price, 0), 0)"
+                    : "0";
+                $variantJoin = $hasPV
+                    ? "LEFT JOIN product_variants pv ON pv.id = oi.product_id
+                       LEFT JOIN products ppar ON ppar.id = pv.product_id"
+                    : "LEFT JOIN products ppar ON ppar.id = oi.product_id";
+
                 // ── Summary KPIs ──
                 $sumStmt = execute_query($pdo,
                     "SELECT
                         COUNT(DISTINCT o.id)                                                          AS orders_count,
                         COALESCE(SUM(oi.quantity), 0)                                                 AS items_count,
                         COALESCE(SUM(oi.quantity * oi.price_per_unit), 0)                             AS revenue,
-                        COALESCE(SUM(oi.quantity * COALESCE(pv.cost_price, 0)), 0)                    AS cost,
-                        COALESCE(SUM(oi.quantity * (oi.price_per_unit - COALESCE(pv.cost_price, 0))), 0) AS profit
+                        COALESCE(SUM(oi.quantity * {$costExpr}), 0)                                   AS cost,
+                        COALESCE(SUM(oi.quantity * (oi.price_per_unit - {$costExpr})), 0)             AS profit
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
-                     LEFT JOIN product_variants pv ON pv.id = oi.product_id
+                     {$variantJoin}
                      WHERE $baseWhere",
                     $baseParams
                 );
@@ -16608,19 +16726,18 @@ switch ($module) {
                 // ── By Product ──
                 $byProductStmt = execute_query($pdo,
                     "SELECT
-                        COALESCE(ppar.name, CONCAT('منتج #', oi.product_id))  AS product_name,
+                        COALESCE(ppar.name, pv.name, CONCAT('منتج #', oi.product_id))  AS product_name,
                         COALESCE(pv.color, '')                                  AS color,
                         COALESCE(pv.size, '')                                   AS size,
                         COALESCE(SUM(oi.quantity), 0)                           AS qty,
                         COALESCE(SUM(oi.quantity * oi.price_per_unit), 0)       AS revenue,
-                        COALESCE(SUM(oi.quantity * COALESCE(pv.cost_price,0)),0) AS cost,
-                        COALESCE(SUM(oi.quantity * (oi.price_per_unit - COALESCE(pv.cost_price,0))),0) AS profit
+                        COALESCE(SUM(oi.quantity * {$costExpr}), 0)             AS cost,
+                        COALESCE(SUM(oi.quantity * (oi.price_per_unit - {$costExpr})), 0) AS profit
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
-                     LEFT JOIN product_variants pv ON pv.id = oi.product_id
-                     LEFT JOIN products ppar ON ppar.id = pv.product_id
+                     {$variantJoin}
                      WHERE $baseWhere
-                     GROUP BY oi.product_id, ppar.name, pv.color, pv.size
+                     GROUP BY oi.product_id, product_name, pv.color, pv.size
                      ORDER BY revenue DESC
                      LIMIT 200",
                     $baseParams
@@ -16638,12 +16755,12 @@ switch ($module) {
                         COALESCE(u.name, CONCAT('مندوب #', o.rep_id)) AS rep_name,
                         COUNT(DISTINCT o.id)                             AS orders_count,
                         COALESCE(SUM(oi.quantity), 0)                   AS items_count,
-                        COALESCE(SUM(oi.quantity * oi.price_per_unit),0) AS revenue,
-                        COALESCE(SUM(oi.quantity * COALESCE(pv.cost_price,0)),0) AS cost,
-                        COALESCE(SUM(oi.quantity * (oi.price_per_unit - COALESCE(pv.cost_price,0))),0) AS profit
+                        COALESCE(SUM(oi.quantity * oi.price_per_unit), 0) AS revenue,
+                        COALESCE(SUM(oi.quantity * {$costExpr}), 0)     AS cost,
+                        COALESCE(SUM(oi.quantity * (oi.price_per_unit - {$costExpr})), 0) AS profit
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
-                     LEFT JOIN product_variants pv ON pv.id = oi.product_id
+                     {$variantJoin}
                      LEFT JOIN users u ON u.id = o.rep_id
                      WHERE $baseWhere
                      GROUP BY o.rep_id, u.name
@@ -16662,12 +16779,12 @@ switch ($module) {
                     "SELECT
                         DATE(o.created_at)                               AS date,
                         COUNT(DISTINCT o.id)                             AS orders_count,
-                        COALESCE(SUM(oi.quantity * oi.price_per_unit),0) AS revenue,
-                        COALESCE(SUM(oi.quantity * COALESCE(pv.cost_price,0)),0) AS cost,
-                        COALESCE(SUM(oi.quantity * (oi.price_per_unit - COALESCE(pv.cost_price,0))),0) AS profit
+                        COALESCE(SUM(oi.quantity * oi.price_per_unit), 0) AS revenue,
+                        COALESCE(SUM(oi.quantity * {$costExpr}), 0)     AS cost,
+                        COALESCE(SUM(oi.quantity * (oi.price_per_unit - {$costExpr})), 0) AS profit
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
-                     LEFT JOIN product_variants pv ON pv.id = oi.product_id
+                     {$variantJoin}
                      WHERE $baseWhere
                      GROUP BY DATE(o.created_at)
                      ORDER BY date ASC",
@@ -16684,13 +16801,13 @@ switch ($module) {
                         COALESCE(u.name, '')            AS rep_name,
                         o.status,
                         DATE(o.created_at)              AS date,
-                        COALESCE(SUM(oi.quantity * oi.price_per_unit),0) AS revenue,
-                        COALESCE(SUM(oi.quantity * COALESCE(pv.cost_price,0)),0) AS cost,
-                        COALESCE(SUM(oi.quantity * (oi.price_per_unit - COALESCE(pv.cost_price,0))),0) AS profit,
+                        COALESCE(SUM(oi.quantity * oi.price_per_unit), 0) AS revenue,
+                        COALESCE(SUM(oi.quantity * {$costExpr}), 0)     AS cost,
+                        COALESCE(SUM(oi.quantity * (oi.price_per_unit - {$costExpr})), 0) AS profit,
                         COALESCE(o.shipping_fees, 0) AS shipping
                      FROM orders o
                      JOIN order_items oi ON oi.order_id = o.id
-                     LEFT JOIN product_variants pv ON pv.id = oi.product_id
+                     {$variantJoin}
                      LEFT JOIN customers c ON c.id = o.customer_id
                      LEFT JOIN users u ON u.id = o.rep_id
                      WHERE $baseWhere
@@ -16904,17 +17021,20 @@ switch ($module) {
                 }
 
                 // inventoryStock
+                $stockLimit = intval($_GET['limit'] ?? 500);
+                if ($stockLimit <= 0 || $stockLimit > 2000) $stockLimit = 500;
+
                 if ($hasPV) {
                     if ($warehouse_id > 0) {
-                        $stmt = execute_query($pdo, "SELECT COALESCE(ppar.name,'منتج') as product, COALESCE(pv.barcode,'') as barcode, COALESCE(w.name,'مستودع') as warehouse, COALESCE(s.quantity,0) as quantity, COALESCE(pv.cost_price,0) as purchasePrice FROM stock s LEFT JOIN product_variants pv ON s.product_id = pv.id LEFT JOIN products ppar ON pv.product_id = ppar.id LEFT JOIN warehouses w ON s.warehouse_id = w.id WHERE s.warehouse_id = ? ORDER BY s.quantity DESC LIMIT 100", [$warehouse_id]);
+                        $stmt = execute_query($pdo, "SELECT COALESCE(ppar.name, pv.name, 'منتج') as product, COALESCE(pv.barcode,'') as barcode, COALESCE(w.name,'مستودع') as warehouse, COALESCE(s.quantity,0) as quantity, COALESCE(NULLIF(pv.cost_price,0), NULLIF(pv.purchase_price,0), 0) as purchasePrice FROM stock s LEFT JOIN product_variants pv ON s.product_id = pv.id LEFT JOIN products ppar ON pv.product_id = ppar.id LEFT JOIN warehouses w ON s.warehouse_id = w.id WHERE s.warehouse_id = ? ORDER BY s.quantity DESC LIMIT $stockLimit", [$warehouse_id]);
                     } else {
-                        $stmt = execute_query($pdo, "SELECT COALESCE(ppar.name,'منتج') as product, COALESCE(pv.barcode,'') as barcode, COALESCE(w.name,'مستودع') as warehouse, COALESCE(s.quantity,0) as quantity, COALESCE(pv.cost_price,0) as purchasePrice FROM stock s LEFT JOIN product_variants pv ON s.product_id = pv.id LEFT JOIN products ppar ON pv.product_id = ppar.id LEFT JOIN warehouses w ON s.warehouse_id = w.id ORDER BY s.quantity DESC LIMIT 100");
+                        $stmt = execute_query($pdo, "SELECT COALESCE(ppar.name, pv.name, 'منتج') as product, COALESCE(pv.barcode,'') as barcode, COALESCE(w.name,'مستودع') as warehouse, COALESCE(s.quantity,0) as quantity, COALESCE(NULLIF(pv.cost_price,0), NULLIF(pv.purchase_price,0), 0) as purchasePrice FROM stock s LEFT JOIN product_variants pv ON s.product_id = pv.id LEFT JOIN products ppar ON pv.product_id = ppar.id LEFT JOIN warehouses w ON s.warehouse_id = w.id ORDER BY s.quantity DESC LIMIT $stockLimit");
                     }
                 } else {
                     if ($warehouse_id > 0) {
-                        $stmt = execute_query($pdo, "SELECT COALESCE(p.name,'منتج') as product, '' as barcode, COALESCE(w.name,'مستودع') as warehouse, COALESCE(s.quantity,0) as quantity, 0 as purchasePrice FROM stock s LEFT JOIN products p ON s.product_id = p.id LEFT JOIN warehouses w ON s.warehouse_id = w.id WHERE s.warehouse_id = ? ORDER BY s.quantity DESC LIMIT 100", [$warehouse_id]);
+                        $stmt = execute_query($pdo, "SELECT COALESCE(p.name,'منتج') as product, '' as barcode, COALESCE(w.name,'مستودع') as warehouse, COALESCE(s.quantity,0) as quantity, 0 as purchasePrice FROM stock s LEFT JOIN products p ON s.product_id = p.id LEFT JOIN warehouses w ON s.warehouse_id = w.id WHERE s.warehouse_id = ? ORDER BY s.quantity DESC LIMIT $stockLimit", [$warehouse_id]);
                     } else {
-                        $stmt = execute_query($pdo, "SELECT COALESCE(p.name,'منتج') as product, '' as barcode, COALESCE(w.name,'مستودع') as warehouse, COALESCE(s.quantity,0) as quantity, 0 as purchasePrice FROM stock s LEFT JOIN products p ON s.product_id = p.id LEFT JOIN warehouses w ON s.warehouse_id = w.id ORDER BY s.quantity DESC LIMIT 100");
+                        $stmt = execute_query($pdo, "SELECT COALESCE(p.name,'منتج') as product, '' as barcode, COALESCE(w.name,'مستودع') as warehouse, COALESCE(s.quantity,0) as quantity, 0 as purchasePrice FROM stock s LEFT JOIN products p ON s.product_id = p.id LEFT JOIN warehouses w ON s.warehouse_id = w.id ORDER BY s.quantity DESC LIMIT $stockLimit");
                     }
                 }
                 $inventoryStock = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -16924,9 +17044,9 @@ switch ($module) {
                 if ($hasPM) {
                     try {
                         if ($hasPV) {
-                            $stmt = execute_query($pdo, "SELECT pm.id, pm.created_at as date, COALESCE(ppar.name,'منتج') as product, pm.movement_type as type, pm.quantity_change as quantity, COALESCE(w.name,'مستودع') as sourceDest FROM product_movements pm LEFT JOIN product_variants pv ON pm.product_id = pv.id LEFT JOIN products ppar ON pv.product_id = ppar.id LEFT JOIN warehouses w ON pm.warehouse_id = w.id WHERE $invWhere ORDER BY pm.created_at DESC LIMIT 100", $invParams);
+                            $stmt = execute_query($pdo, "SELECT pm.id, pm.created_at as date, COALESCE(ppar.name, pv.name, 'منتج') as product, pm.movement_type as type, pm.quantity_change as quantity, COALESCE(w.name,'مستودع') as sourceDest FROM product_movements pm LEFT JOIN product_variants pv ON pm.product_id = pv.id LEFT JOIN products ppar ON pv.product_id = ppar.id LEFT JOIN warehouses w ON pm.warehouse_id = w.id WHERE $invWhere ORDER BY pm.created_at DESC LIMIT $stockLimit", $invParams);
                         } else {
-                            $stmt = execute_query($pdo, "SELECT pm.id, pm.created_at as date, COALESCE(p.name,'منتج') as product, pm.movement_type as type, pm.quantity_change as quantity, COALESCE(w.name,'مستودع') as sourceDest FROM product_movements pm LEFT JOIN products p ON pm.product_id = p.id LEFT JOIN warehouses w ON pm.warehouse_id = w.id WHERE $invWhere ORDER BY pm.created_at DESC LIMIT 100", $invParams);
+                            $stmt = execute_query($pdo, "SELECT pm.id, pm.created_at as date, COALESCE(p.name,'منتج') as product, pm.movement_type as type, pm.quantity_change as quantity, COALESCE(w.name,'مستودع') as sourceDest FROM product_movements pm LEFT JOIN products p ON pm.product_id = p.id LEFT JOIN warehouses w ON pm.warehouse_id = w.id WHERE $invWhere ORDER BY pm.created_at DESC LIMIT $stockLimit", $invParams);
                         }
                         $inventoryMovementHistory = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     } catch (Exception $e3) {}
@@ -17020,11 +17140,55 @@ switch ($module) {
                     ];
                 }
 
+                $expenseCategories = [];
+                try {
+                    $hasCatCol = column_exists($pdo, 'transactions', 'category');
+                    $catColSql = $hasCatCol ? "t.category," : "";
+                    $expStmt = execute_query($pdo, "
+                        SELECT t.id, t.amount, t.type, t.details, {$catColSql} t.transaction_date
+                        FROM transactions t
+                        WHERE t.amount < 0
+                          AND (t.type = 'expense' OR JSON_UNQUOTE(JSON_EXTRACT(t.details, '$.subtype')) = 'expense')
+                          AND t.transaction_date BETWEEN ? AND ?
+                          $trFilter
+                    ", [$start_dt, $end_dt]);
+                    $catTotals = [];
+                    $catNameMap = [
+                        'ads' => 'إعلانات وتسويق',
+                        'salaries' => 'رواتب وأجور',
+                        'rent' => 'إيجارات',
+                        'utilities' => 'مرافق وخدمات',
+                        'transport' => 'انتقالات وشحن',
+                        'maintenance' => 'صيانة وإصلاح',
+                        'hospitality' => 'ضيافة وبوفيه',
+                        'supplies' => 'أدوات مكتبية',
+                        'other' => 'مصروفات متنوعة'
+                    ];
+                    foreach ($expStmt->fetchAll(PDO::FETCH_ASSOC) as $expRow) {
+                        $amt = abs(floatval($expRow['amount']));
+                        $rawCat = (!empty($expRow['category'])) ? $expRow['category'] : '';
+                        if (!$rawCat && !empty($expRow['details'])) {
+                            $det = json_decode($expRow['details'], true);
+                            if (is_array($det) && !empty($det['category'])) $rawCat = $det['category'];
+                        }
+                        $catKey = (!empty($rawCat) && isset($catNameMap[$rawCat])) ? $rawCat : 'other';
+                        $catName = $catNameMap[$catKey] ?? 'مصروفات متنوعة';
+                        $catTotals[$catName] = ($catTotals[$catName] ?? 0.0) + $amt;
+                    }
+                    foreach ($catTotals as $cName => $cVal) {
+                        if ($cVal > 0) {
+                            $expenseCategories[] = ['name' => $cName, 'value' => round($cVal, 2)];
+                        }
+                    }
+                } catch (Throwable $eCat) {
+                    $expenseCategories = [];
+                }
+
                 echo json_encode(['success' => true, 'data' => [
                     'starting_balance'          => $startingBalance,
                     'ending_balance'            => $runningBalance,
                     'treasuryBalanceHistory'     => $treasuryBalanceHistory,
-                    'expenseCategories'          => [],
+                    'expenseCategories'          => $expenseCategories,
                     'revenueAndExpenseRecords'   => $records
                 ]]);
             } catch (Throwable $e) {
@@ -17291,7 +17455,7 @@ switch ($module) {
                     $delOrdersInc = 0; $retOrdersInc = 0;
 
                     if ($rjoStatus === 'partial' || $rjoStatus === 'partial_return') {
-                        $retP = $rjoRetPieces > 0 ? $rjoRetPieces : 1;
+                        $retP = $rjoRetPieces > 0 ? $rjoRetPieces : ($orderPieces > 0 ? 1 : 0);
                         $delP = max(0, $orderPieces - $retP);
                         $retA = $rjoRetValue > 0 ? $rjoRetValue : ($orderPieces > 0 ? ($orderAmount * ($retP / $orderPieces)) : 0);
                         $delA = max(0, $orderAmount - $retA);
@@ -17471,7 +17635,10 @@ switch ($module) {
                 if ($hasCustCols) {
                     $custQuery = "SELECT 
                                     id, name, 'customer' as role, (total_debit - total_credit) as balance,
-                                    (SELECT MAX(transaction_date) FROM transactions WHERE related_to_id = customers.id AND related_to_type = 'customer' AND type IN ('payment_in', 'payment_out')) as last_payment_date
+                                    COALESCE(
+                                        (SELECT MAX(transaction_date) FROM transactions WHERE related_to_id = customers.id AND related_to_type = 'customer' AND type IN ('payment_in', 'payment_out')),
+                                        (SELECT MIN(created_at) FROM orders WHERE customer_id = customers.id)
+                                    ) as last_payment_date
                                 FROM customers 
                                 WHERE ROUND((total_debit - total_credit), 2) != 0";
                 } else {
@@ -17486,7 +17653,10 @@ switch ($module) {
                             UNION ALL
                             SELECT 
                                 id, name, 'representative' as role, balance,
-                                (SELECT MAX(transaction_date) FROM transactions WHERE related_to_id = users.id AND related_to_type = 'employee' AND type IN ('payment_in', 'payment_out')) as last_payment_date
+                                COALESCE(
+                                    (SELECT MAX(transaction_date) FROM transactions WHERE related_to_id = users.id AND related_to_type = 'employee' AND type IN ('payment_in', 'payment_out')),
+                                    users.created_at
+                                ) as last_payment_date
                             FROM users 
                             WHERE role = 'representative' AND ROUND(balance, 2) != 0
                         ) t
@@ -17497,11 +17667,11 @@ switch ($module) {
                 $aging = ['0_30' => 0, '31_60' => 0, '61_90' => 0, 'over_90' => 0];
                 $now = new DateTime();
                 foreach($users as &$user) {
-                    if ($user['last_payment_date']) {
+                    if (!empty($user['last_payment_date'])) {
                         $last = new DateTime($user['last_payment_date']);
-                        $user['days_since_payment'] = $now->diff($last)->days;
+                        $user['days_since_payment'] = max(0, $now->diff($last)->days);
                     } else {
-                        $user['days_since_payment'] = 999;
+                        $user['days_since_payment'] = 0;
                     }
                     if ($user['balance'] > 0) {
                         $d = $user['days_since_payment'];

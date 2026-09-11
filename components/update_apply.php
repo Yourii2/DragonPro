@@ -327,9 +327,17 @@ try {
 
     @unlink($lockPath);
 
+    // Auto-trigger background rebuild and server restart
+    $restartBat = file_exists($root . '/restart.bat') ? ($root . '/restart.bat') : ($root . '/update_and_restart.bat');
+    if (file_exists($restartBat)) {
+        log_msg($root, "Triggering automatic background rebuild and preview server restart...");
+        $cmd = 'start "" /B cmd.exe /c "' . $restartBat . '"';
+        @pclose(@popen($cmd, "r"));
+    }
+
     echo json_encode([
         'success' => true,
-        'message' => 'Update(s) installed. Please refresh the page. If you use XAMPP service, you may restart Apache if needed.',
+        'message' => 'تم تثبيت التحديث بنجاح، ويجري الآن إعادة بناء وتحديث السيرفر تلقائياً في الخلفية.',
         'preserved' => $exclude,
         'backup_zips' => $backupZips
     ]);

@@ -91,6 +91,7 @@ if exist "start.bat" copy /y "start.bat" "%STAGE%\start.bat" >nul
 if exist "restart.bat" copy /y "restart.bat" "%STAGE%\restart.bat" >nul
 if exist "stop.bat" copy /y "stop.bat" "%STAGE%\stop.bat" >nul
 if exist "recreate_license.bat" copy /y "recreate_license.bat" "%STAGE%\recreate_license.bat" >nul
+if exist "update_and_restart.bat" copy /y "update_and_restart.bat" "%STAGE%\update_and_restart.bat" >nul
 
 rem DO NOT ship customer-specific files
 if exist "%STAGE%\config.php" del /f /q "%STAGE%\config.php" >nul 2>nul

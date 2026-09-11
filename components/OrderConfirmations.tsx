@@ -867,6 +867,7 @@ const OrderConfirmations: React.FC = () => {
   const handleAssignBarcode = async () => {
     const barcode = assignBarcode.trim();
     if (!requireSelectedRep() || !requireSelectedWarehouse() || !barcode) return;
+    setAssignBarcode(''); // Clear immediately to prevent scanner buffer concatenation
     setSubmitting(true);
     try {
       const resolveResponse = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=resolveConfirmationBarcode&barcode=${encodeURIComponent(barcode)}`);
@@ -948,15 +949,20 @@ const OrderConfirmations: React.FC = () => {
       Swal.fire('تنبيه', 'الرجاء كتابة أو مسح باركود الأوردر أولاً.', 'warning');
       return;
     }
+    setCancelBarcode(''); // Clear immediately to prevent scanner buffer collision
 
     // Verify if order exists in the representative's active assigned orders list
-    const match = activeSelectedRepOrders.find(
-      (item) =>
-        String(item.order_id) === barcode ||
-        String(item.order?.orderNumber || '').trim() === barcode ||
-        String(item.order?.order_number || '').trim() === barcode ||
-        String(item.order?.id) === barcode
-    );
+    // Strict priority: Match orderNumber / order_number first, then fallback to order_id
+    const match =
+      activeSelectedRepOrders.find(
+        (item) =>
+          String(item.order?.orderNumber || item.order?.order_number || '').trim() === barcode
+      ) ||
+      activeSelectedRepOrders.find(
+        (item) =>
+          String(item.order_id) === barcode ||
+          String(item.order?.id) === barcode
+      );
 
     if (!match) {
       Swal.fire('تنبيه', 'هذا الأوردر غير مسند للمندوب المختار حالياً.', 'warning');
@@ -1511,14 +1517,17 @@ const OrderConfirmations: React.FC = () => {
                   <input
                     value={cancelBarcode}
                     onChange={(event) => setCancelBarcode(event.target.value)}
+                    disabled={submitting}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter') {
                         event.preventDefault();
-                        handleDecisionBarcode(scanDecision);
+                        if (!submitting) {
+                          handleDecisionBarcode(scanDecision);
+                        }
                       }
                     }}
                     placeholder="باركود الأوردر..."
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-base font-bold text-black outline-none transition placeholder:text-black/55 focus:border-blue-500 focus:bg-white dark:border-slate-600 dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-500"
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-4 text-base font-bold text-black outline-none transition placeholder:text-black/55 focus:border-blue-500 focus:bg-white dark:border-slate-600 dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-500 disabled:opacity-60 disabled:cursor-not-allowed"
                   />
 
                   {/* زر التحديث الفعلي */}

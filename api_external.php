@@ -168,12 +168,11 @@ if ($apiToken === '') {
     $apiToken = 'dragon_' . bin2hex(random_bytes(16));
     set_setting_value($pdo, 'external_api_token', $apiToken);
     
-    // First-time warning message so they can retrieve it
+    // Do not leak the generated token in the HTTP response; it can be viewed by the administrator in settings
     http_response_code(401);
     echo json_encode([
         'success' => false,
-        'message' => 'API token has been auto-generated for your system. Please use this token for all API requests.',
-        'external_api_token' => $apiToken
+        'message' => 'Unauthorized: API token not configured or provided. Please provide a valid Bearer token in the Authorization header.'
     ]);
     exit;
 }

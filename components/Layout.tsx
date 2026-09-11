@@ -21,6 +21,7 @@ import { assetUrl } from '../services/assetUrl';
 import { useTheme } from './ThemeContext';
 import Footer from './Footer';
 import Swal from 'sweetalert2';
+import PWAInstallButton from './PWAInstallButton';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -318,11 +319,11 @@ const Layout: React.FC<LayoutProps> = ({
         <div className="flex flex-col h-full">
           <div className="flex items-center justify-between px-6 py-5 border-b border-gradient-to-r via-slate-200/50 dark:via-slate-700/50 bg-gradient-to-b from-blue-500/5 dark:from-blue-400/10 to-transparent">
             <div className="flex items-center gap-3">
-              {companyLogo ? (
-                <img src={companyLogo} alt="logo" className="w-11 h-11 rounded-xl object-cover border-2 border-blue-500/20 dark:border-blue-400/30 shadow-lg" onError={(e:any)=>{e.target.src=assetUrl('Dragon.png')}} />
-              ) : (
-                <img src={assetUrl('Dragon.png')} alt="logo" className="w-11 h-11 rounded-xl object-cover border-2 border-blue-500/20 dark:border-blue-400/30 shadow-lg" />
-              )}
+              <img 
+                src={assetUrl('Dragon.png')} 
+                alt="Dragon Pro" 
+                className="w-11 h-11 rounded-xl object-contain p-0.5 border-2 border-blue-500/20 dark:border-blue-400/30 shadow-lg bg-white/10 dark:bg-slate-800/40 backdrop-blur-sm" 
+              />
               <span className="font-bold text-xl tracking-tight bg-gradient-to-l from-slate-900 via-blue-600 to-slate-900 dark:from-slate-100 dark:via-blue-400 dark:to-slate-100 bg-clip-text text-transparent">دراجون <span className="text-blue-500 dark:text-blue-400">برو</span></span>
             </div>
               <button onClick={() => setIsSidebarOpen(false)} className="lg:hidden hover:text-slate-600 dark:hover:text-slate-200 transition-colors"><X size={24} /></button>
@@ -422,7 +423,8 @@ const Layout: React.FC<LayoutProps> = ({
           <div className="flex items-center gap-4">
           </div>
           
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <PWAInstallButton />
             <button 
               onClick={toggleTheme} 
               className="p-2.5 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-all duration-300 hover:shadow-lg hover:scale-110 active:scale-95 group"
@@ -439,9 +441,14 @@ const Layout: React.FC<LayoutProps> = ({
               <button 
                 onClick={() => setIsNotifOpen(!isNotifOpen)} 
                 className="p-2.5 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/50 relative transition-all duration-200 hover:shadow-md hover:scale-105 active:scale-95"
+                title={notifications.length > 0 ? `${notifications.length} إشعار جديد` : 'الإشعارات'}
               >
                 <Bell size={20} />
-                <span className="absolute top-1.5 left-1.5 w-2.5 h-2.5 bg-gradient-to-br from-red-500 to-red-600 rounded-full border-2 border-white dark:border-slate-900 animate-pulse"></span>
+                {notifications.length > 0 && (
+                  <span className="absolute -top-1 -left-1 min-w-[18px] h-[18px] px-1 bg-gradient-to-br from-red-500 to-rose-600 text-white text-[10px] font-bold rounded-full border-2 border-white dark:border-slate-900 flex items-center justify-center animate-pulse shadow-sm">
+                    {notifications.length > 99 ? '99+' : notifications.length}
+                  </span>
+                )}
               </button>
               {isNotifOpen && (
                 <div className="absolute left-0 mt-2 w-80 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/50 dark:border-slate-700/50 rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in duration-200">
@@ -484,7 +491,34 @@ const Layout: React.FC<LayoutProps> = ({
                       <div className="p-6 text-center text-sm text-muted">لا توجد إشعارات جديدة</div>
                     ) : (
                       notifications.map((n) => (
-                        <div key={n.id} className="p-4 border-b border-slate-200/30 dark:border-slate-700/30 hover:bg-gradient-to-l from-blue-50/50 dark:from-slate-800/50 to-transparent transition-all flex gap-3 cursor-pointer group">
+                        <div 
+                          key={n.id} 
+                          onClick={() => {
+                            const idStr = String(n.id);
+                            const next = new Set(readNotifIdsRef.current);
+                            next.add(idStr);
+                            readNotifIdsRef.current = next;
+                            try {
+                              const jsonStr = JSON.stringify(Array.from(next));
+                              localStorage.setItem(readNotifKey, jsonStr);
+                              fetch(`${API_BASE_PATH}/api.php?module=user_preferences&action=set`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ key: 'notif_read_ids', value: jsonStr })
+                              });
+                            } catch (e) {}
+                            setNotifications((prev) => prev.filter((x) => String(x.id) !== idStr));
+                            if (idStr.startsWith('srv-')) {
+                              const srvId = idStr.replace('srv-', '');
+                              fetch(`${API_BASE_PATH}/api.php?module=notifications&action=markRead`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ id: srvId })
+                              }).catch(() => null);
+                            }
+                          }}
+                          className="p-4 border-b border-slate-200/30 dark:border-slate-700/30 hover:bg-gradient-to-l from-blue-50/50 dark:from-slate-800/50 to-transparent transition-all flex gap-3 cursor-pointer group"
+                        >
                           <div className="bg-gradient-to-br from-blue-100 to-blue-200 dark:from-blue-900/40 dark:to-blue-800/40 p-2.5 rounded-xl h-fit group-hover:scale-110 transition-transform">
                             <Info size={16} className="text-blue-600 dark:text-blue-400" />
                           </div>

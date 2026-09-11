@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
 //import { User, ShoppingCart, CreditCard, Trash2, ArrowRight, Printer, Box, LayoutList, LayoutGrid, ArrowDownAZ, ArrowUpAZ } from 'lucide-react';
@@ -192,6 +192,7 @@ const SalesDaily: React.FC = () => {
   // Today selection (new orders to assign now)
   const [selectedOrders, setSelectedOrders] = useState<any[]>([]);
   const [barcodeInput, setBarcodeInput] = useState('');
+  const scanningLockRef = useRef(false);
   const [openDailyInfo, setOpenDailyInfo] = useState<{ daily_code: string; journal_id: number } | null>(null);
 
   // Accounting & Dual Payment
@@ -990,74 +991,91 @@ const SalesDaily: React.FC = () => {
     setBarcodeInput('');
   }; */
 const scanBarcodeAddOrder = async () => {
+    if (scanningLockRef.current) return;
     const code = String(barcodeInput || '').trim();
     if (!code) return;
 
-    // 1. استخدام let بدلاً من const عشان نقدر نضيف الاوردر لو لقيناها في السيرفر
-    let match: any =
-      pendingOrdersList.find(p => String(p.barcode ?? '') === code) ||
-      pendingOrdersList.find(p => String(p.order_number ?? p.orderNumber ?? '') === code);
+    scanningLockRef.current = true;
+    setBarcodeInput(''); // تفريغ الخانة فوراً لمنع دمج القراءات المتتالية من الاسكانر
 
-    if (!match) {
-      // 2. التحقق مما إذا كانت الاوردر مختارة بالفعل
-      const inSelected = selectedOrders.find(o => String(o.barcode ?? o.order_number ?? '') === code);
-      if (inSelected) {
-        Swal.fire('موجود في اليومية', 'الاوردر موجود بالفعل في قائمة "اوردرات اليوم المختارة".', 'info');
-        setBarcodeInput('');
-        return;
-      }
+    try {
+      // 1. أولوية البحث الصارمة: مطابقة رقم الأوردر المطبوع على البوليصة أولاً، ثم الـ ID كبديل ثانوي إذا كان الكود رقماً
+      let match: any =
+        pendingOrdersList.find(p => String(p.order_number ?? p.orderNumber ?? '').trim() === code) ||
+        (/^\d+$/.test(code) ? pendingOrdersList.find(p => String(p.id ?? '').trim() === code) : null);
 
-      // 3. التحقق مما إذا كان الاوردر في عهدة مندوب حالياً في نفس الجلسة
-      const inAssigned = assignedOrders.find(o => String(o.barcode ?? o.order_number ?? '') === code);
-      if (inAssigned) {
-        const repId = inAssigned.rep_id ?? inAssigned.repId ?? inAssigned.assigned_to ?? inAssigned.assignee_id ?? null;
-        const compId = inAssigned.shipping_company_id ?? inAssigned.shippingCompanyId ?? inAssigned.shippingCompany ?? null;
-        if (repId) {
-          const repName = reps.find(r => Number(r.id) === Number(repId))?.name || '';
-          Swal.fire('موجود مع مندوب', `الاوردر مع المندوب ${repName || ('#' + repId)} حالياً.`, 'info');
-          setBarcodeInput('');
-          return;
-        }
-        if (compId) {
-          const compName = shippingCompanies.find(c => Number(c.id) === Number(compId))?.name || '';
-          Swal.fire('موجود مع شركة شحن', `الاوردر مع شركة الشحن ${compName || ('#' + compId)} حالياً.`, 'info');
-          setBarcodeInput('');
-          return;
-        }
-        Swal.fire('موجود في العهدة', 'الاوردر موجود ضمن الاوردرات المخصصة (عهدة).', 'info');
-        setBarcodeInput('');
-        return;
-      }
-
-      // 4. البحث في السيرفر (بديل آمن لتجنب خطأ الـ API اللي بيظهر في الكونسول)
-      try {
-        let foundOrder: any = null;
-
-        // سحب كل الاوردرات والبحث فيها بأمان تام
-        const rAll = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll`);
-        const jAll = await rAll.json().catch(() => null);
-        
-        if (jAll && jAll.success && Array.isArray(jAll.data)) {
-          foundOrder = jAll.data.find((o: any) => 
-            String(o.barcode ?? '') === code || 
-            String(o.order_number ?? o.orderNumber ?? '') === code
-          );
-        }
-
-        if (foundOrder) {
-          match = foundOrder;
-        }
-      } catch (e) {
-        console.debug('Order lookup failed', e);
-      }
-
-      // لو بعد كل ده ملقيناش الاوردر نهائياً
       if (!match) {
-        Swal.fire('غير موجود', 'لم يتم العثور على اوردر بهذا الباركود/الرقم نهائياً.', 'warning');
-        setBarcodeInput('');
-        return;
+        // 2. التحقق مما إذا كان الاوردر مختاراً بالفعل
+        const inSelected = selectedOrders.find(o => 
+          String(o.order_number ?? o.orderNumber ?? '').trim() === code ||
+          (/^\d+$/.test(code) && String(o.id ?? '').trim() === code)
+        );
+        if (inSelected) {
+          Swal.fire('موجود في اليومية', 'الاوردر موجود بالفعل في قائمة "اوردرات اليوم المختارة".', 'info');
+          return;
+        }
+
+        // 3. التحقق مما إذا كان الاوردر في عهدة مندوب حالياً في نفس الجلسة
+        const inAssigned = assignedOrders.find(o => 
+          String(o.order_number ?? o.orderNumber ?? '').trim() === code ||
+          (/^\d+$/.test(code) && String(o.id ?? '').trim() === code)
+        );
+        if (inAssigned) {
+          const repId = inAssigned.rep_id ?? inAssigned.repId ?? inAssigned.assigned_to ?? inAssigned.assignee_id ?? null;
+          const compId = inAssigned.shipping_company_id ?? inAssigned.shippingCompanyId ?? inAssigned.shippingCompany ?? null;
+          if (repId) {
+            const repName = reps.find(r => Number(r.id) === Number(repId))?.name || '';
+            Swal.fire('موجود مع مندوب', `الاوردر مع المندوب ${repName || ('#' + repId)} حالياً.`, 'info');
+            return;
+          }
+          if (compId) {
+            const compName = shippingCompanies.find(c => Number(c.id) === Number(compId))?.name || '';
+            Swal.fire('موجود مع شركة شحن', `الاوردر مع شركة الشحن ${compName || ('#' + compId)} حالياً.`, 'info');
+            return;
+          }
+          Swal.fire('موجود في العهدة', 'الاوردر موجود ضمن الاوردرات المخصصة (عهدة).', 'info');
+          return;
+        }
+
+        // 4. البحث في السيرفر (بأولوية صارمة لرقم الأوردر ثم الـ ID)
+        try {
+          let foundOrder: any = null;
+
+          const rAll = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll`);
+          const jAll = await rAll.json().catch(() => null);
+          
+          if (jAll && jAll.success && Array.isArray(jAll.data)) {
+            foundOrder =
+              jAll.data.find((o: any) => String(o.order_number ?? o.orderNumber ?? '').trim() === code) ||
+              (/^\d+$/.test(code) ? jAll.data.find((o: any) => String(o.id ?? '').trim() === code) : null);
+          }
+
+          if (foundOrder) {
+            match = foundOrder;
+          }
+        } catch (e) {
+          console.debug('Order lookup failed', e);
+        }
+
+        // لو بعد كل ده ملقيناش الاوردر نهائياً
+        if (!match) {
+          // فحص استباقي: هل تم مسح باركود صنف/منتج بالخطأ؟
+          try {
+            const prodsRes = await fetch(`${API_BASE_PATH}/api.php?module=products&action=getFlat`);
+            const prodsJson = await prodsRes.json().catch(() => null);
+            if (prodsJson && prodsJson.success && Array.isArray(prodsJson.data)) {
+              const isProd = prodsJson.data.find((pr: any) => String(pr.barcode || '').trim() === code);
+              if (isProd) {
+                Swal.fire('تنبيه: باركود صنف', `هذا الباركود يخص المنتج "${isProd.name || ''}" وليس بوليصة أوردر.`, 'warning');
+                return;
+              }
+            }
+          } catch (e) {}
+
+          Swal.fire('غير موجود', 'لم يتم العثور على اوردر بهذا الباركود/الرقم نهائياً.', 'warning');
+          return;
+        }
       }
-    }
 
     // --- 5. فحص حالة الاوردر والبحث عن اسم المندوب ---
     const status = String(match.status || 'pending');
@@ -1202,7 +1220,10 @@ const scanBarcodeAddOrder = async () => {
     setSelectedOrders(prev => [...prev, match]);
     setPendingOrdersList(prev => prev.filter(p => Number(p.id) !== Number(match.id)));
     setBarcodeInput('');
-  };
+  } finally {
+    scanningLockRef.current = false;
+  }
+};
 
   const printThermal = async (orders: any[], extra: any) => {
             console.log('userDefaults at printThermal:', userDefaults);

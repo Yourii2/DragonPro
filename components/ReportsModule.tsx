@@ -496,9 +496,9 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
     // In a real app, this would trigger an API call to fetch data based on filters
   };
 
-  const downloadCsv = (filename: string, rows: string[][]) => {
+  const downloadCsv = (filename: string, rows: any[][]) => {
     const csv = rows.map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -516,54 +516,61 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
     }
 
     if (activeSubTab === 'sales') {
-      const rows: string[][] = [
-        ['section', 'field1', 'field2', 'field3', 'field4'],
-        ['salesByProduct', 'name', 'pieces_sold', 'sales_amount', 'net_profit'],
+      const rows: any[][] = [
+        ['تقرير المبيعات حسب المنتج'],
+        ['اسم المنتج', 'عدد القطع المباعة', 'قيمة المبيعات', 'صافي الربح'],
         ...salesByProduct.map((r: any) => [
-          'salesByProduct',
-          r.name,
-          r.sales,
-          r.sales_amount,
-          r.net_profit
+          r.name || '',
+          r.sales || 0,
+          r.sales_amount || 0,
+          r.net_profit || 0
         ]),
-        ['dailySales', 'date', 'total', '', ''],
-        ...dailySales.map((r: any) => ['dailySales', r.date, r.total, '', ''])
+        [],
+        ['المبيعات اليومية'],
+        ['التاريخ', 'إجمالي المبيعات'],
+        ...dailySales.map((r: any) => [r.date || '', r.total || 0])
       ];
       downloadCsv(`sales_${startDate}_to_${endDate}.csv`, rows);
       return;
     }
 
     if (activeSubTab === 'inventory') {
-      const rows: string[][] = [
-        ['section', 'field1', 'field2', 'field3', 'field4', 'field5'],
-        ['inventoryStockByWarehouse', 'warehouse', 'quantity', '', '', ''],
-        ...inventoryStockByWarehouse.map((r: any) => ['inventoryStockByWarehouse', r.name, r.quantity, '', '', '']),
-        ['inventoryMovement', 'date', 'quantity', '', '', ''],
-        ...inventoryMovement.map((r: any) => ['inventoryMovement', r.date, r.quantity, '', '', '']),
-        ['inventoryStock', 'product', 'barcode', 'warehouse', 'quantity', 'purchasePrice'],
-        ...inventoryStock.map((r: any) => ['inventoryStock', r.product, r.barcode, r.warehouse, r.quantity, r.purchasePrice]),
-        ['inventoryMovementHistory', 'id', 'date', 'product', 'type', 'quantity'],
-        ...inventoryMovementHistory.map((r: any) => ['inventoryMovementHistory', r.id, r.date, r.product, r.type, r.quantity])
+      const rows: any[][] = [
+        ['مستويات المخزون حسب المستودع'],
+        ['المستودع', 'الكمية'],
+        ...inventoryStockByWarehouse.map((r: any) => [r.name || '', r.quantity || 0]),
+        [],
+        ['الأصناف في المخزون'],
+        ['المنتج', 'الباركود', 'المستودع', 'الكمية', 'سعر الشراء'],
+        ...inventoryStock.map((r: any) => [r.product || '', r.barcode || '', r.warehouse || '', r.quantity || 0, r.purchasePrice || 0]),
+        [],
+        ['سجل حركات المخزون'],
+        ['رقم الحركة', 'التاريخ', 'المنتج', 'النوع', 'الكمية'],
+        ...inventoryMovementHistory.map((r: any) => [r.id || '', r.date || '', r.product || '', r.type === 'in' ? 'إدخال' : 'إخراج', r.quantity || 0])
       ];
       downloadCsv(`inventory_${startDate}_to_${endDate}.csv`, rows);
       return;
     }
 
     if (activeSubTab === 'finance') {
-      const rows: string[][] = [
-        ['section', 'field1', 'field2', 'field3', 'field4'],
-        ['treasuryBalanceHistory', 'date', 'balance', '', ''],
-        ...treasuryBalanceHistory.map((r: any) => ['treasuryBalanceHistory', r.date, r.balance, '', '']),
-        ['expenseCategories', 'name', 'value', '', ''],
-        ...expenseCategories.map((r: any) => ['expenseCategories', r.name, r.value, '', '']),
-        ['revenueAndExpenseRecords', 'date', 'type', 'desc', 'amount'],
-        ...revenueAndExpenseRecords.map((r: any) => ['revenueAndExpenseRecords', r.date, r.type, r.desc, r.amount])
+      const rows: any[][] = [
+        ['أرصدة الخزائن التاريخية'],
+        ['التاريخ', 'الرصيد'],
+        ...treasuryBalanceHistory.map((r: any) => [r.date || '', r.balance || 0]),
+        [],
+        ['المصروفات حسب الفئة'],
+        ['الفئة', 'المبلغ'],
+        ...expenseCategories.map((r: any) => [r.name || '', r.value || 0]),
+        [],
+        ['سجل الإيرادات والمصروفات'],
+        ['التاريخ', 'النوع', 'البيان', 'المبلغ'],
+        ...revenueAndExpenseRecords.map((r: any) => [r.date || '', r.type || '', r.desc || '', r.amount || 0])
       ];
       downloadCsv(`finance_${startDate}_to_${endDate}.csv`, rows);
       return;
     }
 
-    Swal.fire('تنبيه', 'التصدير متاح فقط لتقارير المبيعات والمخزون والمالية.', 'info');
+    Swal.fire('تنبيه', 'التصدير متاح حالياً لتقارير المبيعات والمخزون والمالية وأداء المناديب من داخل كل تقرير.', 'info');
   };
 
   const ReportSection = ({ title, description, icon: Icon, children, filters, onGenerate }: any) => (
@@ -726,9 +733,14 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
         <div className="flex bg-white dark:bg-slate-800 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-x-auto max-w-full">
           <button onClick={() => setActiveSubTab('accounting')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'accounting' ? 'bg-violet-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Coins size={16} /> الأرباح والخسائر</button>
           <button onClick={() => setActiveSubTab('sales')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'sales' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><ShoppingCart size={16} /> المبيعات</button>
+          <button onClick={() => setActiveSubTab('daily')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'daily' ? 'bg-sky-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Calendar size={16} /> التقرير اليومي</button>
           <button onClick={() => setActiveSubTab('totals')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'totals' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><FileText size={16} /> ملخص الفترة</button>
-          <button onClick={() => setActiveSubTab('product-report')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'product-report' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><ShoppingCart size={16} /> تقرير منتجات</button>
+          <button onClick={() => setActiveSubTab('product-report')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'product-report' ? 'bg-teal-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Package size={16} /> تسليمات المنتجات</button>
+          <button onClick={() => setActiveSubTab('inventory')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'inventory' ? 'bg-amber-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Warehouse size={16} /> المخزون والجرد</button>
+          <button onClick={() => setActiveSubTab('finance')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'finance' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Coins size={16} /> المالية والخزائن</button>
           <button onClick={() => setActiveSubTab('outstanding-balances')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'outstanding-balances' ? 'bg-rose-500 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><CreditCard size={16} /> أعمار الديون</button>
+          <button onClick={() => setActiveSubTab('reps')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'reps' ? 'bg-cyan-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Users size={16} /> أداء المناديب</button>
+          <button onClick={() => setActiveSubTab('rep-custody')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'rep-custody' ? 'bg-purple-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Package size={16} /> عهدة المناديب</button>
           <button onClick={() => setActiveSubTab('fines-incentives')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'fines-incentives' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Coins size={16} /> الغرامات و الحافز</button>
           <button onClick={() => setActiveSubTab('expenses')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'expenses' ? 'bg-rose-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Receipt size={16} /> المصروفات</button>
         </div>
@@ -871,7 +883,7 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
           filters={salesFilters}
           onGenerate={() => handleGenerateReport('Product report')}
         >
-          <div className="overflow-x-auto rounded-2xl border bg-white p-4">
+          <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80 p-4">
             {/* Fetch data from backend endpoint: module=reports&action=product_delivery */}
             <ProductDeliveryTable startDate={startDate} endDate={endDate} />
           </div>

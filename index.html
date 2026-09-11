@@ -8,8 +8,26 @@
     <link rel="icon" type="image/png" href="./Dragon.png" />
     <link rel="apple-touch-icon" href="./Dragon.png" />
     <link rel="manifest" href="./manifest.json">
-    <meta name="theme-color" content="#3b82f6">
+    <meta name="theme-color" content="#2563eb">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="دراجون برو">
     <script>
+        // Global PWA prompt interceptor
+        window.deferredPwaPrompt = null;
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            window.deferredPwaPrompt = e;
+            window.dispatchEvent(new CustomEvent('pwa-prompt-available', { detail: e }));
+            console.log('[PWA] beforeinstallprompt captured globally');
+        });
+        window.addEventListener('appinstalled', () => {
+            window.deferredPwaPrompt = null;
+            window.dispatchEvent(new CustomEvent('pwa-installed-success'));
+            console.log('[PWA] Application successfully installed');
+        });
+
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('./sw.js')

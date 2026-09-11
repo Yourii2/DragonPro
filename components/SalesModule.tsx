@@ -377,19 +377,19 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
 
   const getStatusChip = (status: string) => {
     switch (status) {
-      case 'pending': return <span className="bg-amber-100 text-amber-700 px-2 py-1 rounded-lg text-[10px] font-bold">قيد الانتظار</span>;
-      case 'confirmed': return <span className="bg-emerald-100 text-emerald-700 px-2 py-1 rounded-lg text-[10px] font-bold">مؤكد</span>;
-      case 'with_rep': return <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded-lg text-[10px] font-bold">مع المندوب</span>;
-      case 'in_delivery': return <span className="bg-indigo-100 text-indigo-700 px-2 py-1 rounded-lg text-[10px] font-bold">قيد التسليم</span>;
-      case 'delivered': return <span className="bg-emerald-100 text-emerald-700 px-2 py-1 rounded-lg text-[10px] font-bold">تم التسليم</span>;
-      case 'partial': return <span className="bg-teal-100 text-teal-700 px-2 py-1 rounded-lg text-[10px] font-bold">تسليم جزئي</span>;
-      case 'returned': return <span className="bg-rose-100 text-rose-700 px-2 py-1 rounded-lg text-[10px] font-bold">مرتجع</span>;
-      case 'postponed': return <span className="bg-purple-100 text-purple-700 px-2 py-1 rounded-lg text-[10px] font-bold">مؤجل</span>;
-      case 'no_answer': return <span className="bg-amber-100 text-amber-800 px-2 py-1 rounded-lg text-[10px] font-bold">لا يرد</span>;
-      case 'wrong_number': return <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded-lg text-[10px] font-bold">رقم خاطئ</span>;
-      case 'cancelled': case 'canceled': return <span className="bg-rose-200 text-rose-800 px-2 py-1 rounded-lg text-[10px] font-bold">ملغي</span>;
-      case 'closed': return <span className="bg-slate-200 text-slate-800 px-2 py-1 rounded-lg text-[10px] font-bold">مغلق</span>;
-      default: return <span className="bg-slate-100 text-slate-700 px-2 py-1 rounded-lg text-[10px] font-bold">{status}</span>;
+      case 'pending': return <span className="bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400 px-2 py-1 rounded-lg text-[10px] font-bold">قيد الانتظار</span>;
+      case 'confirmed': return <span className="bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 px-2 py-1 rounded-lg text-[10px] font-bold">مؤكد</span>;
+      case 'with_rep': return <span className="bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-400 px-2 py-1 rounded-lg text-[10px] font-bold">مع المندوب</span>;
+      case 'in_delivery': return <span className="bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-400 px-2 py-1 rounded-lg text-[10px] font-bold">قيد التسليم</span>;
+      case 'delivered': return <span className="bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 px-2 py-1 rounded-lg text-[10px] font-bold">تم التسليم</span>;
+      case 'partial': return <span className="bg-teal-100 text-teal-700 dark:bg-teal-950/60 dark:text-teal-400 px-2 py-1 rounded-lg text-[10px] font-bold">تسليم جزئي</span>;
+      case 'returned': return <span className="bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400 px-2 py-1 rounded-lg text-[10px] font-bold">مرتجع</span>;
+      case 'postponed': return <span className="bg-purple-100 text-purple-700 dark:bg-purple-950/60 dark:text-purple-400 px-2 py-1 rounded-lg text-[10px] font-bold">مؤجل</span>;
+      case 'no_answer': return <span className="bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 px-2 py-1 rounded-lg text-[10px] font-bold">لا يرد</span>;
+      case 'wrong_number': return <span className="bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300 px-2 py-1 rounded-lg text-[10px] font-bold">رقم خاطئ</span>;
+      case 'cancelled': case 'canceled': return <span className="bg-rose-200 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 px-2 py-1 rounded-lg text-[10px] font-bold">ملغي</span>;
+      case 'closed': return <span className="bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-300 px-2 py-1 rounded-lg text-[10px] font-bold">مغلق</span>;
+      default: return <span className="bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300 px-2 py-1 rounded-lg text-[10px] font-bold">{status}</span>;
     }
   };
 
@@ -1830,11 +1830,11 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
 
       {isOrderDetailsOpen && selectedOrder && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-white w-full max-w-5xl rounded-3xl overflow-hidden shadow-2xl">
-                <div className="p-6 border-b flex justify-between items-center bg-slate-50">
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 w-full max-w-5xl rounded-3xl overflow-hidden shadow-2xl">
+            <div className="p-6 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-900/50">
               <div>
-                <h3 className="text-lg font-black text-slate-800">تفاصيل الطلب #{selectedOrder.orderNumber}</h3>
-                <p className="text-xs text-slate-500">
+                <h3 className="text-lg font-black text-slate-800 dark:text-slate-100">تفاصيل الطلب #{selectedOrder.orderNumber}</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
                   {selectedOrder.customerName} • {pickDisplayPhone(`${selectedOrder.phone || ''}\n${selectedOrder.phone1 || ''}\n${selectedOrder.phone2 || ''}`, '')}
                   {selectedOrder.phone2 && String(selectedOrder.phone2).trim() !== '' && (
                     <span> • {normalizeNumbers(selectedOrder.phone2)}</span>
@@ -1846,8 +1846,8 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6">
               <div className="lg:col-span-2 space-y-6">
-                <div className="border rounded-2xl p-4">
-                  <h4 className="text-sm font-black mb-3">تحديث الحالة</h4>
+                <div className="border border-slate-200 dark:border-slate-700 rounded-2xl p-4 bg-slate-50/40 dark:bg-slate-900/30">
+                  <h4 className="text-sm font-black text-slate-800 dark:text-slate-100 mb-3">تحديث الحالة</h4>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
                     <CustomSelect
                       value={statusUpdate}
@@ -1875,10 +1875,10 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                       ]}
                       className="text-sm"
                     />
-                    <input value={statusNote} onChange={e => setStatusNote(e.target.value)} placeholder="ملاحظة التغيير" className="border rounded-lg px-3 py-2 text-sm md:col-span-2" />
+                    <input value={statusNote} onChange={e => setStatusNote(e.target.value)} placeholder="ملاحظة التغيير" className="border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder-slate-400 rounded-lg px-3 py-2 text-sm md:col-span-2 outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                   <div className="mt-2">
-                    <label className="text-xs font-bold text-slate-500 block mb-1">
+                    <label className="text-xs font-bold text-slate-500 dark:text-slate-400 block mb-1">
                       المندوب {statusUpdate === 'with_rep' && <span className="text-rose-500">*</span>}
                     </label>
                     <CustomSelect
@@ -1894,31 +1894,31 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                   <button onClick={updateOrderStatus} className="mt-3 bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-bold">تحديث الحالة</button>
                 </div>
 
-                <div className="border rounded-2xl p-4">
-                  <h4 className="text-sm font-black mb-3">ملخص الفاتورة</h4>
-                  <div className="text-xs space-y-1">
+                <div className="border border-slate-200 dark:border-slate-700 rounded-2xl p-4 bg-slate-50/40 dark:bg-slate-900/30">
+                  <h4 className="text-sm font-black text-slate-800 dark:text-slate-100 mb-3">ملخص الفاتورة</h4>
+                  <div className="text-xs space-y-1 text-slate-700 dark:text-slate-300">
                     <div className="flex justify-between"><span>الإجمالي قبل الإضافات</span><span>{selectedOrderSubtotal.toLocaleString()} {currencySymbol}</span></div>
                     {selectedOrderDiscountAmount > 0 && (
                       <div className="flex justify-between text-rose-600"><span>الخصم</span><span>-{selectedOrderDiscountAmount.toLocaleString()} {currencySymbol}</span></div>
                     )}
                     <div className="flex justify-between"><span>الشحن</span><span>{selectedOrderShipping.toLocaleString()} {currencySymbol}</span></div>
-                    <div className="flex justify-between font-black pt-2 border-t"><span>الإجمالي</span><span>{selectedOrderTotal.toLocaleString()} {currencySymbol}</span></div>
+                    <div className="flex justify-between font-black pt-2 border-t border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100"><span>الإجمالي</span><span>{selectedOrderTotal.toLocaleString()} {currencySymbol}</span></div>
                   </div>
                 </div>
 
-                <div className="border rounded-2xl p-4">
-                  <h4 className="text-sm font-black mb-3">سجل الحالة</h4>
+                <div className="border border-slate-200 dark:border-slate-700 rounded-2xl p-4 bg-slate-50/40 dark:bg-slate-900/30">
+                  <h4 className="text-sm font-black text-slate-800 dark:text-slate-100 mb-3">سجل الحالة</h4>
                   {orderTimeline.length === 0 ? (
                     <div className="text-xs text-slate-400">لا يوجد سجل حتى الآن.</div>
                   ) : (
                     <div className="space-y-2 max-h-72 overflow-y-auto">
                       {orderTimeline.map((t:any) => (
-                        <div key={t.id} className="border rounded-xl p-3 text-xs">
+                        <div key={t.id} className="border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl p-3 text-xs">
                           <div className="flex justify-between items-center">
-                            <span className="font-bold">{t.status || t.action}</span>
+                            <span className="font-bold text-slate-800 dark:text-slate-200">{t.status || t.action}</span>
                             <span className="text-slate-400">{t.created_at || t.createdAt}</span>
                           </div>
-                          <div className="text-slate-500 mt-1">{t.notes || '-'}</div>
+                          <div className="text-slate-500 dark:text-slate-400 mt-1">{t.notes || '-'}</div>
                         </div>
                       ))}
                     </div>
@@ -1927,8 +1927,8 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
               </div>
 
               <div className="space-y-6">
-                <div className="border rounded-2xl p-4">
-                  <h4 className="text-sm font-black mb-3">المستندات</h4>
+                <div className="border border-slate-200 dark:border-slate-700 rounded-2xl p-4 bg-slate-50/40 dark:bg-slate-900/30">
+                  <h4 className="text-sm font-black text-slate-800 dark:text-slate-100 mb-3">المستندات</h4>
                   <div className="space-y-2 mb-3">
                     <CustomSelect
                       value={docType}
@@ -1941,8 +1941,8 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                       ]}
                       className="text-xs w-full"
                     />
-                    <input value={docUrl} onChange={e => setDocUrl(e.target.value)} placeholder="رابط المستند" className="border rounded-lg px-3 py-2 text-xs w-full" />
-                    <input value={docNotes} onChange={e => setDocNotes(e.target.value)} placeholder="ملاحظات" className="border rounded-lg px-3 py-2 text-xs w-full" />
+                    <input value={docUrl} onChange={e => setDocUrl(e.target.value)} placeholder="رابط المستند" className="border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder-slate-400 rounded-lg px-3 py-2 text-xs w-full outline-none focus:ring-2 focus:ring-blue-500" />
+                    <input value={docNotes} onChange={e => setDocNotes(e.target.value)} placeholder="ملاحظات" className="border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder-slate-400 rounded-lg px-3 py-2 text-xs w-full outline-none focus:ring-2 focus:ring-blue-500" />
                     <button onClick={addOrderDocument} className="w-full bg-emerald-600 text-white px-3 py-2 rounded-lg text-xs font-bold">إضافة مستند</button>
                   </div>
 
@@ -1951,13 +1951,13 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                   ) : (
                     <div className="space-y-2 max-h-64 overflow-y-auto">
                       {orderDocuments.map((d:any) => (
-                        <div key={d.id} className="border rounded-xl p-2 text-xs">
+                        <div key={d.id} className="border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 rounded-xl p-2 text-xs">
                           <div className="flex justify-between items-center">
-                            <span className="font-bold">{d.doc_type || d.type}</span>
+                            <span className="font-bold text-slate-800 dark:text-slate-200">{d.doc_type || d.type}</span>
                             <button onClick={() => deleteOrderDocument(d.id)} className="text-rose-500">حذف</button>
                           </div>
-                          <a href={d.doc_url || d.url} target="_blank" rel="noreferrer" className="text-blue-600 break-all">{d.doc_url || d.url}</a>
-                          <div className="text-slate-500 mt-1">{d.notes || '-'}</div>
+                          <a href={d.doc_url || d.url} target="_blank" rel="noreferrer" className="text-blue-600 dark:text-blue-400 break-all">{d.doc_url || d.url}</a>
+                          <div className="text-slate-500 dark:text-slate-400 mt-1">{d.notes || '-'}</div>
                         </div>
                       ))}
                     </div>
@@ -1971,17 +1971,17 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
 
       {isStatusEditOpen && statusEditOrder && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-white w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl">
-            <div className="p-6 border-b flex justify-between items-center bg-slate-50">
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl">
+            <div className="p-6 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-900/50">
               <div>
-                <h3 className="text-lg font-black text-slate-800">تعديل حالة الطلب</h3>
-                <p className="text-xs text-slate-500">#{statusEditOrder.orderNumber} • {statusEditOrder.customerName}</p>
+                <h3 className="text-lg font-black text-slate-800 dark:text-slate-100">تعديل حالة الطلب</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">#{statusEditOrder.orderNumber} • {statusEditOrder.customerName}</p>
               </div>
               <button onClick={() => setIsStatusEditOpen(false)} className="text-slate-400 hover:text-rose-500">إغلاق</button>
             </div>
             <form onSubmit={submitStatusEdit} className="p-6 space-y-4">
               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500">الحالة</label>
+                <label className="text-xs font-bold text-slate-500 dark:text-slate-400">الحالة</label>
                 <CustomSelect
                   value={statusEditValue}
                   onChange={v => {
@@ -2011,7 +2011,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500">
+                <label className="text-xs font-bold text-slate-500 dark:text-slate-400">
                   المندوب {statusEditValue === 'with_rep' && <span className="text-rose-500">*</span>}
                 </label>
                 <CustomSelect
@@ -2026,38 +2026,38 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
               </div>
 
               <div className="space-y-3">
-                <label className="text-xs font-bold text-slate-500">الغرامة على المندوب</label>
+                <label className="text-xs font-bold text-slate-500 dark:text-slate-400">الغرامة على المندوب</label>
                 <div className="flex gap-3">
-                  <label className="flex items-center gap-2 text-xs font-bold text-slate-600">
+                  <label className="flex items-center gap-2 text-xs font-bold text-slate-600 dark:text-slate-300">
                     <input type="radio" checked={returnFineMode === 'none'} onChange={() => setReturnFineMode('none')} />
                     بدون غرامة
                   </label>
-                  <label className="flex items-center gap-2 text-xs font-bold text-slate-600">
+                  <label className="flex items-center gap-2 text-xs font-bold text-slate-600 dark:text-slate-300">
                     <input type="radio" checked={returnFineMode === 'fine'} onChange={() => setReturnFineMode('fine')} />
                     بغرامة
                   </label>
                 </div>
                 {returnFineMode === 'fine' && (
                   <div>
-                    <label className="text-xs font-bold text-slate-500">مبلغ الغرامة</label>
+                    <label className="text-xs font-bold text-slate-500 dark:text-slate-400">مبلغ الغرامة</label>
                     <input
                       type="number"
                       min="0"
                       value={returnFineAmount}
                       onChange={e => setReturnFineAmount(e.target.value)}
-                      className="w-full border rounded-lg px-3 py-2 text-sm"
+                      className="w-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
                 )}
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-500">ملاحظة</label>
+                <label className="text-xs font-bold text-slate-500 dark:text-slate-400">ملاحظة</label>
                 <input
                   value={statusEditNote}
                   onChange={e => setStatusEditNote(e.target.value)}
                   placeholder="سبب التعديل"
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                  className="w-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder-slate-400 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
 
@@ -2069,13 +2069,13 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       
       <div className="flex flex-col md:flex-row justify-between items-center gap-4">
         <div>
-          <h2 className="text-xl font-black text-slate-900">إدارة الاوردرات</h2>
-          <p className="text-sm text-slate-500 font-medium">نظام تتبع وإدارة المبيعات</p>
+          <h2 className="text-xl font-black text-slate-900 dark:text-slate-100">إدارة الاوردرات</h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400 font-medium">نظام تتبع وإدارة المبيعات</p>
         </div>
-        <div className="flex gap-1 bg-white p-1.5 rounded-2xl border border-slate-200 shadow-sm w-full md:w-auto overflow-x-auto">
-          <button onClick={() => setView('new-order')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all whitespace-nowrap ${view === 'new-order' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}><PlusCircle size={16}/> اوردر جديد</button>
-          <button onClick={() => setView('manage-orders')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all whitespace-nowrap ${view === 'manage-orders' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}><FileText size={16}/> إدارة الاوردرات</button>
-          <button onClick={() => setView('import-orders')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all whitespace-nowrap ${view === 'import-orders' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}><UploadCloud size={16}/> استيراد</button>
+        <div className="flex gap-1 bg-white dark:bg-slate-800 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm w-full md:w-auto overflow-x-auto">
+          <button onClick={() => setView('new-order')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all whitespace-nowrap ${view === 'new-order' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><PlusCircle size={16}/> اوردر جديد</button>
+          <button onClick={() => setView('manage-orders')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all whitespace-nowrap ${view === 'manage-orders' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><FileText size={16}/> إدارة الاوردرات</button>
+          <button onClick={() => setView('import-orders')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all whitespace-nowrap ${view === 'import-orders' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><UploadCloud size={16}/> استيراد</button>
         </div>
       </div>
 
@@ -2084,22 +2084,22 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
         <div className="space-y-5">
 
           {/* ── Page Header ── */}
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white px-6 py-4 rounded-3xl border border-slate-200 shadow-sm">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white dark:bg-slate-800 px-6 py-4 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm">
             <div className="flex items-center gap-3">
               {editingOrderId && (
                 <button
                   onClick={() => { setEditingOrderId(null); setView('manage-orders'); }}
-                  className="w-10 h-10 flex items-center justify-center rounded-full bg-slate-100 hover:bg-slate-200 transition-colors flex-shrink-0"
+                  className="w-10 h-10 flex items-center justify-center rounded-full bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors flex-shrink-0"
                   title="العودة لإدارة الاوردرات"
                 >
-                  <ChevronRight size={20} className="text-slate-600" />
+                  <ChevronRight size={20} className="text-slate-600 dark:text-slate-300" />
                 </button>
               )}
               <div>
-                <h3 className="text-xl font-black text-slate-900">
+                <h3 className="text-xl font-black text-slate-900 dark:text-slate-100">
                   {editingOrderId ? 'تعديل الاوردر' : 'إنشاء اوردر جديد'}
                 </h3>
-                <p className="text-sm text-slate-500">
+                <p className="text-sm text-slate-500 dark:text-slate-400">
                   {editingOrderId ? `رقم المرجع: #${editingOrderId}` : 'أدخل بيانات الاوردر اليدوي'}
                 </p>
               </div>
@@ -2121,13 +2121,13 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
 
               {/* Sales Office Card */}
               {salesDisplayMethod === 'sales_offices' && (
-                <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
-                  <h4 className="text-sm font-black text-slate-700 mb-3 flex items-center gap-2">
-                    <span className="w-7 h-7 bg-purple-100 text-purple-600 rounded-xl flex items-center justify-center text-xs font-black">م</span>
+                <div className="bg-white dark:bg-slate-800 p-5 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                  <h4 className="text-sm font-black text-slate-700 dark:text-slate-200 mb-3 flex items-center gap-2">
+                    <span className="w-7 h-7 bg-purple-100 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 rounded-xl flex items-center justify-center text-xs font-black">م</span>
                     مكتب المبيعات
                   </h4>
                   {isSalesOfficeScopeNone ? (
-                    <p className="text-xs text-slate-500 bg-slate-50 rounded-xl p-3">هذا المستخدم بدون مكاتب مبيعات — سيتم استخدام بيانات الشركة.</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/40 rounded-xl p-3">هذا المستخدم بدون مكاتب مبيعات — سيتم استخدام بيانات الشركة.</p>
                   ) : (
                     <div className="space-y-2">
                       <CustomSelect
@@ -2141,7 +2141,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                         className="w-full"
                       />
                       {selectedSalesOffice && (
-                        <p className="text-xs text-slate-500 px-1">{selectedSalesOffice.phones || ''}</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 px-1">{selectedSalesOffice.phones || ''}</p>
                       )}
                     </div>
                   )}
@@ -2149,15 +2149,15 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
               )}
 
               {/* Customer Card */}
-              <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
-                <h4 className="text-sm font-black text-slate-700 mb-4 flex items-center gap-2">
+              <div className="bg-white dark:bg-slate-800 p-5 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                <h4 className="text-sm font-black text-slate-700 dark:text-slate-200 mb-4 flex items-center gap-2">
                   <User size={16} className="text-blue-500" />
                   بيانات العميل
                 </h4>
 
                 {/* Customer Selector */}
                 <div className="mb-4">
-                  <label className="text-xs font-black text-slate-500 mb-1.5 block">اختر من العملاء الموجودين</label>
+                  <label className="text-xs font-black text-slate-500 dark:text-slate-400 mb-1.5 block">اختر من العملاء الموجودين</label>
                   <div className="flex gap-2">
                     <div className="flex-1">
                       <CustomSelect
@@ -2169,7 +2169,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                     </div>
                     {selectedCustomerId !== '' && (
                       <button
-                        className="flex-shrink-0 px-3 py-2 text-xs font-black text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
+                        className="flex-shrink-0 px-3 py-2 text-xs font-black text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 rounded-xl transition-colors"
                         onClick={() => { setSelectedCustomerId(''); setNewCustomer({ name: '', phone1: '', phone2: '', governorate: '', address: '' }); }}
                       >
                         إلغاء
@@ -2181,10 +2181,10 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                 {/* Customer Fields */}
                 <div className="space-y-3">
                   <div>
-                    <label className="text-xs font-black text-slate-500 mb-1.5 block">اسم العميل</label>
+                    <label className="text-xs font-black text-slate-500 dark:text-slate-400 mb-1.5 block">اسم العميل</label>
                     <input
                       placeholder="الاسم الكامل"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                       value={selectedCustomerId ? (customers.find((c: any) => c.id === selectedCustomerId)?.name || '') : newCustomer.name}
                       onChange={e => { if (!selectedCustomerId) setNewCustomer({ ...newCustomer, name: e.target.value }); }}
                       disabled={!!selectedCustomerId}
@@ -2192,20 +2192,20 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="text-xs font-black text-slate-500 mb-1.5 flex items-center gap-1"><Phone size={11} /> هاتف 1</label>
+                      <label className="text-xs font-black text-slate-500 dark:text-slate-400 mb-1.5 flex items-center gap-1"><Phone size={11} /> هاتف 1</label>
                       <input
                         placeholder="01xxxxxxxxx"
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                        className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                         value={selectedCustomerId ? (customers.find((c: any) => c.id === selectedCustomerId)?.phone1 || '') : newCustomer.phone1}
                         onChange={e => { if (!selectedCustomerId) setNewCustomer({ ...newCustomer, phone1: e.target.value }); }}
                         disabled={!!selectedCustomerId}
                       />
                     </div>
                     <div>
-                      <label className="text-xs font-black text-slate-500 mb-1.5 block">هاتف 2</label>
+                      <label className="text-xs font-black text-slate-500 dark:text-slate-400 mb-1.5 block">هاتف 2</label>
                       <input
                         placeholder="اختياري"
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                        className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                         value={selectedCustomerId ? (customers.find((c: any) => c.id === selectedCustomerId)?.phone2 || '') : newCustomer.phone2}
                         onChange={e => { if (!selectedCustomerId) setNewCustomer({ ...newCustomer, phone2: e.target.value }); }}
                         disabled={!!selectedCustomerId}
@@ -2213,20 +2213,20 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                     </div>
                   </div>
                   <div>
-                    <label className="text-xs font-black text-slate-500 mb-1.5 flex items-center gap-1"><MapPin size={11} /> المحافظة</label>
+                    <label className="text-xs font-black text-slate-500 dark:text-slate-400 mb-1.5 flex items-center gap-1"><MapPin size={11} /> المحافظة</label>
                     <input
                       placeholder="المحافظة"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                       value={selectedCustomerId ? (customers.find((c: any) => c.id === selectedCustomerId)?.governorate || '') : newCustomer.governorate}
                       onChange={e => { if (!selectedCustomerId) setNewCustomer({ ...newCustomer, governorate: e.target.value }); }}
                       disabled={!!selectedCustomerId}
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-black text-slate-500 mb-1.5 block">العنوان التفصيلي</label>
+                    <label className="text-xs font-black text-slate-500 dark:text-slate-400 mb-1.5 block">العنوان التفصيلي</label>
                     <input
                       placeholder="الشارع، المبنى..."
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                       value={selectedCustomerId ? (customers.find((c: any) => c.id === selectedCustomerId)?.address || '') : newCustomer.address}
                       onChange={e => { if (!selectedCustomerId) setNewCustomer({ ...newCustomer, address: e.target.value }); }}
                       disabled={!!selectedCustomerId}
@@ -2236,37 +2236,37 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
               </div>
 
               {/* Notes & Meta Card */}
-              <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
-                <h4 className="text-sm font-black text-slate-700 mb-4 flex items-center gap-2">
+              <div className="bg-white dark:bg-slate-800 p-5 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                <h4 className="text-sm font-black text-slate-700 dark:text-slate-200 mb-4 flex items-center gap-2">
                   <FileText size={16} className="text-slate-400" />
                   ملاحظات وبيانات إضافية
                 </h4>
                 <div className="space-y-3">
                   <div>
-                    <label className="text-xs font-black text-slate-500 mb-1.5 block">ملاحظات الاوردر</label>
+                    <label className="text-xs font-black text-slate-500 dark:text-slate-400 mb-1.5 block">ملاحظات الاوردر</label>
                     <textarea
                       placeholder="ملاحظات خاصة بالاوردر..."
                       rows={3}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all resize-none"
+                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all resize-none"
                       value={notes}
                       onChange={e => setNotes(e.target.value)}
                     />
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="text-xs font-black text-slate-500 mb-1.5 block">الموظف</label>
+                      <label className="text-xs font-black text-slate-500 dark:text-slate-400 mb-1.5 block">الموظف</label>
                       <input
                         placeholder="اسم الموظف"
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                        className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                         value={employee}
                         onChange={e => setEmployee(e.target.value)}
                       />
                     </div>
                     <div>
-                      <label className="text-xs font-black text-slate-500 mb-1.5 block">البيدج</label>
+                      <label className="text-xs font-black text-slate-500 dark:text-slate-400 mb-1.5 block">البيدج</label>
                       <input
                         placeholder="رقم البيدج"
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                        className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                         value={page}
                         onChange={e => setPage(e.target.value)}
                       />
@@ -2281,23 +2281,23 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
             <div className="lg:col-span-2 space-y-4">
 
               {/* Order Items Card */}
-              <div className="bg-white rounded-3xl border border-slate-200 shadow-sm">
-                <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-                  <h4 className="text-sm font-black text-slate-700 flex items-center gap-2">
+              <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-700">
+                  <h4 className="text-sm font-black text-slate-700 dark:text-slate-200 flex items-center gap-2">
                     <ShoppingCart size={16} className="text-blue-500" />
                     عناصر الطلب
-                    <span className="bg-blue-100 text-blue-700 text-xs font-black px-2 py-0.5 rounded-full">{orderItems.length}</span>
+                    <span className="bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 text-xs font-black px-2 py-0.5 rounded-full">{orderItems.length}</span>
                   </h4>
                   <button
                     onClick={addOrderItem}
-                    className="flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-black px-3 py-2 rounded-xl transition-colors"
+                    className="flex items-center gap-1.5 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 text-xs font-black px-3 py-2 rounded-xl transition-colors"
                   >
                     <PlusCircle size={14} /> إضافة منتج
                   </button>
                 </div>
 
                 {/* Column Headers */}
-                <div className="hidden md:grid grid-cols-[2rem_1fr_7rem_7rem_4rem_6rem_4rem_2rem] gap-2 px-4 py-2 bg-slate-50 border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-wide">
+                <div className="hidden md:grid grid-cols-[2rem_1fr_7rem_7rem_4rem_6rem_4rem_2rem] gap-2 px-4 py-2 bg-slate-50 dark:bg-slate-900/40 border-b border-slate-100 dark:border-slate-700 text-[10px] font-black text-slate-400 uppercase tracking-wide">
                   <div></div>
                   <div>المنتج</div>
                   <div className="text-center">المقاس</div>
@@ -2309,7 +2309,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                 </div>
 
                 {/* Item Rows */}
-                <div className="divide-y divide-slate-100">
+                <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
                   {orderItems.map((it, _idx) => {
                     const ia = it as any;
                     const parentId = ia._parentId || '';
@@ -2338,10 +2338,10 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                       : [];
 
                     return (
-                      <div key={it.id} className="grid grid-cols-[2rem_1fr_7rem_7rem_4rem_6rem_4rem_2rem] gap-2 px-4 py-2.5 items-center hover:bg-slate-50/60 transition-colors">
+                      <div key={it.id} className="grid grid-cols-[2rem_1fr_7rem_7rem_4rem_6rem_4rem_2rem] gap-2 px-4 py-2.5 items-center hover:bg-slate-50/60 dark:hover:bg-slate-700/30 transition-colors">
 
                         {/* # */}
-                        <span className="w-6 h-6 rounded-full bg-slate-100 text-slate-400 text-[10px] font-black flex items-center justify-center">{_idx + 1}</span>
+                        <span className="w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-400 dark:text-slate-300 text-[10px] font-black flex items-center justify-center">{_idx + 1}</span>
 
                         {/* Product */}
                         <CustomSelect
@@ -2360,7 +2360,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                             className="w-full text-xs"
                           />
                         ) : (
-                          <div className="h-9 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-center text-[10px] text-slate-300">—</div>
+                          <div className="h-9 rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-700 flex items-center justify-center text-[10px] text-slate-300 dark:text-slate-600">—</div>
                         )}
 
                         {/* Color */}
@@ -2372,13 +2372,13 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                             className="w-full text-xs"
                           />
                         ) : (
-                          <div className="h-9 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-center text-[10px] text-slate-300">—</div>
+                          <div className="h-9 rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-700 flex items-center justify-center text-[10px] text-slate-300 dark:text-slate-600">—</div>
                         )}
 
                         {/* Qty */}
                         <input
                           type="number" min={1}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-1 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                          className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-xl px-1 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                           value={it.qty}
                           onChange={e => updateOrderItemField(it.id, 'qty', Number(e.target.value || 0))}
                         />
@@ -2387,7 +2387,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                         <div className="relative">
                           <input
                             type="number" min={0}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-1 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all pl-6"
+                            className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-xl px-1 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all pl-6"
                             value={it.price}
                             onChange={e => updateOrderItemField(it.id, 'price', Number(e.target.value || 0))}
                           />
@@ -2396,12 +2396,12 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
 
                         {/* Row total */}
                         <div className="text-center">
-                          <span className="text-xs font-black text-slate-700 tabular-nums">{(it.qty * it.price).toLocaleString('ar-EG')}</span>
+                          <span className="text-xs font-black text-slate-700 dark:text-slate-200 tabular-nums">{(it.qty * it.price).toLocaleString('ar-EG')}</span>
                         </div>
 
                         {/* Delete */}
                         <button
-                          className="w-7 h-7 flex items-center justify-center rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-400 transition-colors mx-auto"
+                          className="w-7 h-7 flex items-center justify-center rounded-xl bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/50 text-rose-400 dark:text-rose-400 transition-colors mx-auto"
                           onClick={() => removeOrderItem(it.id)}
                           title="حذف"
                         >
@@ -2412,7 +2412,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                   })}
                   {orderItems.length === 0 && (
                     <div className="py-14 text-center">
-                      <ShoppingCart className="w-12 h-12 mx-auto text-slate-200 mb-3" />
+                      <ShoppingCart className="w-12 h-12 mx-auto text-slate-200 dark:text-slate-700 mb-3" />
                       <p className="text-slate-400 text-sm font-bold">لا توجد عناصر.</p>
                       <p className="text-slate-400 text-xs mt-1">اضغط «إضافة منتج» للبدء.</p>
                     </div>
@@ -2421,16 +2421,16 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
               </div>
 
               {/* Pricing & Totals Card */}
-              <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
-                <h4 className="text-sm font-black text-slate-700 mb-4 flex items-center gap-2">
+              <div className="bg-white dark:bg-slate-800 p-5 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                <h4 className="text-sm font-black text-slate-700 dark:text-slate-200 mb-4 flex items-center gap-2">
                   <RefreshCcw size={15} className="text-slate-400" />
                   التسعير والمجاميع
                 </h4>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
                   {/* Discount */}
-                  <div className="bg-slate-50 rounded-2xl p-3.5">
-                    <label className="text-[11px] font-black text-slate-500 uppercase tracking-wide mb-2.5 block">الخصم</label>
+                  <div className="bg-slate-50 dark:bg-slate-900/40 rounded-2xl p-3.5">
+                    <label className="text-[11px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2.5 block">الخصم</label>
                     <div className="flex gap-2">
                       <CustomSelect
                         value={discountType}
@@ -2442,20 +2442,20 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                         type="number" min={0}
                         value={discountValue}
                         onChange={e => setDiscountValue(Number(e.target.value || 0))}
-                        className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                        className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
                         placeholder="0"
                       />
                     </div>
                   </div>
                   {/* Shipping */}
-                  <div className="bg-slate-50 rounded-2xl p-3.5">
-                    <label className="text-[11px] font-black text-slate-500 uppercase tracking-wide mb-2.5 block">مصاريف الشحن</label>
+                  <div className="bg-slate-50 dark:bg-slate-900/40 rounded-2xl p-3.5">
+                    <label className="text-[11px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2.5 block">مصاريف الشحن</label>
                     <div className="relative">
                       <input
                         type="number" min={0}
                         value={shippingValue}
                         onChange={e => setShippingValue(Number(e.target.value || 0))}
-                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all pl-10"
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all pl-10"
                         placeholder="0"
                       />
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-slate-400 font-bold pointer-events-none">ج.م</span>
@@ -2515,7 +2515,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       {view === 'manage-orders' && (
         <div className="space-y-4">
           {/* Toolbar */}
-          <div className="bg-white p-4 rounded-3xl shadow-sm border border-slate-200 flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="bg-white dark:bg-slate-800 p-4 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="relative flex-1 w-full md:max-w-md">
               <Search className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
               <input 
@@ -2523,7 +2523,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                 placeholder="بحث برقم الاوردر، اسم العميل، الهاتف..." 
                 value={searchTerm} 
                 onChange={e => setSearchTerm(e.target.value)} 
-                className="w-full pr-10 pl-4 py-3 bg-slate-50 border-none rounded-2xl text-sm focus:ring-2 focus:ring-blue-500 transition-all" 
+                className="w-full pr-10 pl-4 py-3 bg-slate-50 dark:bg-slate-900 border border-transparent dark:border-slate-700 rounded-2xl text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 transition-all outline-none" 
               />
             </div>
             
@@ -2598,7 +2598,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                 </div>
                 <button 
                   onClick={toggleSelectAll}
-                  className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 border border-slate-200 px-4 py-3 rounded-2xl text-xs font-bold text-slate-600 transition-all"
+                  className="flex items-center gap-2 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 border border-slate-200 dark:border-slate-600 px-4 py-3 rounded-2xl text-xs font-bold text-slate-600 dark:text-slate-200 transition-all"
                 >
                     {selectedOrders.length === filteredOrders.length && filteredOrders.length > 0 ? <CheckSquare size={16} className="text-blue-600"/> : <Square size={16}/>}
                     {selectedOrders.length === filteredOrders.length ? 'إلغاء الكل' : 'تحديد الكل'}
@@ -2627,8 +2627,8 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
 
           {/* New Card Grid Layout (Unified with Import View) */}
           {filteredOrders.length === 0 ? (
-             <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-slate-300">
-                <FileText className="w-16 h-16 mx-auto text-slate-200 mb-4"/>
+             <div className="text-center py-20 bg-white dark:bg-slate-800 rounded-3xl border border-dashed border-slate-300 dark:border-slate-700">
+                <FileText className="w-16 h-16 mx-auto text-slate-200 dark:text-slate-700 mb-4"/>
                <p className="text-slate-400 font-bold">لا توجد اوردرات مطابقة للبحث</p>
              </div>
           ) : (
@@ -2637,13 +2637,13 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
               {displayedOrders.map(order => (
                 <div 
                   key={order.id} 
-                  className={`relative group bg-white p-0 rounded-3xl border transition-all duration-300 hover:shadow-xl hover:-translate-y-1 ${selectedOrders.includes(order.id) ? 'border-blue-500 ring-2 ring-blue-500/20 z-10' : 'border-slate-200 shadow-sm'}`}
+                  className={`relative group bg-white dark:bg-slate-800 p-0 rounded-3xl border transition-all duration-300 hover:shadow-xl hover:-translate-y-1 ${selectedOrders.includes(order.id) ? 'border-blue-500 ring-2 ring-blue-500/20 z-10' : 'border-slate-200 dark:border-slate-700 shadow-sm'}`}
                 >
                     {/* Selection Checkbox (Absolute) */}
                     <div className="absolute top-4 left-4 z-20">
                         <button 
                           onClick={() => toggleSelectOne(order.id)}
-                          className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${selectedOrders.includes(order.id) ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-300 hover:bg-slate-200'}`}
+                          className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${selectedOrders.includes(order.id) ? 'bg-blue-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-300 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600'}`}
                         >
                            {selectedOrders.includes(order.id) ? <CheckSquare size={16}/> : <Square size={16}/>}
                         </button>
@@ -2654,13 +2654,13 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                         {/* Header */}
                         <div className="flex justify-between items-start mb-4 pl-10">
                             <div>
-                                <span className="inline-block bg-slate-100 text-slate-600 font-mono text-[10px] px-2 py-1 rounded-lg mb-1 mr-2">{order.orderNumber}</span>
+                                <span className="inline-block bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-mono text-[10px] px-2 py-1 rounded-lg mb-1 mr-2">{order.orderNumber}</span>
                                 {(order.created_at || order.createdAt || order.date) && (
-                                  <span className="inline-block bg-blue-50 text-blue-600 font-mono text-[10px] px-2 py-1 rounded-lg mb-1" title="وقت الإضافة">
+                                  <span className="inline-block bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 font-mono text-[10px] px-2 py-1 rounded-lg mb-1" title="وقت الإضافة">
                                     🕒 {formatOrderTime(order.created_at || order.createdAt || order.date)}
                                   </span>
                                 )}
-                                <h3 className="font-bold text-slate-800 text-sm line-clamp-1">{order.customerName}</h3>
+                                <h3 className="font-bold text-slate-800 dark:text-slate-100 text-sm line-clamp-1">{order.customerName}</h3>
                             </div>
                             <div className="flex flex-col items-end gap-1">
                               {getStatusChip(order.status)}
@@ -2672,40 +2672,40 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                               </div>
                               {order.status === 'with_rep' && (() => {
                                 const rn = getRepName(order);
-                                return rn ? <div className="text-[11px] text-slate-500">المندوب: <span className="font-bold text-slate-700">{rn}</span></div> : null;
+                                return rn ? <div className="text-[11px] text-slate-500 dark:text-slate-400">المندوب: <span className="font-bold text-slate-700 dark:text-slate-200">{rn}</span></div> : null;
                               })()}
                             </div>
                         </div>
 
                         {/* Details */}
                         <div className="space-y-2 mb-4">
-                            <div className="flex items-center gap-2 text-xs text-slate-500">
+                            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                               <Phone size={14} className="text-blue-500"/>
                               <div className="flex flex-col">
                                 <span className="font-mono dir-ltr">{pickDisplayPhone(`${order.phone || ''}\n${order.phone1 || ''}\n${order.phone2 || ''}`, '')}</span>
                                 {order.phone2 && String(order.phone2).trim() !== '' && (
-                                  <span className="text-[11px] text-slate-500 font-mono dir-ltr">{normalizeNumbers(order.phone2)}</span>
+                                  <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono dir-ltr">{normalizeNumbers(order.phone2)}</span>
                                 )}
                               </div>
                             </div>
-                            <div className="flex items-start gap-2 text-xs text-slate-500">
+                            <div className="flex items-start gap-2 text-xs text-slate-500 dark:text-slate-400">
                                 <MapPin size={14} className="text-rose-500 mt-0.5 shrink-0"/>
                                 <span className="line-clamp-2 leading-relaxed">{order.governorate} - {order.address}</span>
                             </div>
                         </div>
 
                         {/* Products Summary */}
-                        <div className="bg-slate-50 rounded-xl p-3 mb-4 border border-slate-100">
-                            <p className="text-[10px] text-slate-400 font-bold mb-2">ملخص المنتجات:</p>
+                        <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-3 mb-4 border border-slate-100 dark:border-slate-700/60">
+                            <p className="text-[10px] text-slate-400 dark:text-slate-400 font-bold mb-2">ملخص المنتجات:</p>
                             <div className="space-y-1">
                                 {order.products.slice(0, 2).map((p:any, i:number) => (
                                     <div key={i} className="flex justify-between text-[11px]">
-                                        <span className="text-slate-700 truncate max-w-[70%]">{p.name}</span>
-                                        <span className="text-slate-500 font-mono">x{p.quantity}</span>
+                                        <span className="text-slate-700 dark:text-slate-300 truncate max-w-[70%]">{p.name}</span>
+                                        <span className="text-slate-500 dark:text-slate-400 font-mono">x{p.quantity}</span>
                                     </div>
                                 ))}
                                 {order.products.length > 2 && (
-                                    <p className="text-[10px] text-blue-500 font-bold pt-1">+ {order.products.length - 2} منتجات أخرى</p>
+                                    <p className="text-[10px] text-blue-500 dark:text-blue-400 font-bold pt-1">+ {order.products.length - 2} منتجات أخرى</p>
                                 )}
                             </div>
                         </div>
@@ -2714,29 +2714,29 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                       </div>
 
                     {/* Footer */}
-                    <div className="flex items-center justify-between p-4 border-t border-slate-100 bg-slate-50/50 rounded-b-3xl">
+                    <div className="flex items-center justify-between p-4 border-t border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/30 rounded-b-3xl">
                         <div className="flex flex-col">
-                            <span className="text-[10px] text-slate-400 font-bold">الإجمالي</span>
-                            <span className="font-black text-lg text-slate-800">{order.total.toLocaleString()} {currencySymbol}</span>
+                            <span className="text-[10px] text-slate-400 dark:text-slate-400 font-bold">الإجمالي</span>
+                            <span className="font-black text-lg text-slate-800 dark:text-slate-100">{order.total.toLocaleString()} {currencySymbol}</span>
                         </div>
                         <div className="flex gap-2">
                              <button 
                                 onClick={() => handlePrint([order])}
-                                className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-slate-600 hover:text-blue-600 hover:border-blue-200 transition-colors shadow-sm"
+                                className="w-10 h-10 flex items-center justify-center bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl text-slate-600 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-200 dark:hover:border-blue-500 transition-colors shadow-sm"
                                 title="طباعة"
                              >
                                 <Printer size={18}/>
                              </button>
                              <button
                                onClick={() => openStatusEdit(order)}
-                               className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-slate-600 hover:text-amber-600 hover:border-amber-200 transition-colors shadow-sm"
+                               className="w-10 h-10 flex items-center justify-center bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl text-slate-600 dark:text-slate-200 hover:text-amber-600 dark:hover:text-amber-400 hover:border-amber-200 dark:hover:border-amber-500 transition-colors shadow-sm"
                                title="تعديل الحالة"
                              >
                                <Edit size={18}/>
                              </button>
                              <button
                                onClick={() => openOrderAndEnsure(order)}
-                               className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-slate-600 hover:text-emerald-600 hover:border-emerald-200 transition-colors shadow-sm"
+                               className="w-10 h-10 flex items-center justify-center bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl text-slate-600 dark:text-slate-200 hover:text-emerald-600 dark:hover:text-emerald-400 hover:border-emerald-200 dark:hover:border-emerald-500 transition-colors shadow-sm"
                                title="تفاصيل"
                              >
                                <Eye size={18}/>
@@ -2771,14 +2771,14 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
 
       {view === 'import-orders' && (
         <div className="space-y-6">
-          <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
-              <h3 className="text-xl font-black mb-2 text-slate-900 flex items-center gap-3"><ClipboardPaste size={24} className="text-blue-500"/> استيراد الاوردرات</h3>
+          <div className="bg-white dark:bg-slate-800 p-8 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm">
+              <h3 className="text-xl font-black mb-2 text-slate-900 dark:text-slate-100 flex items-center gap-3"><ClipboardPaste size={24} className="text-blue-500"/> استيراد الاوردرات</h3>
 
               {salesDisplayMethod === 'sales_offices' && (
-                <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-2xl">
-                  <div className="text-xs font-black text-slate-600 mb-2">مكتب المبيعات</div>
+                <div className="mb-4 p-3 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-2xl">
+                  <div className="text-xs font-black text-slate-600 dark:text-slate-300 mb-2">مكتب المبيعات</div>
                   {isSalesOfficeScopeNone ? (
-                    <div className="text-xs text-slate-500">هذا المستخدم بدون مكاتب مبيعات (سيتم استخدام بيانات الشركة في رأس الاوردر).</div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400">هذا المستخدم بدون مكاتب مبيعات (سيتم استخدام بيانات الشركة في رأس الاوردر).</div>
                   ) : (
                     <div className="flex flex-col md:flex-row gap-2 md:items-center">
                       <CustomSelect
@@ -2788,7 +2788,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                         className="w-44"
                         disabled={!canChangeSalesOffice && defaultSalesOfficeId !== null && defaultSalesOfficeId !== undefined}
                       />
-                      <div className="text-xs text-slate-500">
+                      <div className="text-xs text-slate-500 dark:text-slate-400">
                               {selectedSalesOffice ? (selectedSalesOffice.phones || '') : 'سيظهر اسم/هاتف المكتب في رأس الاوردر.'}
                             </div>
                     </div>
@@ -2797,29 +2797,29 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
               )}
 
               <div>
-                <label className="text-xs font-bold text-slate-600">نص الاوردرات</label>
-                <textarea value={scriptText} onChange={(e) => setScriptText(normalizeNumbers(e.target.value))} rows={8} placeholder="انسخ نص الاوردرات هنا..." className="w-full bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl p-4 text-sm font-mono focus:border-blue-500 transition-all mt-1" />
+                <label className="text-xs font-bold text-slate-600 dark:text-slate-300">نص الاوردرات</label>
+                <textarea value={scriptText} onChange={(e) => setScriptText(normalizeNumbers(e.target.value))} rows={8} placeholder="انسخ نص الاوردرات هنا..." className="w-full bg-slate-50 dark:bg-slate-900/50 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-2xl p-4 text-sm font-mono text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 focus:border-blue-500 transition-all mt-1 outline-none" />
               </div>
               
               <div className="mt-4 flex justify-end">
                       <div className="flex items-center gap-3 mr-auto">
-                        <label className="text-xs">مستودع افتراضي (للبيع/المخزون)</label>
+                        <label className="text-xs text-slate-600 dark:text-slate-300 font-bold">مستودع افتراضي (للبيع/المخزون)</label>
                         <CustomSelect
                           value={defaultWarehouseId ? String(defaultWarehouseId) : ''}
                           onChange={v => setDefaultWarehouseId(v ? Number(v) : '')}
                           options={[{ value: '', label: 'بدون' }, ...warehouses.map(w => ({ value: String(w.id), label: w.name }))]}
                           className="w-40"
                         />
-                        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={createSales} onChange={e => setCreateSales(e.target.checked)} /> أنشئ قيود مبيعات</label>
+                        <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 font-bold"><input type="checkbox" checked={createSales} onChange={e => setCreateSales(e.target.checked)} /> أنشئ قيود مبيعات</label>
                         <div className="flex items-center gap-2">
-                          <label className="text-xs">خصم</label>
+                          <label className="text-xs text-slate-600 dark:text-slate-300 font-bold">خصم</label>
                           <CustomSelect
                             value={importDiscountType}
                             onChange={v => setImportDiscountType(v as RateType)}
                             options={[{ value: 'amount', label: 'قيمة' }, { value: 'percent', label: '%' }]}
                             className="w-20"
                           />
-                          <input type="number" min={0} value={importDiscountValue} onChange={e => setImportDiscountValue(Number(e.target.value || 0))} className="bg-white border rounded-xl px-2 py-1 text-xs w-20" />
+                          <input type="number" min={0} value={importDiscountValue} onChange={e => setImportDiscountValue(Number(e.target.value || 0))} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-xl px-2 py-1 text-xs w-20 outline-none focus:ring-2 focus:ring-blue-500" />
                         </div>
                         <button
                           onClick={async () => {
@@ -2856,7 +2856,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                             await Swal.fire('انتهى', `تم تحديث ${successCount} من ${toUpdate.length} طلبيات.`, 'success');
                             await refreshOrdersList();
                           }}
-                          className="text-xs bg-yellow-50 hover:bg-yellow-100 border border-yellow-200 px-3 py-2 rounded-2xl font-bold text-yellow-700"
+                          className="text-xs bg-yellow-50 dark:bg-yellow-950/40 hover:bg-yellow-100 dark:hover:bg-yellow-900/50 border border-yellow-200 dark:border-yellow-800 px-3 py-2 rounded-2xl font-bold text-yellow-700 dark:text-yellow-400 transition-colors"
                         >تحويل الأرقام</button>
                       </div>
                       <button onClick={handleParseScript} disabled={!scriptText || isParsing} className="bg-blue-600 text-white px-8 py-3 rounded-2xl font-black shadow-lg shadow-blue-500/20 disabled:opacity-50 flex gap-2">
@@ -2867,7 +2867,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
           {parsedOrders.length > 0 && (
   <div className="space-y-4">
     <div className="flex justify-between items-center">
-      <h3 className="font-bold">المعاينة ({parsedOrders.length})</h3>
+      <h3 className="font-bold text-slate-800 dark:text-slate-100">المعاينة ({parsedOrders.length})</h3>
       <button onClick={handleConfirmImport} className="bg-emerald-600 text-white px-6 py-2 rounded-xl font-bold shadow-lg">
         حفظ الكل
       </button>
@@ -2879,38 +2879,38 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
         const hasMissing = (order.products || []).some((p: any) => !!p.missingProduct || !!p.missingPrice);
         const hasTotalsMismatch = !!order.totalsMismatch;
         const containerClass = hasMissing 
-          ? 'bg-rose-50 border border-rose-300' 
-          : (hasTotalsMismatch ? 'bg-yellow-50 border border-yellow-300' : 'bg-white border border-slate-200');
+          ? 'bg-rose-50 dark:bg-rose-950/30 border border-rose-300 dark:border-rose-900' 
+          : (hasTotalsMismatch ? 'bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-300 dark:border-yellow-900' : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700');
 
         return (
           <div key={order.id} className={`p-4 rounded-2xl text-xs shadow-sm ${containerClass}`}>
-            <div className="flex justify-between items-start mb-2 border-b pb-2">
-              <span className="font-bold text-sm">{order.name}</span>
+            <div className="flex justify-between items-start mb-2 border-b border-slate-200 dark:border-slate-700 pb-2">
+              <span className="font-bold text-sm text-slate-800 dark:text-slate-100">{order.name}</span>
               <div className="text-sm text-right">
                 <div className="flex flex-col items-end gap-1">
-                  <div className="text-xs text-slate-500">اجمالى الطلبيه</div>
-                  <div className="font-mono font-black text-sm">
+                  <div className="text-xs text-slate-500 dark:text-slate-400">اجمالى الطلبيه</div>
+                  <div className="font-mono font-black text-sm text-slate-800 dark:text-slate-100">
                     {Number(order.parsedSubtotal || order.parsedTotal || order.total || 0).toFixed(2)} ج.م
                   </div>
-                  <div className="text-xs text-slate-500 mt-1">الشحن</div>
-                  <div className="font-mono text-sm">
+                  <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">الشحن</div>
+                  <div className="font-mono text-sm text-slate-800 dark:text-slate-200">
                     {Number(order.parsedShipping || order.shipping || 0).toFixed(2)} ج.م
                   </div>
-                  <div className="text-xs text-slate-500 mt-1">المطلوب</div>
-                  <div className="font-mono font-black text-sm">
+                  <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">المطلوب</div>
+                  <div className="font-mono font-black text-sm text-slate-800 dark:text-slate-100">
                     {Number(order.requiredTotal || (Number(order.parsedSubtotal || 0) + Number(order.parsedShipping || 0))).toFixed(2)} ج.م
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="space-y-1 text-slate-500">
+            <div className="space-y-1 text-slate-500 dark:text-slate-400">
               <p className="truncate">{order.governorate} - {order.address}</p>
               <p className="font-mono">{order.phone1}{order.phone2 && String(order.phone2).trim() !== '' ? ` - ${order.phone2}` : ''}</p>
             </div>
 
             {hasMissing && (
-              <div className="mt-2 mb-2 p-2 bg-rose-100 text-rose-800 rounded text-sm">
+              <div className="mt-2 mb-2 p-2 bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 rounded text-sm">
                 تحتوي هذه الاوردر على منتجات غير متطابقة. يمكنك اختيار المنتج المقابل لكل سطر، أو استخدام الأزرار أدناه.
                 <div className="mt-2 flex gap-2">
                   <button onClick={() => editParsedOrder(order)} className="bg-yellow-500 text-white px-3 py-1 rounded text-xs">تعديل الاوردر</button>
@@ -2921,7 +2921,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
             )}
 
             {((order.products || []).some((p: any) => p.missingSize || p.missingColor) && !hasMissing) && (
-              <div className="mt-2 mb-2 p-2 bg-yellow-100 text-yellow-800 rounded text-sm">
+              <div className="mt-2 mb-2 p-2 bg-yellow-100 dark:bg-yellow-950/60 text-yellow-800 dark:text-yellow-300 rounded text-sm">
                 تحتوي بعض الأسطر على مقاس أو لون غير مسجل. النظام لن يغيّر القيم تلقائياً. يمكنك تعديل الأسطر يدوياً أو حفظ الاوردر كما هو.
                 <div className="mt-2 flex gap-2">
                   <button onClick={() => editParsedOrder(order)} className="bg-yellow-500 text-white px-3 py-1 rounded text-xs">تعديل الاوردر</button>
@@ -2931,7 +2931,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
             )}
 
             {hasTotalsMismatch && (
-              <div className="mt-2 mb-2 p-2 bg-yellow-100 text-yellow-800 rounded text-sm">
+              <div className="mt-2 mb-2 p-2 bg-yellow-100 dark:bg-yellow-950/60 text-yellow-800 dark:text-yellow-300 rounded text-sm">
                 إجمالي الأسطر ({Number(order.computedTotal || 0).toFixed(2)} ج.م) لا يتطابق مع الإجمالي المُدخل ({Number(order.parsedTotal || 0).toFixed(2)} ج.م). راجع الأسعار أو اضغط تعديل الاوردر.
                 <div className="mt-2 flex gap-2">
                   <button onClick={() => editParsedOrder(order)} className="bg-yellow-500 text-white px-3 py-1 rounded text-xs">تعديل الاوردر</button>
@@ -2941,11 +2941,11 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
               </div>
             )}
 
-            <div className="mt-2 pt-2 border-t border-dashed">
+            <div className="mt-2 pt-2 border-t border-dashed border-slate-200 dark:border-slate-700">
               <div className="flex items-center justify-between mb-2">
-                <div className="text-sm font-bold">المنتجات</div>
+                <div className="text-sm font-bold text-slate-800 dark:text-slate-200">المنتجات</div>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => addProductToParsedOrder(order.id)} className="bg-blue-50 text-blue-600 px-3 py-1 rounded-xl text-xs">أضف منتج</button>
+                  <button onClick={() => addProductToParsedOrder(order.id)} className="bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50 px-3 py-1 rounded-xl text-xs font-bold transition-colors">أضف منتج</button>
                 </div>
               </div>
               
@@ -2958,21 +2958,21 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                   <div key={i} className="flex justify-between items-center gap-2 mb-2">
                     <div className="flex-1">
                       <div className="flex gap-2 items-center">
-                        <input value={p.name} onChange={(e) => updateParsedProductField(order.id, i, 'name', e.target.value)} className="w-2/3 bg-transparent text-sm" />
-                        <input value={p.size || ''} placeholder="المقاس" onChange={(e) => updateParsedProductField(order.id, i, 'size', e.target.value)} className="w-1/6 bg-transparent text-sm text-center" />
-                        <input value={p.color || ''} placeholder="اللون" onChange={(e) => updateParsedProductField(order.id, i, 'color', e.target.value)} className="w-1/6 bg-transparent text-sm text-center" />
+                        <input value={p.name} onChange={(e) => updateParsedProductField(order.id, i, 'name', e.target.value)} className="w-2/3 bg-transparent text-sm text-slate-900 dark:text-slate-100 font-bold focus:outline-none" />
+                        <input value={p.size || ''} placeholder="المقاس" onChange={(e) => updateParsedProductField(order.id, i, 'size', e.target.value)} className="w-1/6 bg-transparent text-sm text-center text-slate-700 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none" />
+                        <input value={p.color || ''} placeholder="اللون" onChange={(e) => updateParsedProductField(order.id, i, 'color', e.target.value)} className="w-1/6 bg-transparent text-sm text-center text-slate-700 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none" />
                       </div>
                       <div className="mt-1 flex items-center gap-2">
-                        {p.missingProduct && <span className="text-[11px] bg-rose-100 text-rose-700 px-2 py-0.5 rounded">غير موجود</span>}
-                        {p.missingPrice && <span className="text-[11px] bg-rose-100 text-rose-700 px-2 py-0.5 rounded">سعر مفقود</span>}
+                        {p.missingProduct && <span className="text-[11px] bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 px-2 py-0.5 rounded font-bold">غير موجود</span>}
+                        {p.missingPrice && <span className="text-[11px] bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 px-2 py-0.5 rounded font-bold">سعر مفقود</span>}
                       </div>
                     </div>
                     <div className="flex flex-col items-end gap-1 w-40">
-                      <input type="number" value={p.quantity} onChange={(e) => updateParsedProductField(order.id, i, 'quantity', Number(e.target.value))} className="w-full text-right px-2 py-1 rounded-md border" />
-                      <input type="number" value={p.price} onChange={(e) => updateParsedProductField(order.id, i, 'price', e.target.value)} className="w-full text-right px-2 py-1 rounded-md border" />
+                      <input type="number" value={p.quantity} onChange={(e) => updateParsedProductField(order.id, i, 'quantity', Number(e.target.value))} className="w-full text-right px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-xs outline-none focus:ring-1 focus:ring-blue-500" />
+                      <input type="number" value={p.price} onChange={(e) => updateParsedProductField(order.id, i, 'price', e.target.value)} className="w-full text-right px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-xs outline-none focus:ring-1 focus:ring-blue-500" />
                       <div className="flex gap-2">
-                        <button onClick={() => removeProductFromParsedOrder(order.id, i)} className="text-rose-600 text-xs">حذف</button>
-                        <button onClick={() => saveParsedOrderLine(order.id, i)} className="text-emerald-600 text-xs">حفظ</button>
+                        <button onClick={() => removeProductFromParsedOrder(order.id, i)} className="text-rose-600 dark:text-rose-400 text-xs font-bold">حذف</button>
+                        <button onClick={() => saveParsedOrderLine(order.id, i)} className="text-emerald-600 dark:text-emerald-400 text-xs font-bold">حفظ</button>
                       </div>
                     </div>
                   </div>

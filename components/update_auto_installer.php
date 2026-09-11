@@ -362,7 +362,15 @@ if ($action === 'run') {
         }
 
         @unlink($lockPath);
-        echo json_encode(['success' => true, 'message' => 'تم تثبيت الإصدارات المحددة بنجاح.', 'installed' => $installed]);
+
+        // Auto-trigger background rebuild and server restart
+        $restartBat = file_exists($root . '/restart.bat') ? ($root . '/restart.bat') : ($root . '/update_and_restart.bat');
+        if (file_exists($restartBat)) {
+            $cmd = 'start "" /B cmd.exe /c "' . $restartBat . '"';
+            @pclose(@popen($cmd, "r"));
+        }
+
+        echo json_encode(['success' => true, 'message' => 'تم تثبيت الإصدارات المحددة بنجاح، ويجري الآن إعادة بناء وتحديث السيرفر تلقائياً في الخلفية.', 'installed' => $installed]);
     } catch (Exception $e) {
         @unlink($lockPath);
         http_response_code(500);

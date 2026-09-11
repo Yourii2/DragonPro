@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Download } from 'lucide-react';
 import { API_BASE_PATH } from '../services/apiConfig';
 
 interface ProductRow {
@@ -148,8 +149,43 @@ const ProductDeliveryTable: React.FC<{ startDate: string; endDate: string }> = (
     );
   }
 
+  const exportCSV = () => {
+    if (!rows.length) return;
+    const headers = ['المنتج', 'قطع كلية', 'قطع مسلمة', `مبيعات (${currency})`, 'نسبة التسليم', 'قطع مرتجعة', `مرتجعات (${currency})`, 'نسبة الارتجاع'];
+    const dataRows = sortedRows.map(r => [
+      r.product_name || '',
+      r.total_qty || 0,
+      r.delivered_qty || 0,
+      r.delivered_amount || 0,
+      formatPct(r.delivered_qty, r.total_qty),
+      r.returned_qty || 0,
+      r.returned_amount || 0,
+      formatPct(r.returned_qty, r.total_qty)
+    ]);
+    const csv = [headers.join(','), ...dataRows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(','))].join('\n');
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `product_delivery_${startDate}_to_${endDate}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
   return (
-    <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-700">
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <button
+          onClick={exportCSV}
+          className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all active:scale-95"
+          title="تصدير بيانات المنتجات إلى ملف Excel"
+        >
+          <Download size={14} /> تصدير Excel
+        </button>
+      </div>
+      <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
       <table className="w-full text-sm text-right">
         <thead className="bg-slate-50 dark:bg-slate-900/40 text-slate-600 dark:text-slate-400">
           <tr>
@@ -173,7 +209,7 @@ const ProductDeliveryTable: React.FC<{ startDate: string; endDate: string }> = (
               <tr key={r.product_id || idx} className="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
                 <td className="px-4 py-3 text-slate-400 text-xs text-center">{idx + 1}</td>
                 <td className="px-4 py-3 font-bold text-slate-800 dark:text-slate-100">{r.product_name}</td>
-                <td className="px-4 py-3 text-center font-bold">{r.total_qty.toLocaleString()}</td>
+                <td className="px-4 py-3 text-center font-bold text-slate-800 dark:text-slate-100">{r.total_qty.toLocaleString()}</td>
                 <td className="px-4 py-3 text-center">
                   <span className="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 px-2.5 py-0.5 rounded-full text-xs font-bold">
                     {r.delivered_qty.toLocaleString()}
@@ -225,6 +261,7 @@ const ProductDeliveryTable: React.FC<{ startDate: string; endDate: string }> = (
           </tr>
         </tfoot>
       </table>
+      </div>
     </div>
   );
 };

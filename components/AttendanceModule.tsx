@@ -108,6 +108,7 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
   const [hikAssignUserId, setHikAssignUserId] = useState<string>('');
   const [hikAssignPlanNo, setHikAssignPlanNo] = useState<string>('');
   const [hikAssignLoading, setHikAssignLoading] = useState(false);
+  const [hikPullLogsLoading, setHikPullLogsLoading] = useState(false);
 
   const vendorLabels: Record<string, string> = useMemo(() => ({
     hikvision: 'Hikvision',
@@ -294,10 +295,6 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
   };
 
   const handleScanNetwork = async () => {
-    if (!scanConfig.network) {
-      Swal.fire('تنبيه', 'يرجى إدخال نطاق الشبكة أولاً.', 'warning');
-      return;
-    }
     setScanLoading(true);
     try {
       const res = await fetch(`${API_BASE_PATH}/attendance_scan.php`, {
@@ -313,6 +310,14 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
       const data = await res.json();
       if (data.success) {
         setScanResults(data.data || []);
+        if (data.network && data.network !== scanConfig.network) {
+          setScanConfig(prev => ({ ...prev, network: data.network }));
+        }
+        if ((data.data || []).length === 0) {
+          Swal.fire('تم الفحص', 'لم يتم العثور على أجهزة جديدة على نطاق الشبكة المحدد.', 'info');
+        } else {
+          Swal.fire('نجاح', `تم اكتشاف ${data.data.length} جهاز على الشبكة بنجاح!`, 'success');
+        }
       } else {
         Swal.fire('خطأ', data.message || 'فشل البحث عن الأجهزة.', 'error');
       }
@@ -324,14 +329,49 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
   };
 
   const handleConnectDevice = (device: any) => {
+    const isHik = device.vendor === 'hikvision';
     setDeviceForm(prev => ({
       ...prev,
+      name: device.model || prev.name || (isHik ? 'Hikvision Terminal' : 'جهاز بصمة'),
       ip: device.ip || prev.ip,
-      port: device.port ? String(device.port) : prev.port,
+      port: device.port ? String(device.port) : (isHik ? '80' : prev.port),
       vendor: device.vendor || prev.vendor,
-      protocol: 'http'
+      protocol: 'http',
+      driver: isHik ? 'hikvision_isapi' : inferDefaultDriver(device.vendor || prev.vendor),
+      serial_number: device.serial_number || prev.serial_number
     }));
-    Swal.fire('تم', 'تم نقل بيانات الجهاز إلى النموذج.', 'success');
+    Swal.fire('تم', `تم نقل بيانات الجهاز (${device.model || device.ip}) إلى النموذج. المنفذ: ${device.port || (isHik ? 80 : 4370)}`, 'success');
+  };
+
+  const handleHikPullLogsQuick = async () => {
+    if (!hikDeviceId) {
+      Swal.fire('تنبيه', 'اختر جهاز HikVision أولاً.', 'warning');
+      return;
+    }
+    const today = new Date().toISOString().split('T')[0];
+    setHikPullLogsLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=attendance_devices&action=pullLogs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          device_id: Number(hikDeviceId),
+          start_date: today,
+          end_date: today
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        Swal.fire('تم سحب البصمات', data.message || 'تم سحب الحركات بنجاح.', 'success');
+        fetchAll();
+      } else {
+        Swal.fire('تنبيه', data.message || 'تعذر سحب السجلات.', 'warning');
+      }
+    } catch (e) {
+      Swal.fire('خطأ', 'تعذر الاتصال بالخادم لسحب السجلات.', 'error');
+    } finally {
+      setHikPullLogsLoading(false);
+    }
   };
 
   const handlePullLogs = async () => {
@@ -523,22 +563,30 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
                     <th className="px-3 py-2">IP</th>
                     <th className="px-3 py-2">المنفذ</th>
                     <th className="px-3 py-2">النوع</th>
+                    <th className="px-3 py-2">الموديل / التفاصيل</th>
+                    <th className="px-3 py-2">طريقة الاكتشاف</th>
                     <th className="px-3 py-2"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {scanResults.length === 0 && (
                     <tr>
-                      <td className="px-3 py-3 text-muted" colSpan={4}>لا توجد أجهزة مكتشفة.</td>
+                      <td className="px-3 py-3 text-muted" colSpan={6}>لا توجد أجهزة مكتشفة حالياً. اضغط "بحث عن الأجهزة".</td>
                     </tr>
                   )}
                   {scanResults.map((d: any) => (
-                    <tr key={`${d.ip}-${d.port}`} className="border-t border-slate-200/50">
-                      <td className="px-3 py-2 font-bold">{d.ip}</td>
-                      <td className="px-3 py-2">{d.port}</td>
-                      <td className="px-3 py-2">{vendorLabels[d.vendor] || d.vendor}</td>
+                    <tr key={`${d.ip}-${d.port}`} className="border-t border-slate-200/50 hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                      <td className="px-3 py-2 font-bold font-mono text-blue-600">{d.ip}</td>
+                      <td className="px-3 py-2 font-mono">{d.port}</td>
                       <td className="px-3 py-2">
-                        <button className="px-3 py-1 bg-slate-200 rounded-lg" onClick={() => handleConnectDevice(d)}>اتصال</button>
+                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ${d.vendor === 'hikvision' ? 'bg-red-100 text-red-700' : (d.vendor === 'zkteco' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-700')}`}>
+                          {vendorLabels[d.vendor] || d.vendor}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 font-bold">{d.model || d.serial_number || '-'}</td>
+                      <td className="px-3 py-2 text-muted text-[11px]">{d.discovered_by || '-'}</td>
+                      <td className="px-3 py-2">
+                        <button className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg transition-colors" onClick={() => handleConnectDevice(d)}>ربط الجهاز</button>
                       </td>
                     </tr>
                   ))}
@@ -804,12 +852,21 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
                 />
               </div>
               <button
-                className="px-5 py-2 rounded-xl bg-blue-600 text-white font-black flex items-center gap-2"
+                className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black flex items-center gap-2 transition-colors"
                 onClick={handleHikPing}
                 disabled={hikPingLoading || !hikDeviceId}
               >
                 <RefreshCw size={14} className={hikPingLoading ? 'animate-spin' : ''} />
                 {hikPingLoading ? 'جارٍ الاتصال...' : 'اختبار الاتصال'}
+              </button>
+              <button
+                className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-black flex items-center gap-2 transition-colors"
+                onClick={handleHikPullLogsQuick}
+                disabled={hikPullLogsLoading || !hikDeviceId}
+                title="سحب حركات الموظفين من الجهاز لليوم الحالي"
+              >
+                <Fingerprint size={15} className={hikPullLogsLoading ? 'animate-pulse' : ''} />
+                {hikPullLogsLoading ? 'جارٍ سحب البصمات...' : 'سحب بصمات اليوم'}
               </button>
             </div>
 

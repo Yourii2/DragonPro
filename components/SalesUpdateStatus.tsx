@@ -25,6 +25,7 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
   const [isBarcodeModalOpen, setIsBarcodeModalOpen] = useState(false);
   const [scanInput, setScanInput] = useState('');
   const [scannedBarcodes, setScannedBarcodes] = useState<Array<{ code: string; orderId?: number }>>([]);
+  const [repSearch, setRepSearch] = useState('');
   
   // حالة الطباعة
   const [ordersToPrint, setOrdersToPrint] = useState<any[] | null>(null);
@@ -51,7 +52,7 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
           // fetch reps with server-provided balance
           const usersRes = await fetch(`${API_BASE_PATH}/api.php?module=users&action=getAllWithBalance&related_to_type=rep`);
           const usersJson = await usersRes.json();
-          const allReps = (usersJson.success ? (usersJson.data || []) : []).filter((u:any) => u.role === 'representative');
+          const allReps = (usersJson.success ? (usersJson.data || []) : []);
           // store the whole user object so we can read `balance` later
           repIdToNameMap = new Map(allReps.map((r:any) => [Number(r.id), r]));
         }
@@ -104,7 +105,7 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
       } else {
         const usersRes = await fetch(`${API_BASE_PATH}/api.php?module=users&action=getAllWithBalance&related_to_type=rep`);
         const usersJson = await usersRes.json();
-        const allReps = (usersJson.success ? (usersJson.data || []) : []).filter((u:any) => u.role === 'representative');
+        const allReps = (usersJson.success ? (usersJson.data || []) : []);
         repIdToNameMap = new Map(allReps.map((r:any) => [Number(r.id), r]));
       }
 
@@ -399,6 +400,7 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
       };
       for (let w=0; w<concurrency; w++) workers.push(runNext());
       await Promise.all(workers);
+      setRepsSummary(prev => [...prev].sort((a, b) => (b.ordersCount || 0) - (a.ordersCount || 0)));
     } catch(e) {
       // non-fatal
     }
@@ -982,20 +984,113 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
     setOrdersToPrint(orders);
   };
 
+  const handleBarcodeScan = () => {
+    const raw = (scanInput || '').trim();
+    if (!raw) return;
+    const cleanCode = raw.replace(/^[#\s]+/, '').trim().toLowerCase();
+
+    // 1. First priority: Exact order number / tracking match
+    const directOrderMatch = (openRepOrders?.orders || []).find((o: any) => {
+      const num1 = String(o.orderNumber || '').trim().toLowerCase().replace(/^[#\s]+/, '');
+      const num2 = String(o.order_number || '').trim().toLowerCase().replace(/^[#\s]+/, '');
+      const track = String(o.tracking_number || o.shipping_number || '').trim().toLowerCase();
+      return (num1 && num1 === cleanCode) || (num2 && num2 === cleanCode) || (track && track === cleanCode);
+    });
+
+    // 2. Second priority: If no orderNumber match, check numeric ID
+    const idOrderMatch = !directOrderMatch && /^\d+$/.test(cleanCode)
+      ? (openRepOrders?.orders || []).find((o: any) => String(o.id) === cleanCode)
+      : null;
+
+    const matchedOrder = directOrderMatch || idOrderMatch;
+
+    if (matchedOrder) {
+      setSelectedOrderIds(prev => Array.from(new Set([...prev, matchedOrder.id])));
+      setScannedBarcodes(prev => [{ code: raw, orderId: matchedOrder.id }, ...prev]);
+      Swal.fire({
+        toast: true,
+        position: 'top-end',
+        icon: 'success',
+        title: 'تم تحديد الأوردر',
+        text: `أوردر #${matchedOrder.orderNumber || matchedOrder.order_number || matchedOrder.id} - ${matchedOrder.customerName || matchedOrder.customer_name || ''}`,
+        timer: 1500,
+        showConfirmButton: false
+      });
+      setScanInput('');
+      return;
+    }
+
+    // 3. Third priority: Product barcode match across rep's orders
+    const productMatches = (openRepOrders?.orders || []).filter((o: any) => {
+      return (o.products || []).some((p: any) => {
+        const pCode = String(p.barcode || p.barcode_value || p.code || p.sku || p.product_barcode || '').trim().toLowerCase();
+        return pCode && pCode === cleanCode;
+      });
+    });
+
+    if (productMatches.length > 0) {
+      const ids = productMatches.map((m: any) => m.id);
+      setSelectedOrderIds(prev => Array.from(new Set([...prev, ...ids])));
+      setScannedBarcodes(prev => [{ code: raw, orderId: ids[0] }, ...prev]);
+      Swal.fire({
+        toast: true,
+        position: 'top-end',
+        icon: 'info',
+        title: 'تطابق باركود صنف',
+        text: `تم تحديد ${ids.length} أوردر يحتوي على هذا الصنف`,
+        timer: 1800,
+        showConfirmButton: false
+      });
+    } else {
+      setScannedBarcodes(prev => [{ code: raw, orderId: undefined }, ...prev]);
+      Swal.fire({
+        toast: true,
+        position: 'top-end',
+        icon: 'warning',
+        title: 'لم يتم العثور على أوردر',
+        text: `لا يوجد أوردر أو صنف مطابق للباركود: ${raw}`,
+        timer: 2000,
+        showConfirmButton: false
+      });
+    }
+    setScanInput('');
+  };
+
+  const displayedReps = repsSummary.filter((r: any) => {
+    if (!repSearch.trim()) return true;
+    const q = repSearch.trim().toLowerCase();
+    return (r.name && String(r.name).toLowerCase().includes(q)) || String(r.repId).includes(q);
+  });
+
   return (
     <div className="p-4 rounded-2xl border border-card dir-rtl card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
       
       {/* Hidden Print Container for print output. Choose single-per-page for shipping labels. */}
       {ordersToPrint && (printSinglePerPage ? <PrintableOrdersSingle orders={ordersToPrint} /> : <PrintableOrders orders={ordersToPrint} />)}
 
-      <h2 className="font-black mb-3">تسجيل المرتجعات</h2>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+        <h2 className="font-black text-lg">تسجيل المرتجعات</h2>
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={repSearch}
+            onChange={e => setRepSearch(e.target.value)}
+            placeholder={isShippingMode ? 'بحث عن شركة شحن...' : 'بحث عن مندوب بالاسم أو الرقم...'}
+            className="px-3 py-1.5 border rounded-lg text-sm bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 w-64"
+          />
+          {repSearch && (
+            <button onClick={() => setRepSearch('')} className="px-2 py-1 text-xs bg-slate-200 rounded hover:bg-slate-300">مسح</button>
+          )}
+        </div>
+      </div>
+
       {loading ? <div className="text-sm text-slate-500">جاري التحميل...</div> : (
         <div>
-          {repsSummary.length === 0 ? (
-            <p className="text-sm text-slate-500">{isShippingMode ? 'لا توجد شركات شحن لديهم اوردرات.' : 'لا توجد مندوبين لديهم اوردرات.'}</p>
+          {displayedReps.length === 0 ? (
+            <p className="text-sm text-slate-500">{isShippingMode ? 'لا توجد شركات شحن مطابقة.' : 'لا توجد مندوبين مطابقين.'}</p>
           ) : (
             <div className="space-y-3">
-              {repsSummary.map((rep:any) => (
+              {displayedReps.map((rep:any) => (
                 <div key={rep.repId} className="p-3 border rounded-lg flex justify-between items-center bg-slate-50">
                   <div>
                     <div className="font-bold">{rep.name || ((isShippingMode ? 'شركة شحن #' : 'مندوب #') + rep.repId)}</div>
@@ -1070,39 +1165,27 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
                   <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
                   <div className="rounded-2xl w-full max-w-xl p-6 shadow-2xl card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
                     <div className="flex justify-between items-center mb-3">
-                      <h4 className="font-bold">مسح باركود — امسح باركود المنتجات لاختيار الاوردرات المرتجعة</h4>
+                      <h4 className="font-bold">مسح باركود — امسح بوليصة الشحن أو باركود المنتج لاختيار الأوردر</h4>
                       <button onClick={()=> { setIsBarcodeModalOpen(false); setScanInput(''); }} className="text-red-600">إغلاق</button>
                     </div>
                     <div className="mb-3">
-                      <p className="text-sm text-slate-500">ضع مؤشر الكتابة على حقل المسح ثم استخدم جهاز قارئ الباركود (سيتم ارسال Enter بعد القراءة تلقائياً).</p>
+                      <p className="text-sm text-slate-500">امسح باركود بوليصة الشحن (رقم الأوردر) لاختيار الأوردر مباشرة، أو امسح باركود الصنف لتحديد الأوردرات التي تحتوي عليه.</p>
                     </div>
                     <div className="flex gap-2 mb-3">
-                      <input autoFocus value={scanInput} onChange={e=> setScanInput(e.target.value)} onKeyDown={async (e)=>{
-                        if (e.key === 'Enter') {
-                          const code = (scanInput||'').trim();
-                          if (!code) return;
-                          const matches = (openRepOrders?.orders||[]).filter((o:any) => {
-                            // match by order number / id OR by product barcode fields
-                            const orderNums = [o.orderNumber || o.order_number || o.id || ''].map((x:any)=> String(x));
-                            if (orderNums.includes(code)) return true;
-                            return (o.products||[]).some((p:any)=> {
-                              const cand = String(p.barcode || p.barcode_value || p.code || p.sku || p.product_barcode || '');
-                              return cand === code;
-                            });
-                          });
-                          if (matches.length>0) {
-                            const ids = matches.map((m:any)=> m.id);
-                            setSelectedOrderIds(prev => Array.from(new Set([...prev, ...ids])));
-                            setScannedBarcodes(prev => [{ code, orderId: ids[0] }, ...prev]);
-                            Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'تم الاختيار', text: `تم تحديد ${ids.length} اوردر/اوردرات تحتوي على هذا الباركود`, timer: 1200, showConfirmButton: false });
-                          } else {
-                            setScannedBarcodes(prev => [{ code, orderId: undefined }, ...prev]);
-                            Swal.fire({ toast: true, position: 'top-end', icon: 'warning', title: 'لم يتم العثور', text: `لا توجد اوردرات تحتوي على الباركود ${code}`, timer: 1400, showConfirmButton: false });
+                      <input
+                        autoFocus
+                        value={scanInput}
+                        onChange={e => setScanInput(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleBarcodeScan();
                           }
-                          setScanInput('');
-                        }
-                      }} className="w-full border rounded p-2" placeholder="امسح باركود هنا ثم انتظر" />
-                      <button onClick={() => { const code = (scanInput||'').trim(); if (!code) return; const matches = (openRepOrders?.orders||[]).filter((o:any) => { const orderNums = [o.orderNumber || o.order_number || o.id || ''].map((x:any)=> String(x)); if (orderNums.includes(code)) return true; return (o.products||[]).some((p:any)=> { const cand = String(p.barcode || p.barcode_value || p.code || p.sku || p.product_barcode || ''); return cand === code; }); }); if (matches.length>0) { const ids = matches.map((m:any)=> m.id); setSelectedOrderIds(prev => Array.from(new Set([...prev, ...ids]))); setScannedBarcodes(prev => [{ code, orderId: ids[0] }, ...prev]); Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'تم الاختيار', text: `تم تحديد ${ids.length} اوردر/اوردرات تحتوي على هذا الباركود`, timer: 1200, showConfirmButton: false }); } else { setScannedBarcodes(prev => [{ code, orderId: undefined }, ...prev]); Swal.fire({ toast: true, position: 'top-end', icon: 'warning', title: 'لم يتم العثور', text: `لا توجد اوردرات تحتوي على الباركود ${code}`, timer: 1400, showConfirmButton: false }); } setScanInput(''); }} className="px-3 py-2 bg-blue-600 text-white rounded">تحقق</button>
+                        }}
+                        className="w-full border rounded p-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        placeholder="امسح باركود الأوردر أو الصنف هنا..."
+                      />
+                      <button onClick={handleBarcodeScan} className="px-4 py-2 bg-blue-600 text-white rounded font-bold hover:bg-blue-700">تحقق</button>
                     </div>
 
                     <div className="max-h-48 overflow-y-auto border rounded p-2">

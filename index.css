@@ -299,3 +299,27 @@ select::-ms-expand { color: var(--text) !important; }
 .supplier-ledger-table tfoot.ledger-sticky-foot {
   z-index: 20 !important;
 }
+
+/* ── Clean Report Printing Rules ── */
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
+  aside, nav, header, button, input, select, .no-print {
+    display: none !important;
+  }
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+  tr {
+    page-break-inside: avoid !important;
+  }
+  thead {
+    display: table-header-group !important;
+  }
+  tfoot {
+    display: table-footer-group !important;
+  }
+}
