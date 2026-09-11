@@ -9385,6 +9385,14 @@ switch ($module) {
         if ($action === 'getAllWithBalance') {
             check_permission_or_die($pdo, 'users', 'view');
             $rep_related_type = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
+            $targetRepId = isset($_GET['rep_id']) ? intval($_GET['rep_id']) : (isset($input['rep_id']) ? intval($input['rep_id']) : 0);
+
+            $repFilterSql = "";
+            $params = [$rep_related_type];
+            if ($targetRepId > 0) {
+                $repFilterSql = " AND u.id = ?";
+                $params[] = $targetRepId;
+            }
             
             $sql = "SELECT 
                         u.*, 
@@ -9395,15 +9403,16 @@ switch ($module) {
                             related_to_id, 
                             SUM(amount) as balance 
                         FROM transactions 
+                        WHERE related_to_type = ? OR related_to_type = 'employee'
                         GROUP BY related_to_id
                     ) t ON u.id = t.related_to_id
-                    WHERE u.role = 'representative' OR u.id IN (
+                    WHERE (u.role = 'representative' OR u.id IN (
                         SELECT DISTINCT rep_id FROM orders 
                         WHERE rep_id IS NOT NULL AND status IN ('with_rep', 'partial', 'in_delivery')
-                    )
+                    )) $repFilterSql
                     ORDER BY u.name ASC";
 
-            $stmt = execute_query($pdo, $sql, [$rep_related_type]);
+            $stmt = execute_query($pdo, $sql, $params);
             echo json_encode(['success' => true, 'data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
             break; 
         }
