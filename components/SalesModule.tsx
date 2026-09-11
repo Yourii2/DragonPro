@@ -2,7 +2,7 @@ import Custom12HourTimePicker from './Custom12HourTimePicker';
 import React, { useState, useEffect, useMemo } from 'react';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { assetUrl } from '../services/assetUrl';
-import { Calendar, ShoppingCart, Printer, History, Search, PlusCircle, MinusCircle, UploadCloud, FileText, RefreshCcw, ClipboardPaste, MapPin, Phone, User, CheckSquare, Square, Eye, Edit, ChevronRight } from 'lucide-react';
+import { Calendar, ShoppingCart, Printer, History, Search, PlusCircle, MinusCircle, UploadCloud, FileText, RefreshCcw, ClipboardPaste, MapPin, Phone, User, CheckSquare, Square, Eye, Edit, ChevronRight, AlertTriangle, AlertCircle } from 'lucide-react';
 import Swal from 'sweetalert2';
 import CustomSelect from './CustomSelect';
 import Barcode from './Barcode';
@@ -84,6 +84,329 @@ const normalizeNumbers = (input: any): string => {
   };
 
   return s.split('').map(ch => map[ch] || ch).join('');
+};
+
+// Comprehensive Arabic Text Normalization (Alef variations, Taa Marbuta/Haa, Yaa/Alef Maksura, diacritics, spaces)
+export const normalizeArabicText = (input: any): string => {
+  if (input === null || typeof input === 'undefined') return '';
+  let s = String(input).trim();
+  // Strip Arabic diacritics / tashkeel & tatweel
+  s = s.replace(/[\u0610-\u061A\u064B-\u065F\u0670\u0640]/g, '');
+  // Normalize Alefs (أ, إ, آ, ٱ -> ا)
+  s = s.replace(/[أإآٱ]/g, 'ا');
+  // Normalize Taa Marbuta and Haa (ة -> ه)
+  s = s.replace(/ة/g, 'ه');
+  // Normalize Yaa and Alef Maksura (ى -> ي)
+  s = s.replace(/ى/g, 'ي');
+  // Normalize Waw with Hamza & Yaa with Hamza
+  s = s.replace(/ؤ/g, 'و').replace(/ئ/g, 'ي');
+  // Normalize numerals
+  s = normalizeNumbers(s);
+  // Collapse whitespaces
+  s = s.replace(/\s+/g, ' ');
+  return s.toLowerCase().trim();
+};
+
+export const matchProductAndVariant = (
+  rawName: string,
+  rawColor: string,
+  rawSize: string,
+  existingProducts: any[]
+): {
+  matchedVariant: any | null;
+  productId: number | string | null;
+  missingProduct: boolean;
+  missingProductMsg: string;
+  missingColor: boolean;
+  missingColorMsg: string;
+  missingSize: boolean;
+  missingSizeMsg: string;
+  availableColors: string[];
+  availableSizes: string[];
+  autoColor?: string;
+  autoSize?: string;
+} => {
+  const normName = normalizeArabicText(rawName);
+  const normColor = normalizeArabicText(rawColor);
+  const normSize = normalizeArabicText(rawSize);
+
+  if (!normName) {
+    return {
+      matchedVariant: null,
+      productId: null,
+      missingProduct: true,
+      missingProductMsg: 'اسم المنتج غير محدد',
+      missingColor: false,
+      missingColorMsg: '',
+      missingSize: false,
+      missingSizeMsg: '',
+      availableColors: [],
+      availableSizes: []
+    };
+  }
+
+  // 1. Find all product variants belonging to this product
+  // A) Exact normalized name match
+  let productVariants = (existingProducts || []).filter((ep: any) => {
+    if (!ep || !ep.name) return false;
+    return normalizeArabicText(ep.name) === normName;
+  });
+
+  // B) Fallback: Substring/contains match
+  if (productVariants.length === 0) {
+    productVariants = (existingProducts || []).filter((ep: any) => {
+      if (!ep || !ep.name) return false;
+      const epn = normalizeArabicText(ep.name);
+      return epn.includes(normName) || normName.includes(epn);
+    });
+  }
+
+  // If product name completely not found in database
+  if (productVariants.length === 0) {
+    return {
+      matchedVariant: null,
+      productId: null,
+      missingProduct: true,
+      missingProductMsg: `المنتج "${rawName}" غير مسجل في قاعدة البيانات`,
+      missingColor: false,
+      missingColorMsg: '',
+      missingSize: false,
+      missingSizeMsg: '',
+      availableColors: [],
+      availableSizes: []
+    };
+  }
+
+  // Product is FOUND!
+  // Extract all available colors and sizes for this product
+  const availableColors = Array.from(
+    new Set(
+      productVariants
+        .map((v: any) => (v.color || '').toString().trim())
+        .filter(Boolean)
+    )
+  );
+
+  const availableSizes = Array.from(
+    new Set(
+      productVariants
+        .map((v: any) => (v.size || '').toString().trim())
+        .filter(Boolean)
+    )
+  );
+
+  let autoColor = '';
+  let autoSize = '';
+  let checkColor = normColor;
+  let checkSize = normSize;
+
+  if (!normColor && availableColors.length === 1) {
+    autoColor = availableColors[0];
+    checkColor = normalizeArabicText(autoColor);
+  }
+  if (!normSize && availableSizes.length === 1) {
+    autoSize = availableSizes[0];
+    checkSize = normalizeArabicText(autoSize);
+  }
+
+  // Validate Color
+  let missingColor = false;
+  let missingColorMsg = '';
+  if (checkColor !== '') {
+    if (availableColors.length > 0) {
+      const colorFound = availableColors.some(
+        c => normalizeArabicText(c) === checkColor
+      );
+      if (!colorFound) {
+        missingColor = true;
+        missingColorMsg = `اللون "${rawColor}" غير متوفر (المسجل: ${availableColors.join('، ')})`;
+      }
+    }
+  } else if (availableColors.length > 1) {
+    missingColor = true;
+    missingColorMsg = `لم يتم تحديد لون (المسجل: ${availableColors.join('، ')})`;
+  }
+
+  // Validate Size
+  let missingSize = false;
+  let missingSizeMsg = '';
+  if (checkSize !== '') {
+    if (availableSizes.length > 0) {
+      const sizeFound = availableSizes.some(
+        s => normalizeArabicText(s) === checkSize
+      );
+      if (!sizeFound) {
+        missingSize = true;
+        missingSizeMsg = `المقاس "${rawSize}" غير متوفر (المسجل: ${availableSizes.join('، ')})`;
+      }
+    }
+  } else if (availableSizes.length > 1) {
+    missingSize = true;
+    missingSizeMsg = `لم يتم تحديد مقاس (المسجل: ${availableSizes.join('، ')})`;
+  }
+
+  // Pick best matching variant:
+  // 1. Both color and size match
+  let matchedVariant = productVariants.find((v: any) => {
+    const vc = normalizeArabicText(v.color);
+    const vs = normalizeArabicText(v.size);
+    const colorOk = checkColor === '' || vc === checkColor;
+    const sizeOk = checkSize === '' || vs === checkSize;
+    return colorOk && sizeOk;
+  });
+
+  // 2. Color matches, any size
+  if (!matchedVariant && checkColor !== '') {
+    matchedVariant = productVariants.find((v: any) => normalizeArabicText(v.color) === checkColor);
+  }
+
+  // 3. Size matches, any color
+  if (!matchedVariant && checkSize !== '') {
+    matchedVariant = productVariants.find((v: any) => normalizeArabicText(v.size) === checkSize);
+  }
+
+  // 4. Default to first variant of this product
+  if (!matchedVariant) {
+    matchedVariant = productVariants[0] || null;
+  }
+
+  return {
+    matchedVariant,
+    productId: matchedVariant ? matchedVariant.id : null,
+    missingProduct: false,
+    missingProductMsg: '',
+    missingColor,
+    missingColorMsg,
+    missingSize,
+    missingSizeMsg,
+    availableColors,
+    availableSizes,
+    autoColor,
+    autoSize
+  };
+};
+
+export const parseOrderProductLine = (
+  rawLine: string,
+  existingProductsList: any[] = []
+): {
+  name: string;
+  color: string;
+  size: string;
+  quantity: number;
+  price: string;
+  total: string;
+} => {
+  let line = (rawLine || '').trim().replace(/^(?:-|\*|\d+\.?\s*-?)\s*/, '');
+  line = normalizeNumbers(line);
+
+  let quantity = 1;
+  let price = '0';
+  let size = '';
+  let color = '';
+  let name = '';
+
+  // 1. Extract Quantity: e.g. "الكمية 1" / "الكميه: 2" / "عدد 3" / leading "1 "
+  const qtyMatch = line.match(/(?:الكميه|الكمية|العدد|عدد|كمية|كميه)\s*[:=]?\s*(\d+)/i);
+  if (qtyMatch) {
+    quantity = parseInt(qtyMatch[1], 10) || 1;
+    line = line.replace(qtyMatch[0], ' ').trim();
+  } else {
+    const leadQty = line.match(/^(\d+)\s+/);
+    if (leadQty) {
+      quantity = parseInt(leadQty[1], 10) || 1;
+      line = line.substring(leadQty[0].length).trim();
+    }
+  }
+
+  // 2. Extract Price: e.g. "السعر 250" / "سعر: 250" / trailing " 250"
+  const priceMatch = line.match(/(?:السعر|سعر|price)\s*[:=]?\s*(\d+(?:\.\d+)?)/i);
+  if (priceMatch) {
+    price = priceMatch[1];
+    line = line.replace(priceMatch[0], ' ').trim();
+  } else {
+    const trailPrice = line.match(/\s+(\d+(?:\.\d+)?)$/);
+    if (trailPrice) {
+      price = trailPrice[1];
+      line = line.substring(0, line.length - trailPrice[0].length).trim();
+    }
+  }
+
+  // 3. Extract Size: e.g. "المقاس 8" / "مقاس: L" / "مقاس XL" / "حجم 42"
+  const sizeMatch = line.match(/(?:المقاس|مقاس|الحجم|حجم|size)\s*[:=]?\s*([^\s,;]+)/i);
+  if (sizeMatch) {
+    size = sizeMatch[1].trim();
+    line = line.replace(sizeMatch[0], ' ').trim();
+  }
+
+  // 4. Extract Color: e.g. "اللون اسود" / "لون: أبيض" / "اللون كاروهات"
+  const colorKeyMatch = line.match(/(?:اللون|لون|color)\s*[:=]?\s*([^\s,;]+(?:\s+[^\s,;]+)?)/i);
+  if (colorKeyMatch) {
+    color = colorKeyMatch[1].trim();
+    line = line.replace(colorKeyMatch[0], ' ').trim();
+  }
+
+  // 5. Extract Name: e.g. "الاسم دبدوب" / "اسم المنتج: سلوبته" / "اسم ..."
+  const nameMatch = line.match(/(?:اسم\s+المنتج|الاسم|اسم|المنتج)\s*[:=]?\s*(.+)/i);
+  if (nameMatch) {
+    name = nameMatch[1].trim();
+  } else {
+    name = line.trim();
+  }
+
+  // 6. If color was not found via "اللون" keyword, detect from known colors
+  if (!color && name) {
+    const knownColors = new Set<string>([
+      'اسود', 'أسود', 'ابيض', 'أبيض', 'احمر', 'أحمر', 'ازرق', 'أزرق', 'اخضر', 'أخضر',
+      'اصفر', 'أصفر', 'بني', 'بنى', 'رمادي', 'رمادى', 'وردي', 'وردى', 'كحلي', 'كحلى',
+      'بيج', 'هافان', 'جملي', 'جملى', 'كاروهات', 'مستردة', 'مسترده', 'نبيتي', 'نبيتى',
+      'موف', 'زيتي', 'زيتى', 'رصاصي', 'رصاصى', 'بترولي', 'بترولى', 'فوشيا', 'تركواز',
+      'سيمون', 'ليموني', 'ليمونى', 'كشمير', 'أوف وايت', 'اوف وايت', 'جنزاري', 'جنزارى'
+    ]);
+    if (Array.isArray(existingProductsList)) {
+      existingProductsList.forEach(p => {
+        if (p.color && typeof p.color === 'string') {
+          const c = p.color.trim();
+          if (c) knownColors.add(c);
+        }
+      });
+    }
+
+    const sortedColors = Array.from(knownColors).sort((a, b) => b.length - a.length);
+    for (const c of sortedColors) {
+      const normC = normalizeArabicText(c);
+      const words = name.split(/\s+/);
+      const cWords = c.split(/\s+/);
+      if (cWords.length === 1) {
+        const foundWordIdx = words.findIndex(w => normalizeArabicText(w) === normC);
+        if (foundWordIdx !== -1) {
+          color = words[foundWordIdx];
+          words.splice(foundWordIdx, 1);
+          name = words.join(' ').trim();
+          break;
+        }
+      } else {
+        const normName = normalizeArabicText(name);
+        if (normName.includes(normC)) {
+          color = c;
+          const reg = new RegExp(c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+          name = name.replace(reg, ' ').replace(/\s+/g, ' ').trim();
+          break;
+        }
+      }
+    }
+  }
+
+  name = name.replace(/^[:\-–—\s]+|[:\-–—\s]+$/g, '').trim();
+
+  return {
+    name: name || rawLine.trim(),
+    color: color || '',
+    size: size || '',
+    quantity: quantity > 0 ? quantity : 1,
+    price: price || '0',
+    total: (Number(price || 0) * (quantity > 0 ? quantity : 1)).toString()
+  };
 };
 
 const parseOrderDateTime = (raw: any): string => {
@@ -252,7 +575,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
   // Full-order edit state (for manual edit form)
   const [editingOrderId, setEditingOrderId] = useState<number | null>(null);
 
-  const normalizeProductGroupName = (v: any) => String(v || '').trim().toLowerCase();
+  const normalizeProductGroupName = (v: any) => normalizeArabicText(v);
 
   const parentGroupNameById = React.useMemo(() => {
     const map = new Map<string, string>();
@@ -657,15 +980,10 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
           }
         }
       }
-      // detect missing product: if no productId, try to match by name; otherwise mark missing
       if (!it.productId) {
-        const name = (it.name || '').toString().trim().toLowerCase();
-        let matched = null;
-        if (name) {
-          matched = existingProducts.find(ep => (ep.name||'').toString().trim().toLowerCase() === name) || existingProducts.find(ep => (ep.name||'').toString().toLowerCase().includes(name) || name.includes((ep.name||'').toString().toLowerCase()));
-        }
-        if (!matched) foundMissingProduct = true;
-        else if (!it.productId) it.productId = matched.id;
+        const val = matchProductAndVariant(it.name || '', it.color || '', it.size || '', existingProducts);
+        if (val.productId) it.productId = val.productId;
+        else if (val.missingProduct) foundMissingProduct = true;
       }
 
       return { name: it.name || '', productId: it.productId || null, quantity: Number(it.qty || 0), price, color: it.color || '', size: it.size || '' };
@@ -831,8 +1149,8 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
         .replace(/ {2,}/g, ' ')
         .trim();
 
-      const orderBlocks = cleaned.split(/الإسم:|‏الإسم:|الاسم:/).filter(block => block.trim() !== '');
-      // cleaned text prepared for parsing
+      // Flexible order blocks split (supports الاسم: / الإسم: / اسم: / إسم:)
+      const orderBlocks = cleaned.split(/(?:^|\n)\s*(?:الإسم|الاسم|إسم|اسم)\s*[:=]?\s*/i).filter(block => block.trim() !== '');
       const maxId = orders.reduce((max, o) => { const id = parseInt(o.orderNumber, 10); return !isNaN(id) && id > max ? id : max; }, 0);
 
       const extractedOrders = orderBlocks.map((block, index) => {
@@ -840,14 +1158,14 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
 
           const extractField = (key: string, content: string, isMultiLine: boolean = false): string => {
               if (isMultiLine) {
-                  const startRegex = new RegExp(`${key}:\\s*`);
+                  const startRegex = new RegExp(`(?:${key}|${key.replace(/ة/g,'ه')}|${key.replace(/ه/g,'ة')})\\s*[:=]?\\s*`, 'i');
                   const startMatch = content.match(startRegex);
                   if (!startMatch) return '';
                   const startIndex = startMatch.index! + startMatch[0].length;
-                  const terminators = ['الإسم:', 'الاسم:', 'المحافظة:', 'العنوان:', 'التليفون', 'تليفون', 'موبايل', 'عدد القطع', 'تفاصيل المنتج', 'السعر:', 'الشحن:', 'الاجمالي:', 'الموظف:', 'البيدج:', 'ملاحظات:', 'ملاحظة:'];
+                  const terminators = ['الإسم:', 'الاسم:', 'المحافظة:', 'المحافظه:', 'العنوان:', 'التليفون', 'تليفون', 'موبايل', 'عدد القطع', 'تفاصيل المنتج', 'تفاصيل الطلب', 'المنتجات', 'السعر:', 'سعر:', 'الشحن:', 'شحن:', 'الاجمالي:', 'الإجمالي:', 'الموظف:', 'البيدج:', 'ملاحظات:', 'ملاحظة:', 'ملاحظه:'];
                   let endIndex = content.length;
                   for (const term of terminators) {
-                      if (term === `${key}:`) continue;
+                      if (term.toLowerCase().startsWith(key.toLowerCase())) continue;
                       const termIndex = content.indexOf(term, startIndex);
                       if (termIndex !== -1 && termIndex < endIndex && termIndex > startIndex) {
                           endIndex = termIndex;
@@ -855,35 +1173,31 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                   }
                   return content.substring(startIndex, endIndex).trim();
               } else {
-                  /* const regex = new RegExp(`${key}:?\\s*([^\\n]*)`); */
-                  const regex = new RegExp(`${key}\\s*:?\\s*([^\\r\\n]*)`);
+                  const regex = new RegExp(`(?:${key}|${key.replace(/ة/g,'ه')}|${key.replace(/ه/g,'ة')})\\s*[:=]?\\s*([^\\r\\n]*)`, 'i');
                   const match = content.match(regex);
                   return match ? match[1].trim() : '';
               }
           };
 
           orderData.name = block.split('\n')[0].trim(); 
-          if(orderData.name.length > 50) orderData.name = extractField('الاسم', block); 
+          if(orderData.name.length > 50) orderData.name = extractField('الاسم', block) || extractField('الإسم', block); 
           
-          // Robust extraction for governorate: try common variants, then a regex fallback
+          // Robust extraction for governorate: try common variants
           const getGovernorateFromBlock = (content: string) => {
-            const variants = ['المحافظة', 'المحافظه', 'المنطقة', 'محافظة', 'محافظه'];
+            const variants = ['المحافظة', 'المحافظه', 'المنطقة', 'منطقة', 'محافظة', 'محافظه'];
             for (const v of variants) {
               const found = extractField(v, content);
               if (found) return found;
             }
-            // Fallback: look for a line containing the root "محاف" or word "منطقة" before a value
             const m = content.match(/(?:المحاف\w*|محاف\w*|المنطقة|منطقة)[:\s]*([^\n]+)/i);
             return m ? m[1].trim() : '';
           };
           orderData.governorate = normalizeNumbers(getGovernorateFromBlock(block));
           orderData.address = normalizeNumbers(extractField('العنوان', block, true));
 
-          // Phone extraction: phone numbers may span multiple lines (e.g. "01xxxxxxxx\n01xxxxxxxx")
-          // So we capture from التليفون label until the next known field label
           const extractPhoneBlock = (content: string): string => {
-            const phoneKeys = ['التليفون', 'تليفون', 'موبايل'];
-            const phoneTerminators = ['تفاصيل المنتج', 'السعر:', 'الشحن:', 'الاجمالي:', 'الموظف:', 'البيدج:', 'ملاحظات:', 'ملاحظة:', 'الإسم:', 'الاسم:', 'المحافظة:', 'العنوان:'];
+            const phoneKeys = ['التليفون', 'تليفون', 'موبايل', 'الموبايل', 'الهاتف'];
+            const phoneTerminators = ['تفاصيل المنتج', 'تفاصيل الطلب', 'المنتجات', 'السعر:', 'الشحن:', 'الاجمالي:', 'الموظف:', 'البيدج:', 'ملاحظات:', 'ملاحظة:', 'الإسم:', 'الاسم:', 'المحافظة:', 'العنوان:'];
             for (const key of phoneKeys) {
               const startRe = new RegExp(`${key}\\s*:?\\s*`);
               const m = content.match(startRe);
@@ -900,7 +1214,6 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
           };
           let phoneText = normalizeNumbers(extractPhoneBlock(block));
           const phones = phoneText.match(/\d{10,11}/g) || [];
-          // Fallback: match any long digit sequence if no 10-11 digit found
           if (phones.length === 0) {
             const fallback = phoneText.match(/\d{7,}/g) || [];
             orderData.phone1 = fallback[0] || '';
@@ -910,104 +1223,66 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
             orderData.phone2 = phones[1] || '';
           }
 
-          orderData.price = extractField('السعر', block);
-          orderData.shipping = extractField('الشحن', block);
-          orderData.total = extractField('الاجمالي', block);
-          orderData.employee = extractField('الموظف', block) || extractField('مودريتور', block);
-          orderData.page = extractField('البيدج', block);
+          orderData.price = extractField('السعر', block) || extractField('سعر', block);
+          orderData.shipping = extractField('الشحن', block) || extractField('شحن', block);
+          orderData.total = extractField('الاجمالي', block) || extractField('الإجمالي', block) || extractField('الاجمالى', block);
+          orderData.employee = extractField('الموظف', block) || extractField('موظف', block) || extractField('مودريتور', block);
+          orderData.page = extractField('البيدج', block) || extractField('بيدج', block) || extractField('الصفحة', block);
           
-          const productDetailsText = extractField('تفاصيل المنتج', block, true) || extractField('المنتجات', block, true);
-          // Combine multi-line product entries into single logical lines.
+          const productDetailsText = extractField('تفاصيل المنتج', block, true)
+            || extractField('تفاصيل المنتجات', block, true)
+            || extractField('تفاصيل الطلب', block, true)
+            || extractField('تفاصيل الاوردر', block, true)
+            || extractField('المنتجات', block, true)
+            || extractField('المنتج', block, true);
+
           const rawLines = productDetailsText.split('\n').map(l => l.trim()).filter(line => line !== '');
           const productLines: string[] = [];
           let curLine = '';
           for (let i = 0; i < rawLines.length; i++) {
             const ln = rawLines[i];
-            // Start a new product when line contains the quantity label or starts with a number and 'اسم' may be present
-            if (/^(?:الكميه|الكمية)\b|^\d+\b|^\s*الكميه|^\s*\d+\s*$/.test(ln) || /الكميه\s*\d+/i.test(ln)) {
+            if (/^(?:الكميه|الكمية|العدد|عدد)\b|^\d+\b|^\s*(?:الكميه|الكمية)|^\s*\d+\s*$/i.test(ln) || /(?:الكميه|الكمية)\s*\d+/i.test(ln)) {
               if (curLine) productLines.push(curLine.trim());
               curLine = ln;
             } else {
-              // continuation of previous product (fields on separate lines)
               if (curLine) curLine += ' ' + ln; else curLine = ln;
             }
           }
           if (curLine) productLines.push(curLine.trim());
-          // productLines prepared for parsing
 
           orderData.products = productLines.map(line => {
-              line = line.trim().replace(/^(?:-|\d+\.?\s*-?)\s*/, '');
-              let product: { name: string; color: string; size: string; quantity: number; price: string; };
-
-                // Support new detailed format like:
-                // "الكميه 1 الاسم دبدوب اللون كاروهات المقاس 8 السعر 250"
-                // Accept either 'اسم' or 'اسم المنتج' and optional 'السعر'.
-                const newFormatRegex = /(?:^\s*)الكميه\s+(\d+)\s+(?:اسم(?:\s+المنتج)?|الاسم)\s+(.+?)\s+اللون\s+(.+?)\s+المقاس\s+(\S+)(?:\s+السعر\s+(\d+(?:\.\d+)?))?\s*$/i;
-                const match = line.match(newFormatRegex);
-
-                if (match) {
-                  product = {
-                    quantity: parseInt(match[1], 10),
-                    name: match[2].trim(),
-                    color: match[3].trim(),
-                    size: match[4].trim(),
-                    price: match[5] ? match[5] : '0'
-                  };
-              } else {
-                  // Fallback to old format
-                  product = {
-                      name: '',
-                      color: '',
-                      size: '',
-                      quantity: 1,
-                      price: ''
-                  };
-
-                  const quantityMatch = line.match(/^(\d+)\s+/);
-                  if (quantityMatch) {
-                      product.quantity = parseInt(quantityMatch[1], 10);
-                      line = line.substring(quantityMatch[0].length).trim();
-                  }
-
-                  const priceMatch = line.match(/\s+(\d+(\.\d+)?)$/);
-                  if (priceMatch) {
-                      product.price = priceMatch[1];
-                      line = line.substring(0, line.length - priceMatch[0].length).trim();
-                  }
-
-                  const sizeMatch = line.match(/مقاس\s+([\w\s\d]+)/);
-                  if (sizeMatch) {
-                      product.size = sizeMatch[1].trim();
-                      line = line.replace(sizeMatch[0], '').trim();
-                  }
-                  
-                  const colors = ['اسود', 'هافان', 'كاروهات', 'جملي', 'أبيض', 'أحمر', 'أزرق', 'أخضر', 'أصفر', 'بني', 'رمادي', 'وردي'];
-                  const lineParts = line.split(' ');
-                  const foundColors: string[] = [];
-                  const nameParts: string[] = [];
-
-                  lineParts.forEach(part => {
-                      if (colors.includes(part)) {
-                          foundColors.push(part);
-                      } else {
-                          nameParts.push(part);
-                      }
-                  });
-
-                  product.name = nameParts.join(' ').trim();
-                  product.color = foundColors.join(' ').trim();
-
-                  if (!product.name && !product.color) {
-                      product.name = line;
-                  }
+              const parsedItem = parseOrderProductLine(line, existingProducts);
+              const validation = matchProductAndVariant(parsedItem.name, parsedItem.color, parsedItem.size, existingProducts);
+              let linePrice = Number(parsedItem.price) || 0;
+              if (validation.matchedVariant && linePrice === 0) {
+                linePrice = Number(validation.matchedVariant.sale_price || validation.matchedVariant.price || 0);
               }
-              
-              return { ...product, total: (Number(product.price) * product.quantity).toString() };
+              const finalColor = parsedItem.color || validation.autoColor || '';
+              const finalSize = parsedItem.size || validation.autoSize || '';
+              return {
+                rawLine: line,
+                name: parsedItem.name,
+                color: finalColor,
+                size: finalSize,
+                quantity: parsedItem.quantity,
+                price: linePrice.toString(),
+                total: (linePrice * parsedItem.quantity).toString(),
+                productId: validation.productId,
+                missingProduct: validation.missingProduct,
+                missingProductMsg: validation.missingProductMsg,
+                missingColor: validation.missingColor,
+                missingColorMsg: validation.missingColorMsg,
+                missingSize: validation.missingSize,
+                missingSizeMsg: validation.missingSizeMsg,
+                availableColors: validation.availableColors,
+                availableSizes: validation.availableSizes,
+              };
           });
           
-          const notes1 = extractField('ملاحظات', block, true);
+          const notes1 = extractField('ملاحظات', block, true) || extractField('ملاحظة', block, true) || extractField('ملاحظه', block, true);
           orderData.notes = notes1;
           orderData.orderNumber = (maxId + index + 1).toString();
+          orderData.rawBlock = block;
 
           return orderData;
       });
@@ -1021,98 +1296,57 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
         setParsedOrders(extractedOrders);
       }
       setIsParsing(false);
-      Swal.fire('تم التحليل', `تم استخراج ${extractedOrders.length} اوردر بنجاح. تم احتساب القيم تلقائياً.`, 'success');
+      Swal.fire('تم التحليل', `تم استخراج ${extractedOrders.length} اوردر بنجاح. تم مطابقة المنتجات واحتساب القيم تلقائياً.`, 'success');
     }, 1000);
   };
 
   // validate parsed orders against existing products and mark missing attributes
   useEffect(() => {
-    if (!parsedOrders || parsedOrders.length === 0) return;
-    const validated = parsedOrders.map((o:any) => {
-      const products = (o.products || []).map((p:any) => {
-        const name = (p.name || '').trim();
-        const lname = name.toLowerCase();
-        const lcolor = (p.color || '').toString().trim().toLowerCase();
-        const lsize = (p.size || '').toString().trim().toLowerCase();
-        let match: any = null;
-        // 1) try exact name+color+size match
-        if (name) {
-          match = existingProducts.find((ep:any) => {
-            if (!ep.name) return false;
-            const en = ep.name.toString().trim().toLowerCase();
-            const ec = (ep.color || '').toString().trim().toLowerCase();
-            const es = (ep.size || '').toString().trim().toLowerCase();
-            return en === lname && (lcolor === '' || ec === lcolor) && (lsize === '' || es === lsize);
-          }) || null;
-        }
-        // 2) try exact name-only match
-        if (!match && name) {
-          match = existingProducts.find((ep:any) => ep.name && ep.name.toString().trim().toLowerCase() === lname) || null;
-        }
-        // 3) fuzzy contains match
-        if (!match && name) {
-          match = existingProducts.find((ep:any) => (ep.name||'').toLowerCase().includes(lname) || lname.includes((ep.name||'').toLowerCase())) || null;
-        }
-
-        const productId = match ? match.id : null;
-        const missingProduct = !productId;
-        const missingSize = match && p.size && match.size && p.size.toString() !== match.size.toString() ? true : false;
-        const missingColor = match && p.color && match.color && p.color.toString() !== match.color.toString() ? true : false;
-
-        // If the script provided a price, ALWAYS keep it.
-        // Only auto-fill from product when no price was in the script (resolvedPrice === 0).
-        const salePriceSource = 'product'; // setting removed — always behave as 'product' with script-price priority
+    if (!parsedOrders || parsedOrders.length === 0 || !existingProducts || existingProducts.length === 0) return;
+    const validated = parsedOrders.map((o: any) => {
+      const products = (o.products || []).map((p: any) => {
+        const validation = matchProductAndVariant(p.name, p.color, p.size, existingProducts);
         let resolvedPrice = Number(p.price) || 0;
-        // Only auto-fill from product when no price was in the script (resolvedPrice === 0)
-        if (match && resolvedPrice === 0) {
-          const preferredKeys = ['sale_price','salePrice','sellingPrice','selling_price','price','cost','retail_price','retailPrice','default_price','amount','value'];
-          let candidatePrice: any = 0;
-          for (const k of preferredKeys) {
-            if (match[k] !== undefined && match[k] !== null) {
-              const num = Number(String(match[k]).replace(/,/g, ''));
-              if (!isNaN(num) && num > 0) { candidatePrice = num; break; }
-            }
-          }
-          if (candidatePrice === 0 && typeof match === 'object') {
-            for (const k of Object.keys(match)) {
-              try {
-                const v = match[k];
-                const num = Number(String(v).replace(/,/g, ''));
-                if (!isNaN(num) && num > 0) { candidatePrice = num; break; }
-              } catch (e) {}
-            }
-          }
-          resolvedPrice = Number(candidatePrice) || 0;
+        if (validation.matchedVariant && resolvedPrice === 0) {
+          resolvedPrice = Number(validation.matchedVariant.sale_price || validation.matchedVariant.price || 0);
         }
-
-        // Price is never 'missing' since we removed the 'order' source requirement
-        const missingPrice = false;
-
-        return { ...p, productId, missingProduct, missingSize, missingColor, missingPrice, price: resolvedPrice };
+        const finalColor = p.color || validation.autoColor || '';
+        const finalSize = p.size || validation.autoSize || '';
+        return {
+          ...p,
+          color: finalColor,
+          size: finalSize,
+          productId: validation.productId,
+          missingProduct: validation.missingProduct,
+          missingProductMsg: validation.missingProductMsg,
+          missingColor: validation.missingColor,
+          missingColorMsg: validation.missingColorMsg,
+          missingSize: validation.missingSize,
+          missingSizeMsg: validation.missingSizeMsg,
+          availableColors: validation.availableColors,
+          availableSizes: validation.availableSizes,
+          price: resolvedPrice
+        };
       });
       // compute totals based on resolved product lines
-      const computedTotal = products.reduce((s:any, p:any) => s + (Number(p.price || 0) * Number(p.quantity || p.qty || 0)), 0);
+      const computedTotal = products.reduce((s: any, p: any) => s + (Number(p.price || 0) * Number(p.quantity || p.qty || 0)), 0);
       const parsedSubtotal = Number(o.price || o.subTotal || 0) || 0;
-      const parsedTotal = Number(o.total || 0) || 0; // the 'اجمالي' field from script
+      const parsedTotal = Number(o.total || 0) || 0;
       const parsedShipping = Number(o.shipping || 0) || 0;
-      // requiredTotal: prefer provided 'total' if present, otherwise subtotal + shipping
       const requiredTotal = parsedTotal > 0 ? parsedTotal : (parsedSubtotal + parsedShipping);
       const totalsMismatch = Math.abs(computedTotal - parsedSubtotal) > 0.01 || Math.abs(requiredTotal - (parsedSubtotal + parsedShipping)) > 0.01;
-      return { ...o, products, computedTotal, parsedSubtotal, parsedShipping, parsedTotal: parsedTotal, requiredTotal, totalsMismatch };
+      return { ...o, products, computedTotal, parsedSubtotal, parsedShipping, parsedTotal, requiredTotal, totalsMismatch };
     });
 
-    // Only update state if the validated result actually differs to avoid re-render loops
     setParsedOrders(prev => {
       try {
         const prevStr = JSON.stringify(prev || []);
         const validatedStr = JSON.stringify(validated || []);
         if (prevStr === validatedStr) return prev;
-      } catch (e) {
-        // If serialization fails for any reason, fall back to replacing
-      }
+      } catch (e) {}
       return validated;
     });
-  }, [existingProducts, parsedOrders]);
+  }, [existingProducts]);
 
   const handleConfirmImport = async () => {
     if (salesDisplayMethod === 'sales_offices' && !isSalesOfficeScopeNone && !selectedSalesOfficeId) {
@@ -1165,6 +1399,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
         id: pOrder.id,
         orderNumber: pOrder.orderNumber,
         customerName: pOrder.name,
+        allowSaveAsIs: !!pOrder.allowSaveAsIs,
         phone: normalizeNumbers(pOrder.phone1 || pOrder.phone || ''),
         phone2: normalizeNumbers(pOrder.phone2 || ''),
         governorate: normalizeNumbers(pOrder.governorate || ''),
@@ -1189,9 +1424,8 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       };
     });
 
-    // Block import entirely if any order contains unmatched products or missing prices
     if (newOrders.length > 0) {
-      // Check totals consistency: parsed total vs computed from lines
+      // 1. Check totals consistency: parsed total vs computed from lines
       const mismatchedTotals: any[] = [];
       for (const o of newOrders) {
         const computed = (o.importedProducts || []).reduce((s:any, p:any) => s + (Number(p.quantity || 0) * Number(p.price || 0)), 0);
@@ -1216,16 +1450,58 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
         if (!proceed.isConfirmed) return;
       }
 
-      const problematic = newOrders.filter((o:any) => (o.importedProducts || []).some((p:any) => !!p.missingProduct || !!p.missingPrice));
-      if (problematic.length > 0) {
-        const list = problematic.map((o:any) => (o.customerName || o.orderNumber || o.id)).slice(0, 10).join(', ');
+      // 2. Block import only if an order contains products whose name is completely missing from DB
+      const missingProductsList: { orderName: string; missingNames: string[] }[] = [];
+      for (const o of newOrders) {
+        const unmapped = (o.importedProducts || []).filter((p: any) => p.missingProduct);
+        if (unmapped.length > 0) {
+          missingProductsList.push({
+            orderName: o.customerName || o.orderNumber || String(o.id),
+            missingNames: unmapped.map((p: any) => p.name || 'بدون اسم')
+          });
+        }
+      }
+
+      if (missingProductsList.length > 0) {
+        const detailsHtml = missingProductsList.slice(0, 8).map(m => 
+          `<li style="margin-bottom: 4px;"><b>${m.orderName}:</b> منتجات غير مسجلة (<span style="color: #e11d48; font-weight: bold;">${m.missingNames.join('، ')}</span>)</li>`
+        ).join('');
         await Swal.fire({
-          title: 'خطأ: تم العثور على اوردرات غير صالحة',
-            html: `تم العثور على ${problematic.length} اوردرات تحتوي على منتجات غير متطابقة أو بدون سعر: <b>${list}</b>.<br>لم يُحفظ أي شيء. عدّل الاوردرات ثم حاول مرة أخرى.`,
+          title: 'خطأ: منتجات غير مسجلة بالنظام',
+          html: `تم العثور على ${missingProductsList.length} اوردرات تحتوي على منتجات غير موجودة في قاعدة البيانات:<br><ul style="text-align: right; margin-top: 10px; font-size: 13px;">${detailsHtml}</ul><br>يرجى تصحيح اسم المنتج أو إضافته للمنتجات قبل الحفظ.`,
           icon: 'error',
-          confirmButtonText: 'حسناً'
+          confirmButtonText: 'حسناً، سأراجعها'
         });
         return;
+      }
+
+      // 3. Informative check for unregistered colors or sizes
+      const ordersWithUnregisteredVariants = newOrders.filter((o: any) => 
+        !o.allowSaveAsIs && (o.importedProducts || []).some((p: any) => p.missingColor || p.missingSize)
+      );
+
+      if (ordersWithUnregisteredVariants.length > 0) {
+        const samples = ordersWithUnregisteredVariants.slice(0, 6).map((o: any) => {
+          const issues = (o.importedProducts || []).filter((p: any) => p.missingColor || p.missingSize).map((p: any) => {
+            const parts = [];
+            if (p.missingColor) parts.push(`اللون "${p.color}" غير مسجل`);
+            if (p.missingSize) parts.push(`المقاس "${p.size}" غير مسجل`);
+            return `${p.name} (${parts.join(' - ')})`;
+          });
+          return `<li style="margin-bottom: 4px;"><b>${o.customerName || o.orderNumber}:</b> ${issues.join(' | ')}</li>`;
+        }).join('');
+
+        const proceed = await Swal.fire({
+          title: 'تنبيه: ألوان أو مقاسات غير مسجلة',
+          html: `يوجد ${ordersWithUnregisteredVariants.length} اوردرات تحتوي على مقاس أو لون غير مسجل في بطاقة المنتج:<br><ul style="text-align: right; margin-top: 10px; font-size: 13px; color: #b45309;">${samples}</ul><br><b>هل تريد المتابعة واستيراد الاوردرات كما هي؟</b><br><span style="font-size: 12px; color: #64748b;">(أو اختر "إلغاء للمراجعة" لتعديلها بنقرة واحدة من الخيارات المتاحة في بطاقة كل اوردر)</span>`,
+          icon: 'warning',
+          showCancelButton: true,
+          confirmButtonText: 'نعم، استمر واحفظ كما هي',
+          cancelButtonText: 'إلغاء للمراجعة',
+          confirmButtonColor: '#10b981',
+          cancelButtonColor: '#64748b'
+        });
+        if (!proceed.isConfirmed) return;
       }
     }
 
@@ -1257,7 +1533,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
   };
 
   const addProductToParsedOrder = (orderId: number) => {
-    setParsedOrders(prev => prev.map(po => po.id === orderId ? { ...po, products: [...(po.products||[]), { name: '', quantity: 1, color: '', size: '', price: '0', productId: null, missingProduct: true }] } : po));
+    setParsedOrders(prev => prev.map(po => po.id === orderId ? { ...po, products: [...(po.products||[]), { name: '', quantity: 1, color: '', size: '', price: '0', productId: null, missingProduct: true, missingColor: false, missingSize: false, availableColors: [], availableSizes: [] }] } : po));
   };
 
   const removeProductFromParsedOrder = (orderId: number, index: number) => {
@@ -1468,44 +1744,46 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
   const updateParsedProductField = (orderId: number, index: number, field: string, value: any) => {
     setParsedOrders(prev => prev.map(po => {
       if (po.id !== orderId) return po;
-      const products = (po.products || []).map((pp:any, idx:number) => {
+      const products = (po.products || []).map((pp: any, idx: number) => {
         if (idx !== index) return pp;
         const updated = { ...pp, [field]: value };
-        // Normalize values
         const name = (updated.name || '').toString().trim();
         const size = (updated.size || '').toString().trim();
         const color = (updated.color || '').toString().trim();
 
-        // If user selected a productId explicitly, honor it
-        let productId = updated.productId || null;
-        let match: any = null;
-        if (productId) {
-          match = existingProducts.find((ep:any) => Number(ep.id) === Number(productId)) || null;
-        } else if (name) {
-          match = existingProducts.find((ep:any) => ep.name && ep.name.toLowerCase() === name.toLowerCase()) || null;
-          if (!match) {
-            match = existingProducts.find((ep:any) => (ep.name||'').toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes((ep.name||'').toLowerCase())) || null;
-          }
+        const validation = matchProductAndVariant(name, color, size, existingProducts);
+        let outPrice = updated.price;
+        if (validation.matchedVariant && (Number(outPrice) === 0 || !outPrice)) {
+          outPrice = Number(validation.matchedVariant.sale_price || validation.matchedVariant.price || 0);
         }
 
-        productId = match ? match.id : null;
-        const missingProduct = !productId;
-        const missingSize = !!(match && size && match.size && size.toString() !== match.size.toString());
-        const missingColor = !!(match && color && match.color && color.toString() !== match.color.toString());
+        const finalColor = color || validation.autoColor || '';
+        const finalSize = size || validation.autoSize || '';
 
-        // If we found a match, populate name/price/color/size from the matched product
-        let outName = (updated.name || '').toString();
-        let outPrice: any = updated.price;
-        let outColor = (updated.color || '').toString();
-        let outSize = (updated.size || '').toString();
-        if (match) {
-          if (match.name) outName = match.name;
-          // ✅ Price from script is always preserved; product data is not used for pricing
-        }
-
-        return { ...updated, productId, missingProduct, missingSize, missingColor, name: outName, price: outPrice, color: outColor, size: outSize };
+        return {
+          ...updated,
+          productId: validation.productId,
+          missingProduct: validation.missingProduct,
+          missingProductMsg: validation.missingProductMsg,
+          missingColor: validation.missingColor,
+          missingColorMsg: validation.missingColorMsg,
+          missingSize: validation.missingSize,
+          missingSizeMsg: validation.missingSizeMsg,
+          availableColors: validation.availableColors,
+          availableSizes: validation.availableSizes,
+          name: name,
+          price: outPrice,
+          color: finalColor,
+          size: finalSize
+        };
       });
-      return { ...po, products };
+      const computedTotal = products.reduce((s: any, p: any) => s + (Number(p.price || 0) * Number(p.quantity || p.qty || 0)), 0);
+      const parsedSubtotal = Number(po.parsedSubtotal || po.price || 0) || 0;
+      const parsedShipping = Number(po.parsedShipping || po.shipping || 0) || 0;
+      const parsedTotal = Number(po.parsedTotal || po.total || 0) || 0;
+      const requiredTotal = parsedTotal > 0 ? parsedTotal : (parsedSubtotal + parsedShipping);
+      const totalsMismatch = Math.abs(computedTotal - parsedSubtotal) > 0.01 || Math.abs(requiredTotal - (parsedSubtotal + parsedShipping)) > 0.01;
+      return { ...po, products, computedTotal, totalsMismatch };
     }));
   };
 
@@ -2873,19 +3151,119 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       </button>
     </div>
 
+    {/* Dedicated Summary Panel for Issues Found in Script / Orders */}
+    {(() => {
+      const issueList: {
+        orderId: any;
+        orderIndex: number;
+        orderName: string;
+        orderNumber?: string;
+        rawBlock?: string;
+        issues: { text: string; type: 'product' | 'color' | 'size' | 'total' }[];
+      }[] = [];
+
+      parsedOrders.forEach((o, oIdx) => {
+        const issues: { text: string; type: 'product' | 'color' | 'size' | 'total' }[] = [];
+        (o.products || []).forEach((p: any) => {
+          if (p.missingProduct) {
+            issues.push({
+              text: `المنتج "${p.name || 'بدون اسم'}" غير مسجل بقاعدة البيانات`,
+              type: 'product'
+            });
+          } else {
+            if (p.missingColor) {
+              const avail = p.availableColors && p.availableColors.length > 0 ? ` (المسجل: ${p.availableColors.join('، ')})` : '';
+              issues.push({
+                text: `${p.name}: اللون "${p.color || 'غير محدد'}" غير مسجل${avail}`,
+                type: 'color'
+              });
+            }
+            if (p.missingSize) {
+              const avail = p.availableSizes && p.availableSizes.length > 0 ? ` (المسجل: ${p.availableSizes.join('، ')})` : '';
+              issues.push({
+                text: `${p.name}: المقاس "${p.size || 'غير محدد'}" غير مسجل${avail}`,
+                type: 'size'
+              });
+            }
+          }
+        });
+        if (o.totalsMismatch) {
+          issues.push({
+            text: `إجمالي الأسطر (${Number(o.computedTotal || 0).toFixed(2)}) لا يتطابق مع الإجمالي المطلوب (${Number(o.parsedTotal || 0).toFixed(2)})`,
+            type: 'total'
+          });
+        }
+        if (issues.length > 0) {
+          issueList.push({
+            orderId: o.id,
+            orderIndex: oIdx + 1,
+            orderName: o.name || `أوردر ${oIdx + 1}`,
+            orderNumber: o.orderNumber,
+            rawBlock: o.rawBlock,
+            issues
+          });
+        }
+      });
+
+      if (issueList.length === 0) return null;
+
+      return (
+        <div className="bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950/40 dark:to-orange-950/20 border-2 border-amber-300 dark:border-amber-800 rounded-2xl p-4 text-xs space-y-3 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-200 dark:border-amber-800/80 pb-2">
+            <div className="flex items-center gap-2 font-bold text-amber-900 dark:text-amber-200 text-sm">
+              <AlertTriangle className="text-amber-600 dark:text-amber-400 shrink-0" size={18} />
+              <span>تقرير المشاكل والملاحظات المكتشفة في نص الأوردرات ({issueList.length} أوردر بحاجة لمراجعة أو اختيار):</span>
+            </div>
+            <span className="text-xs text-amber-800 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/50 px-2.5 py-1 rounded-lg font-bold">
+              💡 يمكنك اختيار اللون أو المقاس الصحيح مباشرة من القائمة المنسدلة في كارت الأوردر بالأسفل
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-56 overflow-y-auto pr-1">
+            {issueList.map((item, idx) => (
+              <div key={idx} className="p-3 bg-white dark:bg-slate-800 rounded-xl border border-amber-200 dark:border-amber-800 shadow-sm space-y-1.5">
+                <div className="flex items-center justify-between font-bold text-slate-800 dark:text-slate-100 border-b border-slate-100 dark:border-slate-700 pb-1">
+                  <span>#{item.orderIndex} - {item.orderName}</span>
+                  {item.orderNumber && <span className="text-[11px] font-mono text-slate-400">#{item.orderNumber}</span>}
+                </div>
+                <ul className="space-y-1">
+                  {item.issues.map((iss, iIdx) => (
+                    <li key={iIdx} className="flex items-start gap-1.5 text-[11px]">
+                      <span className={`inline-block w-1.5 h-1.5 rounded-full mt-1 shrink-0 ${iss.type === 'product' ? 'bg-rose-500' : 'bg-amber-500'}`} />
+                      <span className={iss.type === 'product' ? 'text-rose-700 dark:text-rose-300 font-bold' : 'text-amber-800 dark:text-amber-200'}>
+                        {iss.text}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    })()}
+
     {/* Unified Import View Layout */}
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
       {parsedOrders.map((order: any) => {
-        const hasMissing = (order.products || []).some((p: any) => !!p.missingProduct || !!p.missingPrice);
+        const hasMissing = (order.products || []).some((p: any) => !!p.missingProduct);
+        const hasMissingVariant = (order.products || []).some((p: any) => !p.missingProduct && (p.missingSize || p.missingColor));
         const hasTotalsMismatch = !!order.totalsMismatch;
         const containerClass = hasMissing 
-          ? 'bg-rose-50 dark:bg-rose-950/30 border border-rose-300 dark:border-rose-900' 
-          : (hasTotalsMismatch ? 'bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-300 dark:border-yellow-900' : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700');
+          ? 'bg-rose-50/50 dark:bg-rose-950/20 border-2 border-rose-300 dark:border-rose-800' 
+          : (hasMissingVariant 
+              ? 'bg-amber-50/40 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-800'
+              : (hasTotalsMismatch ? 'bg-yellow-50/40 dark:bg-yellow-950/20 border border-yellow-300 dark:border-yellow-800' : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700'));
 
         return (
           <div key={order.id} className={`p-4 rounded-2xl text-xs shadow-sm ${containerClass}`}>
             <div className="flex justify-between items-start mb-2 border-b border-slate-200 dark:border-slate-700 pb-2">
-              <span className="font-bold text-sm text-slate-800 dark:text-slate-100">{order.name}</span>
+              <div>
+                <span className="font-bold text-sm text-slate-800 dark:text-slate-100">{order.name}</span>
+                {order.orderNumber && (
+                  <span className="mr-2 text-[11px] font-mono text-slate-400">#{order.orderNumber}</span>
+                )}
+              </div>
               <div className="text-sm text-right">
                 <div className="flex flex-col items-end gap-1">
                   <div className="text-xs text-slate-500 dark:text-slate-400">اجمالى الطلبيه</div>
@@ -2904,39 +3282,77 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
               </div>
             </div>
 
-            <div className="space-y-1 text-slate-500 dark:text-slate-400">
+            <div className="space-y-1 text-slate-500 dark:text-slate-400 mb-2">
               <p className="truncate">{order.governorate} - {order.address}</p>
               <p className="font-mono">{order.phone1}{order.phone2 && String(order.phone2).trim() !== '' ? ` - ${order.phone2}` : ''}</p>
             </div>
 
             {hasMissing && (
-              <div className="mt-2 mb-2 p-2 bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 rounded text-sm">
-                تحتوي هذه الاوردر على منتجات غير متطابقة. يمكنك اختيار المنتج المقابل لكل سطر، أو استخدام الأزرار أدناه.
-                <div className="mt-2 flex gap-2">
-                  <button onClick={() => editParsedOrder(order)} className="bg-yellow-500 text-white px-3 py-1 rounded text-xs">تعديل الاوردر</button>
-                  <button onClick={() => removeParsedOrder(order.id)} className="bg-rose-600 text-white px-3 py-1 rounded text-xs">حذف الاوردر</button>
-                  <button onClick={() => recalcParsedOrder(order.id)} className="bg-emerald-600 text-white px-3 py-1 rounded text-xs">حساب قيمه الطلبيه</button>
+              <div className="mt-2 mb-2 p-3 bg-rose-100/80 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 text-rose-900 dark:text-rose-200 rounded-xl text-xs space-y-1.5">
+                <div className="font-bold flex items-center gap-1.5 text-sm">
+                  <AlertCircle size={15} className="text-rose-600 dark:text-rose-400 shrink-0" />
+                  <span>تنبيه: منتج غير مسجل في قاعدة البيانات:</span>
+                </div>
+                <ul className="list-disc list-inside space-y-1">
+                  {(order.products || []).filter((p: any) => p.missingProduct).map((p: any, idx: number) => (
+                    <li key={idx}>المنتج <span className="font-bold underline">"{p.name || 'بدون اسم'}"</span> غير مسجل</li>
+                  ))}
+                </ul>
+                <div className="mt-2 flex gap-2 pt-1">
+                  <button onClick={() => editParsedOrder(order)} className="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1 rounded-lg text-xs font-bold transition-colors">تعديل الاوردر</button>
+                  <button onClick={() => removeParsedOrder(order.id)} className="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1 rounded-lg text-xs font-bold transition-colors">حذف الاوردر</button>
                 </div>
               </div>
             )}
 
-            {((order.products || []).some((p: any) => p.missingSize || p.missingColor) && !hasMissing) && (
-              <div className="mt-2 mb-2 p-2 bg-yellow-100 dark:bg-yellow-950/60 text-yellow-800 dark:text-yellow-300 rounded text-sm">
-                تحتوي بعض الأسطر على مقاس أو لون غير مسجل. النظام لن يغيّر القيم تلقائياً. يمكنك تعديل الأسطر يدوياً أو حفظ الاوردر كما هو.
-                <div className="mt-2 flex gap-2">
-                  <button onClick={() => editParsedOrder(order)} className="bg-yellow-500 text-white px-3 py-1 rounded text-xs">تعديل الاوردر</button>
-                  <button onClick={() => allowSaveParsedOrderAsIs(order.id)} className="bg-emerald-600 text-white px-3 py-1 rounded text-xs">حفظ كما هي</button>
+            {hasMissingVariant && (
+              <div className="mt-2 mb-2 p-3 bg-amber-100/80 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 rounded-xl text-xs space-y-1.5">
+                <div className="font-bold flex items-center gap-1.5 text-sm">
+                  <AlertTriangle size={15} className="text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span>تنبيه: لون أو مقاس غير مسجل في بطاقة المنتج:</span>
+                </div>
+                <ul className="list-disc list-inside space-y-1">
+                  {(order.products || []).map((p: any, idx: number) => {
+                    if (!p.missingColor && !p.missingSize) return null;
+                    return (
+                      <li key={idx}>
+                        <span className="font-bold">{p.name}:</span>{' '}
+                        {p.missingColor && (
+                          <span>
+                            اللون <b className="text-rose-600 dark:text-rose-400">"{p.color}"</b> غير متوفر{' '}
+                            {p.availableColors && p.availableColors.length > 0 ? `(المتاح: ${p.availableColors.join('، ')})` : ''}
+                          </span>
+                        )}
+                        {p.missingColor && p.missingSize && ' — '}
+                        {p.missingSize && (
+                          <span>
+                            المقاس <b className="text-rose-600 dark:text-rose-400">"{p.size}"</b> غير متوفر{' '}
+                            {p.availableSizes && p.availableSizes.length > 0 ? `(المتاح: ${p.availableSizes.join('، ')})` : ''}
+                          </span>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+                <div className="mt-2 flex items-center gap-2 pt-1">
+                  <button
+                    onClick={() => allowSaveParsedOrderAsIs(order.id)}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${order.allowSaveAsIs ? 'bg-emerald-700 text-white shadow-sm' : 'bg-emerald-600 hover:bg-emerald-700 text-white'}`}
+                  >
+                    {order.allowSaveAsIs ? '✓ تم اعتماد الحفظ كما هي' : 'حفظ كما هي واستيراد'}
+                  </button>
+                  <button onClick={() => editParsedOrder(order)} className="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1 rounded-lg text-xs font-bold transition-colors">تعديل الاوردر</button>
                 </div>
               </div>
             )}
 
             {hasTotalsMismatch && (
-              <div className="mt-2 mb-2 p-2 bg-yellow-100 dark:bg-yellow-950/60 text-yellow-800 dark:text-yellow-300 rounded text-sm">
-                إجمالي الأسطر ({Number(order.computedTotal || 0).toFixed(2)} ج.م) لا يتطابق مع الإجمالي المُدخل ({Number(order.parsedTotal || 0).toFixed(2)} ج.م). راجع الأسعار أو اضغط تعديل الاوردر.
+              <div className="mt-2 mb-2 p-2.5 bg-yellow-100 dark:bg-yellow-950/60 border border-yellow-300 dark:border-yellow-800 text-yellow-800 dark:text-yellow-300 rounded-xl text-xs">
+                إجمالي الأسطر ({Number(order.computedTotal || 0).toFixed(2)} ج.م) لا يتطابق مع الإجمالي المُدخل ({Number(order.parsedTotal || 0).toFixed(2)} ج.م).
                 <div className="mt-2 flex gap-2">
-                  <button onClick={() => editParsedOrder(order)} className="bg-yellow-500 text-white px-3 py-1 rounded text-xs">تعديل الاوردر</button>
-                  <button onClick={() => removeParsedOrder(order.id)} className="bg-rose-600 text-white px-3 py-1 rounded text-xs">حذف الاوردر</button>
-                  <button onClick={() => recalcParsedOrder(order.id)} className="bg-emerald-600 text-white px-3 py-1 rounded text-xs">حساب قيمه الطلبيه</button>
+                  <button onClick={() => recalcParsedOrder(order.id)} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1 rounded-lg text-xs font-bold">حساب قيمة الطلبية</button>
+                  <button onClick={() => editParsedOrder(order)} className="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded-lg text-xs font-bold">تعديل الاوردر</button>
+                  <button onClick={() => removeParsedOrder(order.id)} className="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1 rounded-lg text-xs font-bold">حذف الاوردر</button>
                 </div>
               </div>
             )}
@@ -2945,36 +3361,190 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
               <div className="flex items-center justify-between mb-2">
                 <div className="text-sm font-bold text-slate-800 dark:text-slate-200">المنتجات</div>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => addProductToParsedOrder(order.id)} className="bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50 px-3 py-1 rounded-xl text-xs font-bold transition-colors">أضف منتج</button>
+                  <button onClick={() => addProductToParsedOrder(order.id)} className="bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50 px-3 py-1 rounded-xl text-xs font-bold transition-colors">+ أضف منتج</button>
                 </div>
               </div>
               
               {(order.products || []).map((p: any, i: number) => {
-                const matchedProduct = p.productId ? existingProducts.find((ep: any) => Number(ep.id) === Number(p.productId)) : null;
-                const sizeCandidates = matchedProduct?.sizes || null; // تبسيط للاختصار
-                const colorCandidates = matchedProduct?.colors || null;
-
                 return (
-                  <div key={i} className="flex justify-between items-center gap-2 mb-2">
-                    <div className="flex-1">
-                      <div className="flex gap-2 items-center">
-                        <input value={p.name} onChange={(e) => updateParsedProductField(order.id, i, 'name', e.target.value)} className="w-2/3 bg-transparent text-sm text-slate-900 dark:text-slate-100 font-bold focus:outline-none" />
-                        <input value={p.size || ''} placeholder="المقاس" onChange={(e) => updateParsedProductField(order.id, i, 'size', e.target.value)} className="w-1/6 bg-transparent text-sm text-center text-slate-700 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none" />
-                        <input value={p.color || ''} placeholder="اللون" onChange={(e) => updateParsedProductField(order.id, i, 'color', e.target.value)} className="w-1/6 bg-transparent text-sm text-center text-slate-700 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none" />
+                  <div key={i} className="p-2.5 rounded-xl border border-slate-200/80 dark:border-slate-700/80 bg-slate-50/60 dark:bg-slate-900/40 mb-2">
+                    <div className="flex justify-between items-start gap-2">
+                      <div className="flex-1">
+                        <div className="flex gap-1.5 items-center">
+                          <input
+                            value={p.name}
+                            placeholder="اسم المنتج"
+                            onChange={(e) => updateParsedProductField(order.id, i, 'name', e.target.value)}
+                            className="w-1/2 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100 font-bold focus:outline-none focus:ring-1 focus:ring-blue-500 rounded px-2 py-1 border border-slate-200 dark:border-slate-700"
+                          />
+                          <input
+                            value={p.size || ''}
+                            placeholder="المقاس"
+                            onChange={(e) => updateParsedProductField(order.id, i, 'size', e.target.value)}
+                            className={`w-1/4 text-xs text-center font-bold placeholder-slate-400 dark:placeholder-slate-500 rounded px-1.5 py-1 border outline-none transition-colors ${p.missingSize ? 'border-amber-400 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:ring-1 focus:ring-blue-500'}`}
+                          />
+                          <input
+                            value={p.color || ''}
+                            placeholder="اللون"
+                            onChange={(e) => updateParsedProductField(order.id, i, 'color', e.target.value)}
+                            className={`w-1/4 text-xs text-center font-bold placeholder-slate-400 dark:placeholder-slate-500 rounded px-1.5 py-1 border outline-none transition-colors ${p.missingColor ? 'border-amber-400 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:ring-1 focus:ring-blue-500'}`}
+                          />
+                        </div>
+
+                        {/* Dropdown selectors for registered colors/sizes when missing */}
+                        {((p.missingColor && p.availableColors && p.availableColors.length > 0) || (p.missingSize && p.availableSizes && p.availableSizes.length > 0)) && (
+                          <div className="mt-2 p-2 rounded-xl bg-amber-500/10 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700/70 space-y-2">
+                            <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-900 dark:text-amber-200">
+                              <AlertTriangle size={13} className="shrink-0 text-amber-600 dark:text-amber-400" />
+                              <span>اختر من القائمة المنسدلة لتصحيح اللون أو المقاس:</span>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {/* Color Dropdown */}
+                              {p.missingColor && p.availableColors && p.availableColors.length > 0 && (
+                                <div className="space-y-1">
+                                  <label className="text-[10px] font-bold text-amber-900 dark:text-amber-300 flex items-center justify-between">
+                                    <span>🎨 ألوان المنتج المسجلة ({p.availableColors.length}):</span>
+                                    {p.color && <span className="text-[9px] text-rose-500">الحالي: "{p.color}"</span>}
+                                  </label>
+                                  <select
+                                    value=""
+                                    onChange={(e) => {
+                                      if (e.target.value) {
+                                        updateParsedProductField(order.id, i, 'color', e.target.value);
+                                      }
+                                    }}
+                                    className="w-full text-xs font-bold rounded-lg border border-amber-300 dark:border-amber-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 px-2 py-1.5 outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer shadow-sm"
+                                  >
+                                    <option value="" disabled>-- اختر اللون المطلوب --</option>
+                                    {p.availableColors.map((c: string, ci: number) => (
+                                      <option key={ci} value={c}>✓ {c}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              )}
+
+                              {/* Size Dropdown */}
+                              {p.missingSize && p.availableSizes && p.availableSizes.length > 0 && (
+                                <div className="space-y-1">
+                                  <label className="text-[10px] font-bold text-purple-900 dark:text-purple-300 flex items-center justify-between">
+                                    <span>📏 مقاسات المنتج المسجلة ({p.availableSizes.length}):</span>
+                                    {p.size && <span className="text-[9px] text-rose-500">الحالي: "{p.size}"</span>}
+                                  </label>
+                                  <select
+                                    value=""
+                                    onChange={(e) => {
+                                      if (e.target.value) {
+                                        updateParsedProductField(order.id, i, 'size', e.target.value);
+                                      }
+                                    }}
+                                    className="w-full text-xs font-bold rounded-lg border border-purple-300 dark:border-purple-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 px-2 py-1.5 outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer shadow-sm"
+                                  >
+                                    <option value="" disabled>-- اختر المقاس المطلوب --</option>
+                                    {p.availableSizes.map((s: string, si: number) => (
+                                      <option key={si} value={s}>✓ {s}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <div className="mt-1 flex items-center gap-2">
-                        {p.missingProduct && <span className="text-[11px] bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 px-2 py-0.5 rounded font-bold">غير موجود</span>}
-                        {p.missingPrice && <span className="text-[11px] bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 px-2 py-0.5 rounded font-bold">سعر مفقود</span>}
+                      <div className="flex flex-col items-end gap-1 w-32 shrink-0">
+                        <div className="flex items-center gap-1 w-full">
+                          <span className="text-[10px] text-slate-400 shrink-0">العدد:</span>
+                          <input
+                            type="number"
+                            min={1}
+                            value={p.quantity}
+                            onChange={(e) => updateParsedProductField(order.id, i, 'quantity', Number(e.target.value))}
+                            className="w-full text-center px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-xs outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                        </div>
+                        <div className="flex items-center gap-1 w-full">
+                          <span className="text-[10px] text-slate-400 shrink-0">السعر:</span>
+                          <input
+                            type="number"
+                            value={p.price}
+                            onChange={(e) => updateParsedProductField(order.id, i, 'price', e.target.value)}
+                            className="w-full text-center px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-xs outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                        </div>
+                        <div className="flex gap-2 mt-0.5">
+                          <button onClick={() => removeProductFromParsedOrder(order.id, i)} className="text-rose-600 dark:text-rose-400 text-xs font-bold hover:underline">حذف</button>
+                          <button onClick={() => saveParsedOrderLine(order.id, i)} className="text-emerald-600 dark:text-emerald-400 text-xs font-bold hover:underline">حساب</button>
+                        </div>
                       </div>
                     </div>
-                    <div className="flex flex-col items-end gap-1 w-40">
-                      <input type="number" value={p.quantity} onChange={(e) => updateParsedProductField(order.id, i, 'quantity', Number(e.target.value))} className="w-full text-right px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-xs outline-none focus:ring-1 focus:ring-blue-500" />
-                      <input type="number" value={p.price} onChange={(e) => updateParsedProductField(order.id, i, 'price', e.target.value)} className="w-full text-right px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-xs outline-none focus:ring-1 focus:ring-blue-500" />
-                      <div className="flex gap-2">
-                        <button onClick={() => removeProductFromParsedOrder(order.id, i)} className="text-rose-600 dark:text-rose-400 text-xs font-bold">حذف</button>
-                        <button onClick={() => saveParsedOrderLine(order.id, i)} className="text-emerald-600 dark:text-emerald-400 text-xs font-bold">حفظ</button>
+
+                    {/* Problem Indicators & 1-Click Fix Chips */}
+                    {(p.missingProduct || p.missingColor || p.missingSize || p.rawLine) && (
+                      <div className="mt-2 pt-1.5 border-t border-dashed border-slate-200 dark:border-slate-700/80 space-y-1.5">
+                        {p.rawLine && (p.missingProduct || p.missingColor || p.missingSize) && (
+                          <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono bg-slate-100 dark:bg-slate-800/80 px-2 py-0.5 rounded truncate" title={p.rawLine}>
+                            السطر في النص: "{p.rawLine}"
+                          </div>
+                        )}
+
+                        {p.missingProduct && (
+                          <div className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400 text-xs font-bold">
+                            <AlertCircle size={13} className="shrink-0" />
+                            <span>❌ المنتج غير مسجل في قاعدة البيانات</span>
+                          </div>
+                        )}
+
+                        {p.missingColor && (
+                          <div className="flex flex-wrap items-center gap-1 text-xs">
+                            <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400 font-bold">
+                              <AlertTriangle size={12} className="shrink-0" />
+                              <span>اللون "{p.color || 'غير محدد'}" غير مسجل</span>
+                            </span>
+                            {p.availableColors && p.availableColors.length > 0 && (
+                              <span className="flex flex-wrap items-center gap-1 text-slate-500 dark:text-slate-400 mr-1">
+                                <span className="text-[11px]">اختيار سريع:</span>
+                                {p.availableColors.map((c: string, ci: number) => (
+                                  <button
+                                    key={ci}
+                                    type="button"
+                                    onClick={() => updateParsedProductField(order.id, i, 'color', c)}
+                                    className="px-2 py-0.5 bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800 rounded-md text-[11px] font-bold transition-all border border-blue-200 dark:border-blue-700 cursor-pointer active:scale-95"
+                                    title={`اختيار اللون ${c}`}
+                                  >
+                                    {c}
+                                  </button>
+                                ))}
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        {p.missingSize && (
+                          <div className="flex flex-wrap items-center gap-1 text-xs">
+                            <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400 font-bold">
+                              <AlertTriangle size={12} className="shrink-0" />
+                              <span>المقاس "{p.size || 'غير محدد'}" غير مسجل</span>
+                            </span>
+                            {p.availableSizes && p.availableSizes.length > 0 && (
+                              <span className="flex flex-wrap items-center gap-1 text-slate-500 dark:text-slate-400 mr-1">
+                                <span className="text-[11px]">اختيار سريع:</span>
+                                {p.availableSizes.map((s: string, si: number) => (
+                                  <button
+                                    key={si}
+                                    type="button"
+                                    onClick={() => updateParsedProductField(order.id, i, 'size', s)}
+                                    className="px-2 py-0.5 bg-purple-50 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-800 rounded-md text-[11px] font-bold transition-all border border-purple-200 dark:border-purple-700 cursor-pointer active:scale-95"
+                                    title={`اختيار المقاس ${s}`}
+                                  >
+                                    {s}
+                                  </button>
+                                ))}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
-                    </div>
+                    )}
                   </div>
                 );
               })}

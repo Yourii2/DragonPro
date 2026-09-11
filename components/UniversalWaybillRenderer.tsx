@@ -10,8 +10,8 @@
  * Perfectly fitted for Quarter-A4 (1/4 ورقة A4 - 4 بوالص في كل ورقة A4).
  */
 import React from 'react';
-import { 
-  Printer, Grid, List, Search, Filter, 
+import {
+  Printer, Grid, List, Search, Filter,
   MapPin, Phone, User, Package, Box, StickyNote, Building2, Calendar, FileText, CheckSquare, ShieldCheck
 } from 'lucide-react';
 import QRCode from 'react-qr-code';
@@ -67,7 +67,7 @@ export const getOrderData = (order: any) => {
       const name = p.name || p.product_name || p.title || 'منتج';
       let size = p.size || p.variant_size || p.item_size || p.size_name || '';
       let color = p.color || p.variant_color || p.item_color || p.color_name || '';
-      
+
       const variantStr = p.variant || p.variant_name || p.variation || '';
       if (variantStr && typeof variantStr === 'string') {
         const parts = variantStr.split(/[-–—/|,]/).map((s: string) => s.trim()).filter(Boolean);
@@ -255,7 +255,7 @@ export const getCustomWaybillTemplates = (): CustomWaybillTemplate[] => {
           updatedAt: parsed.savedAt || new Date().toISOString()
         });
         modified = true;
-      } catch (e) {}
+      } catch (e) { }
     }
 
     const legacyQuick = localStorage.getItem('Dragon_quick_waybill_template');
@@ -271,7 +271,7 @@ export const getCustomWaybillTemplates = (): CustomWaybillTemplate[] => {
           updatedAt: new Date().toISOString()
         });
         modified = true;
-      } catch (e) {}
+      } catch (e) { }
     }
 
     if (modified) {
@@ -347,7 +347,7 @@ export const deleteCustomWaybillTemplate = (id: string | number): void => {
     let list = getCustomWaybillTemplates();
     list = list.filter(t => String(t.id) !== String(id));
     localStorage.setItem('Dragon_custom_waybill_templates', JSON.stringify(list));
-    
+
     // If the deleted template was the active default, revert to template 1
     const currentActive = getSelectedTemplateId();
     if (String(currentActive) === String(id)) {
@@ -415,77 +415,77 @@ export const WaybillProductsTable: React.FC<{
   striped = false,
   altRowBg = 'bg-slate-50/50'
 }) => {
-  const pList = products || [];
-  const pCount = pList.length;
-  // Adaptive scaling based on number of items (e.g. 10 products in 1/4 A4)
-  const isCompact = pCount >= 4 && pCount <= 6;
-  const isUltraCompact = pCount >= 7;
+    const pList = products || [];
+    const pCount = pList.length;
+    // Adaptive scaling based on number of items (e.g. 10 products in 1/4 A4)
+    const isCompact = pCount >= 4 && pCount <= 6;
+    const isUltraCompact = pCount >= 7;
 
-  const headerFontSize = isUltraCompact ? 'text-[8px]' : isCompact ? 'text-[8.5px]' : 'text-[9.5px]';
-  const nameFontSize = isUltraCompact ? 'text-[8px]' : isCompact ? 'text-[9px]' : 'text-[10px]';
-  const cellFontSize = isUltraCompact ? 'text-[7.5px]' : isCompact ? 'text-[8.5px]' : 'text-[9.5px]';
-  const cellPadding = isUltraCompact ? 'py-[1.5px] px-1' : isCompact ? 'py-0.5 px-1' : 'py-1 px-1';
-  const headerPadding = isUltraCompact ? 'py-0.5 px-1' : 'py-1 px-1';
+    const headerFontSize = isUltraCompact ? 'text-[8px]' : isCompact ? 'text-[8.5px]' : 'text-[9.5px]';
+    const nameFontSize = isUltraCompact ? 'text-[8px]' : isCompact ? 'text-[9px]' : 'text-[10px]';
+    const cellFontSize = isUltraCompact ? 'text-[7.5px]' : isCompact ? 'text-[8.5px]' : 'text-[9.5px]';
+    const cellPadding = isUltraCompact ? 'py-[1.5px] px-1' : isCompact ? 'py-0.5 px-1' : 'py-1 px-1';
+    const headerPadding = isUltraCompact ? 'py-0.5 px-1' : 'py-1 px-1';
 
-  return (
-    <div className={`w-full overflow-hidden border ${borderColor} rounded-sm ${isUltraCompact ? 'my-0.5' : 'my-1'} ${className}`}>
-      <table className="w-full text-right border-collapse select-none" style={{ tableLayout: 'fixed' }}>
-        <thead className={`${headerBg} ${headerTextColor} ${headerFontSize} font-black`}>
-          <tr className={`border-b ${borderColor}`}>
-            {showCheckboxes && <th className={`${headerPadding} text-center`} style={{ width: '7%' }}>فحص</th>}
-            <th className={`${headerPadding} text-right`} style={{ width: showCheckboxes ? '33%' : '38%' }}>المنتج</th>
-            <th className={`${headerPadding} text-center`} style={{ width: '11%' }}>المقاس</th>
-            <th className={`${headerPadding} text-center`} style={{ width: '16%' }}>اللون</th>
-            <th className={`${headerPadding} text-center`} style={{ width: '9%' }}>الكمية</th>
-            <th className={`${headerPadding} text-center`} style={{ width: '11%' }}>السعر</th>
-            <th className={`${headerPadding} text-left`} style={{ width: showCheckboxes ? '13%' : '15%' }}>الإجمالي</th>
-          </tr>
-        </thead>
-        <tbody className={`divide-y ${rowBorderColor} bg-white`}>
-          {pList.map((p, i) => (
-            <tr key={i} className={striped && i % 2 === 1 ? altRowBg : 'hover:bg-black/[0.02]'}>
-              {showCheckboxes && (
-                <td className={`${cellPadding} text-center text-gray-400`}>
-                  <span className="inline-block w-3 h-3 border border-gray-400 rounded-xs"></span>
-                </td>
-              )}
-              <td 
-                className={`${cellPadding} ${nameFontSize} font-bold text-right text-gray-900 break-words leading-tight whitespace-normal`} 
-                title={p.name}
-                style={{ wordBreak: 'break-word' }}
-              >
-                {p.name}
-              </td>
-              <td 
-                className={`${cellPadding} ${cellFontSize} text-center font-mono font-medium text-gray-700 break-words leading-tight whitespace-normal`} 
-                title={p.size || '-'}
-                style={{ wordBreak: 'break-word' }}
-              >
-                {p.size || '-'}
-              </td>
-              <td 
-                className={`${cellPadding} ${cellFontSize} text-center text-gray-700 break-words leading-tight whitespace-normal`} 
-                title={p.color || '-'}
-                style={{ wordBreak: 'break-word' }}
-              >
-                {p.color || '-'}
-              </td>
-              <td className={`${cellPadding} ${cellFontSize} text-center font-black font-mono text-gray-900`}>
-                {p.qty}
-              </td>
-              <td className={`${cellPadding} ${cellFontSize} text-center font-mono text-gray-700`}>
-                {p.price}
-              </td>
-              <td className={`${cellPadding} ${cellFontSize} text-left font-mono font-black text-gray-900`}>
-                {p.lineTotal ? p.lineTotal.toLocaleString() : '0'}
-              </td>
+    return (
+      <div className={`w-full overflow-hidden border ${borderColor} rounded-sm ${isUltraCompact ? 'my-0.5' : 'my-1'} ${className}`}>
+        <table className="w-full text-right border-collapse select-none" style={{ tableLayout: 'fixed' }}>
+          <thead className={`${headerBg} ${headerTextColor} ${headerFontSize} font-black`}>
+            <tr className={`border-b ${borderColor}`}>
+              {showCheckboxes && <th className={`${headerPadding} text-center`} style={{ width: '7%' }}>فحص</th>}
+              <th className={`${headerPadding} text-right`} style={{ width: showCheckboxes ? '33%' : '38%' }}>المنتج</th>
+              <th className={`${headerPadding} text-center`} style={{ width: '11%' }}>المقاس</th>
+              <th className={`${headerPadding} text-center`} style={{ width: '16%' }}>اللون</th>
+              <th className={`${headerPadding} text-center`} style={{ width: '9%' }}>الكمية</th>
+              <th className={`${headerPadding} text-center`} style={{ width: '11%' }}>السعر</th>
+              <th className={`${headerPadding} text-left`} style={{ width: showCheckboxes ? '13%' : '15%' }}>الإجمالي</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-};
+          </thead>
+          <tbody className={`divide-y ${rowBorderColor} bg-white`}>
+            {pList.map((p, i) => (
+              <tr key={i} className={striped && i % 2 === 1 ? altRowBg : 'hover:bg-black/[0.02]'}>
+                {showCheckboxes && (
+                  <td className={`${cellPadding} text-center text-gray-400`}>
+                    <span className="inline-block w-3 h-3 border border-gray-400 rounded-xs"></span>
+                  </td>
+                )}
+                <td
+                  className={`${cellPadding} ${nameFontSize} font-bold text-right text-gray-900 break-words leading-tight whitespace-normal`}
+                  title={p.name}
+                  style={{ wordBreak: 'break-word' }}
+                >
+                  {p.name}
+                </td>
+                <td
+                  className={`${cellPadding} ${cellFontSize} text-center font-mono font-medium text-gray-700 break-words leading-tight whitespace-normal`}
+                  title={p.size || '-'}
+                  style={{ wordBreak: 'break-word' }}
+                >
+                  {p.size || '-'}
+                </td>
+                <td
+                  className={`${cellPadding} ${cellFontSize} text-center text-gray-700 break-words leading-tight whitespace-normal`}
+                  title={p.color || '-'}
+                  style={{ wordBreak: 'break-word' }}
+                >
+                  {p.color || '-'}
+                </td>
+                <td className={`${cellPadding} ${cellFontSize} text-center font-black font-mono text-gray-900`}>
+                  {p.qty}
+                </td>
+                <td className={`${cellPadding} ${cellFontSize} text-center font-mono text-gray-700`}>
+                  {p.price}
+                </td>
+                <td className={`${cellPadding} ${cellFontSize} text-left font-mono font-black text-gray-900`}>
+                  {p.lineTotal ? p.lineTotal.toLocaleString() : '0'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // THEMED ENGINE & CONFIGURATION FOR ALL 50 TEMPLATES
@@ -2800,8 +2800,8 @@ export const ThemedWaybillTemplate: React.FC<WaybillProps & { templateId?: numbe
   // Specific custom layout for Template 21 (Suits Boutique)
   if (templateId === 21) {
     return (
-      <div 
-        className={`bg-[#fefdfd] text-[#2c1e23] ${isHighVolume ? 'p-2' : 'p-2.5 sm:p-3'} border-2 border-[#eed8dc] rounded-sm w-full max-w-[395px] mx-auto text-right font-sans box-border flex flex-col justify-between h-full min-h-[480px] overflow-hidden text-xs leading-normal select-none relative`} 
+      <div
+        className={`bg-[#fefdfd] text-[#2c1e23] ${isHighVolume ? 'p-2' : 'p-2.5 sm:p-3'} border-2 border-[#eed8dc] rounded-sm w-full max-w-[395px] mx-auto text-right font-sans box-border flex flex-col justify-between h-full min-h-[480px] overflow-hidden text-xs leading-normal select-none relative`}
         dir="rtl"
       >
         <div>
@@ -2874,7 +2874,7 @@ export const ThemedWaybillTemplate: React.FC<WaybillProps & { templateId?: numbe
           </div>
 
           {/* 6-Column Products Table */}
-          <WaybillProductsTable 
+          <WaybillProductsTable
             products={d.products}
             headerBg="bg-[#914d61]"
             headerTextColor="text-white"
@@ -3180,7 +3180,7 @@ export const UniversalWaybill: React.FC<WaybillProps & { customTemplateData?: an
     if (typeof directData === 'string') {
       try {
         directData = JSON.parse(directData);
-      } catch (e) {}
+      } catch (e) { }
     }
     const unwrapped = directData?.data || directData;
 
@@ -3198,7 +3198,7 @@ export const UniversalWaybill: React.FC<WaybillProps & { customTemplateData?: an
     if (typeof unwrappedMatchData === 'string') {
       try {
         unwrappedMatchData = JSON.parse(unwrappedMatchData);
-      } catch (e) {}
+      } catch (e) { }
     }
 
     if (customMatch.type === 'quick' || unwrappedMatchData?.sections || unwrappedMatchData?.type === 'quick') {
@@ -3287,7 +3287,8 @@ export const UniversalPrintableOrders: React.FC<{
   terms?: string;
   templateId?: number | string;
   users?: any[];
-}> = ({ orders, companyName, companyPhone, companyAddress, companyLogo, terms, templateId, users }) => {
+  customTemplateData?: any;
+}> = ({ orders, companyName, companyPhone, companyAddress, companyLogo, terms, templateId, users, customTemplateData }) => {
   const compName = companyName || (typeof window !== 'undefined' ? localStorage.getItem('Dragon_company_name') : '') || 'اسم الشركة';
   const compPhone = companyPhone || (typeof window !== 'undefined' ? localStorage.getItem('Dragon_company_phone') : '') || '';
   const compAddr = companyAddress || (typeof window !== 'undefined' ? localStorage.getItem('Dragon_company_address') : '') || '';
@@ -3406,6 +3407,7 @@ export const UniversalPrintableOrders: React.FC<{
                     terms={compTerms}
                     templateId={currentTemplate}
                     users={users}
+                    customTemplateData={customTemplateData}
                   />
                 </div>
               );
@@ -3428,7 +3430,7 @@ export const UniversalPrintableOrders: React.FC<{
 const Template51_CustomDragDrop: React.FC<WaybillProps & { customTemplateData?: any }> = (props) => {
   const { order, companyName, companyPhone, terms, companyLogo, customTemplateData } = props;
   const d = getOrderData(order);
-  
+
   let customTemplate: any = customTemplateData;
   if (!customTemplate) {
     try {
@@ -3477,7 +3479,7 @@ const Template51_CustomDragDrop: React.FC<WaybillProps & { customTemplateData?: 
   }
 
   const resolveDynamicText = (dynamicKey?: string) => {
-    switch(dynamicKey) {
+    switch (dynamicKey) {
       case 'companyName': return companyName || d.page || 'اسم الشركة';
       case 'companyPhone': return companyPhone || '01000000000';
       case 'companyTerms': return terms || 'تعتبر هذه البوليصة مستند استلام رسمي. المعاينة حق للعميل.';
@@ -3500,7 +3502,7 @@ const Template51_CustomDragDrop: React.FC<WaybillProps & { customTemplateData?: 
   const renderItemContent = (item: any) => {
     const { type, dynamicKey, content, width, height, src } = item;
     const style = item.style || {};
-    
+
     if (type === 'barcode') {
       return (
         <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
@@ -3513,7 +3515,7 @@ const Template51_CustomDragDrop: React.FC<WaybillProps & { customTemplateData?: 
         </div>
       );
     }
-    
+
     if (type === 'qr') {
       const qrSize = Math.min(parseInt(width as string) || 70, parseInt(height as string) || 70) - 8;
       return (
@@ -3534,7 +3536,7 @@ const Template51_CustomDragDrop: React.FC<WaybillProps & { customTemplateData?: 
         <img src={src} alt="Uploaded" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
       );
     }
-    
+
     if (type === 'table') {
       const fontSize = style.fontSize || 9;
       const bColor = style.borderColor || '#cbd5e1';
@@ -3566,7 +3568,7 @@ const Template51_CustomDragDrop: React.FC<WaybillProps & { customTemplateData?: 
         </table>
       );
     }
-    
+
     if (type === 'rect' || type === 'circle' || type === 'line') {
       return <div style={{ width: '100%', height: '100%' }}></div>;
     }
@@ -3585,6 +3587,21 @@ const Template51_CustomDragDrop: React.FC<WaybillProps & { customTemplateData?: 
       </div>
     );
   };
+
+  // Robust extraction of watermark from any nested shape
+  const rawWatermark = 
+    (customTemplate && typeof customTemplate === 'object' && customTemplate.watermark) ||
+    (customTemplate && typeof customTemplate === 'object' && customTemplate.data && typeof customTemplate.data === 'object' && customTemplate.data.watermark) ||
+    (customTemplateData && typeof customTemplateData === 'object' && customTemplateData.watermark) ||
+    (customTemplateData && typeof customTemplateData === 'object' && customTemplateData.data && typeof customTemplateData.data === 'object' && customTemplateData.data.watermark);
+
+  const watermark = rawWatermark && typeof rawWatermark === 'object' ? rawWatermark : undefined;
+  const isWatermarkEnabled = Boolean(
+    watermark && 
+    (watermark.enabled === true || String(watermark.enabled) === 'true') && 
+    watermark.text && 
+    String(watermark.text).trim().length > 0
+  );
 
   return (
     <div 
@@ -3634,6 +3651,40 @@ const Template51_CustomDragDrop: React.FC<WaybillProps & { customTemplateData?: 
           </div>
         );
       })}
+
+      {/* Watermark Layer (Layered AFTER items with zIndex: 30 so it is never covered by background boxes/rects) */}
+      {isWatermarkEnabled && watermark && (
+        <div 
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            pointerEvents: 'none',
+            userSelect: 'none',
+            overflow: 'hidden',
+            zIndex: 30,
+            mixBlendMode: 'multiply'
+          }}
+        >
+          <span 
+            style={{
+              fontSize: `${Number(watermark.fontSize) || 34}px`,
+              color: watermark.color || '#000000',
+              opacity: watermark.opacity !== undefined ? Number(watermark.opacity) : 0.18,
+              transform: `rotate(${watermark.rotation !== undefined ? Number(watermark.rotation) : -30}deg)`,
+              fontWeight: 'bold',
+              letterSpacing: '3px',
+              whiteSpace: 'nowrap',
+              textAlign: 'center',
+              lineHeight: 1.2
+            }}
+          >
+            {watermark.text}
+          </span>
+        </div>
+      )}
     </div>
   );
 };
@@ -3660,7 +3711,7 @@ const Template52_QuickDesigner: React.FC<WaybillProps & { customTemplateData?: a
   if (typeof quickTemplate === 'string') {
     try {
       quickTemplate = JSON.parse(quickTemplate);
-    } catch (e) {}
+    } catch (e) { }
   }
 
   // Unwrap if nested in data
@@ -3679,6 +3730,20 @@ const Template52_QuickDesigner: React.FC<WaybillProps & { customTemplateData?: a
   if (!quickTemplate || !quickTemplate.style || !quickTemplate.sections) {
     return <Template1_Classic {...props} />;
   }
+
+  const rawWatermark = 
+    (quickTemplate && typeof quickTemplate === 'object' && quickTemplate.watermark) ||
+    (quickTemplate && typeof quickTemplate === 'object' && quickTemplate.data && typeof quickTemplate.data === 'object' && quickTemplate.data.watermark) ||
+    (customTemplateData && typeof customTemplateData === 'object' && customTemplateData.watermark) ||
+    (customTemplateData && typeof customTemplateData === 'object' && customTemplateData.data && typeof customTemplateData.data === 'object' && customTemplateData.data.watermark);
+
+  const quickWatermark = rawWatermark && typeof rawWatermark === 'object' ? rawWatermark : undefined;
+  const isQuickWatermarkEnabled = Boolean(
+    quickWatermark && 
+    (quickWatermark.enabled === true || String(quickWatermark.enabled) === 'true') && 
+    quickWatermark.text && 
+    String(quickWatermark.text).trim().length > 0
+  );
 
   const { style, sections } = quickTemplate;
   const sortedSections = [...sections].sort((a: any, b: any) => a.order - b.order);
@@ -3709,15 +3774,15 @@ const Template52_QuickDesigner: React.FC<WaybillProps & { customTemplateData?: a
     style.govBadgeStyle === 'filled'
       ? { backgroundColor: style.primaryColor || '#2563eb', color: '#ffffff', padding: '2px 8px' }
       : style.govBadgeStyle === 'outlined'
-      ? { border: `2px solid ${style.primaryColor || '#2563eb'}`, color: style.primaryColor || '#2563eb', padding: '2px 8px' }
-      : { backgroundColor: style.accentColor || '#7c3aed', color: '#ffffff', padding: '2px 10px', borderRadius: '999px' };
+        ? { border: `2px solid ${style.primaryColor || '#2563eb'}`, color: style.primaryColor || '#2563eb', padding: '2px 8px' }
+        : { backgroundColor: style.accentColor || '#7c3aed', color: '#ffffff', padding: '2px 10px', borderRadius: '999px' };
 
   const totalBoxStyle: React.CSSProperties =
     style.totalStyle === 'highlighted'
       ? { backgroundColor: style.primaryColor || '#2563eb', color: '#ffffff', padding: '8px 12px', borderRadius: '6px' }
       : style.totalStyle === 'boxed'
-      ? { border: `2px solid ${style.primaryColor || '#2563eb'}`, padding: '8px 12px', borderRadius: '4px' }
-      : { borderTop: `2px solid ${style.primaryColor || '#2563eb'}`, paddingTop: '6px' };
+        ? { border: `2px solid ${style.primaryColor || '#2563eb'}`, padding: '8px 12px', borderRadius: '4px' }
+        : { borderTop: `2px solid ${style.primaryColor || '#2563eb'}`, paddingTop: '6px' };
 
   return (
     <div className="waybill-container select-none text-right flex flex-col gap-2 mx-auto shadow-xs border" style={containerStyle} dir="rtl">
@@ -3817,6 +3882,40 @@ const Template52_QuickDesigner: React.FC<WaybillProps & { customTemplateData?: a
 
         return null;
       })}
+
+      {/* Watermark Layer */}
+      {isQuickWatermarkEnabled && quickWatermark && (
+        <div 
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            pointerEvents: 'none',
+            userSelect: 'none',
+            overflow: 'hidden',
+            zIndex: 30,
+            mixBlendMode: 'multiply'
+          }}
+        >
+          <span 
+            style={{
+              fontSize: `${Number(quickWatermark.fontSize) || 34}px`,
+              color: quickWatermark.color || '#000000',
+              opacity: quickWatermark.opacity !== undefined ? Number(quickWatermark.opacity) : 0.18,
+              transform: `rotate(${quickWatermark.rotation !== undefined ? Number(quickWatermark.rotation) : -30}deg)`,
+              fontWeight: 'bold',
+              letterSpacing: '3px',
+              whiteSpace: 'nowrap',
+              textAlign: 'center',
+              lineHeight: 1.2
+            }}
+          >
+            {quickWatermark.text}
+          </span>
+        </div>
+      )}
     </div>
   );
 };

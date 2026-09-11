@@ -22,6 +22,7 @@ release_stage/
 uploads/
 logs/
 backups/
+scratch/
 
 # Local env/secrets
 .env

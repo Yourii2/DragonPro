@@ -7,18 +7,30 @@ import {
   Palette, Type, Layout, Save, Trash2, Copy, AlignLeft, AlignCenter, AlignRight,
   Bold, Italic, Square, Circle, Minus, Barcode as BarcodeIcon, Undo2, Redo2,
   ArrowUpToLine, ArrowDownToLine, Lock, Unlock, MousePointer2, Image as ImageIcon,
-  Download, QrCode, AlignVerticalSpaceAround, AlignHorizontalSpaceAround, ArrowRight
+  Download, QrCode, AlignVerticalSpaceAround, AlignHorizontalSpaceAround, ArrowRight,
+  Droplets, Eye, Printer, X
 } from 'lucide-react';
 import Barcode from './Barcode';
 import { 
   getOrderData, 
   saveCustomWaybillTemplate, 
   convertTemplateToCanvasItems, 
-  CustomWaybillTemplate 
+  CustomWaybillTemplate,
+  UniversalWaybill,
+  UniversalPrintableOrders
 } from './UniversalWaybillRenderer';
 import { assetUrl } from '../services/assetUrl';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
+
+export interface WatermarkSettings {
+  enabled: boolean;
+  text: string;
+  fontSize: number;
+  color: string;
+  opacity: number;
+  rotation: number;
+}
 
 export type CanvasItemType = 'text' | 'barcode' | 'qr' | 'logo' | 'image' | 'table' | 'rect' | 'circle' | 'line' | 'dynamic';
 
@@ -145,6 +157,32 @@ const WaybillBuilderAdvanced: React.FC<WaybillBuilderAdvancedProps> = ({
     return 'قالب مخصص متقدم';
   });
 
+  const [watermark, setWatermark] = useState<WatermarkSettings>(() => {
+    if (initialPayload?.initialData?.watermark) return initialPayload.initialData.watermark;
+    if (initialPayload?.customTemplate?.data?.watermark) return initialPayload.customTemplate.data.watermark;
+    if ((initialPayload?.customTemplate as any)?.watermark) return (initialPayload.customTemplate as any).watermark;
+    if ((initialPayload?.initialData as any)?.data?.watermark) return (initialPayload.initialData as any).data.watermark;
+    try {
+      const saved = localStorage.getItem('Dragon_advanced_waybill_template');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.watermark) return parsed.watermark;
+        if (parsed.data?.watermark) return parsed.data.watermark;
+      }
+    } catch (e) {}
+    return {
+      enabled: false,
+      text: localStorage.getItem('Dragon_company_name') || 'شركة دراجون',
+      fontSize: 34,
+      color: '#000000',
+      opacity: 0.18,
+      rotation: -30
+    };
+  });
+
+  const [showPreviewModal, setShowPreviewModal] = useState<boolean>(false);
+  const [testPrintOrder, setTestPrintOrder] = useState<any[] | null>(null);
+
   const [history, setHistory] = useState<CanvasItem[][]>([[...items]]);
   const [historyIndex, setHistoryIndex] = useState(0);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -180,6 +218,15 @@ const WaybillBuilderAdvanced: React.FC<WaybillBuilderAdvancedProps> = ({
         setTemplateName(initialPayload.initialData.name);
       } else if (initialPayload.customTemplate?.name) {
         setTemplateName(initialPayload.customTemplate.name);
+      }
+
+      const initialWatermark = 
+        initialPayload.initialData?.watermark || 
+        initialPayload.customTemplate?.data?.watermark || 
+        (initialPayload.customTemplate as any)?.watermark ||
+        (initialPayload.initialData as any)?.data?.watermark;
+      if (initialWatermark) {
+        setWatermark(initialWatermark);
       }
     }
   }, [initialPayload]);
@@ -417,7 +464,12 @@ const WaybillBuilderAdvanced: React.FC<WaybillBuilderAdvancedProps> = ({
   };
 
   const saveTemplate = (saveAsNew: boolean = false) => {
-    const templateData = { name: templateName, items, savedAt: new Date().toISOString() };
+    const templateData = { 
+      name: templateName, 
+      items, 
+      watermark,
+      savedAt: new Date().toISOString() 
+    };
     const targetId = saveAsNew ? undefined : (editingCustomId || undefined);
 
     const savedCustom = saveCustomWaybillTemplate({
@@ -632,6 +684,15 @@ const WaybillBuilderAdvanced: React.FC<WaybillBuilderAdvancedProps> = ({
             <Download size={16} /> تصدير
           </button>
 
+          <button 
+            type="button"
+            onClick={() => setShowPreviewModal(true)} 
+            className="p-2 rounded-lg hover:bg-purple-100 text-purple-700 dark:text-purple-300 transition-colors flex items-center gap-1 text-xs font-bold" 
+            title="معاينة حية للقالب في نافذة مستقلة"
+          >
+            <Eye size={16} /> معاينة
+          </button>
+
           <div className="w-px h-6 bg-slate-300 dark:bg-slate-600 mx-2"></div>
           
           {selectedIds.length > 0 && (
@@ -729,6 +790,34 @@ const WaybillBuilderAdvanced: React.FC<WaybillBuilderAdvancedProps> = ({
                 ))}
               </div>
             </div>
+
+            {/* Watermark Quick Card in Toolbox */}
+            <div className="bg-purple-50/80 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800/60 rounded-xl p-3 shadow-xs">
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center gap-1.5">
+                  <Droplets size={16} className="text-purple-600 dark:text-purple-400" />
+                  <span className="text-xs font-black text-slate-800 dark:text-slate-200">العلامة المائية</span>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={watermark.enabled}
+                    onChange={e => setWatermark(prev => ({ ...prev, enabled: e.target.checked }))}
+                    className="sr-only peer"
+                  />
+                  <div className="w-8 h-4 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-purple-600"></div>
+                </label>
+              </div>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 mb-2 leading-relaxed">
+                {watermark.enabled ? `مفعلة: "${watermark.text || 'بدون نص'}"` : 'معطلة - انقر لتفعيل وطباعة علامة مائية'}
+              </p>
+              <button
+                onClick={() => setSelectedIds([])}
+                className="w-full text-center py-1 bg-white dark:bg-slate-700 hover:bg-purple-100 dark:hover:bg-purple-800/40 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-700 rounded-lg text-[11px] font-bold transition-colors"
+              >
+                إعدادات العلامة المائية ⚙️
+              </button>
+            </div>
           </div>
         </div>
 
@@ -752,7 +841,7 @@ const WaybillBuilderAdvanced: React.FC<WaybillBuilderAdvancedProps> = ({
             {/* Actual Canvas */}
             <div 
               ref={canvasRef}
-              className="bg-white shadow-xl relative"
+              className="bg-white shadow-xl relative overflow-hidden"
               style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}
             >
               {/* Grid Pattern */}
@@ -812,18 +901,222 @@ const WaybillBuilderAdvanced: React.FC<WaybillBuilderAdvancedProps> = ({
                   {renderItemContent(item)}
                 </Rnd>
               ))}
+
+              {/* Watermark Layer (Layered above canvas items with zIndex: 30, mixBlendMode: multiply, pointerEvents: none) */}
+              {watermark.enabled && watermark.text && watermark.text.trim().length > 0 && (
+                <div 
+                  className="absolute inset-0 flex items-center justify-center pointer-events-none select-none overflow-hidden"
+                  style={{ zIndex: 30, mixBlendMode: 'multiply' }}
+                >
+                  <span 
+                    style={{
+                      fontSize: `${watermark.fontSize || 34}px`,
+                      color: watermark.color || '#000000',
+                      opacity: watermark.opacity !== undefined ? Number(watermark.opacity) : 0.18,
+                      transform: `rotate(${watermark.rotation !== undefined ? Number(watermark.rotation) : -30}deg)`,
+                      fontWeight: 'bold',
+                      letterSpacing: '3px',
+                      whiteSpace: 'nowrap',
+                      textAlign: 'center',
+                      lineHeight: 1.2
+                    }}
+                  >
+                    {watermark.text}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         </div>
 
         {/* Left Properties Panel */}
         <div className="w-72 bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 p-4 flex flex-col gap-4 overflow-y-auto shrink-0 custom-scrollbar">
-          <h3 className="font-black text-slate-800 dark:text-white border-b border-slate-100 dark:border-slate-700 pb-2">الخصائص المتقدمة</h3>
+          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-2">
+            <h3 className="font-black text-slate-800 dark:text-white">الخصائص المتقدمة</h3>
+            {selectedIds.length > 0 && (
+              <button 
+                onClick={() => setSelectedIds([])}
+                className="text-[11px] font-bold text-purple-600 hover:text-purple-700 bg-purple-50 hover:bg-purple-100 dark:bg-purple-900/30 px-2 py-0.5 rounded-md flex items-center gap-1 transition-colors"
+                title="التبديل إلى إعدادات العلامة المائية"
+              >
+                <Droplets size={13} />
+                العلامة المائية
+              </button>
+            )}
+          </div>
           
           {selectedIds.length === 0 ? (
-            <div className="text-center text-slate-400 py-10 flex flex-col items-center gap-3 mt-10">
-              <MousePointer2 size={40} className="opacity-20 text-purple-500" />
-              <p className="text-sm font-bold">حدد عنصراً أو أكثر (Shift) للبدء بتعديله</p>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between bg-purple-50 dark:bg-purple-900/30 p-3 rounded-xl border border-purple-100 dark:border-purple-800/50">
+                <div className="flex items-center gap-2">
+                  <Droplets size={18} className="text-purple-600 dark:text-purple-400" />
+                  <div>
+                    <h4 className="text-xs font-black text-slate-800 dark:text-white">العلامة المائية</h4>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400">طباعة خلفية البوليصة</p>
+                  </div>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={watermark.enabled} 
+                    onChange={e => setWatermark(prev => ({ ...prev, enabled: e.target.checked }))} 
+                    className="sr-only peer"
+                  />
+                  <div className="w-10 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+                </label>
+              </div>
+
+              {watermark.enabled ? (
+                <div className="space-y-4 bg-slate-50/50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-200 dark:border-slate-700">
+                  {/* Watermark Text */}
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1 block">نص العلامة المائية</label>
+                    <input 
+                      type="text" 
+                      value={watermark.text} 
+                      onChange={e => setWatermark(prev => ({ ...prev, text: e.target.value }))} 
+                      className="w-full text-xs font-bold border dark:border-slate-600 bg-white dark:bg-slate-700 dark:text-white rounded-lg p-2 outline-none focus:border-purple-500"
+                      placeholder="اكتب الكلمة أو العبارة..."
+                    />
+                    {/* Quick Presets */}
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      <button 
+                        onClick={() => setWatermark(prev => ({ ...prev, text: localStorage.getItem('Dragon_company_name') || 'اسم الشركة' }))}
+                        className="text-[10px] px-2 py-0.5 bg-white dark:bg-slate-700 border dark:border-slate-600 hover:bg-purple-50 rounded text-slate-600 dark:text-slate-300"
+                      >
+                        اسم الشركة
+                      </button>
+                      <button 
+                        onClick={() => setWatermark(prev => ({ ...prev, text: 'معاينة قبل الاستلام' }))}
+                        className="text-[10px] px-2 py-0.5 bg-white dark:bg-slate-700 border dark:border-slate-600 hover:bg-purple-50 rounded text-slate-600 dark:text-slate-300"
+                      >
+                        معاينة قبل الاستلام
+                      </button>
+                      <button 
+                        onClick={() => setWatermark(prev => ({ ...prev, text: 'أصل الفاتورة' }))}
+                        className="text-[10px] px-2 py-0.5 bg-white dark:bg-slate-700 border dark:border-slate-600 hover:bg-purple-50 rounded text-slate-600 dark:text-slate-300"
+                      >
+                        أصل الفاتورة
+                      </button>
+                      <button 
+                        onClick={() => setWatermark(prev => ({ ...prev, text: 'مسودة' }))}
+                        className="text-[10px] px-2 py-0.5 bg-white dark:bg-slate-700 border dark:border-slate-600 hover:bg-purple-50 rounded text-slate-600 dark:text-slate-300"
+                      >
+                        مسودة
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Size */}
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">حجم الخط</span>
+                      <span className="text-xs font-mono font-bold text-purple-600">{watermark.fontSize}px</span>
+                    </div>
+                    <input 
+                      type="range" 
+                      min="16" 
+                      max="80" 
+                      value={watermark.fontSize} 
+                      onChange={e => setWatermark(prev => ({ ...prev, fontSize: Number(e.target.value) }))} 
+                      className="w-full accent-purple-600"
+                    />
+                  </div>
+
+                  {/* Color & Opacity */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1 block">اللون</span>
+                      <div className="flex items-center gap-1.5 border dark:border-slate-600 bg-white dark:bg-slate-700 rounded-lg p-1.5">
+                        <input 
+                          type="color" 
+                          value={watermark.color} 
+                          onChange={e => setWatermark(prev => ({ ...prev, color: e.target.value }))} 
+                          className="w-7 h-6 rounded cursor-pointer border-none p-0 bg-transparent"
+                        />
+                        <span className="text-[10px] font-mono uppercase text-slate-500">{watermark.color}</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">الشفافية</span>
+                        <span className="text-xs font-mono font-bold text-purple-600">{Math.round(watermark.opacity * 100)}%</span>
+                      </div>
+                      <input 
+                        type="range" 
+                        min="0.04" 
+                        max="0.5" 
+                        step="0.02" 
+                        value={watermark.opacity} 
+                        onChange={e => setWatermark(prev => ({ ...prev, opacity: Number(e.target.value) }))} 
+                        className="w-full mt-2 accent-purple-600"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Color presets */}
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] text-slate-400">نماذج:</span>
+                    {[
+                      { c: '#000000', label: 'أسود' },
+                      { c: '#64748b', label: 'رمادي' },
+                      { c: '#2563eb', label: 'أزرق' },
+                      { c: '#dc2626', label: 'أحمر' },
+                      { c: '#7c3aed', label: 'بنفسجي' },
+                    ].map(p => (
+                      <button
+                        key={p.c}
+                        onClick={() => setWatermark(prev => ({ ...prev, color: p.c }))}
+                        className={`w-5 h-5 rounded-full border border-white shadow-xs ${watermark.color === p.c ? 'ring-2 ring-purple-500 scale-110' : 'hover:scale-105'}`}
+                        style={{ backgroundColor: p.c }}
+                        title={p.label}
+                      />
+                    ))}
+                  </div>
+
+                  {/* Rotation Angle */}
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">زاوية الميلان</span>
+                      <span className="text-xs font-mono font-bold text-purple-600">{watermark.rotation}°</span>
+                    </div>
+                    <input 
+                      type="range" 
+                      min="-90" 
+                      max="90" 
+                      value={watermark.rotation} 
+                      onChange={e => setWatermark(prev => ({ ...prev, rotation: Number(e.target.value) }))} 
+                      className="w-full accent-purple-600"
+                    />
+                    <div className="grid grid-cols-4 gap-1 mt-1.5">
+                      {[
+                        { label: 'مائل 30°', val: -30 },
+                        { label: 'مائل 45°', val: -45 },
+                        { label: 'أفقي', val: 0 },
+                        { label: 'رأسي', val: -90 }
+                      ].map(r => (
+                        <button
+                          key={r.val}
+                          onClick={() => setWatermark(prev => ({ ...prev, rotation: r.val }))}
+                          className={`text-[10px] py-1 border dark:border-slate-600 rounded font-medium transition-colors ${watermark.rotation === r.val ? 'bg-purple-100 dark:bg-purple-900/50 border-purple-400 text-purple-700 dark:text-purple-300' : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300'}`}
+                        >
+                          {r.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-6 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-dashed border-slate-200 dark:border-slate-700">
+                  <p className="text-xs text-slate-500 font-bold mb-1">العلامة المائية غير مفعلة</p>
+                  <p className="text-[10px] text-slate-400">قم بتفعيل المفتاح بالأعلى لإضافة علامة مائية على البوليصة</p>
+                </div>
+              )}
+
+              <div className="text-center text-slate-400 py-4 flex flex-col items-center gap-1 border-t border-slate-100 dark:border-slate-700 mt-2">
+                <MousePointer2 size={24} className="opacity-25 text-purple-500" />
+                <p className="text-[11px] font-bold">حدد أي عنصر في الكانفاس لتعديل خصائصه</p>
+              </div>
             </div>
           ) : (
             <div className="space-y-5 pb-8">
@@ -938,6 +1231,85 @@ const WaybillBuilderAdvanced: React.FC<WaybillBuilderAdvancedProps> = ({
         </div>
 
       </div>
+
+      {/* Live Preview Modal */}
+      {showPreviewModal && (
+        <div 
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-[99999] flex items-center justify-center p-4" 
+          onClick={() => setShowPreviewModal(false)}
+        >
+          <div 
+            className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl max-w-xl w-full p-6 border border-slate-200 dark:border-slate-800 space-y-4 max-h-[95vh] overflow-y-auto" 
+            onClick={e => e.stopPropagation()} 
+            dir="rtl"
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Eye className="w-5 h-5 text-purple-600" />
+                <h3 className="text-base font-black text-slate-800 dark:text-white">معاينة حية: {templateName}</h3>
+              </div>
+              <button 
+                onClick={() => setShowPreviewModal(false)} 
+                className="p-1 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="bg-slate-100 dark:bg-slate-950 p-4 rounded-2xl flex flex-col items-center justify-center overflow-x-auto border border-slate-200/60 dark:border-slate-800">
+              <div className="bg-white text-black shadow-xl rounded-sm p-1">
+                <UniversalWaybill
+                  order={MOCK_ORDER}
+                  companyName={localStorage.getItem('Dragon_company_name') || 'شركة دراجون'}
+                  companyPhone={localStorage.getItem('Dragon_company_phone') || '01000000000'}
+                  companyAddress={localStorage.getItem('Dragon_company_address') || 'القاهرة، جمهورية مصر العربية'}
+                  companyLogo={companyLogo}
+                  terms={localStorage.getItem('Dragon_company_terms') || 'المعاينة حق للعميل قبل الاستلام.'}
+                  customTemplateData={{
+                    name: templateName,
+                    items,
+                    watermark
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setTestPrintOrder([MOCK_ORDER])}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-colors"
+              >
+                <Printer size={15} /> طباعة تجريبية
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowPreviewModal(false)}
+                className="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold text-xs shadow-md shadow-purple-500/20 transition-all"
+              >
+                إغلاق المعاينة
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Hidden container for test printing */}
+      {testPrintOrder && (
+        <UniversalPrintableOrders
+          orders={testPrintOrder}
+          companyName={localStorage.getItem('Dragon_company_name') || 'شركة دراجون'}
+          companyPhone={localStorage.getItem('Dragon_company_phone') || ''}
+          companyAddress={localStorage.getItem('Dragon_company_address') || ''}
+          companyLogo={companyLogo}
+          terms={localStorage.getItem('Dragon_company_terms') || ''}
+          customTemplateData={{
+            name: templateName,
+            items,
+            watermark
+          }}
+        />
+      )}
     </div>
   );
 };

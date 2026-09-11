@@ -2730,6 +2730,28 @@ function confirmation_resolve_order_variant(PDO $pdo, int $currentProductId, int
     ];
 }
 
+function normalize_arabic_text(string $text): string {
+    if ($text === '') return '';
+    // Strip diacritics / tashkeel & tatweel
+    $s = preg_replace('/[\x{0610}-\x{061A}\x{064B}-\x{065F}\x{0670}\x{0640}]/u', '', $text);
+    // Normalize Alefs (أ, إ, آ, ٱ -> ا)
+    $s = preg_replace('/[أإآٱ]/u', 'ا', $s);
+    // Normalize Taa Marbuta (ة -> ه)
+    $s = preg_replace('/ة/u', 'ه', $s);
+    // Normalize Yaa / Alef Maksura (ى -> ي)
+    $s = preg_replace('/ى/u', 'ي', $s);
+    // Normalize Waw with Hamza & Yaa with Hamza
+    $s = preg_replace('/ؤ/u', 'و', $s);
+    $s = preg_replace('/ئ/u', 'ي', $s);
+    // Eastern Arabic numerals to Western
+    $eastern = ['٠','١','٢','٣','٤','٥','٦','٧','٨','٩'];
+    $western = ['0','1','2','3','4','5','6','7','8','9'];
+    $s = str_replace($eastern, $western, $s);
+    // Remove extra spaces and lowercase
+    $s = trim(preg_replace('/\s+/u', ' ', $s));
+    return mb_strtolower($s, 'UTF-8');
+}
+
 function confirmation_resolve_order_variant_by_info(PDO $pdo, string $name, string $color = '', string $size = '', int $warehouseId = 0): ?array {
     $baseName = trim($name);
     if ($baseName === '') return null;
@@ -2763,6 +2785,74 @@ function confirmation_resolve_order_variant_by_info(PDO $pdo, string $name, stri
 
     $searchSql .= " ORDER BY stock_qty DESC, pv.id ASC LIMIT 1";
     $matched = execute_query($pdo, $searchSql, $searchParams)->fetch(PDO::FETCH_ASSOC);
+
+    // Fallback: If exact SQL match failed, use normalized Arabic matching across active variants
+    if (!$matched) {
+        $normBase = normalize_arabic_text($baseName);
+        $normColor = normalize_arabic_text($color);
+        $normSize = normalize_arabic_text($size);
+
+        if ($normBase !== '') {
+            $allSql = "
+                SELECT pv.id, pv.name, pv.color, pv.size, COALESCE(s.quantity, 0) as stock_qty,
+                       COALESCE(ppar.name, pv.name) as parent_name
+                FROM product_variants pv
+                LEFT JOIN products ppar ON ppar.id = pv.product_id
+                LEFT JOIN stock s ON s.product_id = pv.id $whClause
+                WHERE pv.is_archived = 0
+                ORDER BY stock_qty DESC, pv.id ASC
+            ";
+            $allVariants = execute_query($pdo, $allSql)->fetchAll(PDO::FETCH_ASSOC);
+
+            // 1. Try exact normalized match (name + color + size)
+            foreach ($allVariants as $v) {
+                $pname = normalize_arabic_text($v['parent_name'] ?: $v['name']);
+                $vc = normalize_arabic_text((string)($v['color'] ?? ''));
+                $vs = normalize_arabic_text((string)($v['size'] ?? ''));
+                if (($pname === $normBase || strpos($pname, $normBase) !== false || strpos($normBase, $pname) !== false)
+                    && ($normColor === '' || $vc === $normColor)
+                    && ($normSize === '' || $vs === $normSize)) {
+                    $matched = $v;
+                    break;
+                }
+            }
+            // 2. Try normalized name + color match
+            if (!$matched && $normColor !== '') {
+                foreach ($allVariants as $v) {
+                    $pname = normalize_arabic_text($v['parent_name'] ?: $v['name']);
+                    $vc = normalize_arabic_text((string)($v['color'] ?? ''));
+                    if (($pname === $normBase || strpos($pname, $normBase) !== false || strpos($normBase, $pname) !== false)
+                        && $vc === $normColor) {
+                        $matched = $v;
+                        break;
+                    }
+                }
+            }
+            // 3. Try normalized name + size match
+            if (!$matched && $normSize !== '') {
+                foreach ($allVariants as $v) {
+                    $pname = normalize_arabic_text($v['parent_name'] ?: $v['name']);
+                    $vs = normalize_arabic_text((string)($v['size'] ?? ''));
+                    if (($pname === $normBase || strpos($pname, $normBase) !== false || strpos($normBase, $pname) !== false)
+                        && $vs === $normSize) {
+                        $matched = $v;
+                        break;
+                    }
+                }
+            }
+            // 4. Try normalized name only
+            if (!$matched) {
+                foreach ($allVariants as $v) {
+                    $pname = normalize_arabic_text($v['parent_name'] ?: $v['name']);
+                    if ($pname === $normBase || strpos($pname, $normBase) !== false || strpos($normBase, $pname) !== false) {
+                        $matched = $v;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
     if ($matched && intval($matched['id'] ?? 0) > 0) {
         return [
             'id' => intval($matched['id']),
