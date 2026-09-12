@@ -2364,30 +2364,34 @@ function ensure_rep_journal_orders_table($pdo) {
     static $checked = false;
     if ($checked) return;
     try {
-        $pdo->query("SELECT returned_pieces, returned_value FROM rep_journal_orders LIMIT 1");
-        $checked = true;
-    } catch (Exception $e) {
-        execute_query($pdo, "CREATE TABLE IF NOT EXISTS rep_journal_orders (
-            id          INT AUTO_INCREMENT PRIMARY KEY,
-            journal_id  INT NULL,
-            rep_id      INT NOT NULL,
-            order_id    INT NOT NULL,
-            status      VARCHAR(32) NOT NULL DEFAULT 'with_rep',
-            event_date  DATE NOT NULL,
-            event_time  TIME NOT NULL,
-            employee    VARCHAR(255) NULL,
-            notes       TEXT NULL,
-            returned_pieces INT DEFAULT 0,
-            returned_value  DECIMAL(14,2) DEFAULT 0,
-            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-        if (!column_exists($pdo, 'rep_journal_orders', 'returned_pieces')) execute_query($pdo, "ALTER TABLE rep_journal_orders ADD COLUMN returned_pieces INT DEFAULT 0");
-        if (!column_exists($pdo, 'rep_journal_orders', 'returned_value')) execute_query($pdo, "ALTER TABLE rep_journal_orders ADD COLUMN returned_value DECIMAL(14,2) DEFAULT 0");
+        if (!table_exists($pdo, 'rep_journal_orders')) {
+            execute_query($pdo, "CREATE TABLE IF NOT EXISTS rep_journal_orders (
+                id          INT AUTO_INCREMENT PRIMARY KEY,
+                journal_id  INT NULL,
+                rep_id      INT NOT NULL,
+                order_id    INT NOT NULL,
+                status      VARCHAR(32) NOT NULL DEFAULT 'with_rep',
+                event_date  DATE NOT NULL,
+                event_time  TIME NOT NULL,
+                employee    VARCHAR(255) NULL,
+                notes       TEXT NULL,
+                returned_pieces INT DEFAULT 0,
+                returned_value  DECIMAL(14,2) DEFAULT 0,
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+        if (!column_exists($pdo, 'rep_journal_orders', 'returned_pieces')) {
+            execute_query($pdo, "ALTER TABLE rep_journal_orders ADD COLUMN returned_pieces INT DEFAULT 0");
+        }
+        if (!column_exists($pdo, 'rep_journal_orders', 'returned_value')) {
+            execute_query($pdo, "ALTER TABLE rep_journal_orders ADD COLUMN returned_value DECIMAL(14,2) DEFAULT 0");
+        }
         try { execute_query($pdo, "ALTER TABLE rep_journal_orders DROP INDEX uk_rep_order"); } catch (Exception $ex) {}
+        try { execute_query($pdo, "ALTER TABLE rep_journal_orders DROP INDEX rep_order_unique"); } catch (Exception $ex) {}
         try { $pdo->exec("ALTER TABLE rep_journal_orders ADD UNIQUE KEY uk_rep_order_journal (rep_id, order_id, journal_id)"); } catch (Exception $ex) {}
-        $checked = true;
-    }
+    } catch (Exception $e) {}
+    $checked = true;
 }
 
 function ensure_rep_daily_journal_table($pdo) {
@@ -14614,6 +14618,10 @@ switch ($module) {
                 }
 
                 if (!empty($selectedJournalIds) && table_exists($pdo, 'rep_daily_journal')) {
+                    try { execute_query($pdo, "ALTER TABLE rep_journal_orders DROP INDEX uk_rep_order"); } catch (Exception $ex) {}
+                    try { execute_query($pdo, "ALTER TABLE rep_journal_orders DROP INDEX rep_order_unique"); } catch (Exception $ex) {}
+                    try { $pdo->exec("ALTER TABLE rep_journal_orders ADD UNIQUE KEY uk_rep_order_journal (rep_id, order_id, journal_id)"); } catch (Exception $ex) {}
+
                     $selectedJournalIdsIn = implode(',', array_map('intval', $selectedJournalIds));
                     $repairRows = $pdo->query(
                         "SELECT id, rep_id, journal_date, is_closed, orders_json
@@ -14630,53 +14638,71 @@ switch ($module) {
                         if (!is_array($decodedOrders)) continue;
 
                         foreach ($decodedOrders as $decodedOrder) {
-                            $decodedOrderId = intval(is_array($decodedOrder) ? ($decodedOrder['id'] ?? 0) : $decodedOrder);
-                            if ($decodedOrderId <= 0) continue;
+                            try {
+                                $decodedOrderId = intval(is_array($decodedOrder) ? ($decodedOrder['id'] ?? 0) : $decodedOrder);
+                                if ($decodedOrderId <= 0) continue;
 
-                            $orderStateRow = execute_query($pdo,
-                                "SELECT rep_id, status FROM orders WHERE id = ? LIMIT 1",
-                                [$decodedOrderId]
-                            )->fetch(PDO::FETCH_ASSOC);
-                            if (!$orderStateRow) continue;
+                                $orderStateRow = execute_query($pdo,
+                                    "SELECT rep_id, status FROM orders WHERE id = ? LIMIT 1",
+                                    [$decodedOrderId]
+                                )->fetch(PDO::FETCH_ASSOC);
+                                if (!$orderStateRow) continue;
 
-                            $orderStatus = trim(strval($orderStateRow['status'] ?? ''));
-                            $mappedStatus = 'with_rep';
-                            if ($orderStatus === 'returned') {
-                                $mappedStatus = 'full_return';
-                            } elseif ($orderStatus === 'delivered') {
-                                $mappedStatus = 'delivered';
-                            } elseif ($orderStatus === 'deferred' || $orderStatus === 'postponed' || $orderStatus === 'pending') {
-                                $mappedStatus = 'deferred';
-                            }
-
-                            $existingRepairRow = execute_query($pdo,
-                                "SELECT id, journal_id, status FROM rep_journal_orders WHERE rep_id = ? AND order_id = ? AND (journal_id = ? OR journal_id = 0 OR journal_id IS NULL) ORDER BY id DESC LIMIT 1",
-                                [$repId, $decodedOrderId, $loopJournalId]
-                            )->fetch(PDO::FETCH_ASSOC);
-
-                            if ($existingRepairRow) {
-                                $repairId = intval($existingRepairRow['id'] ?? 0);
-                                $existingStatus = trim(strval($existingRepairRow['status'] ?? ''));
-                                $existingJournalId = intval($existingRepairRow['journal_id'] ?? 0);
-                                
-                                $finalStatus = $existingStatus;
-                                if ($existingStatus === '' || $existingStatus === 'with_rep') {
-                                    $finalStatus = $mappedStatus;
+                                $orderStatus = trim(strval($orderStateRow['status'] ?? ''));
+                                $mappedStatus = 'with_rep';
+                                if ($orderStatus === 'returned') {
+                                    $mappedStatus = 'full_return';
+                                } elseif ($orderStatus === 'delivered') {
+                                    $mappedStatus = 'delivered';
+                                } elseif ($orderStatus === 'deferred' || $orderStatus === 'postponed' || $orderStatus === 'pending') {
+                                    $mappedStatus = 'deferred';
                                 }
-                                
-                                // Only update if journal_id is 0 or if status/date needs refreshing
-                                execute_query($pdo,
-                                    "UPDATE rep_journal_orders
-                                     SET journal_id = ?, status = ?, event_date = COALESCE(event_date, ?)
-                                     WHERE id = ?",
-                                    [$loopJournalId, $finalStatus, ($repairRow['journal_date'] ?? date('Y-m-d')), $repairId]
-                                );
-                            } else {
-                                execute_query($pdo,
-                                    "INSERT INTO rep_journal_orders (journal_id, rep_id, order_id, status, event_date, event_time, employee)
-                                     VALUES (?, ?, ?, ?, ?, ?, ?)",
-                                    [$loopJournalId, $repId, $decodedOrderId, $mappedStatus, ($repairRow['journal_date'] ?? date('Y-m-d')), date('H:i:s'), $_SESSION['user']['name'] ?? null]
-                                );
+
+                                $existingRepairRow = execute_query($pdo,
+                                    "SELECT id, journal_id, status FROM rep_journal_orders WHERE rep_id = ? AND order_id = ? AND (journal_id = ? OR journal_id = 0 OR journal_id IS NULL) ORDER BY id DESC LIMIT 1",
+                                    [$repId, $decodedOrderId, $loopJournalId]
+                                )->fetch(PDO::FETCH_ASSOC);
+
+                                if ($existingRepairRow) {
+                                    $repairId = intval($existingRepairRow['id'] ?? 0);
+                                    $existingStatus = trim(strval($existingRepairRow['status'] ?? ''));
+                                    
+                                    $finalStatus = $existingStatus;
+                                    if ($existingStatus === '' || $existingStatus === 'with_rep') {
+                                        $finalStatus = $mappedStatus;
+                                    }
+                                    
+                                    execute_query($pdo,
+                                        "UPDATE rep_journal_orders
+                                         SET journal_id = ?, status = ?, event_date = COALESCE(event_date, ?)
+                                         WHERE id = ?",
+                                        [$loopJournalId, $finalStatus, ($repairRow['journal_date'] ?? date('Y-m-d')), $repairId]
+                                    );
+                                } else {
+                                    // If row already exists under another journal or uk_rep_order is still present
+                                    $anyOldRow = execute_query($pdo,
+                                        "SELECT id, journal_id, status FROM rep_journal_orders WHERE rep_id = ? AND order_id = ? ORDER BY id DESC LIMIT 1",
+                                        [$repId, $decodedOrderId]
+                                    )->fetch(PDO::FETCH_ASSOC);
+
+                                    if ($anyOldRow) {
+                                        execute_query($pdo,
+                                            "UPDATE rep_journal_orders
+                                             SET journal_id = ?, status = ?, event_date = COALESCE(event_date, ?)
+                                             WHERE id = ?",
+                                            [$loopJournalId, $mappedStatus, ($repairRow['journal_date'] ?? date('Y-m-d')), intval($anyOldRow['id'])]
+                                        );
+                                    } else {
+                                        execute_query($pdo,
+                                            "INSERT INTO rep_journal_orders (journal_id, rep_id, order_id, status, event_date, event_time, employee)
+                                             VALUES (?, ?, ?, ?, ?, ?, ?)
+                                             ON DUPLICATE KEY UPDATE journal_id = VALUES(journal_id), status = VALUES(status)",
+                                            [$loopJournalId, $repId, $decodedOrderId, $mappedStatus, ($repairRow['journal_date'] ?? date('Y-m-d')), date('H:i:s'), $_SESSION['user']['name'] ?? null]
+                                        );
+                                    }
+                                }
+                            } catch (Exception $eItem) {
+                                // Individual order error should never crash getJournalOrders
                             }
                         }
 

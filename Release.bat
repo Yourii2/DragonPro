@@ -28,8 +28,9 @@ echo [1/5] Writing version.json and updating package.json...
   echo }
 ) > "%cd%\version.json"
 
-rem Update version in package.json via Node (avoids BOM/encoding issues)
+rem Update version in package.json and update-config.json via Node (avoids BOM/encoding issues)
 node -e "const fs=require('fs');const f='package.json';const p=JSON.parse(fs.readFileSync(f,'utf8'));p.version='%VERSION%';fs.writeFileSync(f,JSON.stringify(p,null,2)+'\n','utf8');"
+node -e "const fs=require('fs');const f='update-config.json';if(fs.existsSync(f)){const p=JSON.parse(fs.readFileSync(f,'utf8'));if(p.github){p.github.version='%VERSION%';p.github.assetName='DragonPro_v%VERSION%.zip';fs.writeFileSync(f,JSON.stringify(p,null,2)+'\n','utf8');}}"
 
 echo [2/5] Building frontend (vite build)...
 if not exist "node_modules" (
