@@ -124,8 +124,9 @@ if (!isset($pdo)) {
     }
 }
 
-// Parse JSON body (frontend often sends JSON)
-$input = [];
+if (!isset($input) || !is_array($input)) {
+    $input = [];
+}
 try {
     $raw = file_get_contents('php://input');
     if (is_string($raw) && trim($raw) !== '') {
@@ -133,7 +134,7 @@ try {
         if (is_array($decoded)) $input = $decoded;
     }
 } catch (Exception $e) {
-    $input = [];
+    if (!isset($input) || !is_array($input)) $input = [];
 }
 $module = isset($_GET['module']) ? trim((string)$_GET['module']) : '';
 $action = isset($_GET['action']) ? trim((string)$_GET['action']) : '';
@@ -3390,7 +3391,9 @@ if (!function_exists('nexus_fetch_orders_by_ids')) {
         $rows = $pdo->query(
             "SELECT o.id, o.order_number, o.rep_id, o.status, o.total_amount, o.shipping_fees,
              o.notes, o.created_at, {$assignedAtSubquery}{$extraSql},
-             c.name AS customer_name, c.phone1 AS phone1, c.address, c.governorate
+             c.name AS customer_name, c.phone1 AS phone1,
+             COALESCE(NULLIF(o.address, ''), c.address) AS address,
+             COALESCE(NULLIF(o.governorate, ''), c.governorate) AS governorate
              FROM orders o
              LEFT JOIN customers c ON o.customer_id = c.id
              WHERE o.id IN ($in) ORDER BY o.id"
@@ -10224,6 +10227,16 @@ switch ($module) {
         } catch (Exception $e) {
             // ignore migration failure
         }
+        try {
+            if (!column_exists($pdo, 'orders', 'address')) {
+                execute_query($pdo, "ALTER TABLE orders ADD COLUMN address TEXT NULL COMMENT 'عنوان التوصيل الخاص بالطلب'");
+            }
+            if (!column_exists($pdo, 'orders', 'governorate')) {
+                execute_query($pdo, "ALTER TABLE orders ADD COLUMN governorate VARCHAR(100) NULL COMMENT 'محافظة التوصيل الخاصة بالطلب'");
+            }
+        } catch (Exception $e) {
+            // ignore migration failure
+        }
         if ($action === 'getAll') {
             $statusFilter = isset($_GET['status']) ? trim($_GET['status']) : null;
             $statusInRaw = isset($_GET['status_in']) ? trim($_GET['status_in']) : null;
@@ -10256,7 +10269,11 @@ switch ($module) {
 
             $ordersHasItemsJson = column_exists($pdo, 'orders', 'items_json');
             $itemsJsonSql = $ordersHasItemsJson ? 'o.items_json' : 'NULL AS items_json';
-            $sql = "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, {$itemsJsonSql}, o.created_at{$extraColsSql}, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, c.address as address, c.governorate as governorate, o.id as order_id, u.name as rep_name
+            $ordersHasAddress = column_exists($pdo, 'orders', 'address');
+            $ordersHasGov = column_exists($pdo, 'orders', 'governorate');
+            $addrSelect = $ordersHasAddress ? "COALESCE(NULLIF(o.address, ''), c.address) as address" : "c.address as address";
+            $govSelect = $ordersHasGov ? "COALESCE(NULLIF(o.governorate, ''), c.governorate) as governorate" : "c.governorate as governorate";
+            $sql = "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, {$itemsJsonSql}, o.created_at{$extraColsSql}, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, {$addrSelect}, {$govSelect}, o.id as order_id, u.name as rep_name
                 FROM orders o 
                 LEFT JOIN customers c ON o.customer_id = c.id
                 LEFT JOIN users u ON o.rep_id = u.id";
@@ -10365,6 +10382,27 @@ switch ($module) {
             echo json_encode(['success' => true, 'data' => array_values($ordersMap)]);
             break;
         }
+        if ($action === 'get' || $action === 'getById' || $action === 'getOne') {
+            try {
+                $singleId = $_GET['id'] ?? $_GET['orderId'] ?? '';
+                if (empty($singleId)) {
+                    http_response_code(400);
+                    echo json_encode(['success' => false, 'message' => 'Order ID is required.']);
+                    break;
+                }
+                $result = nexus_fetch_orders_by_ids($pdo, (string)$singleId);
+                $singleOrder = !empty($result) ? $result[0] : null;
+                if ($singleOrder) {
+                    echo json_encode(['success' => true, 'data' => $singleOrder]);
+                } else {
+                    http_response_code(404);
+                    echo json_encode(['success' => false, 'message' => 'Order not found.']);
+                }
+            } catch (Exception $e) {
+                echo json_encode(['success' => false, 'message' => 'getOrder error: ' . $e->getMessage()]);
+            }
+            break;
+        }
         if ($action === 'getByIds') {
             try {
                 $result = nexus_fetch_orders_by_ids($pdo, $_GET['ids'] ?? '');
@@ -10410,7 +10448,7 @@ switch ($module) {
             $extraColsSql = count($extraCols) > 0 ? (', ' . implode(', ', $extraCols)) : '';
 
             // Fetch the order
-                $sql = "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, o.created_at, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, c.address as address, c.governorate as governorate
+                $sql = "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, o.created_at, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, COALESCE(NULLIF(o.address, ''), c.address) as address, COALESCE(NULLIF(o.governorate, ''), c.governorate) as governorate
                     {$extraColsSql}
                     FROM orders o LEFT JOIN customers c ON o.customer_id = c.id
                     WHERE o.order_number = ?";
@@ -10497,7 +10535,7 @@ switch ($module) {
             if ($ordersHasPage) $extraCols[] = 'o.page';
             $extraColsSql = count($extraCols) > 0 ? (', ' . implode(', ', $extraCols)) : '';
 
-            $sql = "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, o.created_at{$extraColsSql}, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, c.address as address, c.governorate as governorate, o.id as order_id
+            $sql = "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, o.created_at{$extraColsSql}, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, COALESCE(NULLIF(o.address, ''), c.address) as address, COALESCE(NULLIF(o.governorate, ''), c.governorate) as governorate, o.id as order_id
                     FROM orders o LEFT JOIN customers c ON o.customer_id = c.id
                     WHERE o.rep_id = ? AND (o.status = 'with_rep' OR o.status = 'partial')
                     ORDER BY o.created_at DESC";
@@ -10699,7 +10737,7 @@ switch ($module) {
                 $assignedAtSubquery = $hasHistory
                     ? "(SELECT MAX(osh.created_at) FROM order_status_history osh WHERE osh.order_id = o.id AND (osh.status IN ('with_rep','partial') OR osh.action IN ('rep_assign','daily_start'))) AS assigned_at"
                     : "NULL AS assigned_at";
-                $sql = "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, o.created_at, {$assignedAtSubquery}{$extraColsSql}, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, c.address as address, c.governorate as governorate, o.id as order_id
+                $sql = "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, o.created_at, {$assignedAtSubquery}{$extraColsSql}, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, COALESCE(NULLIF(o.address, ''), c.address) as address, COALESCE(NULLIF(o.governorate, ''), c.governorate) as governorate, o.id as order_id
                     FROM orders o LEFT JOIN customers c ON o.customer_id = c.id
                     WHERE " . implode(' AND ', $where) . " ORDER BY o.created_at DESC";
 
@@ -10995,7 +11033,7 @@ switch ($module) {
                 if ($orderNumber) {
                     // reuse getByNumber behavior
                     $urlOrderNumber = $orderNumber;
-                    $orderStmt = execute_query($pdo, "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, o.created_at, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, c.address as address FROM orders o LEFT JOIN customers c ON o.customer_id = c.id WHERE o.order_number = ?", [$urlOrderNumber]);
+                    $orderStmt = execute_query($pdo, "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, o.created_at, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, COALESCE(NULLIF(o.address, ''), c.address) as address, COALESCE(NULLIF(o.governorate, ''), c.governorate) as governorate FROM orders o LEFT JOIN customers c ON o.customer_id = c.id WHERE o.order_number = ?", [$urlOrderNumber]);
                     $orderData = $orderStmt->fetch(PDO::FETCH_ASSOC);
                     if ($orderData) {
                         $orderId2 = $orderData['id'];
@@ -11233,20 +11271,29 @@ switch ($module) {
             $ordersHasDiscountValue = column_exists($pdo, 'orders', 'discount_value');
             $ordersHasDiscountAmount = column_exists($pdo, 'orders', 'discount_amount');
             $ordersHasSalesOfficeId = column_exists($pdo, 'orders', 'sales_office_id');
+            $ordersHasEmployee = column_exists($pdo, 'orders', 'employee');
+            $ordersHasPage = column_exists($pdo, 'orders', 'page');
+            $ordersHasAddress = column_exists($pdo, 'orders', 'address');
+            $ordersHasGov = column_exists($pdo, 'orders', 'governorate');
 
             try {
                 $pdo->beginTransaction();
                 $created = [];
                 foreach ($ordersInput as $ord) {
-                    $customerName = $ord['customerName'] ?? $ord['name'] ?? '';
+                    $customerName = trim((string)($ord['customerName'] ?? $ord['name'] ?? ''));
                     $phone = trim((string)($ord['phone'] ?? $ord['phone1'] ?? ''));
                     $phone2 = trim((string)($ord['phone2'] ?? ''));
-                    $gov = $ord['governorate'] ?? '';
-                    $address = $ord['address'] ?? '';
+                    $gov = trim((string)($ord['governorate'] ?? ''));
+                    $address = trim((string)($ord['address'] ?? ''));
 
-                    // find existing customer by phone (phone1 or phone2), then by exact name, otherwise create
+                    // find existing customer by customerId (if provided), then by phone (phone1 or phone2), then by exact name, otherwise create
                     $customerId = null;
-                    if (!empty($phone)) {
+                    if (!empty($ord['customerId']) || !empty($ord['customer_id'])) {
+                        $cIdCandidate = intval($ord['customerId'] ?? $ord['customer_id']);
+                        $stmt = execute_query($pdo, "SELECT id FROM customers WHERE id = ? LIMIT 1", [$cIdCandidate]);
+                        if ($row = $stmt->fetch(PDO::FETCH_ASSOC)) $customerId = $row['id'];
+                    }
+                    if (!$customerId && !empty($phone)) {
                         $stmt = execute_query($pdo, "SELECT id FROM customers WHERE phone1 = ? OR phone2 = ? LIMIT 1", [$phone, $phone]);
                         if ($row = $stmt->fetch(PDO::FETCH_ASSOC)) $customerId = $row['id'];
                     }
@@ -11267,6 +11314,30 @@ switch ($module) {
                             execute_query($pdo, "INSERT INTO customers (name, phone1, governorate, address) VALUES (?, ?, ?, ?)", [$customerName, $phone, $gov, $address]);
                         }
                         $customerId = $pdo->lastInsertId();
+                    } else {
+                        // Customer exists: if a new address, governorate, name, or phone2 is provided, update customer master record
+                        $custUpdates = [];
+                        $custVals = [];
+                        if ($address !== '') {
+                            $custUpdates[] = 'address = ?';
+                            $custVals[] = $address;
+                        }
+                        if ($gov !== '') {
+                            $custUpdates[] = 'governorate = ?';
+                            $custVals[] = $gov;
+                        }
+                        if ($phone2 !== '') {
+                            $custUpdates[] = 'phone2 = ?';
+                            $custVals[] = $phone2;
+                        }
+                        if ($customerName !== '') {
+                            $custUpdates[] = 'name = ?';
+                            $custVals[] = $customerName;
+                        }
+                        if (!empty($custUpdates)) {
+                            $custVals[] = $customerId;
+                            execute_query($pdo, "UPDATE customers SET " . implode(', ', $custUpdates) . " WHERE id = ?", $custVals);
+                        }
                     }
 
                     $orderNumber = $ord['orderNumber'] ?? null;
@@ -11374,6 +11445,8 @@ switch ($module) {
                             if ($ordersHasSalesOfficeId) { $insertCols[] = 'sales_office_id'; $insertVals[] = $salesOfficeId; }
                             if ($ordersHasEmployee) { $insertCols[] = 'employee'; $insertVals[] = $employee; }
                             if ($ordersHasPage) { $insertCols[] = 'page'; $insertVals[] = $page; }
+                            if ($ordersHasAddress) { $insertCols[] = 'address'; $insertVals[] = $address; }
+                            if ($ordersHasGov) { $insertCols[] = 'governorate'; $insertVals[] = $gov; }
 
                             $placeholders = implode(',', array_fill(0, count($insertCols), '?'));
                             $sql = "INSERT INTO orders (" . implode(',', $insertCols) . ") VALUES (" . $placeholders . ")";
@@ -11532,6 +11605,29 @@ switch ($module) {
                 $hasShipCol = column_exists($pdo, 'orders', 'shipping_company_id');
                 $before = execute_query($pdo, "SELECT status, rep_id" . ($hasShipCol ? ", shipping_company_id" : "") . " FROM orders WHERE id = ? LIMIT 1", [$id])->fetch(PDO::FETCH_ASSOC);
                 $prevStatus = $before ? ($before['status'] ?? null) : null;
+
+                // Prevent editing order details if the order is currently in rep custody (with_rep)
+                if ($prevStatus === 'with_rep') {
+                    $hasEditPayload = (
+                        isset($input['products']) ||
+                        isset($input['importedProducts']) ||
+                        isset($input['items']) ||
+                        (isset($input['customerName']) && trim((string)$input['customerName']) !== '') ||
+                        (isset($input['customer_name']) && trim((string)$input['customer_name']) !== '') ||
+                        (isset($input['name']) && trim((string)$input['name']) !== '') ||
+                        (isset($input['phone']) && trim((string)$input['phone']) !== '') ||
+                        (isset($input['phone1']) && trim((string)$input['phone1']) !== '') ||
+                        (isset($input['address']) && trim((string)$input['address']) !== '')
+                    );
+                    if ($hasEditPayload && ($status === null || $status === 'with_rep')) {
+                        http_response_code(400);
+                        echo json_encode([
+                            'success' => false,
+                            'message' => 'لا يمكن تعديل بيانات أو أصناف الأوردر أثناء وجوده في عهدة المندوب (مع المندوب). يجب استرجاعه من المندوب أولاً لإجراء أي تعديلات.'
+                        ]);
+                        break;
+                    }
+                }
                 if ($penaltyApply && $penaltyAmount > 0) {
                     $statusNote = trim($statusNote . ' | غرامة على المندوب: ' . $penaltyAmount);
                 }
@@ -11554,6 +11650,38 @@ switch ($module) {
                     $allowedStatus = pick_allowed_enum($pdo, 'orders', 'status', $status, $allOrderStatuses);
                     $set_parts[] = 'status = ?';
                     $values[] = $allowedStatus;
+                }
+                if (array_key_exists('address', $input) && column_exists($pdo, 'orders', 'address')) {
+                    $set_parts[] = 'address = ?';
+                    $values[] = trim((string)$input['address']);
+                }
+                if (array_key_exists('governorate', $input) && column_exists($pdo, 'orders', 'governorate')) {
+                    $set_parts[] = 'governorate = ?';
+                    $values[] = trim((string)$input['governorate']);
+                }
+                if (array_key_exists('notes', $input) && column_exists($pdo, 'orders', 'notes')) {
+                    $set_parts[] = 'notes = ?';
+                    $values[] = trim((string)$input['notes']);
+                }
+                if (array_key_exists('shipping', $input) && column_exists($pdo, 'orders', 'shipping_fees')) {
+                    $set_parts[] = 'shipping_fees = ?';
+                    $values[] = floatval($input['shipping']);
+                }
+                if (array_key_exists('total', $input) && column_exists($pdo, 'orders', 'total_amount')) {
+                    $set_parts[] = 'total_amount = ?';
+                    $values[] = floatval($input['total']);
+                }
+                if (array_key_exists('employee', $input) && column_exists($pdo, 'orders', 'employee')) {
+                    $set_parts[] = 'employee = ?';
+                    $values[] = trim((string)$input['employee']);
+                }
+                if (array_key_exists('page', $input) && column_exists($pdo, 'orders', 'page')) {
+                    $set_parts[] = 'page = ?';
+                    $values[] = trim((string)$input['page']);
+                }
+                if (array_key_exists('sales_office_id', $input) && column_exists($pdo, 'orders', 'sales_office_id')) {
+                    $set_parts[] = 'sales_office_id = ?';
+                    $values[] = !empty($input['sales_office_id']) ? intval($input['sales_office_id']) : null;
                 }
                 if (!empty($set_parts)) {
                     $sql = 'UPDATE orders SET ' . implode(', ', $set_parts);
@@ -11768,8 +11896,11 @@ switch ($module) {
                         $custNameProvided = array_key_exists('customerName', $input) || array_key_exists('customer_name', $input) || array_key_exists('name', $input);
                         $custName = $custNameProvided ? trim((string)($input['customerName'] ?? $input['customer_name'] ?? $input['name'])) : null;
 
-                        if ($phone !== '' || $phone2 !== '' || $custName !== null) {
-                            $cstmt = execute_query($pdo, "SELECT phone1, phone2, name FROM customers WHERE id = ? LIMIT 1", [$custId]);
+                        $addrProvided = array_key_exists('address', $input) && trim((string)$input['address']) !== '';
+                        $govProvided = array_key_exists('governorate', $input) && trim((string)$input['governorate']) !== '';
+
+                        if ($phone !== '' || $phone2 !== '' || $custName !== null || $addrProvided || $govProvided) {
+                            $cstmt = execute_query($pdo, "SELECT phone1, phone2, name, address, governorate FROM customers WHERE id = ? LIMIT 1", [$custId]);
                             if ($crow = $cstmt->fetch(PDO::FETCH_ASSOC)) {
                                 $existingPhone1 = trim((string)($crow['phone1'] ?? ''));
                                 $existingPhone2 = trim((string)($crow['phone2'] ?? ''));
@@ -11798,6 +11929,16 @@ switch ($module) {
                                         $updateParts[] = 'phone2 = ?';
                                         $updateVals[] = $phone2;
                                     }
+                                }
+
+                                if ($addrProvided) {
+                                    $updateParts[] = 'address = ?';
+                                    $updateVals[] = trim((string)$input['address']);
+                                }
+
+                                if ($govProvided) {
+                                    $updateParts[] = 'governorate = ?';
+                                    $updateVals[] = trim((string)$input['governorate']);
                                 }
 
                                 if (!empty($updateParts)) {
@@ -11831,9 +11972,19 @@ switch ($module) {
             try {
                 $pdo->beginTransaction();
 
-                // Ensure order exists
-                $ord = execute_query($pdo, "SELECT id FROM orders WHERE id = ? LIMIT 1", [$orderId])->fetch(PDO::FETCH_ASSOC);
+                // Ensure order exists and is not locked in rep custody
+                $ord = execute_query($pdo, "SELECT id, status FROM orders WHERE id = ? LIMIT 1", [$orderId])->fetch(PDO::FETCH_ASSOC);
                 if (!$ord) { http_response_code(404); echo json_encode(['success'=>false,'message'=>'Order not found']); if ($pdo->inTransaction()) $pdo->rollBack(); break; }
+
+                if (($ord['status'] ?? '') === 'with_rep') {
+                    if ($pdo->inTransaction()) $pdo->rollBack();
+                    http_response_code(400);
+                    echo json_encode([
+                        'success' => false,
+                        'message' => 'لا يمكن تعديل أصناف الأوردر أثناء وجوده في عهدة المندوب (مع المندوب). يجب استرجاعه أولاً لإجراء أي تعديلات.'
+                    ]);
+                    break;
+                }
 
                 // Delete existing items
                 execute_query($pdo, "DELETE FROM order_items WHERE order_id = ?", [$orderId]);
@@ -12089,6 +12240,28 @@ switch ($module) {
                     return;
                 }
 
+                $idempotencyToken = trim((string)($input['idempotency_token'] ?? $input['client_request_id'] ?? ''));
+                if ($idempotencyToken !== '') {
+                    $dupTx = execute_query($pdo, "SELECT id FROM transactions WHERE JSON_UNQUOTE(JSON_EXTRACT(details, '$.idempotency_token')) = ? LIMIT 1", [$idempotencyToken])->fetch(PDO::FETCH_ASSOC);
+                    if ($dupTx) {
+                        echo json_encode(['success' => true, 'duplicate_prevented' => true, 'message' => 'تم التحويل بنجاح مسبقاً (تم منع التكرار).']);
+                        return;
+                    }
+                }
+                // Check rapid duplicate window (same from, to, amount within 4 seconds)
+                $recentTransfer = execute_query($pdo,
+                    "SELECT id FROM transactions 
+                     WHERE type = 'transfer_out' AND treasury_id = ? AND amount = ? 
+                       AND transaction_date >= NOW() - INTERVAL 4 SECOND
+                       AND JSON_UNQUOTE(JSON_EXTRACT(details, '$.transfer_to')) = ?
+                     LIMIT 1",
+                    [$from_treasury_id, -$amount, strval($to_treasury_id)]
+                )->fetch(PDO::FETCH_ASSOC);
+                if ($recentTransfer) {
+                    echo json_encode(['success' => true, 'duplicate_prevented' => true, 'message' => 'تم التحويل بنجاح مسبقاً (تم منع التكرار).']);
+                    return;
+                }
+
                 $txBegan = false;
                 try {
                     $txBegan = $pdo->beginTransaction();
@@ -12190,6 +12363,34 @@ switch ($module) {
                     $details['category'] = $category;
                 }
                 $direction = isset($input['direction']) ? $input['direction'] : null; // 'in' (company received) | 'out' (company paid)
+
+                $idempotencyToken = trim((string)($input['idempotency_token'] ?? $input['client_request_id'] ?? ($details['idempotency_token'] ?? '')));
+                if ($idempotencyToken !== '') {
+                    $dupTx = execute_query($pdo, "SELECT id FROM transactions WHERE JSON_UNQUOTE(JSON_EXTRACT(details, '$.idempotency_token')) = ? LIMIT 1", [$idempotencyToken])->fetch(PDO::FETCH_ASSOC);
+                    if ($dupTx) {
+                        echo json_encode(['success' => true, 'duplicate_prevented' => true, 'transaction_id' => intval($dupTx['id']), 'message' => 'تم تسجيل المعاملة بنجاح مسبقاً (تم منع التكرار).']);
+                        return;
+                    }
+                    $details['idempotency_token'] = $idempotencyToken;
+                }
+
+                // Rapid duplicate check: if identical transaction was created in the last 4 seconds
+                if ($treasuryId > 0 && abs($amount) > 0) {
+                    $expectedSigned = (isset($input['direction']) && $input['direction'] === 'out') ? -abs($amount) : ($type === 'expense' ? -abs($amount) : abs($amount));
+                    $recentDup = execute_query($pdo,
+                        "SELECT id FROM transactions 
+                         WHERE treasury_id = ? 
+                           AND amount = ? 
+                           AND transaction_date >= NOW() - INTERVAL 4 SECOND
+                           AND (related_to_id <=> ? OR related_to_id IS NULL)
+                         LIMIT 1",
+                        [$treasuryId, $expectedSigned, $relatedId ?: null]
+                    )->fetch(PDO::FETCH_ASSOC);
+                    if ($recentDup) {
+                        echo json_encode(['success' => true, 'duplicate_prevented' => true, 'transaction_id' => intval($recentDup['id']), 'message' => 'تم تسجيل المعاملة بنجاح مسبقاً (تم منع التكرار).']);
+                        return;
+                    }
+                }
 
                 // Special-case: insurance deposit for representatives should always go to the fixed insurance treasury,
                 // and should not be blocked by user's locked default treasury setting.
@@ -12958,10 +13159,7 @@ switch ($module) {
                     break;
                 }
 
-                $todayAssignedOrderIds = confirmation_get_today_assigned_order_ids($pdo, $validOrderIds);
-                $orderIdsForValidation = array_values(array_unique(array_merge($todayAssignedOrderIds, $validOrderIds)));
-
-                $stockSummary = confirmation_validate_stock_for_orders($pdo, $warehouseId, $orderIdsForValidation);
+                $stockSummary = confirmation_validate_stock_for_orders($pdo, $warehouseId, $validOrderIds);
                 if (!$stockSummary['success']) {
                     http_response_code(400);
                     echo json_encode(['success' => false, 'message' => $stockSummary['message'] ?? 'تعذر التحقق من المخزون قبل الإسناد.']);
@@ -12971,12 +13169,12 @@ switch ($module) {
                     http_response_code(409);
                     echo json_encode([
                         'success' => false,
-                        'message' => 'المخزون غير كافٍ بعد احتساب أوردرات كل المناديب اليوم بشكل تراكمي.',
+                        'message' => 'المخزون غير كافٍ في المخزن المختار بعد خصم الحجوزات النشطة.',
                         'data' => [
                             'items' => $stockSummary['items'] ?? [],
                             'shortages' => $stockSummary['shortages'] ?? [],
                             'warehouse_id' => $warehouseId,
-                            'scope' => 'all_reps_today',
+                            'scope' => 'order_assignment',
                         ]
                     ]);
                     break;
@@ -13059,10 +13257,7 @@ switch ($module) {
                     break;
                 }
 
-                $todayAssignedOrderIds = confirmation_get_today_assigned_order_ids($pdo, [$orderId]);
-                $orderIdsForValidation = array_values(array_unique(array_filter(array_map('intval', array_merge($todayAssignedOrderIds, [$orderId])), function($id){ return $id > 0; })));
-
-                $stockSummary = confirmation_validate_stock_for_orders($pdo, $warehouseId, $orderIdsForValidation);
+                $stockSummary = confirmation_validate_stock_for_orders($pdo, $warehouseId, [$orderId]);
                 if (!$stockSummary['success']) {
                     http_response_code(400);
                     echo json_encode(['success' => false, 'message' => $stockSummary['message'] ?? 'تعذر التحقق من المخزون قبل الإسناد.']);
@@ -13072,12 +13267,12 @@ switch ($module) {
                     http_response_code(409);
                     echo json_encode([
                         'success' => false,
-                        'message' => 'المخزون غير كافٍ بعد احتساب أوردرات كل المناديب اليوم بشكل تراكمي.',
+                        'message' => 'المخزون غير كافٍ في المخزن المختار بعد خصم الحجوزات النشطة.',
                         'data' => [
                             'items' => $stockSummary['items'] ?? [],
                             'shortages' => $stockSummary['shortages'] ?? [],
                             'warehouse_id' => $warehouseId,
-                            'scope' => 'all_reps_today',
+                            'scope' => 'order_assignment',
                         ]
                     ]);
                     break;
@@ -13752,8 +13947,11 @@ switch ($module) {
                 }
 
                 if (empty($openRows)) {
-                    http_response_code(400);
-                    echo json_encode(['success' => false, 'message' => 'المندوب ليس له يومية مفتوحة.']);
+                    $insertSql = "INSERT INTO rep_daily_journal (rep_id, employee, is_closed, created_at) VALUES (?, ?, 1, NOW())";
+                    execute_query($pdo, $insertSql, [$repId, $employeeInput ?: null]);
+                    $newJournalId = intval($pdo->lastInsertId());
+                    audit_log($pdo, 'sales', 'close_rep_daily_archive', $repId, json_encode(['journal_id' => $newJournalId]));
+                    echo json_encode(['success' => true, 'closed_count' => 1, 'closed_ids' => [$newJournalId], 'message' => 'تم إغلاق وتوثيق اليومية بنجاح.']);
                     break;
                 }
 
@@ -14001,8 +14199,35 @@ switch ($module) {
             }
 
             if ($totalPaidAmount <= 0) {
-                http_response_code(400);
-                echo json_encode(['success' => false, 'message' => 'Total paid amount must be greater than 0']);
+                echo json_encode(['success' => true, 'message' => 'تمت التسوية بنجاح بدون مدفوعات نقدية.']);
+                break;
+            }
+
+            $idempotencyToken = trim((string)($input['idempotency_token'] ?? $input['client_request_id'] ?? ''));
+            if ($idempotencyToken !== '') {
+                $dupSettle = execute_query($pdo,
+                    "SELECT id FROM transactions 
+                     WHERE JSON_UNQUOTE(JSON_EXTRACT(details, '$.idempotency_token')) = ? LIMIT 1",
+                    [$idempotencyToken]
+                )->fetch(PDO::FETCH_ASSOC);
+                if ($dupSettle) {
+                    echo json_encode(['success' => true, 'duplicate_prevented' => true, 'message' => 'تمت تسوية اليومية بنجاح مسبقاً (تم منع التكرار).']);
+                    break;
+                }
+            }
+
+            // Rapid duplicate check: if a settleDaily transaction for this rep was recorded in the last 4 seconds
+            $recentDupSettle = execute_query($pdo,
+                "SELECT id FROM transactions 
+                 WHERE related_to_id = ? 
+                   AND type IN ('rep_payment_in', 'rep_settlement', 'payment_in')
+                   AND transaction_date >= NOW() - INTERVAL 4 SECOND
+                   AND JSON_UNQUOTE(JSON_EXTRACT(details, '$.action')) = 'settleDaily'
+                 LIMIT 1",
+                [$repId]
+            )->fetch(PDO::FETCH_ASSOC);
+            if ($recentDupSettle) {
+                echo json_encode(['success' => true, 'duplicate_prevented' => true, 'message' => 'تمت تسوية اليومية بنجاح مسبقاً (تم منع التكرار).']);
                 break;
             }
 
@@ -14024,14 +14249,8 @@ switch ($module) {
                 $balRow = $balStmt->fetch(PDO::FETCH_ASSOC);
                 $currentBal = floatval($balRow['bal'] ?? 0);
 
-                if ($currentBal >= 0) {
-                    http_response_code(400);
-                    echo json_encode(['success' => false, 'message' => 'لا توجد مديونية على هذا المندوب لإغلاقها.']);
-                    break;
-                }
-                if ($totalPaidAmount > abs($currentBal) + 0.05) {
-                    http_response_code(400);
-                    echo json_encode(['success' => false, 'message' => 'مبلغ التقفيل الكلي أكبر من المديونية الحالية.']);
+                if ($totalPaidAmount <= 0) {
+                    echo json_encode(['success' => true, 'message' => 'تمت التسوية بنجاح بدون مدفوعات نقدية.']);
                     break;
                 }
 
@@ -14198,7 +14417,7 @@ switch ($module) {
                 $reps = $repsStmt ? $repsStmt->fetchAll(PDO::FETCH_ASSOC) : [];
 
                 $closedStatuses = "'delivered', 'completed', 'settled', 'closed', 'returned', 'full_return', 'cancelled'";
-                $sql = "SELECT o.*, c.name as customer_name, c.phone1, c.phone2, c.address, c.governorate, u.name as rep_name
+                $sql = "SELECT o.*, c.name as customer_name, c.phone1, c.phone2, COALESCE(NULLIF(o.address, ''), c.address) AS address, COALESCE(NULLIF(o.governorate, ''), c.governorate) AS governorate, u.name as rep_name
                         FROM orders o
                         LEFT JOIN customers c ON o.customer_id = c.id
                         LEFT JOIN users u ON o.rep_id = u.id
@@ -14283,7 +14502,7 @@ switch ($module) {
                 if ($ordersHasPage) $extraCols[] = 'o.page';
                 $extraColsSql = count($extraCols) > 0 ? (', ' . implode(', ', $extraCols)) : '';
 
-                $sql = "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, o.created_at{$extraColsSql}, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, c.address as address, c.governorate as governorate, o.id as order_id
+                $sql = "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, o.created_at{$extraColsSql}, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, COALESCE(NULLIF(o.address, ''), c.address) as address, COALESCE(NULLIF(o.governorate, ''), c.governorate) as governorate, o.id as order_id
                         FROM orders o LEFT JOIN customers c ON o.customer_id = c.id
                         WHERE o.rep_id = ? AND o.status IN ('with_rep', 'partial', 'postponed', 'deferred')
                         ORDER BY o.created_at DESC";
@@ -14478,7 +14697,7 @@ switch ($module) {
                             COALESCE(rjo.returned_value, 0) AS returned_value,
                             o.order_number, o.total_amount, o.shipping_fees, o.status AS order_status,
                             o.notes AS order_notes, o.created_at,
-                            c.name AS customer_name, c.phone1, c.address, c.governorate
+                            c.name AS customer_name, c.phone1, COALESCE(NULLIF(o.address, ''), c.address) AS address, COALESCE(NULLIF(o.governorate, ''), c.governorate) AS governorate
                      FROM rep_journal_orders rjo
                      LEFT JOIN orders o ON o.id = rjo.order_id
                      LEFT JOIN customers c ON c.id = o.customer_id
@@ -14597,40 +14816,25 @@ switch ($module) {
                     }
                 }
 
-                $shouldIncludeCurrentCustody = false;
-                if (!empty($selectedJournalIds) && table_exists($pdo, 'rep_daily_journal')) {
-                    $selectedIdsIn = implode(',', array_map('intval', $selectedJournalIds));
-                    $openCount = intval($pdo->query("SELECT COUNT(*) FROM rep_daily_journal WHERE id IN ($selectedIdsIn) AND is_closed = 0")->fetchColumn() ?? 0);
-                    $shouldIncludeCurrentCustody = $openCount > 0;
-                }
+                $shouldIncludeCurrentCustody = (!$from && !$to);
 
                 if ($shouldIncludeCurrentCustody) {
-                    // Include active (with_rep/partial) orders for this rep
-                    // We EXCLUDE finalized statuses like 'returned' or 'delivered' from current custody
-                    // because they should only appear if they are explicitly in rep_journal_orders for this journal.
+                    // Include active (with_rep/partial/postponed/returned) orders for this rep
                     $currentOrdersRows = execute_query($pdo,
                         "SELECT o.id, o.rep_id, o.order_number, o.status, o.total_amount, o.shipping_fees, o.created_at,
-                                c.name AS customer_name, c.phone1, c.address, c.governorate
+                                c.name AS customer_name, c.phone1, COALESCE(NULLIF(o.address, ''), c.address) AS address, COALESCE(NULLIF(o.governorate, ''), c.governorate) AS governorate
                          FROM orders o
                          LEFT JOIN customers c ON c.id = o.customer_id
-                         WHERE o.rep_id = ? AND o.status IN ('with_rep', 'partial', 'postponed')
+                         WHERE o.rep_id = ? AND o.status IN ('with_rep', 'partial', 'postponed', 'returned', 'deferred')
                          ORDER BY o.created_at DESC",
                         [$repId]
                     )->fetchAll(PDO::FETCH_ASSOC);
 
                     $activeSeen = [];
-                    // Exclude categorized orders ONLY if they already belong to THIS journal.
-                    // We allow active orders from current custody to be added if they are not yet in the journal lists.
-                    foreach ($active as $activeOrder)    { $activeSeen[intval($activeOrder['id']    ?? 0)] = true; }
+                    foreach ($active as $activeOrder)       { $activeSeen[intval($activeOrder['id']    ?? 0)] = true; }
                     foreach ($delivered as $deliveredOrder) { $activeSeen[intval($deliveredOrder['id'] ?? 0)] = true; }
-                    foreach ($deferred as $deferredOrder)  { $activeSeen[intval($deferredOrder['id']  ?? 0)] = true; }
-                    foreach ($returned as $returnedOrder)   { 
-                        // If it's in the returned list AND has a journal_id, it's definitely accounted for.
-                        // However, we MUST check if it belongs to THIS specific journal.
-                        if (intval($returnedOrder['journal_id'] ?? 0) === $repairJournalId) {
-                            $activeSeen[intval($returnedOrder['id']   ?? 0)] = true; 
-                        }
-                    }
+                    foreach ($deferred as $deferredOrder)   { $activeSeen[intval($deferredOrder['id']  ?? 0)] = true; }
+                    foreach ($returned as $returnedOrder)   { $activeSeen[intval($returnedOrder['id']  ?? 0)] = true; }
 
                     foreach ($currentOrdersRows as $currentOrderRow) {
                         $currentOrderId     = intval($currentOrderRow['id'] ?? 0);
@@ -14642,7 +14846,7 @@ switch ($module) {
                             'rep_id'       => intval($currentOrderRow['rep_id'] ?? 0),
                             'order_number' => $currentOrderRow['order_number'],
                             'order_status' => $currentOrderRow['status'],
-                            'status'       => 'with_rep', // Default fallback status
+                            'status'       => 'with_rep',
                             'total_amount' => floatval($currentOrderRow['total_amount'] ?? 0),
                             'total'        => floatval($currentOrderRow['total_amount'] ?? 0),
                             'shipping_fees'=> floatval($currentOrderRow['shipping_fees'] ?? 0),
@@ -14658,54 +14862,44 @@ switch ($module) {
                             'event_date'   => null,
                             'event_time'   => null,
                             'employee'     => null,
-                            'journal_id'   => null,
+                            'journal_id'   => $repairJournalId > 0 ? $repairJournalId : null,
                             'products'     => $itemsMap[$currentOrderId] ?? [],
                         ];
 
                         if ($currentOrderStatus === 'returned' || $currentOrderStatus === 'full_return') {
-                            // Map returned orders → returned list with correct status
                             $fallbackEntry['status'] = 'full_return';
-                            // Crucial: check if it's already in the journal by looking up its journal_id from rep_journal_orders
-                            $rjoCheck = execute_query($pdo, "SELECT journal_id FROM rep_journal_orders WHERE order_id = ? AND journal_id = ?", [$currentOrderId, $repairJournalId])->fetch(PDO::FETCH_ASSOC);
-                            if ($rjoCheck) {
-                                $fallbackEntry['journal_id'] = $repairJournalId;
-                                $returned[] = $fallbackEntry;
-                            } else {
-                                // If not in this journal, it remains in active custody but as a "returned" item
-                                // This is for display in "Orders with Rep" but NOT in stats.
-                                $active[] = $fallbackEntry;
-                            }
+                            $returned[] = $fallbackEntry;
+                            $activeSeen[$currentOrderId] = true;
                         } elseif ($currentOrderStatus === 'postponed' || $currentOrderStatus === 'deferred') {
                             $fallbackEntry['status'] = 'deferred';
                             $deferred[] = $fallbackEntry;
+                            $activeSeen[$currentOrderId] = true;
                         } else {
                             $active[] = $fallbackEntry;
+                            $activeSeen[$currentOrderId] = true;
                         }
                     }
                 }
 
-                // --- NEW FIX: Ensure partial returns from rawActive/rawDeferred are also in $returned list ---
+                // Ensure partial returns from rawActive/rawDeferred are also in $returned list
                 $allCurrent = array_merge($active, $deferred);
                 foreach ($allCurrent as $cOrd) {
                     $cId = intval($cOrd['id'] ?? 0);
-                    // Query for ANY return movement record for this order in THIS journal
                     $rjoRow = execute_query($pdo, 
                         "SELECT journal_id, returned_pieces, returned_value 
                          FROM rep_journal_orders 
-                         WHERE order_id = ? AND journal_id = ? AND (returned_pieces > 0 OR status IN ('returned', 'full_return', 'partial_return'))
+                         WHERE order_id = ? AND (returned_pieces > 0 OR status IN ('returned', 'full_return', 'partial_return'))
                          LIMIT 1", 
-                        [$cId, $repairJournalId]
+                        [$cId]
                     )->fetch(PDO::FETCH_ASSOC);
 
                     if ($rjoRow) {
-                        // Mark it as belonging to this journal for the returned list
-                        $cOrd['journal_id'] = $repairJournalId;
+                        $cOrd['journal_id'] = $rjoRow['journal_id'] ? intval($rjoRow['journal_id']) : ($repairJournalId > 0 ? $repairJournalId : null);
                         $cOrd['returned_pieces'] = intval($rjoRow['returned_pieces'] ?? 0);
                         $cOrd['returned_value'] = floatval($rjoRow['returned_value'] ?? 0);
 
-                        // Check if already in $returned to avoid duplicates
                         $alreadyIn = false;
-                        foreach ($returned as $rOrd) { if ($rOrd['id'] === $cOrd['id']) { $alreadyIn = true; break; } }
+                        foreach ($returned as $rOrd) { if (intval($rOrd['id']) === $cId) { $alreadyIn = true; break; } }
                         if (!$alreadyIn) {
                             $returned[] = $cOrd;
                         }
@@ -14795,6 +14989,26 @@ switch ($module) {
                         $updated++;
                         $journalId = $targetJournalId;
                     }
+                    // Synchronize orders table status & rep_id
+                    $mappedOrderStatus = null;
+                    if ($status === 'deferred') {
+                        $mappedOrderStatus = 'postponed';
+                    } elseif ($status === 'with_rep') {
+                        $mappedOrderStatus = 'with_rep';
+                    } elseif ($status === 'delivered') {
+                        $mappedOrderStatus = 'delivered';
+                    } elseif ($status === 'full_return') {
+                        $mappedOrderStatus = 'returned';
+                    }
+
+                    if ($mappedOrderStatus !== null) {
+                        if (column_exists($pdo, 'orders', 'updated_at')) {
+                            execute_query($pdo, "UPDATE orders SET status = ?, rep_id = ?, updated_at = NOW() WHERE id = ?", [$mappedOrderStatus, $repId, $oid]);
+                        } else {
+                            execute_query($pdo, "UPDATE orders SET status = ?, rep_id = ? WHERE id = ?", [$mappedOrderStatus, $repId, $oid]);
+                        }
+                    }
+
                     if ($journalId > 0) {
                         $affectedJournalIds[$journalId] = true;
                     }
@@ -15010,6 +15224,34 @@ switch ($module) {
                 sort($orders, SORT_NUMERIC);
             } else {
                 $orders = [];
+            }
+
+            $idempotencyToken = trim((string)($input['idempotency_token'] ?? $input['client_request_id'] ?? ''));
+            if ($idempotencyToken !== '') {
+                $dupDaily = execute_query($pdo,
+                    "SELECT id FROM rep_daily_journal 
+                     WHERE JSON_UNQUOTE(JSON_EXTRACT(orders_json, '$.idempotency_token')) = ?
+                     LIMIT 1",
+                    [$idempotencyToken]
+                )->fetch(PDO::FETCH_ASSOC);
+                if ($dupDaily) {
+                    echo json_encode(['success' => true, 'duplicate_prevented' => true, 'message' => 'تم إتمام اليومية بنجاح مسبقاً (تم منع التكرار).']);
+                    break;
+                }
+            }
+
+            // Rapid duplicate check: if a daily completion for this rep was created within the last 4 seconds
+            if ($repId > 0) {
+                $recentDaily = execute_query($pdo,
+                    "SELECT id FROM rep_daily_journal 
+                     WHERE rep_id = ? AND created_at >= NOW() - INTERVAL 4 SECOND
+                     ORDER BY id DESC LIMIT 1",
+                    [$repId]
+                )->fetch(PDO::FETCH_ASSOC);
+                if ($recentDaily) {
+                    echo json_encode(['success' => true, 'duplicate_prevented' => true, 'message' => 'تم إتمام اليومية بنجاح مسبقاً (تم منع التكرار).']);
+                    break;
+                }
             }
 
             // enforce defaults/locks for this user when completing daily
@@ -16728,7 +16970,7 @@ switch ($module) {
                 $ordersHasItemsJson = column_exists($pdo, 'orders', 'items_json');
                 $itemsJsonSql = $ordersHasItemsJson ? 'o.items_json' : 'NULL AS items_json';
 
-                $sql = "SELECT o.*, {$itemsJsonSql}, c.name as customer_name, c.phone1, c.phone2, c.address, c.governorate, u.name as rep_name
+                $sql = "SELECT o.*, {$itemsJsonSql}, c.name as customer_name, c.phone1, c.phone2, COALESCE(NULLIF(o.address, ''), c.address) AS address, COALESCE(NULLIF(o.governorate, ''), c.governorate) AS governorate, u.name as rep_name
                         FROM orders o
                         LEFT JOIN customers c ON o.customer_id = c.id
                         LEFT JOIN users u ON o.rep_id = u.id

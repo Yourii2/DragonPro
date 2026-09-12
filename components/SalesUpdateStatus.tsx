@@ -244,9 +244,14 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
         const ord = (openRepOrders?.orders || []).find((o: any) => o.id === id);
         if (!ord) continue;
         const orderRepId = ord?.rep_id ?? ord?.repId ?? repIdLocal;
-        const products = ord?.products || [];
-        // تحقق هل كل المنتجات سيتم إرجاعها (مرتجع كامل)
-        const isFullReturn = products.every((p: any) => Number(p.quantity || p.qty || 0) > 0);
+        const prods = Array.isArray(ord?.products) ? ord.products : [];
+        // تحقق هل كل المنتجات سيتم إرجاعها (مرتجع كامل) أم بعضها (مرتجع جزئي)
+        const hasPartialItems = prods.some((p: any) => {
+          const retQ = Number(p.returnQuantity);
+          const origQ = Number(p.quantity || p.qty || 0);
+          return retQ > 0 && retQ < origQ;
+        });
+        const isFullReturn = !hasPartialItems;
         
         if (isFullReturn) {
           // إرسال طلب تحديث الحالة فقط
@@ -262,8 +267,8 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
           totalReturned += computeOrderSubtotal(ord);
         } else {
           // مرتجع جزئي: قسم المنتجات المرتجعة عن المسلمة
-          const returnedProducts = products.filter((p: any) => Number(p.returnQuantity || 0) > 0);
-          const deliveredProducts = products.filter((p: any) => !p.returnQuantity || Number(p.returnQuantity) < Number(p.quantity || p.qty || 0));
+          const returnedProducts = prods.filter((p: any) => Number(p.returnQuantity || 0) > 0);
+          const deliveredProducts = prods.filter((p: any) => !p.returnQuantity || Number(p.returnQuantity) < Number(p.quantity || p.qty || 0));
           // إرسال المرتجع للمخزن
           if (returnedProducts.length > 0) {
             await fetch(`${API_BASE_PATH}/api.php?module=orders&action=partialReturn`, {

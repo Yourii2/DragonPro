@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
-//import { User, ShoppingCart, CreditCard, Trash2, ArrowRight, Printer, Box, LayoutList, LayoutGrid, ArrowDownAZ, ArrowUpAZ } from 'lucide-react';
-import { User, ShoppingCart, CreditCard, Trash2, ArrowRight, Printer, Box, LayoutList, LayoutGrid, ArrowDownAZ, ArrowUpAZ, Phone, MapPin } from 'lucide-react';
+import { User, ShoppingCart, CreditCard, Trash2, ArrowRight, Printer, Box, LayoutList, LayoutGrid, ArrowDownAZ, ArrowUpAZ, Phone, MapPin, Loader2 } from 'lucide-react';
 import SmallOrderCard from './OrderConfirmations';
 import CustomSelect from './CustomSelect';
 
@@ -195,6 +194,10 @@ const SalesDaily: React.FC = () => {
   const scanningLockRef = useRef(false);
   const [openDailyInfo, setOpenDailyInfo] = useState<{ daily_code: string; journal_id: number } | null>(null);
 
+  // Anti-double-click & Idempotency Submission Lock
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const isSubmittingRef = useRef(false);
+
   // Accounting & Dual Payment
   const [prevBalance, setPrevBalance] = useState<number>(0);
   const [paymentAdjustment, setPaymentAdjustment] = useState<number>(0); // Amount Paid Now (deposit) from rep -> company
@@ -326,7 +329,7 @@ const SalesDaily: React.FC = () => {
       }
 
       try {
-        const pr = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status_in=pending,returned,postponed,cancelled,confirmed,no_answer&limit=500`);
+        const pr = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status_in=pending,returned,postponed,cancelled,confirmed,no_answer&limit=5000`);
         const jr = await pr.json().catch(() => ({ success: false }));
         setPendingOrdersList(jr.success ? (jr.data || []) : []);
       } catch (e) {
@@ -464,7 +467,7 @@ const SalesDaily: React.FC = () => {
 
   const refreshPendingOrdersList = async () => {
     try {
-      const pr = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status_in=pending,returned,postponed,cancelled,confirmed,no_answer&limit=500`);
+      const pr = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status_in=pending,returned,postponed,cancelled,confirmed,no_answer&limit=5000`);
       const jr = await pr.json().catch(() => ({ success: false }));
       setPendingOrdersList(jr.success ? (jr.data || []) : []);
     } catch (e) {
@@ -1780,7 +1783,11 @@ const scanBarcodeAddOrder = async () => {
   };
 
   const onComplete = async () => {
-    const assigneeId = isShippingMode ? selectedShippingCompanyId : selectedRepId;
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+    setIsSubmitting(true);
+    try {
+      const assigneeId = isShippingMode ? selectedShippingCompanyId : selectedRepId;
     if (!assigneeId) {
       Swal.fire(isShippingMode ? 'اختر شركة الشحن' : 'اختر المندوب', 'الرجاء اختيار جهة قبل إتمام اليومية', 'error');
       return;
@@ -1905,29 +1912,39 @@ const scanBarcodeAddOrder = async () => {
       splitPayments: splitPayments && splitPayments.length > 0 ? splitPayments : null
     };
 
-    try {
-      const resp = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=completeDaily`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      const jr = await resp.json();
+      const idempotencyToken = 'daily_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+      payload.idempotency_token = idempotencyToken;
 
-      if (jr && jr.success) {
-        Swal.fire('تم', 'تمت معالجة اليومية وطباعه اليومية.', 'success');
-        printA4Report(ordersToAssign, { ...(jr.reportData || {}), repName, prevBalance, paidNow: paidNowSigned });
-        resetPage();
-        refreshPendingOrdersList();
-      } else {
-        Swal.fire('فشل', jr?.message || 'لم يؤكد الخادم المعالجة.', 'error');
+      try {
+        const resp = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=completeDaily`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const jr = await resp.json();
+
+        if (jr && jr.success) {
+          Swal.fire('تم', 'تمت معالجة اليومية وطباعه اليومية.', 'success');
+          printA4Report(ordersToAssign, { ...(jr.reportData || {}), repName, prevBalance, paidNow: paidNowSigned });
+          resetPage();
+          refreshPendingOrdersList();
+        } else {
+          Swal.fire('فشل', jr?.message || 'لم يؤكد الخادم المعالجة.', 'error');
+        }
+      } catch (e) {
+        console.error('Complete daily failed', e);
+        Swal.fire('خطأ', 'فشل إتمام اليومية: راجع الكونسول.', 'error');
       }
-    } catch (e) {
-      console.error('Complete daily failed', e);
-      Swal.fire('خطأ', 'فشل إتمام اليومية: راجع الكونسول.', 'error');
+    } finally {
+      isSubmittingRef.current = false;
+      setIsSubmitting(false);
     }
   };
 
   const onCompleteSilent = async () => {
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+    setIsSubmitting(true);
     try {
       const assigneeId = isShippingMode ? selectedShippingCompanyId : selectedRepId;
       if (!assigneeId) return;
@@ -2004,6 +2021,9 @@ const scanBarcodeAddOrder = async () => {
         splitPayments: splitPayments && splitPayments.length > 0 ? splitPayments : null
       };
 
+      const idempotencyToken = 'daily_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+      payload.idempotency_token = idempotencyToken;
+
       const resp = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=completeDaily`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2030,6 +2050,9 @@ const scanBarcodeAddOrder = async () => {
         text: 'فشل إتمام اليومية: ' + (e?.message || 'حدث خطأ في الاتصال بالخادم'),
         icon: 'error'
       });
+    } finally {
+      isSubmittingRef.current = false;
+      setIsSubmitting(false);
     }
   };
 
@@ -2361,10 +2384,11 @@ const scanBarcodeAddOrder = async () => {
           <div className="flex gap-2">
             <button
               onClick={onCompleteSilent}
-              disabled={!startDailyUnlocked}
-              className={`flex-1 bg-emerald-600 text-white py-2 rounded-xl flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-emerald-300 ${!startDailyUnlocked ? 'opacity-50 cursor-not-allowed' : 'hover:bg-emerald-700'}`}
+              disabled={!startDailyUnlocked || isSubmitting}
+              className={`flex-1 bg-emerald-600 text-white py-2 rounded-xl flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-emerald-300 ${(!startDailyUnlocked || isSubmitting) ? 'opacity-50 cursor-not-allowed' : 'hover:bg-emerald-700'}`}
             >
-              <ArrowRight /> إتمام و طباعه اليوميه
+              {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <ArrowRight size={18} />} 
+              {isSubmitting ? 'جاري إتمام اليومية...' : 'إتمام و طباعه اليوميه'}
             </button>
 
             <button

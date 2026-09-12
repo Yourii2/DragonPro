@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
-import { User, Wallet, PackageCheck, PackageX, CheckCircle2, RefreshCw, Eye, LayoutGrid, List, ArrowUp, ArrowDown } from 'lucide-react';
+import { User, Wallet, PackageCheck, PackageX, CheckCircle2, RefreshCw, Eye, LayoutGrid, List, ArrowUp, ArrowDown, Loader2 } from 'lucide-react';
 import CustomSelect from './CustomSelect';
 
 // --- Helpers ---
@@ -154,6 +154,9 @@ const SalesDailyClose: React.FC = () => {
 
   const [loading, setLoading] = useState(false);
   const [statsLoading, setStatsLoading] = useState(false);
+  // Anti-double-click & Idempotency Submission Lock
+  const [isClosingDaily, setIsClosingDaily] = useState(false);
+  const isClosingDailyRef = useRef(false);
 
   // Core Data
   const [reps, setReps] = useState<any[]>([]);
@@ -331,20 +334,22 @@ const SalesDailyClose: React.FC = () => {
       const custodyRes = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getSalesActiveWithRep&rep_id=${encodeURIComponent(repId)}`).then(r => r.json()).catch(() => null);
       const custodyOrders = custodyRes?.success && Array.isArray(custodyRes.data) ? custodyRes.data : [];
 
-      // 4. Get Journal Orders if Open Daily Exists
+      // 4. Get Journal Orders (Always fetch for rep to display delivered, returned, and deferred/nazool)
       let jDelivered: any[] = [];
       let jReturned: any[] = [];
       let jDeferred: any[] = [];
 
-      if (openJournalId !== 'none') {
-        const ordersRes = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getJournalOrders&rep_id=${encodeURIComponent(repId)}&journal_ids=${openJournalId}`).then(r => r.json()).catch(() => null);
-        if (ordersRes && ordersRes.success) {
-          jDelivered = uniqOrdersById(ordersRes.delivered || []);
-          jReturned = uniqOrdersById(ordersRes.returned || []);
-          
-          // Filter Deferred to only include those assigned to this specific journal
-          const rawDeferred = ordersRes.deferred || [];
-          jDeferred = uniqOrdersById(rawDeferred.filter((o: any) => String(o.journal_id || o.journalId) === openJournalId));
+      const journalParam = openJournalId !== 'none' ? `&journal_ids=${openJournalId}` : '';
+      const ordersRes = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getJournalOrders&rep_id=${encodeURIComponent(repId)}${journalParam}`).then(r => r.json()).catch(() => null);
+      if (ordersRes && ordersRes.success) {
+        jDelivered = uniqOrdersById(ordersRes.delivered || []);
+        jReturned = uniqOrdersById(ordersRes.returned || []);
+        
+        const rawDeferred = ordersRes.deferred || [];
+        if (openJournalId !== 'none') {
+          jDeferred = uniqOrdersById(rawDeferred.filter((o: any) => !o.journal_id || String(o.journal_id || o.journalId) === openJournalId));
+        } else {
+          jDeferred = uniqOrdersById(rawDeferred);
         }
       }
 
@@ -352,7 +357,7 @@ const SalesDailyClose: React.FC = () => {
       setReturnedOrders(jReturned);
       setDeferredOrders(jDeferred);
 
-      // 5. Filter Active Orders (exclude those that are already deferred in the current journal)
+      // 5. Filter Active Orders (exclude those that are already deferred or returned/delivered)
       const deferredIds = new Set(jDeferred.map(getRealOrderId));
       const filteredActive = uniqOrdersById(custodyOrders).filter(o => {
         const id = getRealOrderId(o);
@@ -404,7 +409,7 @@ const SalesDailyClose: React.FC = () => {
       if (fullIds.length > 0) {
         await Promise.all(fullIds.map(id => fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: Number(id), status: 'delivered', rep_Id: Number(selectedRepId) })
+          body: JSON.stringify({ id: Number(id), status: 'delivered', rep_id: Number(selectedRepId), repId: Number(selectedRepId) })
         }).catch(() => null)));
       }
 
@@ -424,7 +429,7 @@ const SalesDailyClose: React.FC = () => {
         // Also mark remaining portion as delivered in orders table
         await Promise.all(partialIds.map(id => fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: Number(id), status: 'delivered', rep_Id: Number(selectedRepId) })
+          body: JSON.stringify({ id: Number(id), status: 'delivered', rep_id: Number(selectedRepId), repId: Number(selectedRepId) })
         }).catch(() => null)));
       }
 
@@ -476,10 +481,15 @@ const SalesDailyClose: React.FC = () => {
     if (selectedOrderIds.length === 0) { Swal.fire('تحذير', 'اختر الاوردرات أولاً', 'warning'); return; }
     try {
       setLoading(true);
+      const movedIds = selectedOrderIds.map(Number);
       await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: selectedOrderIds.map(Number), status: 'deferred' })
+        body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: movedIds, status: 'deferred' })
       });
+      await Promise.all(movedIds.map(id => fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, status: 'postponed', rep_id: Number(selectedRepId), repId: Number(selectedRepId) })
+      }).catch(() => null)));
       await loadRepData(selectedRepId);
       Swal.fire('تم', 'تم نقل الاوردرات المحددة إلى المؤجلة (النزول).', 'success');
     } catch (e) {
@@ -493,10 +503,15 @@ const SalesDailyClose: React.FC = () => {
   const moveSingleToDeferred = async (order: any) => {
     try {
       setLoading(true);
+      const oid = Number(getRealOrderId(order));
       await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: [Number(getRealOrderId(order))], status: 'deferred' })
+        body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: [oid], status: 'deferred' })
       });
+      await fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: oid, status: 'postponed', rep_id: Number(selectedRepId), repId: Number(selectedRepId) })
+      }).catch(() => null);
       await loadRepData(selectedRepId);
     } catch (e) {
       console.error(e);
@@ -516,7 +531,7 @@ const SalesDailyClose: React.FC = () => {
       });
       await fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: oid, status: 'with_rep', rep_Id: Number(selectedRepId) })
+        body: JSON.stringify({ id: oid, status: 'with_rep', rep_id: Number(selectedRepId), repId: Number(selectedRepId) })
       });
       await loadRepData(selectedRepId);
     } catch (e) {
@@ -563,6 +578,7 @@ const SalesDailyClose: React.FC = () => {
   };
 
   const handleCloseDaily = async () => {
+    if (isClosingDailyRef.current) return;
     if (!selectedRepId) { Swal.fire('اختر المندوب', 'يرجى اختيار المندوب أولاً.', 'warning'); return; }
     if (!openDailyInfo) { Swal.fire('تنبيه', 'المندوب ليس له يومية مفتوحة حالياً.', 'warning'); return; }
 
@@ -601,13 +617,19 @@ const SalesDailyClose: React.FC = () => {
 
     if (!res.isConfirmed) return;
 
+    if (isClosingDailyRef.current) return;
+    isClosingDailyRef.current = true;
+    setIsClosingDaily(true);
+    setLoading(true);
+
+    const idempotencyToken = 'close_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+
     try {
-      setLoading(true);
       let settleSuccess = false;
       if (amount <= 0) {
         settleSuccess = true;
       } else if (settlementDirection === 'collect') {
-        const payload: any = { repId: Number(selectedRepId) };
+        const payload: any = { repId: Number(selectedRepId), idempotency_token: idempotencyToken };
         if (isSplitPayment) {
           const splits = [];
           if (cashAmt > 0) splits.push({ treasuryId: Number(cashTreasuryId), paidAmount: cashAmt, type: 'cash', title: 'تقفيل يومية - كاش' });
@@ -617,7 +639,7 @@ const SalesDailyClose: React.FC = () => {
           payload.treasuryId = Number(selectedTreasuryId);
           payload.paidAmount = amount;
         }
-        payload.details = { reason: 'اغلاق اليوميه تلقائيا' };
+        payload.details = { reason: 'اغلاق اليوميه تلقائيا', idempotency_token: idempotencyToken };
         payload.notes = 'اغلاق اليوميه تلقائيا';
 
         const r = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=settleDaily`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -627,7 +649,8 @@ const SalesDailyClose: React.FC = () => {
       } else {
         const txPayload = {
           type: 'rep_payment_out', related_to_type: 'rep', related_to_id: Number(selectedRepId), amount: amount, treasuryId: Number(selectedTreasuryId || cashTreasuryId), direction: 'out',
-          details: { context: 'close_daily', action: 'settleDaily', reason: 'اغلاق اليوميه تلقائيا' }, notes: 'اغلاق اليوميه تلقائيا', title: `دفع إلى المندوب - تسوية يومية`
+          details: { context: 'close_daily', action: 'settleDaily', reason: 'اغلاق اليوميه تلقائيا', idempotency_token: idempotencyToken }, notes: 'اغلاق اليوميه تلقائيا', title: `دفع إلى المندوب - تسوية يومية`,
+          idempotency_token: idempotencyToken
         };
         const r2 = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=create`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(txPayload) });
         const j2 = await r2.json();
@@ -652,7 +675,7 @@ const SalesDailyClose: React.FC = () => {
 
         const closeResp = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=closeRepDaily`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ rep_id: Number(selectedRepId), journal_id: openDailyInfo.id, employee: currentEmpName, created_by: currentUserId })
+          body: JSON.stringify({ rep_id: Number(selectedRepId), journal_id: openDailyInfo ? openDailyInfo.id : 0, employee: currentEmpName, created_by: currentUserId })
         });
         const closeJson = await closeResp.json().catch(() => null);
         if (!closeJson?.success) {
@@ -676,6 +699,8 @@ const SalesDailyClose: React.FC = () => {
       console.error('Close daily failed', e);
       Swal.fire('خطأ', 'فشل الاتصال بالخادم أثناء التقفيل.', 'error');
     } finally {
+      isClosingDailyRef.current = false;
+      setIsClosingDaily(false);
       setLoading(false);
     }
   };
@@ -1166,8 +1191,9 @@ const SalesDailyClose: React.FC = () => {
               <div className="flex justify-between"><span className="text-slate-200/80">المتبقي (تقديري)</span><span className={`font-black ${balanceClass(settlementDirection === 'collect' ? repBalance + (isSplitPayment ? (cashPaidAmount + electronicPaidAmount) : paidAmount) : repBalance - (isSplitPayment ? (cashPaidAmount + electronicPaidAmount) : paidAmount))}`}>{money(settlementDirection === 'collect' ? repBalance + (isSplitPayment ? (cashPaidAmount + electronicPaidAmount) : paidAmount) : repBalance - (isSplitPayment ? (cashPaidAmount + electronicPaidAmount) : paidAmount))} {currencySymbol}</span></div>
             </div>
 
-            <button onClick={handleCloseDaily} disabled={loading || !selectedRepId || (!isSplitPayment && paidAmount > 0 && !selectedTreasuryId) || (isSplitPayment && (cashPaidAmount + electronicPaidAmount) <= 0)} className="mt-5 w-full bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-slate-900 font-black py-3 rounded-2xl transition-colors">
-              تأكيد التقفيل وإغلاق اليومية
+            <button onClick={handleCloseDaily} disabled={loading || isClosingDaily || !selectedRepId || (!isSplitPayment && paidAmount > 0 && !selectedTreasuryId) || (isSplitPayment && (cashPaidAmount + electronicPaidAmount) <= 0)} className="mt-5 w-full bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-slate-900 font-black py-3 rounded-2xl transition-colors flex items-center justify-center gap-2">
+              {isClosingDaily ? <Loader2 className="animate-spin" size={18} /> : null}
+              {isClosingDaily ? 'جاري التقفيل وإغلاق اليومية...' : 'تأكيد التقفيل وإغلاق اليومية'}
             </button>
           </div>
         </div>

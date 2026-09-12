@@ -2,7 +2,7 @@ import Custom12HourTimePicker from './Custom12HourTimePicker';
 import React, { useState, useEffect, useMemo } from 'react';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { assetUrl } from '../services/assetUrl';
-import { Calendar, ShoppingCart, Printer, History, Search, PlusCircle, MinusCircle, UploadCloud, FileText, RefreshCcw, ClipboardPaste, MapPin, Phone, User, CheckSquare, Square, Eye, Edit, ChevronRight, AlertTriangle, AlertCircle } from 'lucide-react';
+import { Calendar, ShoppingCart, Printer, History, Search, PlusCircle, MinusCircle, UploadCloud, FileText, RefreshCcw, ClipboardPaste, MapPin, Phone, User, CheckSquare, Square, Eye, Edit, ChevronRight, AlertTriangle, AlertCircle, Lock } from 'lucide-react';
 import Swal from 'sweetalert2';
 import CustomSelect from './CustomSelect';
 import Barcode from './Barcode';
@@ -993,18 +993,18 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       return;
     }
 
-    const customerObj = selectedCustomerId ? (customers.find(c=>c.id===selectedCustomerId) || null) : null;
-    const customerName = customerObj ? (customerObj.name || '') : newCustomer.name;
-    const phone1 = customerObj ? (customerObj.phone1 || '') : newCustomer.phone1;
-    const phone2 = customerObj ? (customerObj.phone2 || '') : newCustomer.phone2;
-    const governorateVal = customerObj ? (customerObj.governorate || '') : newCustomer.governorate;
-    const addr = customerObj ? (customerObj.address || '') : newCustomer.address;
+    const customerName = (newCustomer.name || '').trim();
+    const phone1 = (newCustomer.phone1 || '').trim();
+    const phone2 = (newCustomer.phone2 || '').trim();
+    const governorateVal = (newCustomer.governorate || '').trim();
+    const addr = (newCustomer.address || '').trim();
 
     const subtotal = importedProducts.reduce((s, p) => s + (Number(p.quantity || 0) * Number(p.price || 0)), 0);
     const totals = calculateOrderTotals(subtotal, shippingValue, discountType, discountValue);
 
     const orderPayload = {
       orderNumber: null,
+      customerId: selectedCustomerId || null,
       customerName,
       phone: normalizeNumbers(phone1),
       phone2: normalizeNumbers(phone2),
@@ -1028,6 +1028,18 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
 
     try {
       if (editingOrderId) {
+        // Prevent saving edits to an order currently in rep custody
+        const currentOrd = orders.find(o => Number(o.id) === Number(editingOrderId));
+        if (currentOrd && String(currentOrd.status || '').toLowerCase().trim() === 'with_rep') {
+          Swal.fire({
+            icon: 'error',
+            title: 'عملية غير مسموحة',
+            text: 'لا يمكن حفظ التعديلات لأن هذا الاوردر حالياً في عهدة المندوب (مع المندوب). يجب استرجاعه من المندوب أولاً.',
+            confirmButtonText: 'حسناً'
+          });
+          return;
+        }
+
         // Update existing order
         // Ensure product lines are sent under both `products` and `importedProducts` to match different backend expectations
         const updateBody: any = { id: editingOrderId, ...orderPayload, products: importedProducts, importedProducts };
@@ -1657,6 +1669,22 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
   };
 
   const editOrder = async (order: any) => {
+    // Prevent editing orders currently in rep custody (with_rep)
+    const st = String(order?.status || '').toLowerCase().trim();
+    if (st === 'with_rep') {
+      try {
+        Swal.fire({
+          icon: 'warning',
+          title: 'لا يمكن تعديل الاوردر',
+          text: 'هذا الاوردر في عهدة المندوب حالياً (مع المندوب)، ولا يمكن تعديل بياناته أو أصنافه حتى يتم استرجاعه من المندوب أولاً.',
+          confirmButtonText: 'حسناً'
+        });
+      } catch (e) {
+        alert('لا يمكن تعديل الاوردر أثناء وجوده في عهدة المندوب');
+      }
+      return;
+    }
+
     // Map a saved order into the manual new-order form for full editing
     
     // 1. Ensure we have the latest products list
@@ -2440,7 +2468,24 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                     <div className="flex-1">
                       <CustomSelect
                         value={selectedCustomerId ? String(selectedCustomerId) : ''}
-                        onChange={v => setSelectedCustomerId(v ? Number(v) : '')}
+                        onChange={v => {
+                          const cid = v ? Number(v) : '';
+                          setSelectedCustomerId(cid);
+                          if (cid) {
+                            const c = customers.find((x: any) => Number(x.id) === Number(cid));
+                            if (c) {
+                              setNewCustomer({
+                                name: c.name || '',
+                                phone1: c.phone1 || '',
+                                phone2: c.phone2 || '',
+                                governorate: c.governorate || '',
+                                address: c.address || ''
+                              });
+                            }
+                          } else {
+                            setNewCustomer({ name: '', phone1: '', phone2: '', governorate: '', address: '' });
+                          }
+                        }}
                         options={[{ value: '', label: '— عميل جديد —' }, ...customers.map((c: any) => ({ value: String(c.id), label: `${c.name} - ${c.phone1 || ''}` }))]}
                         className="w-full"
                       />
@@ -2454,6 +2499,11 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                       </button>
                     )}
                   </div>
+                  {selectedCustomerId !== '' && (
+                    <div className="mt-2 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 p-2.5 rounded-xl text-xs flex items-center gap-2">
+                      <span>💡 تم جلب بيانات العميل المسجلة. يمكنك تعديل العنوان أو المحافظة لهذا الأوردر بحرية وسيُحفظ العنوان الجديد في البوليصة.</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Customer Fields */}
@@ -2462,10 +2512,9 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                     <label className="text-xs font-black text-slate-500 dark:text-slate-400 mb-1.5 block">اسم العميل</label>
                     <input
                       placeholder="الاسم الكامل"
-                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-                      value={selectedCustomerId ? (customers.find((c: any) => c.id === selectedCustomerId)?.name || '') : newCustomer.name}
-                      onChange={e => { if (!selectedCustomerId) setNewCustomer({ ...newCustomer, name: e.target.value }); }}
-                      disabled={!!selectedCustomerId}
+                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                      value={newCustomer.name}
+                      onChange={e => setNewCustomer({ ...newCustomer, name: e.target.value })}
                     />
                   </div>
                   <div className="grid grid-cols-2 gap-2">
@@ -2473,20 +2522,39 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                       <label className="text-xs font-black text-slate-500 dark:text-slate-400 mb-1.5 flex items-center gap-1"><Phone size={11} /> هاتف 1</label>
                       <input
                         placeholder="01xxxxxxxxx"
-                        className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-                        value={selectedCustomerId ? (customers.find((c: any) => c.id === selectedCustomerId)?.phone1 || '') : newCustomer.phone1}
-                        onChange={e => { if (!selectedCustomerId) setNewCustomer({ ...newCustomer, phone1: e.target.value }); }}
-                        disabled={!!selectedCustomerId}
+                        className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                        value={newCustomer.phone1}
+                        onChange={e => {
+                          const val = e.target.value;
+                          const clean = normalizeNumbers(val);
+                          setNewCustomer(prev => ({ ...prev, phone1: val }));
+                          if (!selectedCustomerId && clean.length >= 10) {
+                            const matched = customers.find((c: any) => {
+                              const cp1 = normalizeNumbers(c.phone1 || '');
+                              const cp2 = normalizeNumbers(c.phone2 || '');
+                              return (cp1 && cp1 === clean) || (cp2 && cp2 === clean);
+                            });
+                            if (matched) {
+                              setSelectedCustomerId(Number(matched.id));
+                              setNewCustomer({
+                                name: matched.name || '',
+                                phone1: val,
+                                phone2: matched.phone2 || '',
+                                governorate: matched.governorate || '',
+                                address: matched.address || ''
+                              });
+                            }
+                          }
+                        }}
                       />
                     </div>
                     <div>
                       <label className="text-xs font-black text-slate-500 dark:text-slate-400 mb-1.5 block">هاتف 2</label>
                       <input
                         placeholder="اختياري"
-                        className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-                        value={selectedCustomerId ? (customers.find((c: any) => c.id === selectedCustomerId)?.phone2 || '') : newCustomer.phone2}
-                        onChange={e => { if (!selectedCustomerId) setNewCustomer({ ...newCustomer, phone2: e.target.value }); }}
-                        disabled={!!selectedCustomerId}
+                        className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                        value={newCustomer.phone2}
+                        onChange={e => setNewCustomer({ ...newCustomer, phone2: e.target.value })}
                       />
                     </div>
                   </div>
@@ -2494,20 +2562,18 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                     <label className="text-xs font-black text-slate-500 dark:text-slate-400 mb-1.5 flex items-center gap-1"><MapPin size={11} /> المحافظة</label>
                     <input
                       placeholder="المحافظة"
-                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-                      value={selectedCustomerId ? (customers.find((c: any) => c.id === selectedCustomerId)?.governorate || '') : newCustomer.governorate}
-                      onChange={e => { if (!selectedCustomerId) setNewCustomer({ ...newCustomer, governorate: e.target.value }); }}
-                      disabled={!!selectedCustomerId}
+                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                      value={newCustomer.governorate}
+                      onChange={e => setNewCustomer({ ...newCustomer, governorate: e.target.value })}
                     />
                   </div>
                   <div>
                     <label className="text-xs font-black text-slate-500 dark:text-slate-400 mb-1.5 block">العنوان التفصيلي</label>
                     <input
                       placeholder="الشارع، المبنى..."
-                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-                      value={selectedCustomerId ? (customers.find((c: any) => c.id === selectedCustomerId)?.address || '') : newCustomer.address}
-                      onChange={e => { if (!selectedCustomerId) setNewCustomer({ ...newCustomer, address: e.target.value }); }}
-                      disabled={!!selectedCustomerId}
+                      className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                      value={newCustomer.address}
+                      onChange={e => setNewCustomer({ ...newCustomer, address: e.target.value })}
                     />
                   </div>
                 </div>
@@ -2943,10 +3009,29 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                             <div className="flex flex-col items-end gap-1">
                               {getStatusChip(order.status)}
                               <div className="mt-2 flex items-center gap-2">
-                                <button onClick={() => editOrder(order)} title="تعديل الطلب" className="flex items-center gap-2 bg-amber-500 text-white px-3 py-1 rounded-lg hover:bg-amber-600 text-sm font-bold shadow-sm transition-colors">
-                                  <Edit size={18} />
-                                  <span>تعديل الاوردر</span>
-                                </button>
+                                {String(order.status || '').toLowerCase().trim() === 'with_rep' ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      Swal.fire({
+                                        icon: 'warning',
+                                        title: 'الاوردر في عهدة المندوب',
+                                        text: 'لا يمكن تعديل هذا الاوردر لأنه حالياً في عهدة المندوب (مع المندوب). يجب استرجاعه من المندوب أولاً لإجراء أي تعديل.',
+                                        confirmButtonText: 'حسناً'
+                                      });
+                                    }}
+                                    title="لا يمكن تعديل الأوردر أثناء وجوده في عهدة المندوب"
+                                    className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-700/80 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-600 px-2.5 py-1 rounded-lg text-xs font-bold hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors shadow-sm cursor-not-allowed"
+                                  >
+                                    <Lock size={14} className="text-amber-500" />
+                                    <span>مع المندوب (مغلق)</span>
+                                  </button>
+                                ) : (
+                                  <button onClick={() => editOrder(order)} title="تعديل الطلب" className="flex items-center gap-2 bg-amber-500 text-white px-3 py-1 rounded-lg hover:bg-amber-600 text-sm font-bold shadow-sm transition-colors">
+                                    <Edit size={18} />
+                                    <span>تعديل الاوردر</span>
+                                  </button>
+                                )}
                               </div>
                               {order.status === 'with_rep' && (() => {
                                 const rn = getRepName(order);

@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { Wallet, TrendingUp, TrendingDown, ArrowLeftRight, Landmark, Plus, Search, X, Save, Edit, Trash2, Eye, Coins, ArrowDown, ArrowUp, Truck, Printer } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Wallet, TrendingUp, TrendingDown, ArrowLeftRight, Landmark, Plus, Search, X, Save, Edit, Trash2, Eye, Coins, ArrowDown, ArrowUp, Truck, Printer, Loader2 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
 import CustomSelect from './CustomSelect';
@@ -20,6 +20,10 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
   const [expenseData, setExpenseData] = useState({ amount: '', treasury_id: '', category: 'other', notes: '' });
   const [depositData, setDepositData] = useState({ amount: '', treasury_id: '', notes: '' });
   const [transferData, setTransferData] = useState({ amount: '', from_treasury_id: '', to_treasury_id: '', notes: '' });
+
+  // Anti-double-click & Idempotency Submission Lock
+  const [isSubmittingTx, setIsSubmittingTx] = useState(false);
+  const isSubmittingTxRef = useRef(false);
 
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [detailStartDate, setDetailStartDate] = useState<string>(() => {
@@ -759,6 +763,8 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
 
   const handleTransactionSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmittingTxRef.current) return;
+
     let url = `${API_BASE_PATH}/api.php?module=transactions&action=create`;
     let payload: any = {};
     let treasuryToCheck: any = null;
@@ -820,6 +826,15 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
       return;
     }
 
+    isSubmittingTxRef.current = true;
+    setIsSubmittingTx(true);
+
+    const idempotencyToken = 'tx_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+    payload.idempotency_token = idempotencyToken;
+    if (payload.details && typeof payload.details === 'object') {
+      payload.details.idempotency_token = idempotencyToken;
+    }
+
     try {
       const response = await fetch(url, {
         method: 'POST',
@@ -875,6 +890,9 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
       }
     } catch (error) {
       Swal.fire('خطأ في الاتصال', 'فشل الاتصال بالخادم.', 'error');
+    } finally {
+      isSubmittingTxRef.current = false;
+      setIsSubmittingTx(false);
     }
   };
 
@@ -1263,8 +1281,9 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
                   <div><label className="text-xs font-bold text-slate-500">السبب/البيان</label><input type="text" required value={transferData.notes} onChange={e => setTransferData({...transferData, notes: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-3 px-4 text-sm mt-1" /></div>
                 </>
               )}
-              <button type="submit" className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black shadow-xl shadow-blue-500/30 hover:bg-blue-700 transition-all">
-                تنفيذ العملية
+              <button type="submit" disabled={isSubmittingTx} className="w-full bg-blue-600 disabled:opacity-50 text-white py-4 rounded-2xl font-black shadow-xl shadow-blue-500/30 hover:bg-blue-700 transition-all flex items-center justify-center gap-2">
+                {isSubmittingTx ? <Loader2 className="animate-spin" size={20} /> : null}
+                {isSubmittingTx ? 'جاري تنفيذ العملية...' : 'تنفيذ العملية'}
               </button>
             </form>
           </div>
