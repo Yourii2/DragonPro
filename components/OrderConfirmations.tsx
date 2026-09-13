@@ -955,17 +955,21 @@ const OrderConfirmations: React.FC = () => {
     }
     setCancelBarcode(''); // Clear immediately to prevent scanner buffer collision
 
-    // Verify if order exists in the representative's active assigned orders list
-    // Strict priority: Match orderNumber / order_number first, never match a different order by id
-    const match = activeSelectedRepOrders.find(
-      (item) => isOrderMatchingBarcode(item.order, barcode) || (
-        item.order_id && !item.order?.orderNumber && !item.order?.order_number && String(item.order_id) === barcode
-      )
+    // Check if order exists in the representative's assigned orders list (active or other tabs)
+    const match = selectedRepOrders.find(
+      (item) => isOrderMatchingBarcode(item.order, barcode) || 
+                String(item.order_id) === barcode || 
+                String(item.order?.id) === barcode
     );
 
-    if (!match) {
-      Swal.fire('تنبيه', `الأوردر رقم #${barcode} غير مسند للمندوب المختار حالياً.`, 'warning');
-      return;
+    const payload: any = {
+      rep_id: selectedRepId,
+      barcode,
+      decision
+    };
+    if (match) {
+      payload.order_id = match.order_id;
+      payload.barcode = getOrderNumber(match.order || { id: match.order_id });
     }
 
     setSubmitting(true);
@@ -973,7 +977,7 @@ const OrderConfirmations: React.FC = () => {
       const response = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateOrderConfirmationDecision`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rep_id: selectedRepId, order_id: match.order_id, barcode, decision })
+        body: JSON.stringify(payload)
       });
       const result = await response.json();
       if (!result?.success) {
@@ -1001,7 +1005,12 @@ const OrderConfirmations: React.FC = () => {
       const response = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateOrderConfirmationDecision`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rep_id: selectedRepId, order_id: assignment.order_id, barcode: String(assignment.order_id), decision })
+        body: JSON.stringify({ 
+          rep_id: selectedRepId, 
+          order_id: assignment.order_id, 
+          barcode: String(orderNum), 
+          decision 
+        })
       });
       const result = await response.json();
       if (!result?.success) {
@@ -1009,6 +1018,14 @@ const OrderConfirmations: React.FC = () => {
       }
       await loadData(selectedRepId);
       await refreshStockSummary([]);
+      const labels: Record<string, string> = { wrong_number: 'رقم خاطئ', confirm: 'مؤكد', postponed: 'مؤجل', close: 'مغلق', no_answer: 'لا يرد', cancel: 'ملغي', assign: 'نشط' };
+      Swal.fire({
+        icon: 'success',
+        title: 'تم التحديث',
+        text: `تم تسجيل حالة "${labels[decision] || decision}" للأوردر #${orderNum}.`,
+        timer: 1500,
+        showConfirmButton: false
+      });
     } catch (error: any) {
       Swal.fire('تنبيه', error?.message || 'تعذر تحديث الأوردر.', 'warning');
     } finally {

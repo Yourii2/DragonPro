@@ -13456,18 +13456,18 @@ switch ($module) {
                 }
 
                 $order = null;
-                // If barcode is provided, resolve order strictly by barcode (order_number first, then ID)
-                if ($barcode !== '') {
-                    $order = confirmation_fetch_order_by_barcode($pdo, $barcode);
-                }
-                // If not resolved by barcode or barcode was empty, try explicit orderIdInput
-                if (!$order && $orderIdInput > 0) {
+                // Priority 1: If order_id is explicitly provided, resolve by database ID directly first (avoids barcode collision)
+                if ($orderIdInput > 0) {
                     $order = execute_query(
                         $pdo,
                         "SELECT id, order_number, status, rep_id, total_amount, shipping_fees, notes, created_at
                          FROM orders WHERE id = ? LIMIT 1",
                         [$orderIdInput]
                     )->fetch(PDO::FETCH_ASSOC);
+                }
+                // Priority 2: If not resolved by ID and barcode is provided, resolve strictly by barcode
+                if (!$order && $barcode !== '') {
+                    $order = confirmation_fetch_order_by_barcode($pdo, $barcode);
                 }
                 if (!$order) {
                     if ($barcode !== '' && table_exists($pdo, 'product_variants') && column_exists($pdo, 'product_variants', 'barcode')) {
@@ -13484,35 +13484,57 @@ switch ($module) {
                 }
 
                 $orderId = intval($order['id'] ?? 0);
-                $assignment = confirmation_fetch_assignment_row($pdo, $orderId);
 
-                // Auto-ensure assignment row if missing or unassigned but order is assigned to rep or in valid status
-                if (!$assignment || ($assignment['status'] ?? '') === 'unassigned') {
-                    $orderRepId = intval($order['rep_id'] ?? 0);
-                    if ($orderRepId === $repId || $orderRepId === 0) {
-                        $assignedBy = isset($_SESSION['user_id']) ? intval($_SESSION['user_id']) : null;
-                        execute_query(
-                            $pdo,
-                            "INSERT INTO order_confirmation_assignments (order_id, rep_id, warehouse_id, assigned_by, notes, status, assigned_at, updated_at)
-                             VALUES (?, ?, NULL, ?, 'Auto-ensured on decision', 'assigned', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                             ON DUPLICATE KEY UPDATE
-                                rep_id = VALUES(rep_id),
-                                status = 'assigned',
-                                updated_at = CURRENT_TIMESTAMP",
-                            [$orderId, $repId, $assignedBy]
-                        );
-                        $assignment = confirmation_fetch_assignment_row($pdo, $orderId);
-                    }
+                // Check assignment for THIS representative first
+                $assignment = execute_query(
+                    $pdo,
+                    "SELECT oca.*, COALESCE(NULLIF(TRIM(u.name), ''), CONCAT('مندوب #', oca.rep_id)) AS rep_name
+                     FROM order_confirmation_assignments oca
+                     LEFT JOIN users u ON u.id = oca.rep_id
+                     WHERE oca.order_id = ? AND oca.rep_id = ?
+                     ORDER BY oca.id DESC LIMIT 1",
+                    [$orderId, $repId]
+                )->fetch(PDO::FETCH_ASSOC) ?: null;
+
+                // If not found for this rep, check general assignment across all reps
+                if (!$assignment) {
+                    $assignment = confirmation_fetch_assignment_row($pdo, $orderId);
                 }
 
-                if (!$assignment || ($assignment['status'] ?? '') === 'unassigned') {
-                    http_response_code(404);
-                    echo json_encode(['success' => false, 'message' => 'هذا الأوردر غير موجود حالياً في قائمة التأكيد.']);
-                    break;
-                }
-                if (intval($assignment['rep_id'] ?? 0) !== $repId) {
+                // If actively assigned to another representative, prevent overwriting
+                if ($assignment && intval($assignment['rep_id'] ?? 0) !== $repId && ($assignment['status'] ?? '') === 'assigned') {
                     http_response_code(409);
                     echo json_encode(['success' => false, 'message' => 'هذا الأوردر مسند إلى مندوب آخر: ' . ($assignment['rep_name'] ?? ('مندوب #' . intval($assignment['rep_id'] ?? 0)))]);
+                    break;
+                }
+
+                // Auto-ensure assignment row if missing or unassigned or previous assignment was for another rep (not active)
+                if (!$assignment || ($assignment['status'] ?? '') === 'unassigned' || intval($assignment['rep_id'] ?? 0) !== $repId) {
+                    $assignedBy = isset($_SESSION['user_id']) ? intval($_SESSION['user_id']) : null;
+                    execute_query(
+                        $pdo,
+                        "INSERT INTO order_confirmation_assignments (order_id, rep_id, warehouse_id, assigned_by, notes, status, assigned_at, updated_at)
+                         VALUES (?, ?, NULL, ?, 'Auto-ensured on decision', 'assigned', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                         ON DUPLICATE KEY UPDATE
+                            rep_id = VALUES(rep_id),
+                            status = 'assigned',
+                            updated_at = CURRENT_TIMESTAMP",
+                        [$orderId, $repId, $assignedBy]
+                    );
+                    $assignment = execute_query(
+                        $pdo,
+                        "SELECT oca.*, COALESCE(NULLIF(TRIM(u.name), ''), CONCAT('مندوب #', oca.rep_id)) AS rep_name
+                         FROM order_confirmation_assignments oca
+                         LEFT JOIN users u ON u.id = oca.rep_id
+                         WHERE oca.order_id = ? AND oca.rep_id = ?
+                         ORDER BY oca.id DESC LIMIT 1",
+                        [$orderId, $repId]
+                    )->fetch(PDO::FETCH_ASSOC) ?: null;
+                }
+
+                if (!$assignment) {
+                    http_response_code(404);
+                    echo json_encode(['success' => false, 'message' => 'هذا الأوردر غير موجود حالياً في قائمة التأكيد.']);
                     break;
                 }
 
@@ -13571,6 +13593,16 @@ switch ($module) {
                     $updateParams[] = $orderId;
                     execute_query($pdo, $updateSql, $updateParams);
                     $responseOrderStatus = $nextOrderStatus;
+
+                    if (table_exists($pdo, 'order_status_history')) {
+                        $currentUserId = isset($_SESSION['user_id']) ? intval($_SESSION['user_id']) : null;
+                        execute_query(
+                            $pdo,
+                            "INSERT INTO order_status_history (order_id, status, action, notes, rep_id, created_by)
+                             VALUES (?, ?, 'confirmation_decision', ?, ?, ?)",
+                            [$orderId, $nextOrderStatus, $successMessage, $repId, $currentUserId]
+                        );
+                    }
                 }
 
                 $pdo->commit();
