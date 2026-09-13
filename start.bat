@@ -127,6 +127,15 @@ if not exist "dist" (
     call :Log "[Wait] Building application for the first time..."
     call npm.cmd run build >> "%LOGFILE%" 2>&1
 )
+rem Ensure ports 3000 and 3001 are free before starting
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":3000" ^| findstr "LISTENING"') do (
+    taskkill /F /T /PID %%a >nul 2>&1
+)
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":3001" ^| findstr "LISTENING"') do (
+    taskkill /F /T /PID %%a >nul 2>&1
+)
+timeout /t 1 /nobreak >nul
+
 start "Dragon Pro Server" cmd /k "cd /d %~dp0 && npm.cmd run preview"
 
 timeout /t 3 /nobreak >nul

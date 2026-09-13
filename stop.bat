@@ -1,46 +1,51 @@
 @echo off
-chcp 65001 >nul
-title Dragon Pro - Stop Project
+setlocal enableextensions
+cd /d "%~dp0"
 title Dragon Pro - Stop Project
 color 0C
 
 echo ====================================
 echo     Dragon Pro - Stopping Project
-echo     Dragon Pro - Stopping Project
 echo ====================================
 echo.
 
-:: Stopping Node.js processes
-echo [1/2] Stopping Node.js processes...
-tasklist /FI "IMAGENAME eq node.exe" 2>NUL | find /I /N "node.exe">NUL
-if "%ERRORLEVEL%"=="0" (
-    echo Stopping Node.js processes...
-    taskkill /F /IM node.exe >nul 2>&1
-    echo ✓ Node.js processes stopped.
-) else (
-    echo ✓ No Node.js processes are running.
+echo [1/3] Freeing ports 3000 and 3001
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":3000" ^| findstr "LISTENING"') do (
+    taskkill /F /T /PID %%a >nul 2>&1
+)
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":3001" ^| findstr "LISTENING"') do (
+    taskkill /F /T /PID %%a >nul 2>&1
 )
 
-timeout /t 1 /nobreak >nul
+echo [2/3] Stopping Node.js processes...
+taskkill /F /T /IM node.exe >nul 2>&1
 
-:: Option to stop XAMPP
 echo.
-echo [2/2] Do you want to stop XAMPP as well?
+echo Server stopped and ports 3000 and 3001 are now free.
+
 echo.
+echo [3/3] Do you want to stop XAMPP as well?
 echo 1. Yes, stop XAMPP completely
-echo 2. No, keep XAMPP running
+echo 2. No, keep XAMPP running (default)
 echo.
-set /p choice="Choose a number (1 or 2): "
+set "choice=2"
+if "%~1"=="1" set "choice=1"
+if "%~1"=="2" set "choice=2"
+if "%~1"=="/all" set "choice=1"
+if "%~1"=="" (
+    set /p "choice=Choose a number (1 or 2, default is 2): "
+)
+if "%choice%"=="" set "choice=2"
 
 if "%choice%"=="1" (
     echo.
     echo Stopping XAMPP...
-    taskkill /F /IM httpd.exe >nul 2>&1
-    taskkill /F /IM mysqld.exe >nul 2>&1
-    echo ✓ XAMPP stopped.
+    taskkill /F /T /IM httpd.exe >nul 2>&1
+    taskkill /F /T /IM mysqld.exe >nul 2>&1
+    echo XAMPP stopped.
 ) else (
     echo.
-    echo ✓ XAMPP was kept running.
+    echo XAMPP was kept running.
 )
 
 echo.
@@ -49,7 +54,10 @@ echo     Project stopped successfully!
 echo ====================================
 echo.
 echo To run the project again, use:
-echo - start.bat for normal startup
+echo - start.bat for normal startup (port 3000)
 echo - restart.bat to restart
 echo.
-pause
+if "%~1"=="" (
+    timeout /t 3 /nobreak >nul
+)
+exit /b 0

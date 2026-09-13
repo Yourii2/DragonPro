@@ -44,6 +44,7 @@ export default defineConfig(({ mode }) => {
     base: '/',
     server: {
       port: 3000,
+      strictPort: true,
       host: '0.0.0.0',
       // Allow all external hosts when accessed via a public hostname (e.g. Cloudflare tunnels)
       allowedHosts: true,
@@ -65,6 +66,7 @@ export default defineConfig(({ mode }) => {
     },
     preview: {
       port: 3000,
+      strictPort: true,
       host: '0.0.0.0',
       allowedHosts: true,
       proxy: {
