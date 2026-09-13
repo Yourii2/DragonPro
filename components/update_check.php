@@ -93,18 +93,14 @@ try {
             $name = (string)($a['name'] ?? '');
             $url = (string)($a['browser_download_url'] ?? '');
             if ($url === '') continue;
-            if ($assetName !== '') {
-                if (strcasecmp($name, $assetName) === 0) {
-                    $assetUrl = $url;
-                    $assetFoundName = $name;
-                    break;
-                }
-            } else {
-                if (preg_match('/\.zip$/i', $name)) {
-                    $assetUrl = $url;
-                    $assetFoundName = $name;
-                    break;
-                }
+            if ($assetName !== '' && strcasecmp($name, $assetName) === 0) {
+                $assetUrl = $url;
+                $assetFoundName = $name;
+                break;
+            } elseif (preg_match('/^DragonPro.*\.zip$/i', $name) || preg_match('/\.zip$/i', $name)) {
+                $assetUrl = $url;
+                $assetFoundName = $name;
+                break;
             }
         }
     }
