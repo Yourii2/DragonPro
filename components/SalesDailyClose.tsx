@@ -348,13 +348,16 @@ const SalesDailyClose: React.FC = () => {
       const journalParam = openJournalId !== 'none' ? `&journal_ids=${openJournalId}` : '';
       const ordersRes = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getJournalOrders&rep_id=${encodeURIComponent(repId)}${journalParam}`).then(r => r.json()).catch(() => null);
       if (ordersRes && ordersRes.success) {
-        jDelivered = uniqOrdersById(ordersRes.delivered || []);
-        jReturned = uniqOrdersById(ordersRes.returned || []);
-        
+        const rawDelivered = ordersRes.delivered || [];
+        const rawReturned = ordersRes.returned || [];
         const rawDeferred = ordersRes.deferred || [];
         if (openJournalId !== 'none') {
+          jDelivered = uniqOrdersById(rawDelivered.filter((o: any) => String(o.journal_id || o.journalId) === openJournalId));
+          jReturned = uniqOrdersById(rawReturned.filter((o: any) => String(o.journal_id || o.journalId) === openJournalId));
           jDeferred = uniqOrdersById(rawDeferred.filter((o: any) => !o.journal_id || String(o.journal_id || o.journalId) === openJournalId));
         } else {
+          jDelivered = uniqOrdersById(rawDelivered);
+          jReturned = uniqOrdersById(rawReturned);
           jDeferred = uniqOrdersById(rawDeferred);
         }
       }

@@ -14923,16 +14923,16 @@ switch ($module) {
                     }
                 }
 
-                $shouldIncludeCurrentCustody = (!$from && !$to);
+                $shouldIncludeCurrentCustody = (!$from && !$to && empty($journalIds) && $journalId <= 0);
 
                 if ($shouldIncludeCurrentCustody) {
-                    // Include active (with_rep/partial/postponed/returned) orders for this rep
+                    // Include active (with_rep/partial/postponed/deferred) orders for this rep
                     $currentOrdersRows = execute_query($pdo,
                         "SELECT o.id, o.rep_id, o.order_number, o.status, o.total_amount, o.shipping_fees, o.created_at,
                                 c.name AS customer_name, c.phone1, COALESCE(NULLIF(o.address, ''), c.address) AS address, COALESCE(NULLIF(o.governorate, ''), c.governorate) AS governorate
                          FROM orders o
                          LEFT JOIN customers c ON c.id = o.customer_id
-                         WHERE o.rep_id = ? AND o.status IN ('with_rep', 'partial', 'postponed', 'returned', 'deferred')
+                         WHERE o.rep_id = ? AND o.status IN ('with_rep', 'partial', 'postponed', 'deferred')
                          ORDER BY o.created_at DESC",
                         [$repId]
                     )->fetchAll(PDO::FETCH_ASSOC);
@@ -14969,15 +14969,11 @@ switch ($module) {
                             'event_date'   => null,
                             'event_time'   => null,
                             'employee'     => null,
-                            'journal_id'   => $repairJournalId > 0 ? $repairJournalId : null,
+                            'journal_id'   => null,
                             'products'     => $itemsMap[$currentOrderId] ?? [],
                         ];
 
-                        if ($currentOrderStatus === 'returned' || $currentOrderStatus === 'full_return') {
-                            $fallbackEntry['status'] = 'full_return';
-                            $returned[] = $fallbackEntry;
-                            $activeSeen[$currentOrderId] = true;
-                        } elseif ($currentOrderStatus === 'postponed' || $currentOrderStatus === 'deferred') {
+                        if ($currentOrderStatus === 'postponed' || $currentOrderStatus === 'deferred') {
                             $fallbackEntry['status'] = 'deferred';
                             $deferred[] = $fallbackEntry;
                             $activeSeen[$currentOrderId] = true;
@@ -14992,12 +14988,18 @@ switch ($module) {
                 $allCurrent = array_merge($active, $deferred);
                 foreach ($allCurrent as $cOrd) {
                     $cId = intval($cOrd['id'] ?? 0);
+                    $rjoParams = [$cId];
+                    $rjoJournalCond = "";
+                    if ($repairJournalId > 0) {
+                        $rjoJournalCond = " AND journal_id = ?";
+                        $rjoParams[] = $repairJournalId;
+                    }
                     $rjoRow = execute_query($pdo, 
                         "SELECT journal_id, returned_pieces, returned_value 
                          FROM rep_journal_orders 
-                         WHERE order_id = ? AND (returned_pieces > 0 OR status IN ('returned', 'full_return', 'partial_return'))
+                         WHERE order_id = ? $rjoJournalCond AND (returned_pieces > 0 OR status IN ('returned', 'full_return', 'partial_return'))
                          LIMIT 1", 
-                        [$cId]
+                        $rjoParams
                     )->fetch(PDO::FETCH_ASSOC);
 
                     if ($rjoRow) {
