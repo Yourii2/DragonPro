@@ -1272,13 +1272,13 @@ if (!function_exists('hik_isapi_request')) {
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT        => $timeout,
-            CURLOPT_CONNECTTIMEOUT => 8,
-            CURLOPT_HTTPAUTH       => CURLAUTH_DIGEST,
+            CURLOPT_CONNECTTIMEOUT => 6,
+            CURLOPT_HTTPAUTH       => CURLAUTH_DIGEST | CURLAUTH_BASIC,
             CURLOPT_USERPWD        => "$user:$pass",
             CURLOPT_SSL_VERIFYPEER => false,
             CURLOPT_SSL_VERIFYHOST => false,
             CURLOPT_CUSTOMREQUEST  => strtoupper($method),
-            CURLOPT_HTTPHEADER     => ['Content-Type: application/json; charset=utf-8', 'Accept: application/json'],
+            CURLOPT_HTTPHEADER     => ['Content-Type: application/json; charset=utf-8', 'Accept: application/json, application/xml, text/xml'],
         ]);
 
         if ($body !== null && in_array(strtoupper($method), ['POST', 'PUT'])) {
@@ -1292,12 +1292,24 @@ if (!function_exists('hik_isapi_request')) {
         curl_close($ch);
 
         if ($resp === false || $err) throw new Exception('cURL error: ' . $err);
-        if ($code === 0) throw new Exception('Could not reach device at ' . $ip . ':' . $port);
-        if ($code >= 400) throw new Exception('HTTP ' . $code . ' from device: ' . substr($resp, 0, 300));
+        if ($code === 0) throw new Exception('تعذر الوصول إلى الجهاز على ' . $ip . ':' . $port . ' (تأكد من تشغيل الجهاز وتوصيله بنفس الشبكة).');
+        if ($code === 401) {
+            throw new Exception('اسم المستخدم أو كلمة المرور غير صحيحة بجهاز البصمة (HTTP 401 Unauthorized). يرجى التأكد من كتابة كلمة المرور الصحيحة في إعدادات الجهاز.');
+        }
+        if ($code >= 400) throw new Exception('خطأ HTTP ' . $code . ' من جهاز البصمة: ' . substr($resp, 0, 300));
 
         if (trim($resp) === '') return ['_http_code' => $code, '_empty' => true];
 
         $j = json_decode($resp, true);
+        if (!is_array($j)) {
+            // Fallback for devices returning XML
+            if (strpos(trim($resp), '<') === 0) {
+                $xml = @simplexml_load_string($resp);
+                if ($xml !== false) {
+                    $j = json_decode(json_encode($xml), true);
+                }
+            }
+        }
         if (!is_array($j)) return ['_raw' => $resp, '_http_code' => $code];
         $j['_http_code'] = $code;
         return $j;
@@ -8602,6 +8614,63 @@ switch ($module) {
             } catch (Exception $e) {
                 // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+            }
+            break;
+        }
+        if ($action === 'testConnection') {
+            check_permission_or_die($pdo, 'employees', 'view');
+            $device_id = intval($input['device_id'] ?? ($_GET['device_id'] ?? 0));
+            if ($device_id > 0) {
+                $device = execute_query($pdo, "SELECT * FROM attendance_devices WHERE id=? LIMIT 1", [$device_id])->fetch(PDO::FETCH_ASSOC);
+                if (!$device) { echo json_encode(['success' => false, 'message' => 'الجهاز غير موجود.']); break; }
+                if (isset($input['password']) && is_string($input['password']) && $input['password'] !== '') {
+                    $device['password'] = $input['password'];
+                }
+                if (isset($input['username']) && is_string($input['username']) && $input['username'] !== '') {
+                    $device['username'] = $input['username'];
+                }
+                if (isset($input['ip']) && is_string($input['ip']) && $input['ip'] !== '') {
+                    $device['ip'] = $input['ip'];
+                }
+                if (isset($input['port']) && intval($input['port']) > 0) {
+                    $device['port'] = intval($input['port']);
+                }
+            } else {
+                $device = [
+                    'ip'       => trim((string)($input['ip'] ?? '')),
+                    'port'     => intval($input['port'] ?? 80),
+                    'protocol' => trim((string)($input['protocol'] ?? 'http')),
+                    'username' => trim((string)($input['username'] ?? 'admin')),
+                    'password' => (string)($input['password'] ?? ''),
+                    'vendor'   => trim((string)($input['vendor'] ?? 'hikvision')),
+                    'driver'   => trim((string)($input['driver'] ?? 'hikvision_isapi')),
+                ];
+            }
+
+            if (empty($device['ip'])) {
+                echo json_encode(['success' => false, 'message' => 'يرجى إدخال عنوان IP الخاص بالجهاز.']);
+                break;
+            }
+
+            $result = hik_get_device_info($device);
+            if ($result['success']) {
+                echo json_encode([
+                    'success' => true,
+                    'code' => 200,
+                    'message' => 'تم الاتصال بنجاح! اسم المستخدم وكلمة المرور صحيحة تماماً.',
+                    'info' => $result['info'] ?? []
+                ]);
+            } else {
+                $msg = $result['message'] ?? 'فشل الاتصال بالجهاز.';
+                $isAuth = (strpos($msg, '401') !== false || strpos($msg, 'Unauthorized') !== false);
+                echo json_encode([
+                    'success' => false,
+                    'code' => $isAuth ? 401 : 0,
+                    'message' => $isAuth
+                        ? 'اسم المستخدم أو كلمة المرور غير صحيحة (HTTP 401 Unauthorized). يرجى التأكد من كتابة كلمة المرور الصحيحة للجهاز.'
+                        : $msg,
+                    'info' => []
+                ]);
             }
             break;
         }
@@ -18983,8 +19052,8 @@ function handle_crud($pdo, $table, $input, $fields, $select_fields = "*") {
                 }
             }
 
-            // If a password was provided (e.g., from frontend), ensure it's hashed before storing
-            if (isset($input['password']) && is_string($input['password'])) {
+            // If a password was provided for a USER account, ensure it's hashed before storing (Do NOT hash hardware device passwords)
+            if ($table === 'users' && isset($input['password']) && is_string($input['password'])) {
                 $pw = $input['password'];
                 // If it doesn't look like a bcrypt/argon hash, hash it
                 if (!preg_match('/^\$2[ayb]\$|^\$argon2/', $pw)) {
@@ -19056,6 +19125,19 @@ function handle_crud($pdo, $table, $input, $fields, $select_fields = "*") {
                 http_response_code(400);
                 echo json_encode(['success' => false, 'message' => 'ID is required for update.']);
                 return;
+            }
+            
+            // Password handling for users vs hardware devices
+            if ($table === 'users' && isset($input['password']) && is_string($input['password']) && trim($input['password']) !== '') {
+                $pw = $input['password'];
+                if (!preg_match('/^\$2[ayb]\$|^\$argon2/', $pw)) {
+                    $input['password'] = function_exists('password_hash') ? password_hash($pw, PASSWORD_DEFAULT) : md5($pw);
+                }
+            } else if ($table === 'users' && isset($input['password']) && trim((string)$input['password']) === '') {
+                unset($input['password']);
+            } else if ($table === 'attendance_devices' && isset($input['password']) && trim((string)$input['password']) === '') {
+                // If updating attendance_devices and password left blank, keep existing password
+                unset($input['password']);
             }
             
             $set_parts = [];

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { CalendarDays, Fingerprint, Plus, RefreshCw, Save, Upload, Wifi, WifiOff, Users, UserPlus, Trash2, Send, ChevronDown, ChevronUp, AlertCircle, CheckCircle } from 'lucide-react';
+import { CalendarDays, Fingerprint, Plus, RefreshCw, Save, Upload, Wifi, WifiOff, Users, UserPlus, Trash2, Send, ChevronDown, ChevronUp, AlertCircle, CheckCircle, Edit, ShieldCheck, X } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
 import CustomSelect from './CustomSelect';
@@ -43,11 +43,31 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
     ip: '',
     port: '80',
     serial_number: '',
-    username: '',
+    username: 'admin',
     password: '',
     location: '',
     enabled: true
   });
+  const [editingDeviceId, setEditingDeviceId] = useState<number | null>(null);
+
+  // ── Device Edit Modal & Connection Test States ──
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editModalDevice, setEditModalDevice] = useState<any>({
+    id: null,
+    name: '',
+    vendor: 'hikvision',
+    protocol: 'http',
+    driver: 'hikvision_isapi',
+    driver_config: '',
+    ip: '',
+    port: '80',
+    serial_number: '',
+    username: 'admin',
+    password: '',
+    location: '',
+    enabled: true
+  });
+  const [testConnLoading, setTestConnLoading] = useState(false);
 
   const [deviceUserForm, setDeviceUserForm] = useState({ device_id: '', employee_id: '', device_user_id: '' });
   const [deviceWorkerForm, setDeviceWorkerForm] = useState({ device_id: '', worker_id: '', device_user_id: '' });
@@ -338,9 +358,239 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
       vendor: device.vendor || prev.vendor,
       protocol: 'http',
       driver: isHik ? 'hikvision_isapi' : inferDefaultDriver(device.vendor || prev.vendor),
-      serial_number: device.serial_number || prev.serial_number
+      serial_number: device.serial_number || prev.serial_number,
+      username: prev.username || 'admin',
+      password: ''
     }));
-    Swal.fire('تم', `تم نقل بيانات الجهاز (${device.model || device.ip}) إلى النموذج. المنفذ: ${device.port || (isHik ? 80 : 4370)}`, 'success');
+    setEditingDeviceId(null);
+    Swal.fire({
+      icon: 'info',
+      title: 'تم نقل بيانات الجهاز إلى النموذج',
+      html: `
+        <div class="text-right text-xs space-y-2">
+          <p>تم تحديد الجهاز <b>${device.model || device.ip}</b> بنجاح.</p>
+          <div class="p-2.5 bg-blue-50 text-blue-800 rounded-xl">
+            <b>الخطوة التالية:</b> اكتب كلمة مرور الجهاز واضغط <b>"اختبار الاتصال وبيانات الدخول"</b> للتأكد منها قبل الحفظ.
+          </div>
+        </div>
+      `,
+      confirmButtonText: 'الانتقال إلى النموذج'
+    }).then(() => {
+      const el = document.getElementById('device-form-section');
+      if (el) el.scrollIntoView({ behavior: 'smooth' });
+    });
+  };
+
+  const handleTestConnection = async (targetData?: any) => {
+    const dev = targetData || deviceForm;
+    if (!dev.ip) {
+      Swal.fire('تنبيه', 'يرجى إدخال عنوان IP الخاص بالجهاز أولاً.', 'warning');
+      return;
+    }
+    setTestConnLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=attendance_devices&action=testConnection`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          device_id: dev.id ? Number(dev.id) : undefined,
+          ip: dev.ip,
+          port: Number(dev.port || 80),
+          protocol: dev.protocol || 'http',
+          username: dev.username || 'admin',
+          password: dev.password || '',
+          vendor: dev.vendor || 'hikvision',
+          driver: dev.driver || 'hikvision_isapi'
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        Swal.fire({
+          icon: 'success',
+          title: '✅ تم الاتصال بنجاح!',
+          html: `
+            <div class="text-right text-xs space-y-2 mt-2">
+              <div class="p-3 bg-emerald-50 text-emerald-800 rounded-xl font-bold">
+                ✓ تم التحقق بنجاح: اسم المستخدم وكلمة المرور صحيحة تماماً!
+              </div>
+              ${data.info ? `
+              <div class="grid grid-cols-2 gap-2 text-gray-700 bg-gray-50 p-3 rounded-xl font-mono text-[11px]">
+                <div><b>الموديل:</b> ${data.info.model || '-'}</div>
+                <div><b>السيريال:</b> ${data.info.serialNumber || '-'}</div>
+                <div><b>الإصدار:</b> ${data.info.firmwareVersion || '-'}</div>
+                <div><b>MAC:</b> ${data.info.macAddress || '-'}</div>
+              </div>` : ''}
+            </div>
+          `
+        });
+      } else {
+        const isAuth = data.code === 401 || data.message?.includes('401') || data.message?.includes('Unauthorized');
+        Swal.fire({
+          icon: 'error',
+          title: isAuth ? '❌ خطأ في بيانات الدخول (HTTP 401)' : '❌ فشل الاتصال بالجهاز',
+          html: `
+            <div class="text-right text-xs mt-2 space-y-2">
+              <div class="p-3 ${isAuth ? 'bg-red-50 text-red-800' : 'bg-orange-50 text-orange-800'} rounded-xl">
+                ${data.message || 'تعذر الاتصال بالجهاز.'}
+              </div>
+              ${isAuth ? '<p class="text-gray-500">يرجى التأكد من اسم المستخدم (الافتراضي admin) وكلمة المرور المعينة في الجهاز أو عبر تطبيق SADP.</p>' : ''}
+            </div>
+          `
+        });
+      }
+    } catch (e) {
+      Swal.fire('خطأ', 'تعذر الاتصال بالخادم لاختبار الجهاز.', 'error');
+    } finally {
+      setTestConnLoading(false);
+    }
+  };
+
+  const handleOpenEditModal = (dev: any) => {
+    setEditModalDevice({
+      id: dev.id,
+      name: dev.name || '',
+      vendor: dev.vendor || 'hikvision',
+      protocol: dev.protocol || 'http',
+      driver: dev.driver || 'hikvision_isapi',
+      driver_config: dev.driver_config || '',
+      ip: dev.ip || '',
+      port: String(dev.port || 80),
+      serial_number: dev.serial_number || '',
+      username: dev.username || 'admin',
+      password: '',
+      location: dev.location || '',
+      enabled: Boolean(dev.enabled)
+    });
+    setIsEditModalOpen(true);
+  };
+
+  const handleSaveDeviceModal = async () => {
+    if (!editModalDevice.name || !editModalDevice.ip) {
+      Swal.fire('تنبيه', 'يرجى إدخال اسم الجهاز وعنوان IP.', 'warning');
+      return;
+    }
+    const isEdit = Boolean(editModalDevice.id);
+    const endpoint = isEdit
+      ? `${API_BASE_PATH}/api.php?module=attendance_devices&action=update`
+      : `${API_BASE_PATH}/api.php?module=attendance_devices&action=create`;
+
+    const payload: any = {
+      ...editModalDevice,
+      port: Number(editModalDevice.port || 80),
+      enabled: editModalDevice.enabled ? 1 : 0
+    };
+    if (isEdit && (!payload.password || payload.password.trim() === '')) {
+      delete payload.password;
+    }
+
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (data.success) {
+        Swal.fire('تم', isEdit ? 'تم تحديث بيانات الجهاز بنجاح.' : 'تمت إضافة الجهاز بنجاح.', 'success');
+        setIsEditModalOpen(false);
+        fetchAll();
+      } else {
+        Swal.fire('خطأ', data.message || 'فشل حفظ الجهاز.', 'error');
+      }
+    } catch {
+      Swal.fire('خطأ', 'تعذر الاتصال بالخادم.', 'error');
+    }
+  };
+
+  const handleSaveDeviceForm = async () => {
+    if (!deviceForm.name || !deviceForm.ip) {
+      Swal.fire('تنبيه', 'يرجى إدخال اسم الجهاز وعنوان IP.', 'warning');
+      return;
+    }
+    const isEdit = Boolean(editingDeviceId);
+    const endpoint = isEdit
+      ? `${API_BASE_PATH}/api.php?module=attendance_devices&action=update`
+      : `${API_BASE_PATH}/api.php?module=attendance_devices&action=create`;
+
+    const payload: any = {
+      ...deviceForm,
+      port: Number(deviceForm.port || 80),
+      enabled: deviceForm.enabled ? 1 : 0
+    };
+    if (isEdit) {
+      payload.id = editingDeviceId;
+      if (!payload.password || payload.password.trim() === '') {
+        delete payload.password;
+      }
+    }
+
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (data.success) {
+        Swal.fire('تم', isEdit ? 'تم تحديث بيانات الجهاز بنجاح.' : 'تم حفظ الجهاز بنجاح.', 'success');
+        setEditingDeviceId(null);
+        setDeviceForm({
+          name: '',
+          vendor: 'hikvision',
+          protocol: 'http',
+          driver: 'hikvision_isapi',
+          driver_config: '',
+          ip: '',
+          port: '80',
+          serial_number: '',
+          username: 'admin',
+          password: '',
+          location: '',
+          enabled: true
+        });
+        fetchAll();
+      } else {
+        Swal.fire('خطأ', data.message || 'فشل الحفظ.', 'error');
+      }
+    } catch {
+      Swal.fire('خطأ', 'تعذر الاتصال بالخادم.', 'error');
+    }
+  };
+
+  const handleDeleteDevice = async (device: any) => {
+    const confirm = await Swal.fire({
+      title: 'حذف جهاز البصمة؟',
+      html: `<div class="text-right text-xs">هل أنت متأكد من حذف الجهاز <b>"${device.name || device.ip}"</b>؟<br/><span class="text-red-500">سيتم إلغاء ربط الموظفين والعمال المسجلين على هذا الجهاز.</span></div>`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'نعم، حذف الجهاز',
+      cancelButtonText: 'إلغاء',
+      confirmButtonColor: '#ef4444'
+    });
+    if (!confirm.isConfirmed) return;
+
+    try {
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=attendance_devices&action=delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: Number(device.id) })
+      });
+      const data = await res.json();
+      if (data.success) {
+        Swal.fire('تم الحذف', 'تم حذف الجهاز بنجاح.', 'success');
+        if (String(hikDeviceId) === String(device.id)) {
+          setHikDeviceId('');
+          setHikDeviceInfo(null);
+          setHikDeviceOnline(null);
+          setHikDeviceUsers([]);
+        }
+        fetchAll();
+      } else {
+        Swal.fire('خطأ', data.message || 'فشل حذف الجهاز.', 'error');
+      }
+    } catch {
+      Swal.fire('خطأ', 'تعذر الاتصال بالخادم لحذف الجهاز.', 'error');
+    }
   };
 
   const handleHikPullLogsQuick = async () => {
@@ -414,14 +664,44 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
     return res.json();
   };
 
-  const handleHikPing = async () => {
-    if (!hikDeviceId) { Swal.fire('تنبيه', 'اختر الجهاز أولاً.', 'warning'); return; }
+  const handleHikPing = async (targetDeviceId?: string | any) => {
+    const devId = (typeof targetDeviceId === 'string' && targetDeviceId) ? targetDeviceId : hikDeviceId;
+    if (!devId) { Swal.fire('تنبيه', 'اختر الجهاز أولاً.', 'warning'); return; }
     setHikPingLoading(true); setHikDeviceInfo(null); setHikDeviceOnline(null);
     try {
-      const data = await hikPost('pingDevice', { device_id: Number(hikDeviceId) });
+      const data = await hikPost('pingDevice', { device_id: Number(devId) });
       setHikDeviceOnline(data.success);
       setHikDeviceInfo(data.success ? data.info : null);
-    } catch { setHikDeviceOnline(false); }
+      if (data.success) {
+        Swal.fire({
+          icon: 'success',
+          title: '✅ الجهاز متصل ويعمل بشكل طبيعي',
+          html: `<div class="text-right text-xs space-y-1 mt-2"><b>تم الاتصال بنجاح واسم المستخدم وكلمة المرور صحيحة!</b><br/>الموديل: ${data.info?.model || '-'}<br/>السيريال: ${data.info?.serialNumber || '-'}<br/>الإصدار: ${data.info?.firmwareVersion || '-'}</div>`
+        });
+      } else {
+        const isAuth = data.message?.includes('401') || data.message?.includes('Unauthorized') || data.message?.includes('كلمة المرور');
+        if (isAuth) {
+          Swal.fire({
+            title: 'خطأ في بيانات الدخول (HTTP 401)',
+            text: 'اسم المستخدم أو كلمة المرور غير صحيحة لجهاز البصمة. يرجى مراجعة وتعديل بيانات الجهاز.',
+            icon: 'error',
+            confirmButtonText: 'تعديل بيانات الجهاز',
+            showCancelButton: true,
+            cancelButtonText: 'إلغاء'
+          }).then(res => {
+            if (res.isConfirmed) {
+              const dev = devices.find((d: any) => String(d.id) === String(devId));
+              if (dev) handleOpenEditModal(dev);
+            }
+          });
+        } else {
+          Swal.fire('فشل الاتصال', data.message || 'تعذر الاتصال بالجهاز.', 'error');
+        }
+      }
+    } catch {
+      setHikDeviceOnline(false);
+      Swal.fire('خطأ', 'تعذر الاتصال بالخادم.', 'error');
+    }
     finally { setHikPingLoading(false); }
   };
 
@@ -430,9 +710,32 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
     setHikUsersLoading(true);
     try {
       const data = await hikPost('pullDeviceUsers', { device_id: Number(hikDeviceId) });
-      if (data.success) { setHikDeviceUsers(data.users || []); }
-      else { Swal.fire('خطأ', data.message, 'error'); }
-    } catch { Swal.fire('خطأ', 'تعذر سحب المستخدمين.', 'error'); }
+      if (data.success) {
+        setHikDeviceUsers(data.users || []);
+        Swal.fire('تم', data.message || `تم سحب ${data.users?.length || 0} مستخدم من الجهاز بنجاح.`, 'success');
+      } else {
+        const isAuth = data.message?.includes('401') || data.message?.includes('Unauthorized') || data.message?.includes('كلمة المرور');
+        if (isAuth) {
+          Swal.fire({
+            title: 'خطأ في بيانات الدخول (HTTP 401)',
+            html: '<div class="text-right text-xs"><b>اسم المستخدم أو كلمة المرور المسجلة لجهاز البصمة غير صحيحة.</b><br/><br/>يرجى تعديل بيانات الجهاز وإدخال كلمة المرور الصحيحة ثم إعادة المحاولة.</div>',
+            icon: 'error',
+            confirmButtonText: 'تعديل بيانات الجهاز الآن',
+            showCancelButton: true,
+            cancelButtonText: 'إلغاء'
+          }).then(res => {
+            if (res.isConfirmed) {
+              const dev = devices.find((d: any) => String(d.id) === String(hikDeviceId));
+              if (dev) handleOpenEditModal(dev);
+            }
+          });
+        } else {
+          Swal.fire('خطأ', data.message || 'تعذر سحب مستخدمي الجهاز.', 'error');
+        }
+      }
+    } catch {
+      Swal.fire('خطأ', 'تعذر سحب المستخدمين.', 'error');
+    }
     finally { setHikUsersLoading(false); }
   };
 
@@ -595,8 +898,49 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
             </div>
           </div>
 
-          <div className="p-6 rounded-3xl border border-card shadow-sm card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
-            <h3 className="font-black mb-4 flex items-center gap-2"><Fingerprint size={18}/> إضافة جهاز بصمة</h3>
+          <div id="device-form-section" className="p-6 rounded-3xl border border-card shadow-sm card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-black flex items-center gap-2">
+                <Fingerprint size={18}/> {editingDeviceId ? 'تعديل جهاز بصمة' : 'إضافة جهاز بصمة'}
+              </h3>
+              {editingDeviceId && (
+                <span className="text-[11px] bg-amber-100 text-amber-800 px-2.5 py-0.5 rounded-full font-bold">
+                  وضع التعديل
+                </span>
+              )}
+            </div>
+
+            {editingDeviceId && (
+              <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-2xl text-xs flex items-center justify-between">
+                <span className="text-amber-800 dark:text-amber-300 font-bold">
+                  أنت تقوم الآن بتعديل الجهاز: {deviceForm.name || deviceForm.ip}
+                </span>
+                <button
+                  type="button"
+                  className="px-2.5 py-1 bg-amber-200 hover:bg-amber-300 text-amber-900 rounded-xl text-[11px] font-black transition-colors"
+                  onClick={() => {
+                    setEditingDeviceId(null);
+                    setDeviceForm({
+                      name: '',
+                      vendor: 'hikvision',
+                      protocol: 'http',
+                      driver: 'hikvision_isapi',
+                      driver_config: '',
+                      ip: '',
+                      port: '80',
+                      serial_number: '',
+                      username: 'admin',
+                      password: '',
+                      location: '',
+                      enabled: true
+                    });
+                  }}
+                >
+                  إلغاء التعديل
+                </button>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-3 text-xs">
               <div className="space-y-1">
                 <label className="text-[11px] text-muted">اسم الجهاز</label>
@@ -650,43 +994,56 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
               </div>
               <div className="space-y-1">
                 <label className="text-[11px] text-muted">عنوان IP</label>
-                <input className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2" placeholder="IP" value={deviceForm.ip} onChange={e => setDeviceForm({ ...deviceForm, ip: e.target.value })} />
+                <input className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2 font-mono font-bold text-blue-600" placeholder="IP" value={deviceForm.ip} onChange={e => setDeviceForm({ ...deviceForm, ip: e.target.value })} />
               </div>
               <div className="space-y-1">
                 <label className="text-[11px] text-muted">المنفذ</label>
-                <input className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2" placeholder="Port" value={deviceForm.port} onChange={e => setDeviceForm({ ...deviceForm, port: e.target.value })} />
+                <input className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2 font-mono" placeholder="Port" value={deviceForm.port} onChange={e => setDeviceForm({ ...deviceForm, port: e.target.value })} />
               </div>
               <div className="space-y-1">
                 <label className="text-[11px] text-muted">السيريال</label>
-                <input className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2" placeholder="Serial" value={deviceForm.serial_number} onChange={e => setDeviceForm({ ...deviceForm, serial_number: e.target.value })} />
+                <input className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2 font-mono text-[11px]" placeholder="Serial" value={deviceForm.serial_number} onChange={e => setDeviceForm({ ...deviceForm, serial_number: e.target.value })} />
               </div>
               <div className="space-y-1">
                 <label className="text-[11px] text-muted">الموقع</label>
                 <input className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2" placeholder="Location" value={deviceForm.location} onChange={e => setDeviceForm({ ...deviceForm, location: e.target.value })} />
               </div>
               <div className="space-y-1">
-                <label className="text-[11px] text-muted">اسم المستخدم</label>
-                <input className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2" placeholder="Username" value={deviceForm.username} onChange={e => setDeviceForm({ ...deviceForm, username: e.target.value })} />
+                <label className="text-[11px] text-muted font-bold">اسم المستخدم (Username)</label>
+                <input className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2 font-mono" placeholder="admin" value={deviceForm.username} onChange={e => setDeviceForm({ ...deviceForm, username: e.target.value })} />
               </div>
               <div className="space-y-1">
-                <label className="text-[11px] text-muted">كلمة المرور</label>
-                <input type="password" className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2" placeholder="Password" value={deviceForm.password} onChange={e => setDeviceForm({ ...deviceForm, password: e.target.value })} />
+                <label className="text-[11px] text-muted font-bold">كلمة المرور (Password)</label>
+                <input
+                  type="password"
+                  className="bg-slate-50 dark:bg-slate-900 rounded-xl px-3 py-2"
+                  placeholder={editingDeviceId ? 'اتركه فارغاً للاحتفاظ بالحالية' : 'كلمة المرور'}
+                  value={deviceForm.password}
+                  onChange={e => setDeviceForm({ ...deviceForm, password: e.target.value })}
+                />
               </div>
             </div>
-            <button
-              className="mt-4 w-full bg-accent text-white py-3 rounded-2xl text-xs font-black flex items-center justify-center gap-2"
-              onClick={() => handleCreate(
-                `${API_BASE_PATH}/api.php?module=attendance_devices&action=create`,
-                { ...deviceForm, port: Number(deviceForm.port), enabled: deviceForm.enabled ? 1 : 0 },
-                () => {
-                  Swal.fire('تم', 'تم حفظ الجهاز.', 'success');
-                  setDeviceForm({ ...deviceForm, name: '', ip: '', serial_number: '', location: '', driver_config: '' });
-                  fetchAll();
-                }
-              )}
-            >
-              <Save size={16}/> حفظ الجهاز
-            </button>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="flex-1 min-w-[150px] bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-2xl text-xs font-black flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+                onClick={() => handleTestConnection(deviceForm)}
+                disabled={testConnLoading || !deviceForm.ip}
+                title="اختبار اسم المستخدم وكلمة المرور والاتصال بالجهاز"
+              >
+                <ShieldCheck size={16} className={testConnLoading ? 'animate-spin' : ''} />
+                {testConnLoading ? 'جارٍ الفحص...' : 'اختبار الاتصال وبيانات الدخول'}
+              </button>
+
+              <button
+                type="button"
+                className="flex-1 min-w-[140px] bg-accent hover:opacity-90 text-white py-3 rounded-2xl text-xs font-black flex items-center justify-center gap-2 transition-colors"
+                onClick={handleSaveDeviceForm}
+              >
+                <Save size={16}/> {editingDeviceId ? 'تحديث بيانات الجهاز' : 'حفظ الجهاز'}
+              </button>
+            </div>
           </div>
 
           <div className="p-6 rounded-3xl border border-card shadow-sm card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
@@ -803,7 +1160,9 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
           </div>
 
           <div className="p-6 rounded-3xl border border-card shadow-sm card lg:col-span-2" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
-            <h3 className="font-black mb-4">قائمة الأجهزة</h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-black">قائمة الأجهزة ({devices.length})</h3>
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full text-xs text-right">
                 <thead className="text-muted">
@@ -811,22 +1170,60 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
                     <th className="px-3 py-2">الاسم</th>
                     <th className="px-3 py-2">النوع</th>
                     <th className="px-3 py-2">Driver</th>
-                    <th className="px-3 py-2">IP</th>
+                    <th className="px-3 py-2">IP : المنفذ</th>
                     <th className="px-3 py-2">Serial</th>
                     <th className="px-3 py-2">آخر مزامنة</th>
+                    <th className="px-3 py-2 text-center">الإجراءات</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {devices.map(d => (
-                    <tr key={d.id} className="border-t border-slate-200/50">
-                      <td className="px-3 py-2 font-bold">{d.name}</td>
-                      <td className="px-3 py-2">{vendorLabels[d.vendor] || d.vendor}</td>
-                      <td className="px-3 py-2">{driverLabels[d.driver] || d.driver || '-'}</td>
-                      <td className="px-3 py-2">{d.ip || '-'}</td>
-                      <td className="px-3 py-2">{d.serial_number || '-'}</td>
-                      <td className="px-3 py-2">{d.last_sync_at || '-'}</td>
+                  {devices.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="px-3 py-6 text-center text-muted">
+                        لا توجد أجهزة مضافة حالياً.
+                      </td>
                     </tr>
-                  ))}
+                  ) : (
+                    devices.map(d => (
+                      <tr key={d.id} className="border-t border-slate-200/50 hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
+                        <td className="px-3 py-2 font-bold">{d.name}</td>
+                        <td className="px-3 py-2">
+                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ${d.vendor === 'hikvision' ? 'bg-red-100 text-red-700' : (d.vendor === 'zkteco' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-700')}`}>
+                            {vendorLabels[d.vendor] || d.vendor}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2">{driverLabels[d.driver] || d.driver || '-'}</td>
+                        <td className="px-3 py-2 font-mono text-blue-600 font-bold">{d.ip ? `${d.ip}:${d.port || 80}` : '-'}</td>
+                        <td className="px-3 py-2 font-mono text-[11px]">{d.serial_number || '-'}</td>
+                        <td className="px-3 py-2">{d.last_sync_at || '-'}</td>
+                        <td className="px-3 py-2 text-center">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              className="p-1.5 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-700 transition-colors"
+                              onClick={() => handleOpenEditModal(d)}
+                              title="تعديل الجهاز"
+                            >
+                              <Edit size={13} />
+                            </button>
+                            <button
+                              className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
+                              onClick={() => handleTestConnection(d)}
+                              title="اختبار الاتصال"
+                            >
+                              <Wifi size={13} />
+                            </button>
+                            <button
+                              className="p-1.5 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 transition-colors"
+                              onClick={() => handleDeleteDevice(d)}
+                              title="حذف الجهاز"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -836,6 +1233,133 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
 
       {activeTab === 'hikvision' && (
         <div className="space-y-6">
+          {/* ── Section 0: HikVision Devices List & Management ── */}
+          <div className="p-6 rounded-3xl border border-card shadow-sm card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <div>
+                <h3 className="font-black text-sm flex items-center gap-2 text-blue-600">
+                  <Fingerprint size={18}/> قائمة أجهزة هيك فيجن المضافة ({devices.filter((d:any) => d.vendor === 'hikvision' || d.driver === 'hikvision_isapi').length})
+                </h3>
+                <p className="text-[11px] text-muted mt-0.5">إدارة أجهزة هيك فيجن: تعديل بيانات الدخول (اسم المستخدم وكلمة المرور)، اختبار الاتصال، أو حذف جهاز</p>
+              </div>
+              <button
+                type="button"
+                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black flex items-center gap-1.5 transition-colors shadow-sm"
+                onClick={() => {
+                  setEditModalDevice({
+                    id: null,
+                    name: 'Hikvision Terminal',
+                    vendor: 'hikvision',
+                    protocol: 'http',
+                    driver: 'hikvision_isapi',
+                    driver_config: '',
+                    ip: '',
+                    port: '80',
+                    serial_number: '',
+                    username: 'admin',
+                    password: '',
+                    location: '',
+                    enabled: true
+                  });
+                  setIsEditModalOpen(true);
+                }}
+              >
+                <Plus size={14}/> إضافة جهاز هيك فيجن جديد
+              </button>
+            </div>
+
+            {devices.filter((d:any) => d.vendor === 'hikvision' || d.driver === 'hikvision_isapi').length === 0 ? (
+              <div className="p-8 text-center bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-dashed border-slate-300 dark:border-slate-800">
+                <Fingerprint size={36} className="mx-auto text-slate-400 mb-2" />
+                <p className="font-bold text-xs text-slate-700 dark:text-slate-300">لا توجد أجهزة هيك فيجن مسجلة حالياً</p>
+                <p className="text-[11px] text-muted mt-1">يمكنك البحث التلقائي عن الأجهزة عبر تبويب "إدارة الأجهزة" أو الضغط على "إضافة جهاز هيك فيجن جديد" أعلاه.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-right">
+                  <thead className="text-muted border-b border-slate-200 dark:border-slate-800">
+                    <tr>
+                      <th className="px-3 py-2.5">اسم الجهاز</th>
+                      <th className="px-3 py-2.5">IP : المنفذ</th>
+                      <th className="px-3 py-2.5">اسم المستخدم</th>
+                      <th className="px-3 py-2.5">السيريال</th>
+                      <th className="px-3 py-2.5">الموقع</th>
+                      <th className="px-3 py-2.5 text-center">إجراءات الجهاز</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {devices.filter((d:any) => d.vendor === 'hikvision' || d.driver === 'hikvision_isapi').map((d: any) => {
+                      const isSelected = String(hikDeviceId) === String(d.id);
+                      return (
+                        <tr key={d.id} className={`border-t border-slate-100 dark:border-slate-800/60 hover:bg-slate-50/70 transition-colors ${isSelected ? 'bg-blue-50/60 dark:bg-blue-900/20' : ''}`}>
+                          <td className="px-3 py-3 font-bold flex items-center gap-2">
+                            <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${isSelected ? 'bg-blue-600 animate-pulse' : 'bg-slate-300 dark:bg-slate-700'}`} />
+                            <span>{d.name}</span>
+                            {isSelected && <span className="text-[10px] bg-blue-100 text-blue-700 dark:bg-blue-800 dark:text-blue-200 px-2 py-0.5 rounded-full font-black">الجهاز المحدد</span>}
+                          </td>
+                          <td className="px-3 py-3 font-mono text-blue-600 font-bold">{d.ip}:{d.port || 80}</td>
+                          <td className="px-3 py-3 font-mono font-bold text-slate-700 dark:text-slate-300">{d.username || 'admin'}</td>
+                          <td className="px-3 py-3 font-mono text-slate-500 text-[11px]">{d.serial_number || '—'}</td>
+                          <td className="px-3 py-3 text-slate-500">{d.location || '—'}</td>
+                          <td className="px-3 py-3 text-center">
+                            <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                              <button
+                                type="button"
+                                className="px-2.5 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 font-black text-[11px] flex items-center gap-1 transition-colors"
+                                onClick={() => handleOpenEditModal(d)}
+                                title="تعديل الجهاز وكلمة المرور"
+                              >
+                                <Edit size={12}/> تعديل
+                              </button>
+                              <button
+                                type="button"
+                                className="px-2.5 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 font-black text-[11px] flex items-center gap-1 transition-colors"
+                                onClick={() => {
+                                  setHikDeviceId(String(d.id));
+                                  handleHikPing(String(d.id));
+                                }}
+                                title="اختبار الاتصال وبيانات الدخول"
+                              >
+                                <Wifi size={12}/> فحص الاتصال
+                              </button>
+                              <button
+                                type="button"
+                                className={`px-2.5 py-1.5 rounded-xl font-black text-[11px] flex items-center gap-1 transition-colors ${isSelected ? 'bg-emerald-600 text-white' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700'}`}
+                                onClick={() => {
+                                  setHikDeviceId(String(d.id));
+                                  setHikDeviceInfo(null);
+                                  setHikDeviceOnline(null);
+                                  Swal.fire({
+                                    icon: 'success',
+                                    title: 'تم اختيار الجهاز',
+                                    text: `تم تحديد (${d.name}) للعمليات المتقدمة وسحب البصمات والمستخدمين.`,
+                                    timer: 1400,
+                                    showConfirmButton: false
+                                  });
+                                }}
+                                title="تحديد هذا الجهاز للعمليات أدناه"
+                              >
+                                <CheckCircle size={12}/> {isSelected ? 'محدد حالياً' : 'تحديد'}
+                              </button>
+                              <button
+                                type="button"
+                                className="p-1.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 transition-colors"
+                                onClick={() => handleDeleteDevice(d)}
+                                title="حذف الجهاز"
+                              >
+                                <Trash2 size={13}/>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
           {/* ── Section 1: Device Status ── */}
           <div className="p-6 rounded-3xl border border-card shadow-sm card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
             <h3 className="font-black mb-4 flex items-center gap-2 text-blue-600">
@@ -853,7 +1377,7 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
               </div>
               <button
                 className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black flex items-center gap-2 transition-colors"
-                onClick={handleHikPing}
+                onClick={() => handleHikPing()}
                 disabled={hikPingLoading || !hikDeviceId}
               >
                 <RefreshCw size={14} className={hikPingLoading ? 'animate-spin' : ''} />
@@ -1433,6 +1957,165 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── Device Edit / Creation Modal ── */}
+      {isEditModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl max-w-lg w-full p-6 text-right space-y-4 my-8 animate-in fade-in zoom-in-95 duration-200" dir="rtl">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <h3 className="font-black text-sm flex items-center gap-2 text-blue-600">
+                <Fingerprint size={18} />
+                {editModalDevice.id ? `تعديل جهاز: ${editModalDevice.name || editModalDevice.ip}` : 'إضافة جهاز هيك فيجن جديد'}
+              </h3>
+              <button
+                type="button"
+                className="p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 transition-colors"
+                onClick={() => setIsEditModalOpen(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div className="col-span-2 space-y-1">
+                <label className="text-[11px] text-muted font-bold">اسم الجهاز</label>
+                <input
+                  className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 w-full font-bold"
+                  placeholder="مثال: جهاز بصمة الإدارة"
+                  value={editModalDevice.name}
+                  onChange={e => setEditModalDevice({ ...editModalDevice, name: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] text-muted font-bold">النوع (Vendor)</label>
+                <CustomSelect
+                  value={editModalDevice.vendor}
+                  onChange={v => {
+                    const nextV = v;
+                    setEditModalDevice({
+                      ...editModalDevice,
+                      vendor: nextV,
+                      driver: nextV === 'hikvision' ? 'hikvision_isapi' : inferDefaultDriver(nextV)
+                    });
+                  }}
+                  options={[
+                    { value: 'hikvision', label: 'Hikvision' },
+                    { value: 'zkteco', label: 'ZKTeco' },
+                    { value: 'adms', label: 'ADMS' },
+                    { value: 'other', label: 'أخرى' }
+                  ]}
+                  className="w-full"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] text-muted font-bold">البروتوكول</label>
+                <CustomSelect
+                  value={editModalDevice.protocol || 'http'}
+                  onChange={v => setEditModalDevice({ ...editModalDevice, protocol: v })}
+                  options={[
+                    { value: 'http', label: 'HTTP' },
+                    { value: 'https', label: 'HTTPS' }
+                  ]}
+                  className="w-full"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] text-muted font-bold">عنوان IP</label>
+                <input
+                  className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 w-full font-mono font-bold text-blue-600"
+                  placeholder="مثال: 192.168.1.200"
+                  value={editModalDevice.ip}
+                  onChange={e => setEditModalDevice({ ...editModalDevice, ip: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] text-muted font-bold">المنفذ (Port)</label>
+                <input
+                  className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 w-full font-mono"
+                  placeholder="80"
+                  value={editModalDevice.port}
+                  onChange={e => setEditModalDevice({ ...editModalDevice, port: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] text-muted font-bold">اسم المستخدم (Username)</label>
+                <input
+                  className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 w-full font-mono font-bold"
+                  placeholder="admin"
+                  value={editModalDevice.username}
+                  onChange={e => setEditModalDevice({ ...editModalDevice, username: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] text-muted font-bold">كلمة المرور (Password)</label>
+                <input
+                  type="password"
+                  className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 w-full"
+                  placeholder={editModalDevice.id ? 'اتركه فارغاً للاحتفاظ بالحالية' : 'كلمة المرور'}
+                  value={editModalDevice.password}
+                  onChange={e => setEditModalDevice({ ...editModalDevice, password: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] text-muted font-bold">السيريال (Serial Number)</label>
+                <input
+                  className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 w-full font-mono text-[11px]"
+                  placeholder="DS-K1T..."
+                  value={editModalDevice.serial_number}
+                  onChange={e => setEditModalDevice({ ...editModalDevice, serial_number: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] text-muted font-bold">الموقع</label>
+                <input
+                  className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 w-full"
+                  placeholder="مثال: الباب الرئيسي"
+                  value={editModalDevice.location}
+                  onChange={e => setEditModalDevice({ ...editModalDevice, location: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800/40 rounded-2xl text-[11px] text-blue-800 dark:text-blue-300">
+              💡 <b>ملاحظة:</b> يمكنك الضغط على <b>"اختبار الاتصال وبيانات الدخول"</b> قبل الحفظ للتأكد الفوري من صحة اسم المستخدم وكلمة المرور.
+            </div>
+
+            <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                className="flex-1 min-w-[140px] bg-blue-600 hover:bg-blue-700 text-white py-2.5 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+                onClick={() => handleTestConnection(editModalDevice)}
+                disabled={testConnLoading || !editModalDevice.ip}
+              >
+                <ShieldCheck size={15} className={testConnLoading ? 'animate-spin' : ''} />
+                {testConnLoading ? 'جارٍ الفحص...' : 'اختبار الاتصال وبيانات الدخول'}
+              </button>
+              <button
+                type="button"
+                className="flex-1 min-w-[120px] bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-colors"
+                onClick={handleSaveDeviceModal}
+              >
+                <Save size={15} /> {editModalDevice.id ? 'حفظ التعديلات' : 'إضافة الجهاز'}
+              </button>
+              <button
+                type="button"
+                className="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition-colors"
+                onClick={() => setIsEditModalOpen(false)}
+              >
+                إلغاء
+              </button>
+            </div>
           </div>
         </div>
       )}
