@@ -4,6 +4,7 @@ import { ArrowDownAZ, ArrowUpAZ, CheckCircle2, CheckSquare, Clock, Lock, MapPin,
 import { API_BASE_PATH } from '../services/apiConfig';
 import { PrintableOrders } from './PrintableOrderCard';
 import CustomSelect from './CustomSelect';
+import { cleanBarcode, isOrderMatchingBarcode } from '../services/barcodeUtils';
 
 type RepSummary = {
   id: number;
@@ -865,7 +866,8 @@ const OrderConfirmations: React.FC = () => {
   };
 
   const handleAssignBarcode = async () => {
-    const barcode = assignBarcode.trim();
+    const rawBarcode = assignBarcode.trim();
+    const barcode = cleanBarcode(rawBarcode);
     if (!requireSelectedRep() || !requireSelectedWarehouse() || !barcode) return;
     setAssignBarcode(''); // Clear immediately to prevent scanner buffer concatenation
     setSubmitting(true);
@@ -923,7 +925,8 @@ const OrderConfirmations: React.FC = () => {
     }
   };
 
-  const resolveAssignmentByBarcode = async (barcode: string) => {
+  const resolveAssignmentByBarcode = async (rawCode: string) => {
+    const barcode = cleanBarcode(rawCode);
     const response = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=resolveConfirmationBarcode&barcode=${encodeURIComponent(barcode)}`);
     const result = await response.json();
     if (!result?.success) {
@@ -943,7 +946,8 @@ const OrderConfirmations: React.FC = () => {
   };
 
   const handleDecisionBarcode = async (decision: 'cancel' | 'wrong_number' | 'confirm' | 'close' | 'no_answer' | 'postponed') => {
-    const barcode = cancelBarcode.trim();
+    const rawBarcode = cancelBarcode.trim();
+    const barcode = cleanBarcode(rawBarcode);
     if (!requireSelectedRep()) return;
     if (!barcode) {
       Swal.fire('تنبيه', 'الرجاء كتابة أو مسح باركود الأوردر أولاً.', 'warning');
@@ -952,20 +956,15 @@ const OrderConfirmations: React.FC = () => {
     setCancelBarcode(''); // Clear immediately to prevent scanner buffer collision
 
     // Verify if order exists in the representative's active assigned orders list
-    // Strict priority: Match orderNumber / order_number first, then fallback to order_id
-    const match =
-      activeSelectedRepOrders.find(
-        (item) =>
-          String(item.order?.orderNumber || item.order?.order_number || '').trim() === barcode
-      ) ||
-      activeSelectedRepOrders.find(
-        (item) =>
-          String(item.order_id) === barcode ||
-          String(item.order?.id) === barcode
-      );
+    // Strict priority: Match orderNumber / order_number first, never match a different order by id
+    const match = activeSelectedRepOrders.find(
+      (item) => isOrderMatchingBarcode(item.order, barcode) || (
+        item.order_id && !item.order?.orderNumber && !item.order?.order_number && String(item.order_id) === barcode
+      )
+    );
 
     if (!match) {
-      Swal.fire('تنبيه', 'هذا الأوردر غير مسند للمندوب المختار حالياً.', 'warning');
+      Swal.fire('تنبيه', `الأوردر رقم #${barcode} غير مسند للمندوب المختار حالياً.`, 'warning');
       return;
     }
 

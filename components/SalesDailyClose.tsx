@@ -328,6 +328,12 @@ const SalesDailyClose: React.FC = () => {
         openJournalId = String(odResp.data.id);
       } else {
         setOpenDailyInfo(null);
+        setActiveOrders([]);
+        setDeferredOrders([]);
+        setDeliveredOrders([]);
+        setReturnedOrders([]);
+        setSelectedOrderIds([]);
+        return;
       }
 
       // 3. Get Active Custody (Orders currently with rep)
@@ -1029,12 +1035,19 @@ const SalesDailyClose: React.FC = () => {
         </div>
       </div>
 
+      {selectedRepId && !openDailyInfo && !statsLoading && (
+        <div className="mt-4 p-3.5 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 rounded-2xl border border-amber-200 dark:border-amber-800/60 text-xs font-bold flex items-center gap-2">
+          <span className="text-base">⚠️</span>
+          <span>تنبيه: هذا المندوب ليس لديه يومية مفتوحة حالياً. يمكنك بدء يومية جديدة له من صفحة "بدء اليومية".</span>
+        </div>
+      )}
+
       {/* Summary Cards */}
       <div className="mb-4 rounded-3xl border border-blue-100 bg-gradient-to-br from-blue-50 to-slate-50 dark:from-slate-800 dark:to-slate-900 dark:border-slate-700 p-5 shadow-sm mt-4">
         <div className="flex items-center gap-2 mb-4">
           <div className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" />
           <span className="text-sm font-black text-slate-700 dark:text-slate-200">
-            {selectedRepId ? (openDailyInfo ? `ملخص اليومية المفتوحة — ${selectedRep?.name || ''}` : `العهدة الحالية — ${selectedRep?.name || ''}`) : 'الملخص'}
+            {selectedRepId ? (openDailyInfo ? `ملخص اليومية المفتوحة — ${selectedRep?.name || ''}` : `لا توجد يومية مفتوحة — ${selectedRep?.name || ''}`) : 'الملخص'}
           </span>
         </div>
 

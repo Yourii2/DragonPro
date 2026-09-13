@@ -2563,25 +2563,43 @@ function confirmation_describe_blocked_order_status(PDO $pdo, array $order) {
 }
 
 function confirmation_fetch_order_by_barcode(PDO $pdo, $barcode) {
-    $barcode = trim((string)$barcode);
-    if ($barcode === '') return null;
+    $raw = trim((string)$barcode);
+    if ($raw === '') return null;
 
-    // 1. First search by exact order_number (supports both numeric and alphanumeric codes e.g. ORD-101, 1005)
+    // 1. Normalize Arabic-Indic and Persian digits to standard 0-9
+    $arDigits = ['٠','١','٢','٣','٤','٥','٦','٧','٨','٩','۰','۱','۲','۳','۴','۵','۶','۷','۸','۹'];
+    $enDigits = ['0','1','2','3','4','5','6','7','8','9','0','1','2','3','4','5','6','7','8','9'];
+    $norm = str_replace($arDigits, $enDigits, $raw);
+
+    // 2. Strip leading # and trailing -POD or _POD
+    $clean = ltrim($norm, '#');
+    $clean = preg_replace('/[-_]pod$/i', '', $clean);
+    $clean = trim($clean);
+
+    // 3. Search by exact order_number (supports both numeric and alphanumeric codes e.g. ORD-101, 1005)
     $order = execute_query(
         $pdo,
         "SELECT id, order_number, status, rep_id, total_amount, shipping_fees, notes, created_at
-         FROM orders WHERE order_number = ? LIMIT 1",
-        [$barcode]
+         FROM orders WHERE order_number = ? OR order_number = ? OR order_number = ? LIMIT 1",
+        [$raw, $clean, '#' . $clean]
     )->fetch(PDO::FETCH_ASSOC);
 
-    // 2. If not found and barcode consists only of digits, fallback to matching orders.id
-    if (!$order && preg_match('/^\d+$/', $barcode)) {
-        $order = execute_query(
+    // 4. If not found and barcode consists only of digits, fallback to matching orders.id
+    // CRITICAL GUARD: Only accept if order_number is empty or matches $clean. Never return an order with a different order_number!
+    if (!$order && preg_match('/^\d+$/', $clean)) {
+        $candidate = execute_query(
             $pdo,
             "SELECT id, order_number, status, rep_id, total_amount, shipping_fees, notes, created_at
              FROM orders WHERE id = ? LIMIT 1",
-            [intval($barcode)]
+            [intval($clean)]
         )->fetch(PDO::FETCH_ASSOC);
+
+        if ($candidate) {
+            $candNum = trim((string)($candidate['order_number'] ?? ''));
+            if ($candNum === '' || $candNum === $clean || $candNum === $raw) {
+                $order = $candidate;
+            }
+        }
     }
 
     // Never fallback to product_variants for resolving an order!
@@ -10284,7 +10302,11 @@ switch ($module) {
             
             $where = [];
             if ($statusFilter) {
-                $where[] = "o.status = '" . str_replace("'", "\'", $statusFilter) . "'";
+                if ($statusFilter === 'active') {
+                    $where[] = "(o.status = 'with_rep' OR o.status = 'partial' OR o.status = 'in_delivery' OR o.status = 'postponed')";
+                } else {
+                    $where[] = "o.status = '" . str_replace("'", "\'", $statusFilter) . "'";
+                }
             } elseif ($statusInRaw) {
                 $statuses = array_filter(array_map('trim', explode(',', $statusInRaw)));
                 if (!empty($statuses)) {
@@ -10418,12 +10440,22 @@ switch ($module) {
             break;
         }
         if ($action === 'getByNumber') {
-            $orderNumber = $_GET['orderNumber'] ?? '';
-            if (empty($orderNumber)) {
+            $rawOrderNumber = trim((string)($_GET['orderNumber'] ?? ''));
+            if ($rawOrderNumber === '') {
                 http_response_code(400);
                 echo json_encode(['success' => false, 'message' => 'Order number is required.']);
                 break;
             }
+
+            // Normalize Arabic-Indic and Persian numerals
+            $arDigits = ['٠','١','٢','٣','٤','٥','٦','٧','٨','٩','۰','۱','۲','۳','۴','۵','۶','۷','۸','۹'];
+            $enDigits = ['0','1','2','3','4','5','6','7','8','9','0','1','2','3','4','5','6','7','8','9'];
+            $norm = str_replace($arDigits, $enDigits, $rawOrderNumber);
+
+            // Strip leading # and trailing -POD or _POD
+            $clean = ltrim($norm, '#');
+            $clean = preg_replace('/[-_]pod$/i', '', $clean);
+            $clean = trim($clean);
 
             $ordersHasDiscountType = column_exists($pdo, 'orders', 'discount_type');
             $ordersHasDiscountValue = column_exists($pdo, 'orders', 'discount_value');
@@ -10435,8 +10467,6 @@ switch ($module) {
             $ordersHasEmployee = column_exists($pdo, 'orders', 'employee');
             $ordersHasPage = column_exists($pdo, 'orders', 'page');
             $ordersHasShippingCompanyId = column_exists($pdo, 'orders', 'shipping_company_id');
-            $ordersHasEmployee = column_exists($pdo, 'orders', 'employee');
-            $ordersHasPage = column_exists($pdo, 'orders', 'page');
 
             $extraCols = [];
             if ($ordersHasDiscountType) $extraCols[] = 'o.discount_type';
@@ -10451,14 +10481,34 @@ switch ($module) {
             if ($ordersHasPage) $extraCols[] = 'o.page';
             $extraColsSql = count($extraCols) > 0 ? (', ' . implode(', ', $extraCols)) : '';
 
-            // Fetch the order
-                $sql = "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, o.created_at, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, COALESCE(NULLIF(o.address, ''), c.address) as address, COALESCE(NULLIF(o.governorate, ''), c.governorate) as governorate
+            // 1. First search by exact order_number
+            $sql = "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, o.created_at, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, COALESCE(NULLIF(o.address, ''), c.address) as address, COALESCE(NULLIF(o.governorate, ''), c.governorate) as governorate
+                {$extraColsSql}
+                FROM orders o LEFT JOIN customers c ON o.customer_id = c.id
+                WHERE (o.order_number = ? OR o.order_number = ? OR o.order_number = ?)
+                LIMIT 1";
+            
+            $stmt = execute_query($pdo, $sql, [$rawOrderNumber, $clean, '#' . $clean]);
+            $order = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            // 2. Safe fallback if not found and code is purely digits:
+            // CRITICAL GUARD: Only match WHERE o.id = ? if candidate's order_number is empty or matches $clean!
+            // Never return an order whose order_number is different (e.g. id 604 has order_number 609)!
+            if (!$order && preg_match('/^\d+$/', $clean)) {
+                $candSql = "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, o.created_at, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, COALESCE(NULLIF(o.address, ''), c.address) as address, COALESCE(NULLIF(o.governorate, ''), c.governorate) as governorate
                     {$extraColsSql}
                     FROM orders o LEFT JOIN customers c ON o.customer_id = c.id
-                    WHERE o.order_number = ?";
-            
-            $stmt = execute_query($pdo, $sql, [$orderNumber]);
-            $order = $stmt->fetch(PDO::FETCH_ASSOC);
+                    WHERE o.id = ?
+                    LIMIT 1";
+                $candStmt = execute_query($pdo, $candSql, [intval($clean)]);
+                $candidate = $candStmt->fetch(PDO::FETCH_ASSOC);
+                if ($candidate) {
+                    $candNum = trim((string)($candidate['order_number'] ?? ''));
+                    if ($candNum === '' || $candNum === $clean || $candNum === $rawOrderNumber) {
+                        $order = $candidate;
+                    }
+                }
+            }
 
             if (!$order) {
                 echo json_encode(['success' => false, 'data' => null]);
@@ -10722,7 +10772,7 @@ switch ($module) {
             $params = [$repId];
             if ($statusFilter !== '') {
                 if ($statusFilter === 'active') {
-                    $where[] = "(o.status = 'with_rep' OR o.status = 'partial' OR o.status = 'in_delivery')";
+                    $where[] = "(o.status = 'with_rep' OR o.status = 'partial' OR o.status = 'in_delivery' OR o.status = 'postponed')";
                 } else {
                     $where[] = 'o.status = ?';
                     $params[] = $statusFilter;
@@ -11182,10 +11232,16 @@ switch ($module) {
                             $jid = 0;
                             if (table_exists($pdo, 'rep_daily_journal')) {
                                 $openJrnl = execute_query($pdo,
-                                    "SELECT id FROM rep_daily_journal WHERE rep_id = ? AND is_closed = 0 ORDER BY id DESC LIMIT 1",
+                                    "SELECT id, journal_date, created_at FROM rep_daily_journal WHERE rep_id = ? AND is_closed = 0 ORDER BY id DESC LIMIT 1",
                                     [$repId]
                                 )->fetch(PDO::FETCH_ASSOC);
-                                $jid = intval($openJrnl['id'] ?? 0);
+                                if ($openJrnl) {
+                                    $dailyDate = $openJrnl['journal_date'] ?? substr($openJrnl['created_at'] ?? '', 0, 10);
+                                    $orderDate = substr($orderRow['created_at'] ?? '', 0, 10);
+                                    if ($orderDate >= $dailyDate) {
+                                        $jid = intval($openJrnl['id']);
+                                    }
+                                }
                             }
                             execute_query($pdo,
                                 "INSERT INTO rep_journal_orders (journal_id, rep_id, order_id, status, event_date, event_time, returned_pieces, returned_value)
@@ -14054,7 +14110,7 @@ switch ($module) {
                 $openingOrdersList = [];
                 if ($dateCol) {
                     $statusList = "'with_rep','partial','postponed'";
-                    $stmt = execute_query($pdo, "SELECT id FROM orders WHERE rep_id = ? AND status IN ($statusList) AND DATE(`$dateCol`) < ?", [$repId, $journalDate]);
+                    $stmt = execute_query($pdo, "SELECT id FROM orders WHERE rep_id = ? AND status IN ($statusList)", [$repId]);
                     $ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
                     if (count($ids) > 0) {
                         $openingOrdersCount = count($ids);
@@ -14686,19 +14742,26 @@ switch ($module) {
                                     )->fetch(PDO::FETCH_ASSOC);
 
                                     if ($anyOldRow) {
-                                        execute_query($pdo,
-                                            "UPDATE rep_journal_orders
-                                             SET journal_id = ?, status = ?, event_date = COALESCE(event_date, ?)
-                                             WHERE id = ?",
-                                            [$loopJournalId, $mappedStatus, ($repairRow['journal_date'] ?? date('Y-m-d')), intval($anyOldRow['id'])]
-                                        );
+                                        $oldJid = intval($anyOldRow['journal_id'] ?? 0);
+                                        // NEVER overwrite journal_id if this order already belongs to another journal
+                                        if ($oldJid <= 0 || $oldJid === $loopJournalId) {
+                                            execute_query($pdo,
+                                                "UPDATE rep_journal_orders
+                                                 SET journal_id = ?, status = ?, event_date = COALESCE(event_date, ?)
+                                                 WHERE id = ?",
+                                                [$loopJournalId, $mappedStatus, ($repairRow['journal_date'] ?? date('Y-m-d')), intval($anyOldRow['id'])]
+                                            );
+                                        }
                                     } else {
-                                        execute_query($pdo,
-                                            "INSERT INTO rep_journal_orders (journal_id, rep_id, order_id, status, event_date, event_time, employee)
-                                             VALUES (?, ?, ?, ?, ?, ?, ?)
-                                             ON DUPLICATE KEY UPDATE journal_id = VALUES(journal_id), status = VALUES(status)",
-                                            [$loopJournalId, $repId, $decodedOrderId, $mappedStatus, ($repairRow['journal_date'] ?? date('Y-m-d')), date('H:i:s'), $_SESSION['user']['name'] ?? null]
-                                        );
+                                        // Only create new row if this is an active/deferred order, NOT an old returned order
+                                        if ($mappedStatus !== 'full_return') {
+                                            execute_query($pdo,
+                                                "INSERT INTO rep_journal_orders (journal_id, rep_id, order_id, status, event_date, event_time, employee)
+                                                 VALUES (?, ?, ?, ?, ?, ?, ?)
+                                                 ON DUPLICATE KEY UPDATE journal_id = VALUES(journal_id), status = VALUES(status)",
+                                                [$loopJournalId, $repId, $decodedOrderId, $mappedStatus, ($repairRow['journal_date'] ?? date('Y-m-d')), date('H:i:s'), $_SESSION['user']['name'] ?? null]
+                                            );
+                                        }
                                     }
                                 }
                             } catch (Exception $eItem) {
@@ -14715,6 +14778,24 @@ switch ($module) {
                 } elseif ($journalId > 0) {
                     $where[] = 'rjo.journal_id = ?';
                     $params[] = $journalId;
+                } else {
+                    // No journal requested: only query the current open daily journal for this rep
+                    $openJrnl = execute_query($pdo, "SELECT id FROM rep_daily_journal WHERE rep_id = ? AND is_closed = 0 ORDER BY id DESC LIMIT 1", [$repId])->fetch(PDO::FETCH_ASSOC);
+                    if ($openJrnl && intval($openJrnl['id'] ?? 0) > 0) {
+                        $where[] = 'rjo.journal_id = ?';
+                        $params[] = intval($openJrnl['id']);
+                    } else {
+                        // Rep has no open daily -> return empty immediately so old closed history does not show
+                        if (ob_get_length()) ob_clean();
+                        echo json_encode([
+                            'success' => true,
+                            'delivered' => [],
+                            'returned' => [],
+                            'deferred' => [],
+                            'all' => []
+                        ]);
+                        exit;
+                    }
                 }
                 $rows = execute_query($pdo,
                     "SELECT rjo.id AS jro_id, rjo.journal_id, rjo.rep_id, rjo.order_id,

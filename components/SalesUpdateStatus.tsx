@@ -3,6 +3,7 @@ import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
 import CustomSelect from './CustomSelect';
 import { PrintableContent, PrintableOrders, PrintableOrdersSingle } from './PrintTemplates';
+import { cleanBarcode, isOrderMatchingBarcode } from '../services/barcodeUtils';
 
 // --- المكون الرئيسي ---
 
@@ -20,13 +21,13 @@ const SalesUpdateStatus: React.FC = () => {
   const [userDefaults, setUserDefaults] = useState<any>(null);
   const [openPartialOrder, setOpenPartialOrder] = useState<any | null>(null);
   const [partialProducts, setPartialProducts] = useState<any[]>([]);
-  const [partialWarehouse, setPartialWarehouse] = useState<number|undefined>(undefined);
-const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:string; quantity:number; lineId:string; color?:string; size?:string }>>([]);
+  const [partialWarehouse, setPartialWarehouse] = useState<number | undefined>(undefined);
+  const [returnItems, setReturnItems] = useState<Array<{ productId: number; name: string; quantity: number; lineId: string; color?: string; size?: string }>>([]);
   const [isBarcodeModalOpen, setIsBarcodeModalOpen] = useState(false);
   const [scanInput, setScanInput] = useState('');
   const [scannedBarcodes, setScannedBarcodes] = useState<Array<{ code: string; orderId?: number }>>([]);
   const [repSearch, setRepSearch] = useState('');
-  
+
   // حالة الطباعة
   const [ordersToPrint, setOrdersToPrint] = useState<any[] | null>(null);
   const [printSinglePerPage, setPrintSinglePerPage] = useState<boolean>(false);
@@ -47,14 +48,14 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
           const cRes = await fetch(`${API_BASE_PATH}/api.php?module=shipping_companies&action=getAll`);
           const cJson = await cRes.json();
           const allCompanies = (cJson.success ? (cJson.data || []) : []);
-          repIdToNameMap = new Map(allCompanies.map((c:any) => [Number(c.id), String(c.name || '')]));
+          repIdToNameMap = new Map(allCompanies.map((c: any) => [Number(c.id), String(c.name || '')]));
         } else {
           // fetch reps with server-provided balance
           const usersRes = await fetch(`${API_BASE_PATH}/api.php?module=users&action=getAllWithBalance&related_to_type=rep`);
           const usersJson = await usersRes.json();
           const allReps = (usersJson.success ? (usersJson.data || []) : []);
           // store the whole user object so we can read `balance` later
-          repIdToNameMap = new Map(allReps.map((r:any) => [Number(r.id), r]));
+          repIdToNameMap = new Map(allReps.map((r: any) => [Number(r.id), r]));
         }
 
         // 2. Fetch all orders
@@ -67,22 +68,22 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
           return { repId: Number(id), name: (u && (u.name || u.fullname)) || String(u || `مندوب #${id}`), balance: Number(u?.balance || 0), ordersCount: 0, productsCount: 0 };
         });
         setRepsSummary(repsList);
-          // populate counts for reps (orders/products) in background so counts show on page open
-          (async () => { try { await populateRepCounts?.(repsList); } catch(e){} })();
-          // load warehouses for returns
+        // populate counts for reps (orders/products) in background so counts show on page open
+        (async () => { try { await populateRepCounts?.(repsList); } catch (e) { } })();
+        // load warehouses for returns
         try {
           const w = await fetch(`${API_BASE_PATH}/api.php?module=warehouses&action=getAll`);
           const jw = await w.json();
-          setWarehouses(jw.success ? (jw.data||[]) : []);
+          setWarehouses(jw.success ? (jw.data || []) : []);
           // fetch user defaults (warehouse/treasury) so returns can prefill
           try {
             const udRes = await fetch(`${API_BASE_PATH}/api.php?module=permissions&action=getUserDefaults&user_id=${jv.user?.id ?? 0}`, { credentials: 'include' });
             const udJson = await udRes.json();
             if (udJson && udJson.success) {
               setUserDefaults(udJson.data || null);
-              try { (window as any).userDefaults = udJson.data || null; } catch(e) {}
+              try { (window as any).userDefaults = udJson.data || null; } catch (e) { }
             }
-          } catch(e) { /* ignore */ }
+          } catch (e) { /* ignore */ }
         } catch (e) { setWarehouses([]); }
       } catch (e) {
         console.error('Failed to load update-status data', e);
@@ -101,12 +102,12 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
         const cRes = await fetch(`${API_BASE_PATH}/api.php?module=shipping_companies&action=getAll`);
         const cJson = await cRes.json();
         const allCompanies = (cJson.success ? (cJson.data || []) : []);
-        repIdToNameMap = new Map(allCompanies.map((c:any) => [Number(c.id), String(c.name || '')]));
+        repIdToNameMap = new Map(allCompanies.map((c: any) => [Number(c.id), String(c.name || '')]));
       } else {
         const usersRes = await fetch(`${API_BASE_PATH}/api.php?module=users&action=getAllWithBalance&related_to_type=rep`);
         const usersJson = await usersRes.json();
         const allReps = (usersJson.success ? (usersJson.data || []) : []);
-        repIdToNameMap = new Map(allReps.map((r:any) => [Number(r.id), r]));
+        repIdToNameMap = new Map(allReps.map((r: any) => [Number(r.id), r]));
       }
 
       const repsList = Array.from(repIdToNameMap.entries()).map(([id, entry]) => {
@@ -117,13 +118,13 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
         return { repId: Number(id), name: (u && (u.name || u.fullname)) || String(u || `مندوب #${id}`), balance: Number(u?.balance || 0), ordersCount: 0, productsCount: 0 };
       });
       setRepsSummary(repsList);
-        // Kick off background population of ordersCount/productsCount without blocking UI
-        (async () => { try { await populateRepCounts?.(repsList); } catch(e){} })();
+      // Kick off background population of ordersCount/productsCount without blocking UI
+      (async () => { try { await populateRepCounts?.(repsList); } catch (e) { } })();
 
       try {
         const w = await fetch(`${API_BASE_PATH}/api.php?module=warehouses&action=getAll`);
         const jw = await w.json();
-        setWarehouses(jw.success ? (jw.data||[]) : []);
+        setWarehouses(jw.success ? (jw.data || []) : []);
       } catch (e) { setWarehouses([]); }
     } catch (e) {
       console.error('Failed to refresh data', e);
@@ -131,10 +132,10 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
   };
 
   // Translate status codes to Arabic for display
-  const translateStatus = (s:any) => {
+  const translateStatus = (s: any) => {
     if (!s && s !== 0) return '';
     const st = String(s).toLowerCase();
-    const map: Record<string,string> = {
+    const map: Record<string, string> = {
       'with_rep': 'مع المندوب',
       'delivered': 'تم التسليم',
       'returned': 'مرتجع',
@@ -147,20 +148,20 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
     return map[st] || s;
   };
 
-  const computeOrderSubtotal = (o:any) => {
+  const computeOrderSubtotal = (o: any) => {
     if (!o) return 0;
     // Prioritize DB-level total/shipping to accurately account for discounts
     if (o.total_amount !== undefined && o.shipping_fees !== undefined) return Number(o.total_amount || 0) - Number(o.shipping_fees || 0);
     if (o.total !== undefined && o.shipping !== undefined) return Number(o.total || 0) - Number(o.shipping || 0);
-    
+
     if (o.subTotal !== undefined) return Number(o.subTotal || 0);
     if (o.sub_total !== undefined) return Number(o.sub_total || 0);
     // fallback to products list if no total info
-    if (o.order_items && Array.isArray(o.order_items) && o.order_items.length>0) {
-      return o.order_items.reduce((s:any,it:any) => s + (Number(it.quantity||it.qty||0) * Number(it.price||it.sale_price||it.unit_price||0)), 0);
+    if (o.order_items && Array.isArray(o.order_items) && o.order_items.length > 0) {
+      return o.order_items.reduce((s: any, it: any) => s + (Number(it.quantity || it.qty || 0) * Number(it.price || it.sale_price || it.unit_price || 0)), 0);
     }
-    if (o.products && Array.isArray(o.products) && o.products.length>0) {
-      return o.products.reduce((s:any,p:any) => s + (Number(p.quantity||p.qty||0) * Number(p.price||p.sale_price||0)), 0);
+    if (o.products && Array.isArray(o.products) && o.products.length > 0) {
+      return o.products.reduce((s: any, p: any) => s + (Number(p.quantity || p.qty || 0) * Number(p.price || p.sale_price || 0)), 0);
     }
     return Number(o.total_amount || o.total || 0);
   };
@@ -187,7 +188,7 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
 
   // Prompt user to choose a warehouse from available `warehouses` (or choose empty).
   // Returns: undefined => cancelled, null => no warehouse chosen, number => warehouse id
-  const promptWarehouseForReturn = async (): Promise<number|null|undefined> => {
+  const promptWarehouseForReturn = async (): Promise<number | null | undefined> => {
     // If no warehouses configured, abort
     const list = (warehouses || []);
     if (!list || list.length === 0) return undefined;
@@ -201,15 +202,15 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
 
     if (defaultWarehouseId && canChangeWarehouse === false) {
       // ensure the default exists in list
-      if (list.find((w:any) => Number(w.id) === Number(defaultWarehouseId))) return Number(defaultWarehouseId);
+      if (list.find((w: any) => Number(w.id) === Number(defaultWarehouseId))) return Number(defaultWarehouseId);
     }
 
     // If only one warehouse available, require it (no prompt)
     if (list.length === 1) return Number(list[0].id);
 
     // Build options (no empty 'بدون' option — selection is mandatory)
-    const options: Record<string,string> = {};
-    list.forEach((w:any) => { options[String(w.id)] = w.name || (`المستودع ${w.id}`); });
+    const options: Record<string, string> = {};
+    list.forEach((w: any) => { options[String(w.id)] = w.name || (`المستودع ${w.id}`); });
 
     const res = await Swal.fire({
       title: 'اختر المستودع لإتمام المرتجع (إجباري)',
@@ -252,7 +253,7 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
           return retQ > 0 && retQ < origQ;
         });
         const isFullReturn = !hasPartialItems;
-        
+
         if (isFullReturn) {
           // إرسال طلب تحديث الحالة فقط
           await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
@@ -329,19 +330,19 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
   // تفعيل الطباعة عند تغيير state
   useEffect(() => {
     if (ordersToPrint) {
-      setTimeout(() => { 
-          window.print(); 
-          setOrdersToPrint(null); // Reset after print dialog triggers
-          setPrintSinglePerPage(false);
+      setTimeout(() => {
+        window.print();
+        setOrdersToPrint(null); // Reset after print dialog triggers
+        setPrintSinglePerPage(false);
       }, 500);
     }
   }, [ordersToPrint]);
 
-  const toggleSelectOrder = (id:number) => {
-    setSelectedOrderIds(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev, id]);
+  const toggleSelectOrder = (id: number) => {
+    setSelectedOrderIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   };
 
-  const openOrdersForRep = (rep:any) => {
+  const openOrdersForRep = (rep: any) => {
     // Lazy-load orders for the selected rep/company to avoid fetching all orders on page load
     (async () => {
       try {
@@ -352,7 +353,7 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
         // scanning controls which orders will be returned.
         setSelectedOrderIds([]);
         // update summary counts for UI
-        setRepsSummary(prev => prev.map(r => (String(r.repId) === String(rep.repId) ? { ...r, ordersCount: (orders||[]).length, productsCount: (orders||[]).reduce((s:number,o:any)=> s + ((o.products||[]).reduce((ss:number,p:any)=> ss + Number(p.quantity||p.qty||0),0)), 0) } : r)));
+        setRepsSummary(prev => prev.map(r => (String(r.repId) === String(rep.repId) ? { ...r, ordersCount: (orders || []).length, productsCount: (orders || []).reduce((s: number, o: any) => s + ((o.products || []).reduce((ss: number, p: any) => ss + Number(p.quantity || p.qty || 0), 0)), 0) } : r)));
       } catch (e) {
         console.error('Failed to load orders for rep', e);
         setOpenRepOrders(rep);
@@ -361,14 +362,14 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
     })();
   };
 
-  const fetchOrdersForRep = async (repId:number) => {
+  const fetchOrdersForRep = async (repId: number) => {
     if (!repId) return [];
     try {
       if (isShippingMode) {
         const r = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=in_delivery`);
         const jr = await r.json();
         const list = jr && jr.success ? jr.data || [] : [];
-        return list.filter((o:any) => Number(o.shipping_company_id ?? o.shippingCompanyId) === Number(repId));
+        return list.filter((o: any) => Number(o.shipping_company_id ?? o.shippingCompanyId) === Number(repId));
       }
       // جلب جميع الطلبات الموجودة مع المندوب، بما في ذلك الطلبات التي تم إرجاعها جزئيًا
       // نطلب الحالات النشطة فقط (active) لضمان عدم سحب المرتجعات الكلية السابقة
@@ -383,7 +384,7 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
   };
 
   // Populate ordersCount and productsCount for a list of reps (runs concurrently)
-  const populateRepCounts = async (list:any[]) => {
+  const populateRepCounts = async (list: any[]) => {
     try {
       const concurrency = 3;
       let idx = 0;
@@ -396,24 +397,24 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
           try {
             const ords = await fetchOrdersForRep(r.repId);
             const ordersCount = (ords || []).length;
-            const productsCount = (ords || []).reduce((s:number,o:any)=> s + ((o.products||[]).reduce((ss:number,p:any)=> ss + Number(p.quantity||p.qty||0),0)), 0);
+            const productsCount = (ords || []).reduce((s: number, o: any) => s + ((o.products || []).reduce((ss: number, p: any) => ss + Number(p.quantity || p.qty || 0), 0)), 0);
             setRepsSummary(prev => prev.map(x => String(x.repId) === String(r.repId) ? { ...x, ordersCount, productsCount } : x));
-          } catch(e) {
+          } catch (e) {
             // ignore per-rep errors
           }
         }
       };
-      for (let w=0; w<concurrency; w++) workers.push(runNext());
+      for (let w = 0; w < concurrency; w++) workers.push(runNext());
       await Promise.all(workers);
       setRepsSummary(prev => [...prev].sort((a, b) => (b.ordersCount || 0) - (a.ordersCount || 0)));
-    } catch(e) {
+    } catch (e) {
       // non-fatal
     }
   };
 
-  const openPartialEditor = (order:any) => {
+  const openPartialEditor = (order: any) => {
     setOpenPartialOrder(order);
-    const prods = (order.products||[]).map((p:any, idx:number) => ({
+    const prods = (order.products || []).map((p: any, idx: number) => ({
       // lineId distinguishes duplicate product lines even if productId matches
       lineId: p.line_id ?? p.lineId ?? `${order.id}-${idx}`,
       productId: p.productId || p.product_id || p.id || 0,
@@ -436,34 +437,34 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
     }
   };
 
-  const updatePartialQty = (index:number, val:number) => {
-    setPartialProducts(prev => prev.map((pp, i) => i===index ? { ...pp, deliveredQty: Math.max(0, Math.min(pp.qtyOriginal, val)) } : pp));
+  const updatePartialQty = (index: number, val: number) => {
+    setPartialProducts(prev => prev.map((pp, i) => i === index ? { ...pp, deliveredQty: Math.max(0, Math.min(pp.qtyOriginal, val)) } : pp));
   };
 
   const submitPartialDelivery = async (warehouseId?: number) => {
     // preserve old behavior as fallback (not used for returns UI)
     if (!openPartialOrder) return;
-    const deliveredAmount = partialProducts.reduce((s:any,p:any)=> s + (Number(p.deliveredQty||0) * Number(p.price||0)), 0);
-    const returnedItems = partialProducts.filter(p=> (p.qtyOriginal - (p.deliveredQty||0)) > 0).map(p=> ({ productId: p.productId, quantity: (p.qtyOriginal - (p.deliveredQty||0)) }));
+    const deliveredAmount = partialProducts.reduce((s: any, p: any) => s + (Number(p.deliveredQty || 0) * Number(p.price || 0)), 0);
+    const returnedItems = partialProducts.filter(p => (p.qtyOriginal - (p.deliveredQty || 0)) > 0).map(p => ({ productId: p.productId, quantity: (p.qtyOriginal - (p.deliveredQty || 0)) }));
     try {
-      const body:any = { id: openPartialOrder.id, status: 'in_delivery', deliveredAmount };
-      if (returnedItems.length>0) { body.returnedItems = returnedItems; }
+      const body: any = { id: openPartialOrder.id, status: 'in_delivery', deliveredAmount };
+      if (returnedItems.length > 0) { body.returnedItems = returnedItems; }
       if (warehouseId) body.warehouseId = warehouseId;
-      const res = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const j = await res.json();
       if (j.success) {
-        setOpenRepOrders((prev:any)=> (prev ? ({ ...prev, orders: (prev.orders||[]).filter((o:any)=> o.id !== openPartialOrder.id) }) : prev));
-        try { await refreshData(); } catch(e) { console.error(e); }
+        setOpenRepOrders((prev: any) => (prev ? ({ ...prev, orders: (prev.orders || []).filter((o: any) => o.id !== openPartialOrder.id) }) : prev));
+        try { await refreshData(); } catch (e) { console.error(e); }
         setOpenPartialOrder(null);
         setPartialProducts([]);
-        Swal.fire('تم','تم حفظ حالة التسليم الجزئي.','success');
+        Swal.fire('تم', 'تم حفظ حالة التسليم الجزئي.', 'success');
       } else {
         console.error('Partial save failed', j);
         Swal.fire('خطأ', j.message || 'فشل حفظ التسليم الجزئي.', 'error');
       }
     } catch (e) {
       console.error(e);
-      Swal.fire('خطأ','فشل في الاتصال بالخادم.','error');
+      Swal.fire('خطأ', 'فشل في الاتصال بالخادم.', 'error');
     }
   };
 
@@ -483,28 +484,28 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
     try {
       // Build payload compatible with server partialReturn handler
       const itemsPayload = (returnItems || []).map(r => ({ lineId: r.lineId, productId: r.productId, quantity: Number(r.quantity || 0) }));
-      const payload:any = { order_id: savedOrderId, rep_id: savedOrderRepId, items: itemsPayload, warehouse_id: partialWarehouse, notes: '' };
-      const res = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=partialReturn`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const payload: any = { order_id: savedOrderId, rep_id: savedOrderRepId, items: itemsPayload, warehouse_id: partialWarehouse, notes: '' };
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=partialReturn`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const j = await res.json();
       if (j.success) {
         // If server returned updated order data, replace the order in openRepOrders
         if (j.order && openRepOrders && Array.isArray(openRepOrders.orders)) {
           const updatedOrder = j.order;
-          setOpenRepOrders((prev:any) => {
+          setOpenRepOrders((prev: any) => {
             if (!prev) return prev;
-            const newOrders = (prev.orders||[]).map((o:any) => o.id === updatedOrder.id ? {
+            const newOrders = (prev.orders || []).map((o: any) => o.id === updatedOrder.id ? {
               ...o,
               orderNumber: updatedOrder.order_number ?? updatedOrder.orderNumber ?? o.orderNumber,
               customerName: updatedOrder.customer_name ?? updatedOrder.customerName ?? o.customerName,
-              products: Array.isArray(updatedOrder.products) ? updatedOrder.products.map((p:any) => ({ productId: p.productId || p.product_id, name: p.name, color: p.color, size: p.size, quantity: p.quantity, price: p.price || p.price_per_unit, total: p.total })) : o.products
+              products: Array.isArray(updatedOrder.products) ? updatedOrder.products.map((p: any) => ({ productId: p.productId || p.product_id, name: p.name, color: p.color, size: p.size, quantity: p.quantity, price: p.price || p.price_per_unit, total: p.total })) : o.products
             } : o);
             // Recalculate productsCount and ordersCount for this rep and update repsSummary
             try {
               const repIdLocal = prev.repId;
               const ordersCount = newOrders.length;
-              const productsCount = newOrders.reduce((s:number,ord:any)=> s + ((ord.products||[]).reduce((ss:number,p:any)=> ss + Number(p.quantity||p.qty||0),0)), 0);
+              const productsCount = newOrders.reduce((s: number, ord: any) => s + ((ord.products || []).reduce((ss: number, p: any) => ss + Number(p.quantity || p.qty || 0), 0)), 0);
               setRepsSummary(rs => rs.map(r => String(r.repId) === String(repIdLocal) ? ({ ...r, ordersCount, productsCount }) : r));
-            } catch(e) {}
+            } catch (e) { }
             return { ...prev, orders: newOrders };
           });
         }
@@ -518,14 +519,14 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
             const newBal = Number((r.balance || 0)) - rv;
             return { ...r, balance: newBal };
           }));
-          setOpenRepOrders((prev:any) => prev ? ({ ...prev, balance: Number((prev.balance || 0)) - rv }) : prev);
+          setOpenRepOrders((prev: any) => prev ? ({ ...prev, balance: Number((prev.balance || 0)) - rv }) : prev);
         }
 
         // تحديث rep_journal_orders قبل إغلاق النافذة
         try {
           if (savedOrderRepId && savedOrderId) {
             await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
-              method: 'POST', headers: {'Content-Type': 'application/json'},
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ rep_id: savedOrderRepId, order_ids: [savedOrderId], status: 'partial_return' })
             });
           }
@@ -534,8 +535,8 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
         // Show concise confirmation with counts and warehouse name
         try {
           const ordersCount = 1;
-          const productsCount = itemsPayload.reduce((s:number,it:any) => s + Number(it.quantity||0), 0);
-          const wh = (warehouses||[]).find(w => Number(w.id) === Number(partialWarehouse));
+          const productsCount = itemsPayload.reduce((s: number, it: any) => s + Number(it.quantity || 0), 0);
+          const wh = (warehouses || []).find(w => Number(w.id) === Number(partialWarehouse));
           const whName = (wh && (wh.name || wh.title || wh.label)) || (partialWarehouse ? (`المستودع #${partialWarehouse}`) : 'غير محدد');
           const txt = `تم استلام\nطلبيات : ${ordersCount}\nمنتجات : ${productsCount}\nفى المخزن: ${whName}`;
           setOpenPartialOrder(null);
@@ -543,7 +544,7 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
           setReturnItems([]);
           setPartialWarehouse(undefined);
           Swal.fire({ title: 'تم', html: txt.replace(/\n/g, '<br/>'), icon: 'success', confirmButtonText: 'حسناً' });
-        } catch(e) {
+        } catch (e) {
           setOpenPartialOrder(null);
           setPartialProducts([]);
           setReturnItems([]);
@@ -556,31 +557,31 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
       }
     } catch (e) {
       console.error(e);
-      Swal.fire('خطأ','فشل في الاتصال بالخادم.','error');
+      Swal.fire('خطأ', 'فشل في الاتصال بالخادم.', 'error');
     }
   };
 
-  const adjustRepCounts = (repId:any, removedOrders:any[]) => {
+  const adjustRepCounts = (repId: any, removedOrders: any[]) => {
     if (!repId) return;
     const removedCount = removedOrders.length || 0;
-    const removedProducts = removedOrders.reduce((s:any,o:any)=> s + ((o.products||[]).reduce((ss:number,p:any)=> ss + Number(p.quantity||p.qty||0),0)), 0);
-    setRepsSummary(prev => prev.map((r:any) => {
+    const removedProducts = removedOrders.reduce((s: any, o: any) => s + ((o.products || []).reduce((ss: number, p: any) => ss + Number(p.quantity || p.qty || 0), 0)), 0);
+    setRepsSummary(prev => prev.map((r: any) => {
       if (String(r.repId) !== String(repId)) return r;
       return {
         ...r,
-        ordersCount: Math.max(0, (r.ordersCount||0) - removedCount),
-        productsCount: Math.max(0, (r.productsCount||0) - removedProducts)
+        ordersCount: Math.max(0, (r.ordersCount || 0) - removedCount),
+        productsCount: Math.max(0, (r.productsCount || 0) - removedProducts)
       };
     }));
   };
 
   // وظيفة الطباعة الجديدة الموحدة
   const handlePrintOrders = (ordersList: any[]) => {
-      if (!ordersList || ordersList.length === 0) {
-          Swal.fire('تنبيه', 'لا توجد اوردرات للطباعة', 'warning');
-          return;
-      }
-      setOrdersToPrint(ordersList);
+    if (!ordersList || ordersList.length === 0) {
+      Swal.fire('تنبيه', 'لا توجد اوردرات للطباعة', 'warning');
+      return;
+    }
+    setOrdersToPrint(ordersList);
   };
 
   /* const printDailyDocument = (ordersToPrint:any[]) => {
@@ -662,17 +663,17 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
     const w = window.open('', '_blank', 'toolbar=0,location=0,menubar=0,scrollbars=1,resizable=1,width=900,height=700');
     if (!w) return; w.document.write(html); w.document.close(); w.focus(); setTimeout(()=>w.print(),400);
   }; */
-   const printDailyDocument = (ordersToPrint:any[]) => {
+  const printDailyDocument = (ordersToPrint: any[]) => {
     const dateStr = new Date().toLocaleDateString();
-    
+
     // --- 1. تحديد اسم المندوب ---
     let repName = '';
     if (ordersToPrint && ordersToPrint.length > 0) {
       const firstOrder = ordersToPrint[0];
       const repId = firstOrder.rep_id || firstOrder.repId || firstOrder.shipping_company_id || firstOrder.shippingCompanyId;
-      
+
       if (repId && typeof repsSummary !== 'undefined') {
-        const found = repsSummary.find((r:any) => String(r.repId) === String(repId));
+        const found = repsSummary.find((r: any) => String(r.repId) === String(repId));
         if (found) repName = found.name;
       }
       if (!repName) {
@@ -681,50 +682,50 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
     } else {
       repName = openRepOrders?.name || '';
     }
-    
+
     // --- 2. حساب الإجماليات بدقة (وتجاهل الأخطاء في الداتا القديمة) ---
-    const parseDate = (o:any) => new Date(o.created_at || o.createdAt || o.date || o.order_date || o.orderDate || Date.now());
-    const isSameDay = (a:Date,b:Date) => a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
+    const parseDate = (o: any) => new Date(o.created_at || o.createdAt || o.date || o.order_date || o.orderDate || Date.now());
+    const isSameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
     const today = new Date();
     const allOrders = ordersToPrint || [];
-    
-    const todayOrders = allOrders.filter((o:any)=> isSameDay(parseDate(o), today));
-    const oldOrders = allOrders.filter((o:any)=> !isSameDay(parseDate(o), today));
-    
-    const todayValue = todayOrders.reduce((s:any,o:any)=> s + computeOrderSubtotal(o), 0);
-    const totalAmount = allOrders.reduce((s:any,o:any)=> s + computeOrderSubtotal(o), 0);
-    
+
+    const todayOrders = allOrders.filter((o: any) => isSameDay(parseDate(o), today));
+    const oldOrders = allOrders.filter((o: any) => !isSameDay(parseDate(o), today));
+
+    const todayValue = todayOrders.reduce((s: any, o: any) => s + computeOrderSubtotal(o), 0);
+    const totalAmount = allOrders.reduce((s: any, o: any) => s + computeOrderSubtotal(o), 0);
+
     // حساب إجمالي التحصيل الفعلي (منتجات + شحن)
-    const totalRequiredToCollect = allOrders.reduce((s:any,o:any)=> s + computeOrderSubtotal(o) + Number(o.shipping||o.shipping_fees||o.shippingCost||0), 0);
-    
+    const totalRequiredToCollect = allOrders.reduce((s: any, o: any) => s + computeOrderSubtotal(o) + Number(o.shipping || o.shipping_fees || o.shippingCost || 0), 0);
+
     const todayOrdersCount = todayOrders.length;
-    const todayPieces = todayOrders.reduce((s:any,o:any)=> s + ((o.products||[]).reduce((ss:number,p:any)=> ss + Number(p.quantity||p.qty||0),0)), 0);
+    const todayPieces = todayOrders.reduce((s: any, o: any) => s + ((o.products || []).reduce((ss: number, p: any) => ss + Number(p.quantity || p.qty || 0), 0)), 0);
     const oldOrdersCount = oldOrders.length;
-    const oldPieces = oldOrders.reduce((s:any,o:any)=> s + ((o.products||[]).reduce((ss:number,p:any)=> ss + Number(p.quantity||p.qty||0),0)), 0);
+    const oldPieces = oldOrders.reduce((s: any, o: any) => s + ((o.products || []).reduce((ss: number, p: any) => ss + Number(p.quantity || p.qty || 0), 0)), 0);
     const totalOrdersCount = allOrders.length;
-    const totalPieces = allOrders.reduce((s:any,o:any)=> s + ((o.products||[]).reduce((ss:number,p:any)=> ss + Number(p.quantity||p.qty||0),0)), 0);
-    
+    const totalPieces = allOrders.reduce((s: any, o: any) => s + ((o.products || []).reduce((ss: number, p: any) => ss + Number(p.quantity || p.qty || 0), 0)), 0);
+
     let prevBalance = Number(openRepOrders?.balance || 0);
     try {
-      if ((!prevBalance || prevBalance===0) && allOrders.length>0) {
+      if ((!prevBalance || prevBalance === 0) && allOrders.length > 0) {
         const repId = allOrders[0].rep_id || allOrders[0].repId || allOrders[0].shipping_company_id || allOrders[0].shippingCompanyId || null;
         if (repId) {
-          const found = (repsSummary||[]).find((r:any) => String(r.repId) === String(repId));
+          const found = (repsSummary || []).find((r: any) => String(r.repId) === String(repId));
           if (found) prevBalance = Number(found.balance || 0);
         }
       }
-    } catch(e) { prevBalance = Number(openRepOrders?.balance || 0); }
+    } catch (e) { prevBalance = Number(openRepOrders?.balance || 0); }
     const finalDebtBefore = prevBalance - todayValue;
-    
+
     const reportTitle = isShippingMode ? 'يومية شركة الشحن' : 'يومية المندوب';
     const assigneeLabel = isShippingMode ? 'شركة الشحن' : 'اسم المندوب';
 
     // === تجميع المنتجات لإذن التسليم السفلي ===
     const summaryMap: Record<string, { name: string; color: string; size: string; qty: number }> = {};
-    allOrders.forEach(o => (o.products||[]).forEach((p:any) => {
-      const key = `${p.name||''}||${p.color||''}||${p.size||''}`;
-      if (!summaryMap[key]) summaryMap[key] = { name: p.name||'', color: p.color||'', size: p.size||'', qty: 0 };
-      summaryMap[key].qty += Number(p.quantity||p.qty||0);
+    allOrders.forEach(o => (o.products || []).forEach((p: any) => {
+      const key = `${p.name || ''}||${p.color || ''}||${p.size || ''}`;
+      if (!summaryMap[key]) summaryMap[key] = { name: p.name || '', color: p.color || '', size: p.size || '', qty: 0 };
+      summaryMap[key].qty += Number(p.quantity || p.qty || 0);
     }));
     const groupedProducts = Object.values(summaryMap);
 
@@ -833,32 +834,32 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
           </thead>
           <tbody>
             ${allOrders.map(o => {
-            const pieces = (o.products||[]).reduce((s:number,p:any)=> s + Number(p.quantity||p.qty||0), 0);
-            const prodVal = computeOrderSubtotal(o);
-            const shipVal = Number(o.shipping||o.shipping_fees||o.shippingCost||0);
-            const totalVal = prodVal + shipVal;
-            return `
+      const pieces = (o.products || []).reduce((s: number, p: any) => s + Number(p.quantity || p.qty || 0), 0);
+      const prodVal = computeOrderSubtotal(o);
+      const shipVal = Number(o.shipping || o.shipping_fees || o.shippingCost || 0);
+      const totalVal = prodVal + shipVal;
+      return `
             <tr>
-              <td class="font-black text-center">${o.orderNumber||o.order_number||''}</td>
-              <td class="font-black">${o.customerName||o.customer_name||''}</td>
-              <td dir="ltr" class="text-center font-black">${o.phone||o.phone1||''}</td>
-              <td class="text-center font-black">${o.governorate||''}</td>
-              <td>${o.address||''}</td>
-              <td class="text-center">${o.employee||o.user_name||o.admin||o.created_by||'-'}<br><span style="font-size:9px; color:#555;">${o.page||o.source||'-'}</span></td>
+              <td class="font-black text-center">${o.orderNumber || o.order_number || ''}</td>
+              <td class="font-black">${o.customerName || o.customer_name || ''}</td>
+              <td dir="ltr" class="text-center font-black">${o.phone || o.phone1 || ''}</td>
+              <td class="text-center font-black">${o.governorate || ''}</td>
+              <td>${o.address || ''}</td>
+              <td class="text-center">${o.employee || o.user_name || o.admin || o.created_by || '-'}<br><span style="font-size:9px; color:#555;">${o.page || o.source || '-'}</span></td>
               <td class="text-center font-black">${pieces}</td>
               <td class="text-center font-black">${prodVal.toLocaleString()}</td>
               <td class="text-center">${shipVal.toLocaleString()}</td>
               <td class="text-center highlight-cell">${totalVal.toLocaleString()}</td>
-              <td>${o.notes||o.remark||o.customer_notes||'-'}</td>
+              <td>${o.notes || o.remark || o.customer_notes || '-'}</td>
             </tr>`;
-            }).join('')}
+    }).join('')}
           </tbody>
         </table>
 
         <div class="delivery-section">
           <div class="delivery-header">
               <div class="delivery-title">إذن تسليم مجمع (جرد القطع)</div>
-              <div class="total-pieces-badge">إجمالي القطع المستلمة: ${groupedProducts.reduce((s,r) => s + r.qty, 0)} قطعة</div>
+              <div class="total-pieces-badge">إجمالي القطع المستلمة: ${groupedProducts.reduce((s, r) => s + r.qty, 0)} قطعة</div>
           </div>
           <!-- جدول طلبيات النزول: يعرض رقم الطلب، الموظف، البيدج وعدد القطع لكل طلب -->
           <table class="delivery-orders-table">
@@ -872,11 +873,11 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
             </thead>
             <tbody>
             ${allOrders.map(o => {
-              const piecesPerOrder = (o.products||[]).reduce((s:number,p:any)=> s + Number(p.quantity||p.qty||0), 0);
-              const employee = o.employee || o.user_name || o.admin || o.created_by || o.created_by_name || o.rep_name || o.representative || o.assigned_to || o.assigned_employee || '-';
-              const page = o.page || o.source || o.source_page || o.page_no || o.pageNumber || '-';
-              return `<tr><td class="font-black text-center">${o.orderNumber||o.order_number||''}</td><td>${employee}</td><td class="text-center">${page}</td><td class="text-center font-black">${piecesPerOrder}</td></tr>`;
-            }).join('')}
+      const piecesPerOrder = (o.products || []).reduce((s: number, p: any) => s + Number(p.quantity || p.qty || 0), 0);
+      const employee = o.employee || o.user_name || o.admin || o.created_by || o.created_by_name || o.rep_name || o.representative || o.assigned_to || o.assigned_employee || '-';
+      const page = o.page || o.source || o.source_page || o.page_no || o.pageNumber || '-';
+      return `<tr><td class="font-black text-center">${o.orderNumber || o.order_number || ''}</td><td>${employee}</td><td class="text-center">${page}</td><td class="text-center font-black">${piecesPerOrder}</td></tr>`;
+    }).join('')}
             </tbody>
           </table>
           <table class="mini-table">
@@ -903,23 +904,23 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
     </body></html>`;
 
     const w = window.open('', '_blank', 'toolbar=0,location=0,menubar=0,scrollbars=1,resizable=1,width=1000,height=800');
-    if (!w) return; 
-    w.document.write(html); 
-    w.document.close(); 
-    w.focus(); 
+    if (!w) return;
+    w.document.write(html);
+    w.document.close();
+    w.focus();
     setTimeout(() => w.print(), 500);
   };
-  const printDeliveryNote = (ordersList:any[]) => {
+  const printDeliveryNote = (ordersList: any[]) => {
     // طباعة إذن التسليم مهيأ لطابعة حرارية 80mm
     const summaryMap: Record<string, { name: string; color: string; size: string; qty: number }> = {};
-    (ordersList||[]).forEach(o => (o.products||[]).forEach((p:any) => {
-      const key = `${p.name||''}||${p.color||''}||${p.size||''}`;
-      if (!summaryMap[key]) summaryMap[key] = { name: p.name||'', color: p.color||'', size: p.size||'', qty: 0 };
-      summaryMap[key].qty += Number(p.quantity||p.qty||0);
+    (ordersList || []).forEach(o => (o.products || []).forEach((p: any) => {
+      const key = `${p.name || ''}||${p.color || ''}||${p.size || ''}`;
+      if (!summaryMap[key]) summaryMap[key] = { name: p.name || '', color: p.color || '', size: p.size || '', qty: 0 };
+      summaryMap[key].qty += Number(p.quantity || p.qty || 0);
     }));
     const rows = Object.values(summaryMap);
     const dateStr = new Date().toLocaleString('ar-EG');
-    const repName = (ordersList && ordersList.length>0) ? (openRepOrders?.name || ordersList[0].rep_name || ordersList[0].repName || '') : (openRepOrders?.name || '');
+    const repName = (ordersList && ordersList.length > 0) ? (openRepOrders?.name || ordersList[0].rep_name || ordersList[0].repName || '') : (openRepOrders?.name || '');
     const assigneeLabel = isShippingMode ? 'شركة الشحن' : 'المندوب';
     const compName = localStorage.getItem('Dragon_company_name') || '';
     const totalProducts = rows.length;
@@ -979,45 +980,37 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
       `<div class="signatures"><div>توقيع المستلم: .................</div><div>توقيع أمين المخزن: .................</div></div>` +
       `</body></html>`;
     const w = window.open('', '_blank', 'toolbar=0,location=0,menubar=0,scrollbars=1,resizable=1,width=400,height=800');
-    if (!w) return; w.document.write(html); w.document.close(); w.focus(); setTimeout(()=>w.print(),500);
+    if (!w) return; w.document.write(html); w.document.close(); w.focus(); setTimeout(() => w.print(), 500);
   };
 
-  const printShippingLabelsNew = (ordersList:any[]) => {
+  const printShippingLabelsNew = (ordersList: any[]) => {
     // Reuse the unified PrintableOrders layout so output matches Orders Management page
     const orders = ordersList || [];
     setPrintSinglePerPage(true);
     setOrdersToPrint(orders);
   };
 
-  const handleBarcodeScan = () => {
+  const handleBarcodeScan = async () => {
     const raw = (scanInput || '').trim();
     if (!raw) return;
-    const cleanCode = raw.replace(/^[#\s]+/, '').trim().toLowerCase();
+    const cleanCode = cleanBarcode(raw);
+    if (!cleanCode) {
+      setScanInput('');
+      return;
+    }
 
-    // 1. First priority: Exact order number / tracking match
-    const directOrderMatch = (openRepOrders?.orders || []).find((o: any) => {
-      const num1 = String(o.orderNumber || '').trim().toLowerCase().replace(/^[#\s]+/, '');
-      const num2 = String(o.order_number || '').trim().toLowerCase().replace(/^[#\s]+/, '');
-      const track = String(o.tracking_number || o.shipping_number || '').trim().toLowerCase();
-      return (num1 && num1 === cleanCode) || (num2 && num2 === cleanCode) || (track && track === cleanCode);
-    });
+    // 1. First priority: Exact order number / tracking match in the current open rep's orders
+    const directOrderMatch = (openRepOrders?.orders || []).find((o: any) => isOrderMatchingBarcode(o, cleanCode));
 
-    // 2. Second priority: If no orderNumber match, check numeric ID
-    const idOrderMatch = !directOrderMatch && /^\d+$/.test(cleanCode)
-      ? (openRepOrders?.orders || []).find((o: any) => String(o.id) === cleanCode)
-      : null;
-
-    const matchedOrder = directOrderMatch || idOrderMatch;
-
-    if (matchedOrder) {
-      setSelectedOrderIds(prev => Array.from(new Set([...prev, matchedOrder.id])));
-      setScannedBarcodes(prev => [{ code: raw, orderId: matchedOrder.id }, ...prev]);
+    if (directOrderMatch) {
+      setSelectedOrderIds(prev => Array.from(new Set([...prev, directOrderMatch.id])));
+      setScannedBarcodes(prev => [{ code: raw, orderId: directOrderMatch.id }, ...prev]);
       Swal.fire({
         toast: true,
         position: 'top-end',
         icon: 'success',
         title: 'تم تحديد الأوردر',
-        text: `أوردر #${matchedOrder.orderNumber || matchedOrder.order_number || matchedOrder.id} - ${matchedOrder.customerName || matchedOrder.customer_name || ''}`,
+        text: `أوردر #${directOrderMatch.orderNumber || directOrderMatch.order_number || directOrderMatch.id} - ${directOrderMatch.customerName || directOrderMatch.customer_name || ''}`,
         timer: 1500,
         showConfirmButton: false
       });
@@ -1025,11 +1018,63 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
       return;
     }
 
+    // 2. Second priority: If not in open rep's orders, check the server to see if this order exists in the system
+    try {
+      const sRes = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getByNumber&orderNumber=${encodeURIComponent(cleanCode)}`);
+      const sJson = await sRes.json().catch(() => null);
+      if (sJson && sJson.success && sJson.data) {
+        const sysOrder = sJson.data;
+        const currentRepId = openRepOrders?.repId;
+        const orderRepId = sysOrder.rep_id ?? sysOrder.repId ?? null;
+
+        // Find rep name
+        let repName = '';
+        if (orderRepId) {
+          const foundRep = repsSummary.find(r => Number(r.repId) === Number(orderRepId));
+          repName = foundRep?.name || `مندوب #${orderRepId}`;
+        }
+
+        if (orderRepId && Number(orderRepId) !== Number(currentRepId)) {
+          Swal.fire({
+            icon: 'warning',
+            title: 'الأوردر تابع لمندوب آخر',
+            html: `<p>الأوردر رقم <b>#${cleanCode}</b> ليس في عهدة المندوب المختار حالياً.</p><p class="mt-2 text-sm text-slate-600">هذا الأوردر في عهدة: <b>${repName}</b></p>`,
+            confirmButtonText: 'حسناً'
+          });
+          setScanInput('');
+          return;
+        } else {
+          // Status is not with current rep (e.g. pending, delivered, etc.)
+          const statusMap: Record<string, string> = {
+            pending: 'قيد الانتظار',
+            with_rep: 'مع المندوب',
+            delivered: 'تم التسليم',
+            returned: 'مرتجع',
+            cancelled: 'ملغي',
+            canceled: 'ملغي',
+            postponed: 'مؤجل',
+            no_answer: 'لم يرد'
+          };
+          const statusLabel = statusMap[sysOrder.status] || sysOrder.status;
+          Swal.fire({
+            icon: 'info',
+            title: 'حالة الأوردر غير مطابقة',
+            text: `الأوردر رقم #${cleanCode} موجود في النظام وحالته الحالية: "${statusLabel}" وليس في عهدة المندوب المفتوح.`,
+            confirmButtonText: 'حسناً'
+          });
+          setScanInput('');
+          return;
+        }
+      }
+    } catch (e) {
+      console.debug('Order lookup error', e);
+    }
+
     // 3. Third priority: Product barcode match across rep's orders
     const productMatches = (openRepOrders?.orders || []).filter((o: any) => {
       return (o.products || []).some((p: any) => {
-        const pCode = String(p.barcode || p.barcode_value || p.code || p.sku || p.product_barcode || '').trim().toLowerCase();
-        return pCode && pCode === cleanCode;
+        const pCode = cleanBarcode(p.barcode || p.barcode_value || p.code || p.sku || p.product_barcode || '').toLowerCase();
+        return pCode && pCode === cleanCode.toLowerCase();
       });
     });
 
@@ -1069,7 +1114,7 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
 
   return (
     <div className="p-4 rounded-2xl border border-card dir-rtl card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
-      
+
       {/* Hidden Print Container for print output. Choose single-per-page for shipping labels. */}
       {ordersToPrint && (printSinglePerPage ? <PrintableOrdersSingle orders={ordersToPrint} /> : <PrintableOrders orders={ordersToPrint} />)}
 
@@ -1095,7 +1140,7 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
             <p className="text-sm text-slate-500">{isShippingMode ? 'لا توجد شركات شحن مطابقة.' : 'لا توجد مندوبين مطابقين.'}</p>
           ) : (
             <div className="space-y-3">
-              {displayedReps.map((rep:any) => (
+              {displayedReps.map((rep: any) => (
                 <div key={rep.repId} className="p-3 border rounded-lg flex justify-between items-center bg-slate-50">
                   <div>
                     <div className="font-bold">{rep.name || ((isShippingMode ? 'شركة شحن #' : 'مندوب #') + rep.repId)}</div>
@@ -1106,9 +1151,9 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
                     <button onClick={() => openOrdersForRep(rep)} className="bg-blue-600 text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-blue-700">عرض الاوردرات</button>
                     {SHOW_ACTION_BUTTONS && (
                       <>
-                        <button onClick={() => { (async ()=>{ const ords = await fetchOrdersForRep(rep.repId); printDailyDocument(ords); })(); }} className="bg-amber-500 text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-amber-600">عرض اليومية</button>
-                        <button onClick={() => { (async ()=>{ const ords = await fetchOrdersForRep(rep.repId); printDeliveryNote(ords); })(); }} className="bg-emerald-600 text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-emerald-700">أذن التسليم</button>
-                        <button onClick={() => { (async ()=>{ const ords = await fetchOrdersForRep(rep.repId); printShippingLabelsNew(ords); })(); }} className="bg-sky-600 text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-sky-700">طباعة بوالص الشحن فقط</button>
+                        <button onClick={() => { (async () => { const ords = await fetchOrdersForRep(rep.repId); printDailyDocument(ords); })(); }} className="bg-amber-500 text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-amber-600">عرض اليومية</button>
+                        <button onClick={() => { (async () => { const ords = await fetchOrdersForRep(rep.repId); printDeliveryNote(ords); })(); }} className="bg-emerald-600 text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-emerald-700">أذن التسليم</button>
+                        <button onClick={() => { (async () => { const ords = await fetchOrdersForRep(rep.repId); printShippingLabelsNew(ords); })(); }} className="bg-sky-600 text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-sky-700">طباعة بوالص الشحن فقط</button>
                       </>
                     )}
                   </div>
@@ -1121,57 +1166,58 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
 
       {/* Modal for rep orders */}
       {openRepOrders && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="rounded-2xl w-full max-w-4xl p-6 shadow-2xl flex flex-col max-h-[90vh] card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
-              <div className="flex justify-between items-center mb-4 border-b pb-3">
+            <div className="flex justify-between items-center mb-4 border-b pb-3">
               <h3 className="font-black text-lg">{isShippingMode ? 'اوردرات شركة الشحن' : 'اوردرات المندوب'}: {openRepOrders.name}</h3>
               <div className="flex items-center gap-2">
                 <button onClick={() => setIsBarcodeModalOpen(true)} className="px-3 py-1.5 rounded-lg bg-purple-600 text-white text-xs font-bold hover:bg-purple-700">مسح بالباركود</button>
-                <button onClick={() => { const sels = (openRepOrders.orders||[]).map((o:any)=>o.id); setSelectedOrderIds(sels); }} className="px-3 py-1.5 rounded-lg bg-slate-100 text-xs font-bold hover:bg-slate-200">تحديد الكل</button>
+                <button onClick={() => { const sels = (openRepOrders.orders || []).map((o: any) => o.id); setSelectedOrderIds(sels); }} className="px-3 py-1.5 rounded-lg bg-slate-100 text-xs font-bold hover:bg-slate-200">تحديد الكل</button>
                 <button onClick={() => { setSelectedOrderIds([]); }} className="px-3 py-1.5 rounded-lg bg-slate-100 text-xs font-bold hover:bg-slate-200">إلغاء التحديد</button>
                 <button onClick={() => setOpenRepOrders(null)} className="px-3 py-1.5 rounded-lg bg-red-100 text-red-600 text-xs font-bold hover:bg-red-200">إغلاق</button>
               </div>
             </div>
-            
+
             {/* Summary removed from orders modal per user request; kept in printable report only */}
             <div className="flex-1 overflow-y-auto mb-4 space-y-2 pr-2">
-              {(openRepOrders.orders||[]).map((o:any)=> {
-                const piecesCount = (o.products||[]).reduce((s:number,p:any)=> s + Number(p.quantity||p.qty||0), 0);
+              {(openRepOrders.orders || []).map((o: any) => {
+                const piecesCount = (o.products || []).reduce((s: number, p: any) => s + Number(p.quantity || p.qty || 0), 0);
                 return (
-                <div key={o.id} className={`flex items-center justify-between p-3 border rounded-xl hover:bg-slate-50 transition-colors ${selectedOrderIds.includes(o.id) ? 'border-blue-500 bg-blue-50/30' : 'border-slate-200'}`}>
-                  <label className="flex items-center gap-3 flex-1 cursor-pointer">
-                    <input type="checkbox" className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500" checked={selectedOrderIds.includes(o.id)} onChange={()=>toggleSelectOrder(o.id)} />
-                    <div className="flex-1">
-                      <div className="flex justify-between">
-                          <div className="font-bold text-slate-800">#{o.orderNumber||o.order_number} — {o.customerName||o.customer_name}</div>
+                  <div key={o.id} className={`flex items-center justify-between p-3 border rounded-xl hover:bg-slate-50 transition-colors ${selectedOrderIds.includes(o.id) ? 'border-blue-500 bg-blue-50/30' : 'border-slate-200'}`}>
+                    <label className="flex items-center gap-3 flex-1 cursor-pointer">
+                      <input type="checkbox" className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500" checked={selectedOrderIds.includes(o.id)} onChange={() => toggleSelectOrder(o.id)} />
+                      <div className="flex-1">
+                        <div className="flex justify-between">
+                          <div className="font-bold text-slate-800">#{o.orderNumber || o.order_number} — {o.customerName || o.customer_name}</div>
                           <div className="font-bold text-blue-600">{computeOrderSubtotal(o).toLocaleString()} ج.م</div>
-                      </div>
-                      <div className="text-xs text-slate-500 mt-1 flex gap-4">
-                          <span>عدد القطع المتبقية: {(o.products||[]).reduce((s:number,p:any)=> s + Number(p.quantity||p.qty||0),0)}</span>
+                        </div>
+                        <div className="text-xs text-slate-500 mt-1 flex gap-4">
+                          <span>عدد القطع المتبقية: {(o.products || []).reduce((s: number, p: any) => s + Number(p.quantity || p.qty || 0), 0)}</span>
                           <span>المتبقي: {Number(o.remainingPieces || 0)}</span>
                           <span>المحافظة: {o.governorate}</span>
                           <span>الحالة: {translateStatus(o.status)}</span>
+                        </div>
                       </div>
-                    </div>
-                  </label>
+                    </label>
 
-                  <div className="flex items-center gap-2 ml-3">
-                    {piecesCount > 1 && (
-                      <button onClick={(e)=>{ e.stopPropagation(); openPartialEditor(o); }} className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700">ارتجاع جزئي</button>
-                    )}
+                    <div className="flex items-center gap-2 ml-3">
+                      {piecesCount > 1 && (
+                        <button onClick={(e) => { e.stopPropagation(); openPartialEditor(o); }} className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700">ارتجاع جزئي</button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )})}
+                )
+              })}
             </div>
 
             <div className="pt-4 border-t flex flex-wrap gap-2 justify-end">
               {/* Barcode scanning modal (opened by header button) */}
               {isBarcodeModalOpen && (
-                  <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+                <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
                   <div className="rounded-2xl w-full max-w-xl p-6 shadow-2xl card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
                     <div className="flex justify-between items-center mb-3">
                       <h4 className="font-bold">مسح باركود — امسح بوليصة الشحن أو باركود المنتج لاختيار الأوردر</h4>
-                      <button onClick={()=> { setIsBarcodeModalOpen(false); setScanInput(''); }} className="text-red-600">إغلاق</button>
+                      <button onClick={() => { setIsBarcodeModalOpen(false); setScanInput(''); }} className="text-red-600">إغلاق</button>
                     </div>
                     <div className="mb-3">
                       <p className="text-sm text-slate-500">امسح باركود بوليصة الشحن (رقم الأوردر) لاختيار الأوردر مباشرة، أو امسح باركود الصنف لتحديد الأوردرات التي تحتوي عليه.</p>
@@ -1204,8 +1250,8 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
                                 <div className="text-xs text-slate-500">{s.orderId ? `مطابقة للاوردر #${s.orderId}` : 'لم يتم العثور على تطابق'}</div>
                               </div>
                               <div className="flex gap-2">
-                                {s.orderId && <button onClick={()=> { setSelectedOrderIds(prev => prev.includes(s.orderId!) ? prev.filter(x=>x!==s.orderId) : [...prev, s.orderId!]); }} className="px-2 py-1 text-xs bg-slate-100 rounded">تبديل اختيار</button>}
-                                <button onClick={()=> setScannedBarcodes(prev => prev.filter((_,i)=> i!==idx))} className="px-2 py-1 text-xs bg-red-100 text-red-600 rounded">حذف</button>
+                                {s.orderId && <button onClick={() => { setSelectedOrderIds(prev => prev.includes(s.orderId!) ? prev.filter(x => x !== s.orderId) : [...prev, s.orderId!]); }} className="px-2 py-1 text-xs bg-slate-100 rounded">تبديل اختيار</button>}
+                                <button onClick={() => setScannedBarcodes(prev => prev.filter((_, i) => i !== idx))} className="px-2 py-1 text-xs bg-red-100 text-red-600 rounded">حذف</button>
                               </div>
                             </div>
                           ))}
@@ -1214,18 +1260,18 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
                     </div>
                     <div className="flex justify-end gap-2 mt-4">
                       <button onClick={handleReturnSelected} className="px-4 py-2 bg-rose-600 text-white rounded">تم</button>
-                      <button onClick={()=> { setIsBarcodeModalOpen(false); setScanInput(''); }} className="px-4 py-2 bg-slate-100 rounded">إغلاق</button>
+                      <button onClick={() => { setIsBarcodeModalOpen(false); setScanInput(''); }} className="px-4 py-2 bg-slate-100 rounded">إغلاق</button>
                     </div>
                   </div>
                 </div>
               )}
-              
+
               <div className="w-px bg-slate-300 mx-2"></div>
 
-              
+
               <button onClick={handleReturnSelected} className="px-5 py-2.5 bg-rose-600 text-white rounded-xl font-bold shadow-lg hover:bg-rose-700">مرتجع كلي</button>
-              
-              
+
+
             </div>
 
             {/* Partial-delivery editor modal */}
@@ -1234,7 +1280,7 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
                 <div className="rounded-xl w-full max-w-2xl p-4 shadow-xl card border border-card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
                   <div className="flex justify-between items-center mb-3">
                     <h4 className="font-bold">ارتجاع جزئي للطلب: #{openPartialOrder.orderNumber || openPartialOrder.order_number}</h4>
-                    <button onClick={()=>{ setOpenPartialOrder(null); setPartialProducts([]); setPartialWarehouse(undefined); }} className="text-red-600">إغلاق</button>
+                    <button onClick={() => { setOpenPartialOrder(null); setPartialProducts([]); setPartialWarehouse(undefined); }} className="text-red-600">إغلاق</button>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     {/* Left: Return items (what will be returned) */}
@@ -1254,9 +1300,9 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
                               <div className="w-28 flex items-center gap-2">
                                 <input type="number" min={1} value={ri.quantity} onChange={e => {
                                   const v = Math.max(1, Number(e.target.value || 0));
-                                  setReturnItems(prev => prev.map((x,idx) => idx===i ? { ...x, quantity: v } : x));
+                                  setReturnItems(prev => prev.map((x, idx) => idx === i ? { ...x, quantity: v } : x));
                                 }} className="w-16 border rounded p-1 text-center" />
-                                <button onClick={() => setReturnItems(prev => prev.filter((_,idx) => idx!==i))} className="px-2 py-1 text-xs bg-red-100 text-red-600 rounded">حذف</button>
+                                <button onClick={() => setReturnItems(prev => prev.filter((_, idx) => idx !== i))} className="px-2 py-1 text-xs bg-red-100 text-red-600 rounded">حذف</button>
                               </div>
                             </div>
                           ))}
@@ -1269,7 +1315,7 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
                           <CustomSelect
                             value={partialWarehouse ? String(partialWarehouse) : ''}
                             onChange={v => setPartialWarehouse(v ? Number(v) : undefined)}
-                            options={warehouses.map((w:any) => ({ value: String(w.id), label: w.name || w.title || ('المستودع ' + w.id) }))}
+                            options={warehouses.map((w: any) => ({ value: String(w.id), label: w.name || w.title || ('المستودع ' + w.id) }))}
                           />
                         ) : (
                           <div className="text-sm text-rose-600">لا توجد مستودعات معرّفة. تعذّر اتمام المرتجع.</div>
@@ -1277,8 +1323,8 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
                       </div>
 
                       <div className="flex justify-end gap-2 mt-4">
-                        <button onClick={()=>{ setOpenPartialOrder(null); setPartialProducts([]); setReturnItems([]); setPartialWarehouse(undefined); }} className="px-4 py-2 bg-slate-100 rounded">إلغاء</button>
-                        <button onClick={()=> submitPartialReturn()} className="px-4 py-2 bg-rose-600 text-white rounded">تنفيذ المرتجع</button>
+                        <button onClick={() => { setOpenPartialOrder(null); setPartialProducts([]); setReturnItems([]); setPartialWarehouse(undefined); }} className="px-4 py-2 bg-slate-100 rounded">إلغاء</button>
+                        <button onClick={() => submitPartialReturn()} className="px-4 py-2 bg-rose-600 text-white rounded">تنفيذ المرتجع</button>
                       </div>
                     </div>
 
@@ -1287,7 +1333,7 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
                       <h5 className="font-bold mb-2">الاوردر — #{openPartialOrder.orderNumber || openPartialOrder.order_number}</h5>
                       <div className="text-sm text-slate-500 mb-2">العميل: {openPartialOrder.customerName || openPartialOrder.customer_name}</div>
                       <div className="space-y-2">
-                        {partialProducts.map((p:any, idx:number) => {
+                        {partialProducts.map((p: any, idx: number) => {
                           const existing = returnItems.find(r => String(r.lineId) === String(p.lineId));
                           const maxQty = Number(p.qtyOriginal || 0);
                           return (
@@ -1303,7 +1349,7 @@ const [returnItems, setReturnItems] = useState<Array<{ productId:number; name:st
                                     // each product line is distinct — use lineId to identify
                                     const foundIdx = prev.findIndex(x => String(x.lineId) === String(p.lineId));
                                     if (foundIdx === -1) return [{ lineId: p.lineId, productId: Number(p.productId), name: p.name || '', color: p.color || '', size: p.size || '', quantity: 1 }, ...prev];
-                                    return prev.map((x, i) => i===foundIdx ? { ...x, quantity: Math.min(maxQty, Number(x.quantity||0) + 1) } : x);
+                                    return prev.map((x, i) => i === foundIdx ? { ...x, quantity: Math.min(maxQty, Number(x.quantity || 0) + 1) } : x);
                                   });
                                 }} className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700">ارتجاع قطعة</button>
                                 <button onClick={() => {

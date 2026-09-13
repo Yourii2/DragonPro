@@ -83,6 +83,12 @@ if exist "dist\index.html" (
   exit /b 1
 )
 
+if exist "dist\assets" (
+  del /f /q "assets\index-*.js" >nul 2>nul
+  xcopy /e /i /y "dist\assets" "assets" >nul
+)
+if exist "dist\index.html" copy /y "dist\index.html" "index.html" >nul
+
 if exist "Dragon.png" copy /y "Dragon.png" "%STAGE%\Dragon.png" >nul
 if exist "metadata.json" copy /y "metadata.json" "%STAGE%\metadata.json" >nul
 if exist "update-config.json" copy /y "update-config.json" "%STAGE%\update-config.json" >nul

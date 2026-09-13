@@ -4,6 +4,7 @@ import { API_BASE_PATH } from '../services/apiConfig';
 import { User, ShoppingCart, CreditCard, Trash2, ArrowRight, Printer, Box, LayoutList, LayoutGrid, ArrowDownAZ, ArrowUpAZ, Phone, MapPin, Loader2 } from 'lucide-react';
 import SmallOrderCard from './OrderConfirmations';
 import CustomSelect from './CustomSelect';
+import { cleanBarcode, isOrderMatchingBarcode } from '../services/barcodeUtils';
 
 const toNum = (v: any) => {
   const n = Number(v);
@@ -329,7 +330,7 @@ const SalesDaily: React.FC = () => {
       }
 
       try {
-        const pr = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status_in=pending,returned,postponed,cancelled,confirmed,no_answer&limit=5000`);
+        const pr = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status_in=pending,postponed,cancelled,confirmed,no_answer&limit=5000`);
         const jr = await pr.json().catch(() => ({ success: false }));
         setPendingOrdersList(jr.success ? (jr.data || []) : []);
       } catch (e) {
@@ -467,7 +468,7 @@ const SalesDaily: React.FC = () => {
 
   const refreshPendingOrdersList = async () => {
     try {
-      const pr = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status_in=pending,returned,postponed,cancelled,confirmed,no_answer&limit=5000`);
+      const pr = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status_in=pending,postponed,cancelled,confirmed,no_answer&limit=5000`);
       const jr = await pr.json().catch(() => ({ success: false }));
       setPendingOrdersList(jr.success ? (jr.data || []) : []);
     } catch (e) {
@@ -995,34 +996,32 @@ const SalesDaily: React.FC = () => {
   }; */
 const scanBarcodeAddOrder = async () => {
     if (scanningLockRef.current) return;
-    const code = String(barcodeInput || '').trim();
-    if (!code) return;
+    const rawCode = String(barcodeInput || '').trim();
+    if (!rawCode) return;
 
     scanningLockRef.current = true;
     setBarcodeInput(''); // تفريغ الخانة فوراً لمنع دمج القراءات المتتالية من الاسكانر
 
+    const code = cleanBarcode(rawCode);
+    if (!code) {
+      scanningLockRef.current = false;
+      return;
+    }
+
     try {
-      // 1. أولوية البحث الصارمة: مطابقة رقم الأوردر المطبوع على البوليصة أولاً، ثم الـ ID كبديل ثانوي إذا كان الكود رقماً
-      let match: any =
-        pendingOrdersList.find(p => String(p.order_number ?? p.orderNumber ?? '').trim() === code) ||
-        (/^\d+$/.test(code) ? pendingOrdersList.find(p => String(p.id ?? '').trim() === code) : null);
+      // 1. أولوية البحث الصارمة: مطابقة رقم الأوردر المطبوع على البوليصة حصرياً
+      let match: any = pendingOrdersList.find(p => isOrderMatchingBarcode(p, code));
 
       if (!match) {
-        // 2. التحقق مما إذا كان الاوردر مختاراً بالفعل
-        const inSelected = selectedOrders.find(o => 
-          String(o.order_number ?? o.orderNumber ?? '').trim() === code ||
-          (/^\d+$/.test(code) && String(o.id ?? '').trim() === code)
-        );
+        // 2. التحقق مما إذا كان الاوردر مختاراً بالفعل في اليومية الحالية
+        const inSelected = selectedOrders.find(o => isOrderMatchingBarcode(o, code));
         if (inSelected) {
           Swal.fire('موجود في اليومية', 'الاوردر موجود بالفعل في قائمة "اوردرات اليوم المختارة".', 'info');
           return;
         }
 
-        // 3. التحقق مما إذا كان الاوردر في عهدة مندوب حالياً في نفس الجلسة
-        const inAssigned = assignedOrders.find(o => 
-          String(o.order_number ?? o.orderNumber ?? '').trim() === code ||
-          (/^\d+$/.test(code) && String(o.id ?? '').trim() === code)
-        );
+        // 3. التحقق مما إذا كان الاوردر في عهدة مندوب أو شركة شحن حالياً في نفس الجلسة
+        const inAssigned = assignedOrders.find(o => isOrderMatchingBarcode(o, code));
         if (inAssigned) {
           const repId = inAssigned.rep_id ?? inAssigned.repId ?? inAssigned.assigned_to ?? inAssigned.assignee_id ?? null;
           const compId = inAssigned.shipping_company_id ?? inAssigned.shippingCompanyId ?? inAssigned.shippingCompany ?? null;
@@ -1040,24 +1039,15 @@ const scanBarcodeAddOrder = async () => {
           return;
         }
 
-        // 4. البحث في السيرفر (بأولوية صارمة لرقم الأوردر ثم الـ ID)
+        // 4. البحث المباشر في السيرفر برقم الأوردر المحدد حصرياً عبر getByNumber
         try {
-          let foundOrder: any = null;
-
-          const rAll = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll`);
-          const jAll = await rAll.json().catch(() => null);
-          
-          if (jAll && jAll.success && Array.isArray(jAll.data)) {
-            foundOrder =
-              jAll.data.find((o: any) => String(o.order_number ?? o.orderNumber ?? '').trim() === code) ||
-              (/^\d+$/.test(code) ? jAll.data.find((o: any) => String(o.id ?? '').trim() === code) : null);
-          }
-
-          if (foundOrder) {
-            match = foundOrder;
+          const rNum = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getByNumber&orderNumber=${encodeURIComponent(code)}`);
+          const jNum = await rNum.json().catch(() => null);
+          if (jNum && jNum.success && jNum.data) {
+            match = jNum.data;
           }
         } catch (e) {
-          console.debug('Order lookup failed', e);
+          console.debug('Direct getByNumber lookup failed', e);
         }
 
         // لو بعد كل ده ملقيناش الاوردر نهائياً
@@ -1067,7 +1057,7 @@ const scanBarcodeAddOrder = async () => {
             const prodsRes = await fetch(`${API_BASE_PATH}/api.php?module=products&action=getFlat`);
             const prodsJson = await prodsRes.json().catch(() => null);
             if (prodsJson && prodsJson.success && Array.isArray(prodsJson.data)) {
-              const isProd = prodsJson.data.find((pr: any) => String(pr.barcode || '').trim() === code);
+              const isProd = prodsJson.data.find((pr: any) => cleanBarcode(pr.barcode) === code);
               if (isProd) {
                 Swal.fire('تنبيه: باركود صنف', `هذا الباركود يخص المنتج "${isProd.name || ''}" وليس بوليصة أوردر.`, 'warning');
                 return;
@@ -1075,7 +1065,7 @@ const scanBarcodeAddOrder = async () => {
             }
           } catch (e) {}
 
-          Swal.fire('غير موجود', 'لم يتم العثور على اوردر بهذا الباركود/الرقم نهائياً.', 'warning');
+          Swal.fire('غير موجود', `لم يتم العثور على اوردر برقم "${rawCode}". تأكد من رقم الأوردر أو مسح الباركود الصحيح.`, 'warning');
           return;
         }
       }
