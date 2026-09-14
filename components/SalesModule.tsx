@@ -436,7 +436,7 @@ export const recalcParsedOrderData = (po: any, existingProductsList: any[] = [])
   const rawTotal = po.rawTotal !== undefined && po.rawTotal !== null ? cleanPrice(po.rawTotal) : (po.parsedTotal !== undefined ? cleanPrice(po.parsedTotal) : cleanPrice(po.total));
 
   // 2. Resolve product lines
-  const products = (po.products || []).map((p: any) => {
+  let products = (po.products || []).map((p: any) => {
     let resolvedPrice = cleanPrice(p.price);
     const quantity = Number(p.quantity || p.qty || 1) || 1;
 
