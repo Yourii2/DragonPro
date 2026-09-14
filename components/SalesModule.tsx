@@ -333,20 +333,14 @@ export const parseOrderProductLine = (
     }
   }
 
-  // 2. Extract Price: e.g. "السعر 250" / "سعر: 250" / trailing " 250" / "250ج" / "250 ج.م"
+  // 2. Extract Price with explicit keyword: e.g. "السعر 250" / "سعر: 250"
   const priceMatch = line.match(/(?:السعر|سعر|price)\s*[:=]?\s*(\d+(?:\.\d+)?)\s*(?:ج\.?م?|جنيه|egp|le)?/i);
   if (priceMatch) {
     price = priceMatch[1];
     line = line.replace(priceMatch[0], ' ').trim();
-  } else {
-    const trailPrice = line.match(/\s+(\d+(?:\.\d+)?)\s*(?:ج\.?م?|جنيه|egp|le)?\s*$/i);
-    if (trailPrice) {
-      price = trailPrice[1];
-      line = line.substring(0, line.length - trailPrice[0].length).trim();
-    }
   }
 
-  // 3. Extract Size: e.g. "المقاس 8" / "مقاس: L" / "مقاس XL" / "حجم 42"
+  // 3. Extract Size BEFORE trailing price to prevent stealing numeric sizes (e.g. مقاس 2, مقاس 4, حجم 38)
   const sizeMatch = line.match(/(?:المقاس|مقاس|الحجم|حجم|size)\s*[:=]?\s*([^\s,;]+)/i);
   if (sizeMatch) {
     size = sizeMatch[1].trim();
@@ -360,7 +354,16 @@ export const parseOrderProductLine = (
     line = line.replace(colorKeyMatch[0], ' ').trim();
   }
 
-  // 5. Extract Name: e.g. "الاسم دبدوب" / "اسم المنتج: سلوبته" / "اسم ..."
+  // 5. Extract Trailing Price if price was not explicitly specified with keyword
+  if (price === '0' || !price) {
+    const trailPrice = line.match(/\s+(\d+(?:\.\d+)?)\s*(?:ج\.?م?|جنيه|egp|le)?\s*$/i);
+    if (trailPrice) {
+      price = trailPrice[1];
+      line = line.substring(0, line.length - trailPrice[0].length).trim();
+    }
+  }
+
+  // 6. Extract Name: e.g. "الاسم دبدوب" / "اسم المنتج: سلوبته" / "اسم ..."
   const nameMatch = line.match(/(?:اسم\s+المنتج|الاسم|اسم|المنتج)\s*[:=]?\s*(.+)/i);
   if (nameMatch) {
     name = nameMatch[1].trim();
@@ -483,34 +486,67 @@ export const recalcParsedOrderData = (po: any, existingProductsList: any[] = [])
     };
   });
 
-  // 3. If line prices are still 0, but we have rawTotal > 0 and rawShipping, try to infer line price for single product
+  // 3. Target subtotal from explicit rawPrice or (rawTotal - rawShipping)
+  const finalShipping = rawShipping;
+  let targetSubtotal = rawPrice > 0 ? rawPrice : (rawTotal > finalShipping ? rawTotal - finalShipping : 0);
   let computedSubtotal = products.reduce((s: number, p: any) => s + (cleanPrice(p.price) * Number(p.quantity || 1)), 0);
 
-  if (computedSubtotal === 0 && rawTotal > 0 && products.length === 1) {
-    const inferredSub = Math.max(0, rawTotal - rawShipping);
-    const q = Number(products[0].quantity || 1) || 1;
-    if (inferredSub > 0 && q > 0) {
-      products[0].price = inferredSub / q;
-      products[0].total = (products[0].price * q).toString();
-      products[0].missingPrice = false;
-      computedSubtotal = inferredSub;
+  // 3a. Handle case where moderator wrote total line price instead of unit price when quantity > 1
+  if (targetSubtotal > 0 && Math.abs(computedSubtotal - targetSubtotal) > 1.0) {
+    const sumAsLineTotal = products.reduce((s: number, p: any) => s + (Number(p.quantity || 1) > 1 ? cleanPrice(p.price) : (cleanPrice(p.price) * Number(p.quantity || 1))), 0);
+    if (Math.abs(sumAsLineTotal - targetSubtotal) <= 1.0) {
+      products = products.map((p: any) => {
+        const q = Number(p.quantity || 1) || 1;
+        const curP = cleanPrice(p.price);
+        if (q > 1 && curP > 0) {
+          const unitP = Math.round((curP / q) * 100) / 100;
+          return { ...p, price: unitP, total: curP.toString(), missingPrice: false };
+        }
+        return p;
+      });
+      computedSubtotal = targetSubtotal;
+    }
+  }
+
+  // 3b. If any product lines have price 0, deduce their price from the remaining target subtotal (supports both single & multi products!)
+  const zeroPricedProducts = products.filter((p: any) => cleanPrice(p.price) === 0);
+  if (targetSubtotal > 0 && zeroPricedProducts.length > 0) {
+    const knownSubtotal = products.reduce((s: number, p: any) => s + (cleanPrice(p.price) > 0 ? cleanPrice(p.price) * Number(p.quantity || 1) : 0), 0);
+    const remainingSubtotal = Math.max(0, targetSubtotal - knownSubtotal);
+    const zeroTotalQty = zeroPricedProducts.reduce((sum: number, p: any) => sum + (Number(p.quantity || 1) || 1), 0);
+
+    if (remainingSubtotal > 0 && zeroTotalQty > 0) {
+      const distributedUnit = Math.round((remainingSubtotal / zeroTotalQty) * 100) / 100;
+      products = products.map((p: any) => {
+        if (cleanPrice(p.price) === 0) {
+          const q = Number(p.quantity || 1) || 1;
+          const lineTot = distributedUnit * q;
+          return {
+            ...p,
+            price: distributedUnit,
+            total: lineTot.toString(),
+            missingPrice: false
+          };
+        }
+        return p;
+      });
+      computedSubtotal = products.reduce((s: number, p: any) => s + (cleanPrice(p.price) * Number(p.quantity || 1)), 0);
     }
   }
 
   // 4. Subtotal & Shipping & Total
-  const finalShipping = rawShipping;
-  let finalSubtotal = computedSubtotal > 0 ? computedSubtotal : (rawPrice > 0 ? rawPrice : (rawTotal > finalShipping ? rawTotal - finalShipping : 0));
+  let finalSubtotal = computedSubtotal > 0 ? computedSubtotal : (targetSubtotal > 0 ? targetSubtotal : 0);
   let finalTotal = rawTotal > 0 ? rawTotal : (finalSubtotal + finalShipping);
 
   // 5. Mismatch evaluation:
   // Discrepancy should ONLY be flagged when:
-  // - rawPrice was explicitly given (> 0) and computedSubtotal > 0 and differs by > 0.50
-  // - rawTotal was explicitly given (> 0) and computedSubtotal > 0 and (computedSubtotal + finalShipping) differs from rawTotal by > 0.50
+  // - rawPrice was explicitly given (> 0) and computedSubtotal > 0 and differs by > 1.00
+  // - rawTotal was explicitly given (> 0) and computedSubtotal > 0 and (computedSubtotal + finalShipping) differs from rawTotal by > 1.00
   let totalsMismatch = false;
-  if (rawPrice > 0 && computedSubtotal > 0 && Math.abs(computedSubtotal - rawPrice) > 0.5) {
+  if (rawPrice > 0 && computedSubtotal > 0 && Math.abs(computedSubtotal - rawPrice) > 1.0) {
     totalsMismatch = true;
   }
-  if (rawTotal > 0 && computedSubtotal > 0 && Math.abs((computedSubtotal + finalShipping) - rawTotal) > 0.5) {
+  if (rawTotal > 0 && computedSubtotal > 0 && Math.abs((computedSubtotal + finalShipping) - rawTotal) > 1.0) {
     totalsMismatch = true;
   }
 
@@ -1299,18 +1335,21 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                   const startMatch = content.match(startRegex);
                   if (!startMatch) return '';
                   const startIndex = startMatch.index! + startMatch[0].length;
-                  const terminators = ['الإسم:', 'الاسم:', 'المحافظة:', 'المحافظه:', 'العنوان:', 'التليفون', 'تليفون', 'موبايل', 'عدد القطع', 'تفاصيل المنتج', 'تفاصيل الطلب', 'المنتجات', 'السعر:', 'سعر:', 'الشحن:', 'شحن:', 'الاجمالي:', 'الإجمالي:', 'الموظف:', 'البيدج:', 'ملاحظات:', 'ملاحظة:', 'ملاحظه:'];
+                  const terminatorRegex = /(?:^|\n)\s*(?:الإسم|الاسم|المحافظة|المحافظه|المنطقة|منطقة|محافظة|محافظه|العنوان|التليفون|تليفون|موبايل|الموبايل|الهاتف|عدد\s*القطع|تفاصيل\s*المنتج|تفاصيل\s*الطلب|تفاصيل\s*الاوردر|المنتجات|المنتج|السعر|سعر|الشحن|شحن|مصاريف\s*الشحن|الاجمالي|الإجمالي|الاجمالى|الموظف|موظف|مودريتور|البيدج|بيدج|الصفحة|صفحة|ملاحظات|ملاحظة|ملاحظه)\s*[:=]?/gi;
                   let endIndex = content.length;
-                  for (const term of terminators) {
-                      if (term.toLowerCase().startsWith(key.toLowerCase())) continue;
-                      const termIndex = content.indexOf(term, startIndex);
-                      if (termIndex !== -1 && termIndex < endIndex && termIndex > startIndex) {
-                          endIndex = termIndex;
+                  let m: RegExpExecArray | null;
+                  while ((m = terminatorRegex.exec(content)) !== null) {
+                    if (m.index > startIndex) {
+                      const termMatched = m[0].trim();
+                      if (!termMatched.toLowerCase().startsWith(key.toLowerCase())) {
+                        endIndex = m.index;
+                        break;
                       }
+                    }
                   }
                   return content.substring(startIndex, endIndex).trim();
               } else {
-                  const regex = new RegExp(`(?:${key}|${key.replace(/ة/g,'ه')}|${key.replace(/ه/g,'ة')})\\s*[:=]?\\s*([^\\r\\n]*)`, 'i');
+                  const regex = new RegExp(`(?:^|\\n)\\s*(?:${key}|${key.replace(/ة/g,'ه')}|${key.replace(/ه/g,'ة')})\\s*[:=]?\\s*([^\\r\\n]*)`, 'i');
                   const match = content.match(regex);
                   return match ? match[1].trim() : '';
               }
@@ -1385,11 +1424,12 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
           let curLine = '';
           for (let i = 0; i < rawLines.length; i++) {
             const ln = rawLines[i];
-            if (/^(?:الكميه|الكمية|العدد|عدد)\b|^\d+\b|^\s*(?:الكميه|الكمية)|^\s*\d+\s*$/i.test(ln) || /(?:الكميه|الكمية)\s*\d+/i.test(ln)) {
+            const isContinuation = /^(?:اللون|لون|المقاس|مقاس|الحجم|حجم|الخامة|خامة|كود|code|الموديل|موديل)\s*[:=]/i.test(ln);
+            if (isContinuation && curLine) {
+              curLine += ' ' + ln;
+            } else {
               if (curLine) productLines.push(curLine.trim());
               curLine = ln;
-            } else {
-              if (curLine) curLine += ' ' + ln; else curLine = ln;
             }
           }
           if (curLine) productLines.push(curLine.trim());
