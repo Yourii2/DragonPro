@@ -128,15 +128,22 @@ if not exist "dist" (
     call npm.cmd run build >> "%LOGFILE%" 2>&1
 )
 rem Ensure ports 3000 and 3001 are free before starting
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":3000" ^| findstr "LISTENING"') do (
-    taskkill /F /T /PID %%a >nul 2>&1
-)
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":3001" ^| findstr "LISTENING"') do (
-    taskkill /F /T /PID %%a >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ports = @(3000, 3001); Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object { $ports -contains $_.LocalPort } | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }" >nul 2>&1
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":3000" ^| findstr "LISTENING"') do taskkill /F /T /PID %%a >nul 2>&1
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":3001" ^| findstr "LISTENING"') do taskkill /F /T /PID %%a >nul 2>&1
+
+set "retries=0"
+:start_wait_port_3000
+netstat -ano | findstr ":3000" | findstr "LISTENING" >nul 2>&1
+if %ERRORLEVEL% equ 0 (
+    set /a retries+=1
+    for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":3000" ^| findstr "LISTENING"') do taskkill /F /T /PID %%a >nul 2>&1
+    timeout /t 1 /nobreak >nul
+    if %retries% lss 10 goto start_wait_port_3000
 )
 timeout /t 1 /nobreak >nul
 
-start "Dragon Pro Server" cmd /k "cd /d %~dp0 && npm.cmd run preview"
+start "Dragon Pro Server" cmd /c "cd /d %~dp0 && npm.cmd run preview"
 
 timeout /t 3 /nobreak >nul
 call :Log "Opening browser at http://localhost:3000..."
