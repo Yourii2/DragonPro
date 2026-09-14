@@ -623,13 +623,15 @@ const OrderConfirmations: React.FC = () => {
         return prev.filter((id) => validIds.has(Number(id)));
       });
 
-      if (nextRepId && repRows.some((rep) => Number(rep.id) === Number(nextRepId))) {
-        if (selectedRepId !== Number(nextRepId)) {
-          setSelectedRepId(Number(nextRepId));
+      if (repsRes?.success && repRows.length > 0) {
+        if (nextRepId && repRows.some((rep) => Number(rep.id) === Number(nextRepId))) {
+          if (selectedRepId !== Number(nextRepId)) {
+            setSelectedRepId(Number(nextRepId));
+          }
+        } else if (nextRepId && !repRows.some((rep) => Number(rep.id) === Number(nextRepId))) {
+          setSelectedRepId(null);
+          setAssignments([]);
         }
-      } else if (nextRepId && !repRows.some((rep) => Number(rep.id) === Number(nextRepId))) {
-        setSelectedRepId(null);
-        setAssignments([]);
       }
     } catch (error) {
       console.error('Failed to load confirmation board', error);
@@ -790,6 +792,11 @@ const OrderConfirmations: React.FC = () => {
 
   const noAnswerAssignments = useMemo(
     () => selectedRepOrders.filter((assignment) => String(assignment.status || '').toLowerCase() === 'no_answer'),
+    [selectedRepOrders]
+  );
+
+  const confirmedAssignments = useMemo(
+    () => selectedRepOrders.filter((assignment) => String(assignment.status || '').toLowerCase() === 'confirmed'),
     [selectedRepOrders]
   );
 
@@ -987,6 +994,10 @@ const OrderConfirmations: React.FC = () => {
       await loadData(selectedRepId);
       await refreshStockSummary();
       setCancelBarcode('');
+      const targetTab = decision === 'close' ? 'closed' : decision === 'cancel' ? 'cancelled' : decision === 'confirm' ? 'confirmed' : decision;
+      if (['wrong_number', 'postponed', 'closed', 'no_answer', 'cancelled', 'confirmed'].includes(targetTab)) {
+        setActiveTab(targetTab);
+      }
       const labels: Record<string, string> = { wrong_number: 'رقم خاطئ', confirm: 'مؤكد', postponed: 'مؤجل', close: 'مغلق', no_answer: 'لا يرد', cancel: 'ملغي' };
       Swal.fire('تم', `تم تسجيل حالة "${labels[decision] || decision}" للأوردر.`, 'success');
     } catch (error: any) {
@@ -1018,6 +1029,10 @@ const OrderConfirmations: React.FC = () => {
       }
       await loadData(selectedRepId);
       await refreshStockSummary();
+      const targetTab = decision === 'close' ? 'closed' : decision === 'cancel' ? 'cancelled' : decision === 'confirm' ? 'confirmed' : decision;
+      if (['wrong_number', 'postponed', 'closed', 'no_answer', 'cancelled', 'confirmed'].includes(targetTab)) {
+        setActiveTab(targetTab);
+      }
       const labels: Record<string, string> = { wrong_number: 'رقم خاطئ', confirm: 'مؤكد', postponed: 'مؤجل', close: 'مغلق', no_answer: 'لا يرد', cancel: 'ملغي', assign: 'نشط' };
       Swal.fire({
         icon: 'success',
@@ -1577,7 +1592,7 @@ const OrderConfirmations: React.FC = () => {
               <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-black dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
                 اختر مندوباً من القائمة الجانبية لتظهر قائمة الأوردرات هنا.
               </div>
-            ) : activeSelectedRepOrders.length === 0 && cancelledOrders.length === 0 && wrongNumberAssignments.length === 0 && postponedAssignments.length === 0 && closedAssignments.length === 0 && noAnswerAssignments.length === 0 ? (
+            ) : activeSelectedRepOrders.length === 0 && cancelledOrders.length === 0 && wrongNumberAssignments.length === 0 && postponedAssignments.length === 0 && closedAssignments.length === 0 && noAnswerAssignments.length === 0 && confirmedAssignments.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-black dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
                 لا توجد أوردرات حالية مع هذا المندوب.
               </div>
@@ -1681,6 +1696,7 @@ const OrderConfirmations: React.FC = () => {
                         { key: 'closed', label: 'مغلقة', count: closedAssignments.length, badgeClass: 'bg-slate-500 text-white', tabActiveClass: 'bg-slate-600 text-white border-slate-600', tabInactiveClass: 'bg-white text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300' },
                         { key: 'no_answer', label: 'لا يرد', count: noAnswerAssignments.length, badgeClass: 'bg-amber-500 text-white', tabActiveClass: 'bg-amber-500 text-white border-amber-500', tabInactiveClass: 'bg-white text-amber-700 border-amber-200 dark:bg-slate-800 dark:text-amber-300' },
                         { key: 'cancelled', label: 'ملغية', count: cancelledOrders.length, badgeClass: 'bg-rose-500 text-white', tabActiveClass: 'bg-rose-600 text-white border-rose-600', tabInactiveClass: 'bg-white text-rose-700 border-rose-200 dark:bg-slate-800 dark:text-rose-300' },
+                        { key: 'confirmed', label: 'مؤكدة', count: confirmedAssignments.length, badgeClass: 'bg-emerald-500 text-white', tabActiveClass: 'bg-emerald-600 text-white border-emerald-600', tabInactiveClass: 'bg-white text-emerald-700 border-emerald-200 dark:bg-slate-800 dark:text-emerald-300' },
                       ];
                       const activeTabData = tabs.find(t => t.key === activeTab) || tabs[0];
                       const getTabAssignments = (key: string) => {
@@ -1689,6 +1705,7 @@ const OrderConfirmations: React.FC = () => {
                         if (key === 'closed') return closedAssignments;
                         if (key === 'no_answer') return noAnswerAssignments;
                         if (key === 'cancelled') return cancelledAssignments;
+                        if (key === 'confirmed') return confirmedAssignments;
                         return [];
                       };
                       const currentItems = getTabAssignments(activeTab);
@@ -1721,8 +1738,8 @@ const OrderConfirmations: React.FC = () => {
                                   key={`${activeTab}-${assignment.id}`}
                                   assignment={assignment}
                                   badgeLabel={activeTabData.label}
-                                  badgeClass={activeTab === 'wrong_number' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-200' : activeTab === 'postponed' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' : activeTab === 'closed' ? 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200' : activeTab === 'no_answer' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200' : 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-200'}
-                                  iconClass={activeTab === 'wrong_number' ? 'bg-purple-600' : activeTab === 'postponed' ? 'bg-blue-600' : activeTab === 'closed' ? 'bg-slate-600' : activeTab === 'no_answer' ? 'bg-amber-500' : 'bg-rose-600'}
+                                  badgeClass={activeTab === 'wrong_number' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-200' : activeTab === 'postponed' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' : activeTab === 'closed' ? 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200' : activeTab === 'no_answer' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200' : activeTab === 'confirmed' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200' : 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-200'}
+                                  iconClass={activeTab === 'wrong_number' ? 'bg-purple-600' : activeTab === 'postponed' ? 'bg-blue-600' : activeTab === 'closed' ? 'bg-slate-600' : activeTab === 'no_answer' ? 'bg-amber-500' : activeTab === 'confirmed' ? 'bg-emerald-600' : 'bg-rose-600'}
                                   actionLabel={activeTab === 'cancelled' ? 'استرجاع الأوردر' : 'إعادة للنشط'}
                                   actionClass={activeTab === 'cancelled' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-blue-600 hover:bg-blue-700'}
                                   actionIcon={RotateCcw}

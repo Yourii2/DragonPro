@@ -2636,7 +2636,10 @@ function confirmation_clear_old_assignments(PDO $pdo): void {
     ensure_order_confirmation_assignments_table($pdo);
     execute_query(
         $pdo,
-        "DELETE FROM order_confirmation_assignments WHERE status <> 'assigned' AND DATE(assigned_at) < CURDATE()"
+        "DELETE FROM order_confirmation_assignments 
+         WHERE status <> 'assigned' 
+           AND DATE(assigned_at) < CURDATE() 
+           AND DATE(updated_at) < CURDATE()"
     );
 }
 
@@ -13022,7 +13025,7 @@ switch ($module) {
                 confirmation_clear_old_assignments($pdo);
 
                 $repId = intval($_GET['rep_id'] ?? 0);
-                $where = ["oca.status <> 'unassigned'", 'o.id IS NOT NULL', "(oca.status = 'assigned' OR DATE(oca.assigned_at) = CURDATE())"];
+                $where = ["oca.status <> 'unassigned'", 'o.id IS NOT NULL', "(oca.status = 'assigned' OR DATE(oca.assigned_at) = CURDATE() OR DATE(oca.updated_at) = CURDATE())"];
                 $params = [];
                 if ($repId > 0) {
                     $where[] = 'oca.rep_id = ?';
@@ -13082,8 +13085,6 @@ switch ($module) {
                             FROM order_confirmation_assignments oca
                             JOIN orders o ON o.id = oca.order_id
                             WHERE oca.status = 'assigned'
-                              AND oca.assigned_at >= CURDATE()
-                              AND oca.assigned_at < DATE_ADD(CURDATE(), INTERVAL 1 DAY)
                               AND o.status IN ('pending','returned','postponed')
                             GROUP BY oca.rep_id
                         ) cnt ON cnt.rep_id = u.id
@@ -13579,7 +13580,7 @@ switch ($module) {
                 execute_query(
                     $pdo,
                     "UPDATE order_confirmation_assignments
-                     SET status = ?, updated_at = CURRENT_TIMESTAMP
+                     SET status = ?, assigned_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
                      WHERE order_id = ? AND rep_id = ?",
                     [$nextAssignmentStatus, $orderId, $repId]
                 );
