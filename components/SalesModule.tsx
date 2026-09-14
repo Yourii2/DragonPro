@@ -107,6 +107,20 @@ export const normalizeArabicText = (input: any): string => {
   return s.toLowerCase().trim();
 };
 
+// Clean numeric price / amount from any string or number representation (handles Arabic numerals and currency suffixes)
+export const cleanPrice = (val: any): number => {
+  if (val === null || typeof val === 'undefined' || val === '') return 0;
+  if (typeof val === 'number') return isNaN(val) ? 0 : val;
+  const s = normalizeNumbers(String(val || '').trim());
+  const match = s.match(/(\d+(?:\.\d+)?)/);
+  if (match) {
+    const n = parseFloat(match[1]);
+    return isNaN(n) ? 0 : n;
+  }
+  const num = Number(s.replace(/[^0-9.-]+/g, ''));
+  return isNaN(num) ? 0 : num;
+};
+
 export const matchProductAndVariant = (
   rawName: string,
   rawColor: string,
@@ -319,13 +333,13 @@ export const parseOrderProductLine = (
     }
   }
 
-  // 2. Extract Price: e.g. "السعر 250" / "سعر: 250" / trailing " 250"
-  const priceMatch = line.match(/(?:السعر|سعر|price)\s*[:=]?\s*(\d+(?:\.\d+)?)/i);
+  // 2. Extract Price: e.g. "السعر 250" / "سعر: 250" / trailing " 250" / "250ج" / "250 ج.م"
+  const priceMatch = line.match(/(?:السعر|سعر|price)\s*[:=]?\s*(\d+(?:\.\d+)?)\s*(?:ج\.?م?|جنيه|egp|le)?/i);
   if (priceMatch) {
     price = priceMatch[1];
     line = line.replace(priceMatch[0], ' ').trim();
   } else {
-    const trailPrice = line.match(/\s+(\d+(?:\.\d+)?)$/);
+    const trailPrice = line.match(/\s+(\d+(?:\.\d+)?)\s*(?:ج\.?م?|جنيه|egp|le)?\s*$/i);
     if (trailPrice) {
       price = trailPrice[1];
       line = line.substring(0, line.length - trailPrice[0].length).trim();
@@ -406,6 +420,117 @@ export const parseOrderProductLine = (
     quantity: quantity > 0 ? quantity : 1,
     price: price || '0',
     total: (Number(price || 0) * (quantity > 0 ? quantity : 1)).toString()
+  };
+};
+
+// Recompute prices and totals for a single parsed order consistently
+export const recalcParsedOrderData = (po: any, existingProductsList: any[] = []): any => {
+  const preferredKeys = ['sale_price','salePrice','sellingPrice','selling_price','price','cost','retail_price','retailPrice','default_price','amount','value'];
+
+  // 1. Raw values extracted or previously recorded
+  const rawPrice = po.rawPrice !== undefined && po.rawPrice !== null ? cleanPrice(po.rawPrice) : (po.parsedSubtotal !== undefined ? cleanPrice(po.parsedSubtotal) : cleanPrice(po.price));
+  const rawShipping = po.rawShipping !== undefined && po.rawShipping !== null ? cleanPrice(po.rawShipping) : (po.parsedShipping !== undefined ? cleanPrice(po.parsedShipping) : cleanPrice(po.shipping || po.shippingCost));
+  const rawTotal = po.rawTotal !== undefined && po.rawTotal !== null ? cleanPrice(po.rawTotal) : (po.parsedTotal !== undefined ? cleanPrice(po.parsedTotal) : cleanPrice(po.total));
+
+  // 2. Resolve product lines
+  const products = (po.products || []).map((p: any) => {
+    let resolvedPrice = cleanPrice(p.price);
+    const quantity = Number(p.quantity || p.qty || 1) || 1;
+
+    // Validation & matching
+    const validation = matchProductAndVariant(p.name, p.color, p.size, existingProductsList);
+
+    // Auto-fill price only when line has no price (0)
+    if (resolvedPrice === 0) {
+      if (validation.matchedVariant) {
+        resolvedPrice = cleanPrice(validation.matchedVariant.sale_price || validation.matchedVariant.price);
+      }
+      if (resolvedPrice === 0 && (p.productId || validation.productId)) {
+        const prodId = p.productId || validation.productId;
+        const match = (existingProductsList || []).find((ep: any) => Number(ep.id) === Number(prodId));
+        if (match) {
+          for (const k of preferredKeys) {
+            if (match[k] !== undefined && match[k] !== null) {
+              const num = cleanPrice(match[k]);
+              if (num > 0) { resolvedPrice = num; break; }
+            }
+          }
+        }
+      }
+    }
+
+    const finalColor = p.color || validation.autoColor || '';
+    const finalSize = p.size || validation.autoSize || '';
+
+    return {
+      ...p,
+      name: p.name,
+      color: finalColor,
+      size: finalSize,
+      quantity,
+      price: resolvedPrice,
+      total: (resolvedPrice * quantity).toString(),
+      productId: p.productId || validation.productId,
+      missingProduct: validation.missingProduct,
+      missingProductMsg: validation.missingProductMsg,
+      missingColor: validation.missingColor,
+      missingColorMsg: validation.missingColorMsg,
+      missingSize: validation.missingSize,
+      missingSizeMsg: validation.missingSizeMsg,
+      availableColors: validation.availableColors,
+      availableSizes: validation.availableSizes,
+      missingPrice: resolvedPrice === 0
+    };
+  });
+
+  // 3. If line prices are still 0, but we have rawTotal > 0 and rawShipping, try to infer line price for single product
+  let computedSubtotal = products.reduce((s: number, p: any) => s + (cleanPrice(p.price) * Number(p.quantity || 1)), 0);
+
+  if (computedSubtotal === 0 && rawTotal > 0 && products.length === 1) {
+    const inferredSub = Math.max(0, rawTotal - rawShipping);
+    const q = Number(products[0].quantity || 1) || 1;
+    if (inferredSub > 0 && q > 0) {
+      products[0].price = inferredSub / q;
+      products[0].total = (products[0].price * q).toString();
+      products[0].missingPrice = false;
+      computedSubtotal = inferredSub;
+    }
+  }
+
+  // 4. Subtotal & Shipping & Total
+  const finalShipping = rawShipping;
+  let finalSubtotal = computedSubtotal > 0 ? computedSubtotal : (rawPrice > 0 ? rawPrice : (rawTotal > finalShipping ? rawTotal - finalShipping : 0));
+  let finalTotal = rawTotal > 0 ? rawTotal : (finalSubtotal + finalShipping);
+
+  // 5. Mismatch evaluation:
+  // Discrepancy should ONLY be flagged when:
+  // - rawPrice was explicitly given (> 0) and computedSubtotal > 0 and differs by > 0.50
+  // - rawTotal was explicitly given (> 0) and computedSubtotal > 0 and (computedSubtotal + finalShipping) differs from rawTotal by > 0.50
+  let totalsMismatch = false;
+  if (rawPrice > 0 && computedSubtotal > 0 && Math.abs(computedSubtotal - rawPrice) > 0.5) {
+    totalsMismatch = true;
+  }
+  if (rawTotal > 0 && computedSubtotal > 0 && Math.abs((computedSubtotal + finalShipping) - rawTotal) > 0.5) {
+    totalsMismatch = true;
+  }
+
+  return {
+    ...po,
+    products,
+    rawPrice,
+    rawShipping,
+    rawTotal,
+    price: finalSubtotal,
+    subTotal: finalSubtotal,
+    parsedSubtotal: finalSubtotal,
+    shipping: finalShipping,
+    shippingCost: finalShipping,
+    parsedShipping: finalShipping,
+    total: finalTotal,
+    parsedTotal: finalTotal,
+    computedTotal: computedSubtotal,
+    requiredTotal: finalTotal,
+    totalsMismatch
   };
 };
 
@@ -1235,9 +1360,16 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
             orderData.phone2 = phones[1] || '';
           }
 
-          orderData.price = extractField('السعر', block) || extractField('سعر', block);
-          orderData.shipping = extractField('الشحن', block) || extractField('شحن', block);
-          orderData.total = extractField('الاجمالي', block) || extractField('الإجمالي', block) || extractField('الاجمالى', block);
+          const rawPriceStr = extractField('السعر', block) || extractField('سعر', block);
+          const rawShippingStr = extractField('الشحن', block) || extractField('شحن', block);
+          const rawTotalStr = extractField('الاجمالي', block) || extractField('الإجمالي', block) || extractField('الاجمالى', block);
+
+          orderData.rawPrice = cleanPrice(rawPriceStr);
+          orderData.rawShipping = cleanPrice(rawShippingStr);
+          orderData.rawTotal = cleanPrice(rawTotalStr);
+          orderData.price = orderData.rawPrice > 0 ? orderData.rawPrice : '';
+          orderData.shipping = orderData.rawShipping;
+          orderData.total = orderData.rawTotal > 0 ? orderData.rawTotal : '';
           orderData.employee = extractField('الموظف', block) || extractField('موظف', block) || extractField('مودريتور', block);
           orderData.page = extractField('البيدج', block) || extractField('بيدج', block) || extractField('الصفحة', block);
           
@@ -1315,40 +1447,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
   // validate parsed orders against existing products and mark missing attributes
   useEffect(() => {
     if (!parsedOrders || parsedOrders.length === 0 || !existingProducts || existingProducts.length === 0) return;
-    const validated = parsedOrders.map((o: any) => {
-      const products = (o.products || []).map((p: any) => {
-        const validation = matchProductAndVariant(p.name, p.color, p.size, existingProducts);
-        let resolvedPrice = Number(p.price) || 0;
-        if (validation.matchedVariant && resolvedPrice === 0) {
-          resolvedPrice = Number(validation.matchedVariant.sale_price || validation.matchedVariant.price || 0);
-        }
-        const finalColor = p.color || validation.autoColor || '';
-        const finalSize = p.size || validation.autoSize || '';
-        return {
-          ...p,
-          color: finalColor,
-          size: finalSize,
-          productId: validation.productId,
-          missingProduct: validation.missingProduct,
-          missingProductMsg: validation.missingProductMsg,
-          missingColor: validation.missingColor,
-          missingColorMsg: validation.missingColorMsg,
-          missingSize: validation.missingSize,
-          missingSizeMsg: validation.missingSizeMsg,
-          availableColors: validation.availableColors,
-          availableSizes: validation.availableSizes,
-          price: resolvedPrice
-        };
-      });
-      // compute totals based on resolved product lines
-      const computedTotal = products.reduce((s: any, p: any) => s + (Number(p.price || 0) * Number(p.quantity || p.qty || 0)), 0);
-      const parsedSubtotal = Number(o.price || o.subTotal || 0) || 0;
-      const parsedTotal = Number(o.total || 0) || 0;
-      const parsedShipping = Number(o.shipping || 0) || 0;
-      const requiredTotal = parsedTotal > 0 ? parsedTotal : (parsedSubtotal + parsedShipping);
-      const totalsMismatch = Math.abs(computedTotal - parsedSubtotal) > 0.01 || Math.abs(requiredTotal - (parsedSubtotal + parsedShipping)) > 0.01;
-      return { ...o, products, computedTotal, parsedSubtotal, parsedShipping, parsedTotal, requiredTotal, totalsMismatch };
-    });
+    const validated = parsedOrders.map((o: any) => recalcParsedOrderData(o, existingProducts));
 
     setParsedOrders(prev => {
       try {
@@ -1368,30 +1467,21 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
     // Recalculate all parsed orders first and use the updated array for validation
     const updatedParsed = recalcAllParsedOrders();
     let newOrders: any[] = (updatedParsed || parsedOrders).map(pOrder => {
-      const cleanPrice = (val: string|number|null|undefined) => {
-        if (val === null || typeof val === 'undefined' || val === '') return 0;
-        if (typeof val === 'number') return Number(val) || 0;
-        const s = String(val || '').toString();
-        const match = s.match(/(\d+(\.\d+)?)/);
-        if (match) return parseFloat(match[0]);
-        const num = Number(s.replace(/[^0-9.-]+/g, ''));
-        return isNaN(num) ? 0 : num;
-      };
       // Preserve product-level validation state in the saved order. Backend import enhancement can be done later.
       // Group identical products by name/size/color
       const groupedMap: any = {};
       (pOrder.products || []).forEach((pp:any) => {
         const key = `${(pp.name||'').trim().toLowerCase()}|${(pp.size||'').trim().toLowerCase()}|${(pp.color||'').trim().toLowerCase()}`;
         // ✅ Only auto-fill from product when: line has no price (0)
-        let linePrice = Number(pp.price) || 0;
+        let linePrice = cleanPrice(pp.price);
         if (pp.productId && linePrice === 0) {
           const matched = existingProducts.find((ep:any) => Number(ep.id) === Number(pp.productId));
           if (matched) {
             const preferredKeys = ['sale_price','salePrice','sellingPrice','selling_price','price','cost','retail_price','retailPrice','default_price','amount','value'];
             for (const k of preferredKeys) {
               if (matched[k] !== undefined && matched[k] !== null) {
-                const num = Number(String(matched[k]).replace(/,/g, ''));
-                if (!isNaN(num) && num > 0) { linePrice = num; break; }
+                const num = cleanPrice(matched[k]);
+                if (num > 0) { linePrice = num; break; }
               }
             }
           }
@@ -1423,8 +1513,10 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
         page_raw: pOrder.page || '',
         status: 'pending',
         total: cleanPrice(pOrder.total),
-        shippingCost: cleanPrice(pOrder.shipping),
-        subTotal: cleanPrice(pOrder.price),
+        shippingCost: cleanPrice(pOrder.shipping || pOrder.shippingCost || pOrder.parsedShipping),
+        subTotal: cleanPrice(pOrder.price || pOrder.subTotal || pOrder.parsedSubtotal),
+        rawPrice: cleanPrice(pOrder.rawPrice),
+        rawTotal: cleanPrice(pOrder.rawTotal),
         importedProducts: importedProductsArr,
         // ensure UI expects `products` field (used by manage view) to avoid render errors
         products: importedProductsArr,
@@ -1437,16 +1529,24 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
     });
 
     if (newOrders.length > 0) {
-      // 1. Check totals consistency: parsed total vs computed from lines
+      // 1. Check totals consistency: only flag orders where raw price or raw total actually conflicts with computed lines
       const mismatchedTotals: any[] = [];
       for (const o of newOrders) {
-        const computed = (o.importedProducts || []).reduce((s:any, p:any) => s + (Number(p.quantity || 0) * Number(p.price || 0)), 0);
-        const parsedSubtotal = Number(o.subTotal || o.price || o.parsedSubtotal || 0) || 0;
-        const parsedShipping = Number(o.shippingCost || o.shipping || 0) || 0;
-        const parsedTotal = Number(o.total || o.parsedTotal || 0) || 0;
-        // Compare computed lines -> parsed subtotal, and computed+shipping -> parsed total
-        if (Math.abs(computed - parsedSubtotal) > 0.01 || Math.abs((computed + parsedShipping) - parsedTotal) > 0.01) {
-          mismatchedTotals.push({ order: o, parsedSubtotal, parsedShipping, parsedTotal, computed });
+        const computed = (o.importedProducts || []).reduce((s:any, p:any) => s + (Number(p.quantity || 0) * cleanPrice(p.price)), 0);
+        const rawSubtotal = cleanPrice(o.rawPrice);
+        const rawTotal = cleanPrice(o.rawTotal);
+        const shipping = cleanPrice(o.shippingCost);
+
+        let isMismatch = false;
+        if (rawSubtotal > 0 && computed > 0 && Math.abs(computed - rawSubtotal) > 0.5) {
+          isMismatch = true;
+        }
+        if (rawTotal > 0 && computed > 0 && Math.abs((computed + shipping) - rawTotal) > 0.5) {
+          isMismatch = true;
+        }
+
+        if (isMismatch) {
+          mismatchedTotals.push({ order: o, rawSubtotal, shipping, rawTotal, computed });
         }
       }
       if (mismatchedTotals.length > 0) {
@@ -1545,11 +1645,19 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
   };
 
   const addProductToParsedOrder = (orderId: number) => {
-    setParsedOrders(prev => prev.map(po => po.id === orderId ? { ...po, products: [...(po.products||[]), { name: '', quantity: 1, color: '', size: '', price: '0', productId: null, missingProduct: true, missingColor: false, missingSize: false, availableColors: [], availableSizes: [] }] } : po));
+    setParsedOrders(prev => prev.map(po => {
+      if (po.id !== orderId) return po;
+      const updatedPo = { ...po, products: [...(po.products||[]), { name: '', quantity: 1, color: '', size: '', price: '0', productId: null, missingProduct: true, missingColor: false, missingSize: false, availableColors: [], availableSizes: [] }] };
+      return recalcParsedOrderData(updatedPo, existingProducts);
+    }));
   };
 
   const removeProductFromParsedOrder = (orderId: number, index: number) => {
-    setParsedOrders(prev => prev.map(po => po.id === orderId ? { ...po, products: po.products.filter((_:any, idx:number) => idx !== index) } : po));
+    setParsedOrders(prev => prev.map(po => {
+      if (po.id !== orderId) return po;
+      const updatedPo = { ...po, products: po.products.filter((_:any, idx:number) => idx !== index) };
+      return recalcParsedOrderData(updatedPo, existingProducts);
+    }));
   };
 
   const removeParsedOrder = (orderId: number) => {
@@ -1559,84 +1667,29 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
   const recalcParsedOrder = (orderId: number) => {
     setParsedOrders(prev => prev.map(po => {
       if (po.id !== orderId) return po;
-      // ✅ Price from script is always preserved
-      const saleSource = 'order';
-      const preferredKeys = ['sale_price','salePrice','sellingPrice','selling_price','price','cost','retail_price','retailPrice','default_price','amount','value'];
-      const products = (po.products || []).map((p:any) => {
-        let resolvedPrice = Number(p.price || 0) || 0;
-        // Price from script is preserved; auto-fill only when line has no price
-        if (p.productId && resolvedPrice === 0) {
-          const match = existingProducts.find((ep:any) => Number(ep.id) === Number(p.productId));
-          if (match) {
-            for (const k of preferredKeys) {
-              if (match[k] !== undefined && match[k] !== null) {
-                const num = Number(String(match[k]).replace(/,/g, ''));
-                if (!isNaN(num) && num > 0) { resolvedPrice = num; break; }
-              }
-            }
-            if (resolvedPrice === 0 && typeof match === 'object') {
-              for (const k of Object.keys(match)) {
-                try {
-                  const v = match[k];
-                  const num = Number(String(v).replace(/,/g, ''));
-                  if (!isNaN(num) && num > 0) { resolvedPrice = num; break; }
-                } catch (e) {}
-              }
-            }
-          }
-        }
-        const missingPrice = saleSource === 'order' ? (!resolvedPrice || Number(resolvedPrice) === 0) : false;
-        return { ...p, price: resolvedPrice, missingPrice };
-      });
-      const computed = products.reduce((s:any, p:any) => s + (Number(p.price || 0) * Number(p.quantity || p.qty || 0)), 0);
-      const shipping = Number(po.shipping || po.shippingCost || 0) || 0;
-      const newSubtotal = Number(computed || 0);
-      const newTotal = Number((newSubtotal + shipping) || 0);
-      return { ...po, products, price: newSubtotal, total: newTotal, parsedSubtotal: newSubtotal, parsedTotal: newTotal, computedTotal: computed, requiredTotal: newTotal, totalsMismatch: false };
+      const res = recalcParsedOrderData(po, existingProducts);
+      const computed = Number(res.computedTotal || 0);
+      const shipping = Number(res.shipping || 0);
+      const newTotal = computed + shipping;
+      return {
+        ...res,
+        price: computed,
+        subTotal: computed,
+        parsedSubtotal: computed,
+        total: newTotal,
+        parsedTotal: newTotal,
+        requiredTotal: newTotal,
+        rawPrice: computed,
+        rawTotal: newTotal,
+        totalsMismatch: false
+      };
     }));
     try { Swal.fire('تم الحساب', 'تم تحديث إجماليات الاوردر بناءً على أسطر المنتجات.', 'success'); } catch (e) { /* ignore if Swal missing */ }
   };
 
   // Recompute prices and totals for all parsed orders and return the new array
   const recalcParsedOrdersArray = (inputArr: any[]) => {
-    // ✅ Price from script is always preserved
-    const saleSource = 'order';
-    const preferredKeys = ['sale_price','salePrice','sellingPrice','selling_price','price','cost','retail_price','retailPrice','default_price','amount','value'];
-    const updated = (inputArr || []).map((po:any) => {
-      const products = (po.products || []).map((p:any) => {
-        let resolvedPrice = Number(p.price || 0) || 0;
-        // Price from script is preserved; auto-fill only when line has no price
-        if (p.productId && resolvedPrice === 0) {
-          const match = existingProducts.find((ep:any) => Number(ep.id) === Number(p.productId));
-          if (match) {
-            for (const k of preferredKeys) {
-              if (match[k] !== undefined && match[k] !== null) {
-                const num = Number(String(match[k]).replace(/,/g, ''));
-                if (!isNaN(num) && num > 0) { resolvedPrice = num; break; }
-              }
-            }
-            if (resolvedPrice === 0 && typeof match === 'object') {
-              for (const k of Object.keys(match)) {
-                try {
-                  const v = match[k];
-                  const num = Number(String(v).replace(/,/g, ''));
-                  if (!isNaN(num) && num > 0) { resolvedPrice = num; break; }
-                } catch (e) {}
-              }
-            }
-          }
-        }
-        const missingPrice = saleSource === 'order' ? (!resolvedPrice || Number(resolvedPrice) === 0) : false;
-        return { ...p, price: resolvedPrice, missingPrice };
-      });
-      const computed = products.reduce((s:any, p:any) => s + (Number(p.price || 0) * Number(p.quantity || p.qty || 0)), 0);
-      const shipping = Number(po.shipping || po.shippingCost || 0) || 0;
-      const newSubtotal = Number(computed || 0);
-      const newTotal = Number((newSubtotal + shipping) || 0);
-      const totalsMismatch = Math.abs(computed - (Number(po.parsedSubtotal || po.price || 0))) > 0.01 || Math.abs(newTotal - (Number(po.parsedTotal || po.total || 0))) > 0.01;
-      return { ...po, products, price: newSubtotal, total: newTotal, parsedSubtotal: newSubtotal, parsedTotal: newTotal, computedTotal: computed, requiredTotal: newTotal, totalsMismatch };
-    });
-    return updated;
+    return (inputArr || []).map((po: any) => recalcParsedOrderData(po, existingProducts));
   };
 
   const recalcAllParsedOrders = () => {
@@ -1774,44 +1827,9 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       if (po.id !== orderId) return po;
       const products = (po.products || []).map((pp: any, idx: number) => {
         if (idx !== index) return pp;
-        const updated = { ...pp, [field]: value };
-        const name = (updated.name || '').toString().trim();
-        const size = (updated.size || '').toString().trim();
-        const color = (updated.color || '').toString().trim();
-
-        const validation = matchProductAndVariant(name, color, size, existingProducts);
-        let outPrice = updated.price;
-        if (validation.matchedVariant && (Number(outPrice) === 0 || !outPrice)) {
-          outPrice = Number(validation.matchedVariant.sale_price || validation.matchedVariant.price || 0);
-        }
-
-        const finalColor = color || validation.autoColor || '';
-        const finalSize = size || validation.autoSize || '';
-
-        return {
-          ...updated,
-          productId: validation.productId,
-          missingProduct: validation.missingProduct,
-          missingProductMsg: validation.missingProductMsg,
-          missingColor: validation.missingColor,
-          missingColorMsg: validation.missingColorMsg,
-          missingSize: validation.missingSize,
-          missingSizeMsg: validation.missingSizeMsg,
-          availableColors: validation.availableColors,
-          availableSizes: validation.availableSizes,
-          name: name,
-          price: outPrice,
-          color: finalColor,
-          size: finalSize
-        };
+        return { ...pp, [field]: value };
       });
-      const computedTotal = products.reduce((s: any, p: any) => s + (Number(p.price || 0) * Number(p.quantity || p.qty || 0)), 0);
-      const parsedSubtotal = Number(po.parsedSubtotal || po.price || 0) || 0;
-      const parsedShipping = Number(po.parsedShipping || po.shipping || 0) || 0;
-      const parsedTotal = Number(po.parsedTotal || po.total || 0) || 0;
-      const requiredTotal = parsedTotal > 0 ? parsedTotal : (parsedSubtotal + parsedShipping);
-      const totalsMismatch = Math.abs(computedTotal - parsedSubtotal) > 0.01 || Math.abs(requiredTotal - (parsedSubtotal + parsedShipping)) > 0.01;
-      return { ...po, products, computedTotal, totalsMismatch };
+      return recalcParsedOrderData({ ...po, products }, existingProducts);
     }));
   };
 
@@ -3273,8 +3291,12 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
           }
         });
         if (o.totalsMismatch) {
+          const computedLines = Number(o.computedTotal || 0);
+          const shp = Number(o.shipping || o.parsedShipping || 0);
+          const expected = computedLines + shp;
+          const entered = Number(o.rawTotal || o.parsedTotal || o.total || 0);
           issues.push({
-            text: `إجمالي الأسطر (${Number(o.computedTotal || 0).toFixed(2)}) لا يتطابق مع الإجمالي المطلوب (${Number(o.parsedTotal || 0).toFixed(2)})`,
+            text: `إجمالي الأسطر (${computedLines.toFixed(2)} ج.م + شحن ${shp.toFixed(2)} ج.م = ${expected.toFixed(2)} ج.م) لا يتطابق مع الإجمالي المطلوب (${entered.toFixed(2)} ج.م)`,
             type: 'total'
           });
         }
@@ -3433,7 +3455,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
 
             {hasTotalsMismatch && (
               <div className="mt-2 mb-2 p-2.5 bg-yellow-100 dark:bg-yellow-950/60 border border-yellow-300 dark:border-yellow-800 text-yellow-800 dark:text-yellow-300 rounded-xl text-xs">
-                إجمالي الأسطر ({Number(order.computedTotal || 0).toFixed(2)} ج.م) لا يتطابق مع الإجمالي المُدخل ({Number(order.parsedTotal || 0).toFixed(2)} ج.م).
+                إجمالي الأسطر ({Number(order.computedTotal || 0).toFixed(2)} ج.م) + الشحن ({Number(order.shipping || order.parsedShipping || 0).toFixed(2)} ج.م) = {(Number(order.computedTotal || 0) + Number(order.shipping || order.parsedShipping || 0)).toFixed(2)} ج.م لا يتطابق مع الإجمالي المُدخل ({Number(order.rawTotal || order.parsedTotal || order.total || 0).toFixed(2)} ج.م).
                 <div className="mt-2 flex gap-2">
                   <button onClick={() => recalcParsedOrder(order.id)} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1 rounded-lg text-xs font-bold">حساب قيمة الطلبية</button>
                   <button onClick={() => editParsedOrder(order)} className="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded-lg text-xs font-bold">تعديل الاوردر</button>
