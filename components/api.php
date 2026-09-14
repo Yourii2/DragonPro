@@ -2979,15 +2979,16 @@ function confirmation_validate_stock_for_orders(PDO $pdo, int $warehouseId, arra
             $excludeParams = $orderIds;
         }
 
+        // Only count reservations for assignments that are still ACTIVELY assigned (not yet decided).
+        // Decided assignments (postponed, wrong_number, no_answer, closed, cancelled, confirmed) do NOT
+        // block stock — their orders are no longer going out today.
         $sqlReserved = "
             SELECT 
                 oi.product_id, 
                 COALESCE(SUM(oi.quantity),0) AS reserved_qty
             FROM order_items oi
             JOIN order_confirmation_assignments oca ON oi.order_id = oca.order_id
-            JOIN orders o ON o.id = oca.order_id
             WHERE oca.status = 'assigned'
-              AND o.status IN ('pending', 'postponed', 'returned')
               AND DATE(oca.assigned_at) = CURDATE()
               AND oi.product_id IN ($placeholders)
               AND (oca.warehouse_id IS NULL OR oca.warehouse_id = ?)
@@ -13579,7 +13580,7 @@ switch ($module) {
                     $pdo,
                     "UPDATE order_confirmation_assignments
                      SET status = ?, updated_at = CURRENT_TIMESTAMP
-                     WHERE order_id = ? AND rep_id = ? AND status <> 'unassigned'",
+                     WHERE order_id = ? AND rep_id = ?",
                     [$nextAssignmentStatus, $orderId, $repId]
                 );
 

@@ -985,7 +985,7 @@ const OrderConfirmations: React.FC = () => {
       }
 
       await loadData(selectedRepId);
-      await refreshStockSummary([]);
+      await refreshStockSummary();
       setCancelBarcode('');
       const labels: Record<string, string> = { wrong_number: 'رقم خاطئ', confirm: 'مؤكد', postponed: 'مؤجل', close: 'مغلق', no_answer: 'لا يرد', cancel: 'ملغي' };
       Swal.fire('تم', `تم تسجيل حالة "${labels[decision] || decision}" للأوردر.`, 'success');
@@ -1017,7 +1017,7 @@ const OrderConfirmations: React.FC = () => {
         throw new Error(result?.message || `تعذر حفظ حالة الأوردر #${orderNum}.`);
       }
       await loadData(selectedRepId);
-      await refreshStockSummary([]);
+      await refreshStockSummary();
       const labels: Record<string, string> = { wrong_number: 'رقم خاطئ', confirm: 'مؤكد', postponed: 'مؤجل', close: 'مغلق', no_answer: 'لا يرد', cancel: 'ملغي', assign: 'نشط' };
       Swal.fire({
         icon: 'success',
