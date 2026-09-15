@@ -7,6 +7,10 @@ echo     Dragon Pro - Auto Rebuild and Restart Server
 echo ===================================================
 echo.
 
+rem Give PHP time to flush the HTTP response when triggered via API
+echo Delaying for 3 seconds to allow HTTP response to complete...
+timeout /T 3 /NOBREAK >nul
+
 echo [1/3] Stopping existing server on port 3000 and 3001...
 rem 1. Stop via PowerShell
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$ports = @(3000, 3001); Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object { $ports -contains $_.LocalPort } | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }" >nul 2>&1

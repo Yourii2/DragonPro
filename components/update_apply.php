@@ -331,7 +331,7 @@ try {
     $restartBat = file_exists($root . '/restart.bat') ? ($root . '/restart.bat') : ($root . '/update_and_restart.bat');
     if (file_exists($restartBat)) {
         log_msg($root, "Triggering automatic background rebuild and preview server restart...");
-        $cmd = 'start "" /B cmd.exe /c "' . $restartBat . '"';
+        $cmd = 'start "" /B cmd.exe /c "' . $restartBat . ' >nul 2>&1"';
         @pclose(@popen($cmd, "r"));
     }
 

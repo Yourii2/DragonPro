@@ -9,6 +9,10 @@ echo     Dragon Pro - Stopping Project
 echo ====================================
 echo.
 
+rem Give PHP time to flush the HTTP response when triggered via API
+echo Delaying for 3 seconds to allow HTTP response to complete...
+timeout /T 3 /NOBREAK >nul
+
 echo [1/3] Freeing ports 3000 and 3001
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":3000" ^| findstr "LISTENING"') do (
     taskkill /F /T /PID %%a >nul 2>&1

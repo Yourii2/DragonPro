@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Users, Box, FileText, Search, UserCheck, RefreshCcw, Edit, Trash2, Eye, X, Save, PlusCircle, MinusCircle, Play, Square, Wallet, ShoppingCart, PackageCheck, PackageX, RefreshCw, LayoutGrid, List, ArrowUp, ArrowDown } from 'lucide-react';
 import Swal from 'sweetalert2';
+import * as ExcelJS from 'exceljs';
 
 import { API_BASE_PATH } from '../services/apiConfig';
 import CustomSelect from './CustomSelect';
@@ -1347,6 +1348,101 @@ ${productsSummaryHtml}
     const w = window.open('', '_blank', 'toolbar=0,location=0,menubar=0,scrollbars=1,width=960,height=720');
     if (!w) { Swal.fire('تنبيه', 'يرجى السماح بفتح النوافذ المنبثقة', 'warning'); return; }
     w.document.write(html); w.document.close(); w.focus(); setTimeout(() => w.print(), 500);
+  };
+
+  const exportDailyJournalExcel = async (row: any) => {
+    const repTargetId = row.rep_id || selectedRepId;
+    const repName = representatives.find((r: any) => Number(r.id) === Number(repTargetId))?.name || '';
+    const dateStr = row.journal_date || new Date().toLocaleDateString();
+    const journalOrders = _parseJournalOrders(row);
+    const allIds = journalOrders.map(x => x.id).filter(Boolean);
+
+    let fullOrders: any[] = [];
+    if (allIds.length > 0) {
+      try { fullOrders = await _fetchOrdersByIds(allIds); } catch (_) {}
+    }
+    const byId: Record<number, any> = {};
+    fullOrders.forEach(o => { byId[o.id] = o; });
+
+    const allOrdersFull = journalOrders.map(x => byId[x.id] || {id: x.id, orderNumber: x.order_number, order_number: x.order_number, products: []});
+
+    if (allOrdersFull.length === 0) {
+      Swal.fire('تنبيه', 'لا توجد اوردرات لتصديرها.', 'info');
+      return;
+    }
+
+    try {
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = 'DragonPro';
+      const worksheet = workbook.addWorksheet('يومية المندوب', {
+        views: [{ rightToLeft: true }]
+      });
+      
+      worksheet.columns = [
+        { header: 'رقم الاوردر', key: 'orderNumber', width: 15 },
+        { header: 'اسم العميل', key: 'customerName', width: 25 },
+        { header: 'الهاتف', key: 'phone', width: 15 },
+        { header: 'المحافظة', key: 'governorate', width: 15 },
+        { header: 'العنوان', key: 'address', width: 35 },
+        { header: 'الموظف', key: 'employee', width: 20 },
+        { header: 'البيدج', key: 'page', width: 20 },
+        { header: 'الإجمالي', key: 'subtotal', width: 12 },
+        { header: 'الشحن', key: 'shipping', width: 10 },
+        { header: 'الإجمالي الكلي', key: 'total', width: 15 },
+        { header: 'ملاحظات', key: 'notes', width: 30 }
+      ];
+
+      // Style header row
+      const headerRow = worksheet.getRow(1);
+      headerRow.font = { name: 'Arial', size: 12, bold: true, color: { argb: 'FFFFFFFF' } };
+      headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F46E5' } };
+      headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
+      headerRow.height = 30;
+      
+      // Add rows
+      allOrdersFull.forEach((o: any) => {
+        const rowData = worksheet.addRow({
+          orderNumber: o.orderNumber ?? o.order_number ?? o.id ?? '',
+          customerName: o.customerName ?? o.customer_name ?? '',
+          phone: o.phone ?? o.phone1 ?? '',
+          governorate: o.governorate ?? '',
+          address: o.address ?? '',
+          employee: o.employee ?? o.employee_name ?? o.assigneeName ?? o.assigned_to ?? (o.assigned && (o.assigned.name || o.assigned.employee)) ?? repName,
+          page: o.page ?? o.page_number ?? o.page_no ?? o.pageNumber ?? o.package_page ?? '',
+          subtotal: _orderSub(o),
+          shipping: _toN(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0),
+          total: _orderSub(o) + _toN(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0),
+          notes: o.notes ?? ''
+        });
+        
+        rowData.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        
+        // Style row borders
+        rowData.eachCell((cell) => {
+          cell.border = {
+            top: {style:'thin', color: {argb:'FFE2E8F0'}},
+            left: {style:'thin', color: {argb:'FFE2E8F0'}},
+            bottom: {style:'thin', color: {argb:'FFE2E8F0'}},
+            right: {style:'thin', color: {argb:'FFE2E8F0'}}
+          };
+        });
+      });
+
+      // Generate and download
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `rep_journal_${repName.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+    } catch (err) {
+      console.error(err);
+      Swal.fire('خطأ', 'فشل تصدير الإكسيل.', 'error');
+    }
   };
 
   const printDeliveryPermit = async (row: any) => {
@@ -3287,6 +3383,13 @@ ${productsSummaryHtml}
                         className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black transition-colors whitespace-nowrap"
                       >
                         <Eye className="w-3.5 h-3.5" /> عرض و طباعة يومية المندوب
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => exportDailyJournalExcel(row)}
+                        className="flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-black transition-colors whitespace-nowrap"
+                      >
+                        <FileText className="w-3.5 h-3.5" /> تصدير يوميه المندوب اكسيل
                       </button>
                       <button
                         type="button"
