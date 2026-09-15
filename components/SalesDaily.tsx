@@ -2453,6 +2453,7 @@ const scanBarcodeAddOrder = async () => {
                   o.notes ?? ''
                 ]);
                 const csvContent = [
+                  'sep=,',
                   headers.join(','),
                   ...rows.map(row => row.map(cell => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(','))
                 ].join('\n');
