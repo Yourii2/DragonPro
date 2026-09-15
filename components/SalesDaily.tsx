@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState, useRef } from 'react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { User, ShoppingCart, CreditCard, Trash2, ArrowRight, Printer, Box, LayoutList, LayoutGrid, ArrowDownAZ, ArrowUpAZ, Phone, MapPin, Loader2 } from 'lucide-react';
+import * as ExcelJS from 'exceljs';
 import SmallOrderCard from './OrderConfirmations';
 import CustomSelect from './CustomSelect';
 import { cleanBarcode, isOrderMatchingBarcode } from '../services/barcodeUtils';
@@ -2421,50 +2422,83 @@ const scanBarcodeAddOrder = async () => {
             </button>
 
             <button
-              onClick={() => {
+              onClick={async () => {
                 if (todayOrdersUnique.length === 0) {
                   Swal.fire('لا توجد اوردرات', 'لا توجد اوردرات لتصديرها.', 'info');
                   return;
                 }
-                const headers = [
-                  'رقم الاوردر',
-                  'اسم العميل',
-                  'الهاتف',
-                  'المحافظة',
-                  'العنوان',
-                  'الموظف',
-                  'البيدج',
-                  'الإجمالي',
-                  'الشحن',
-                  'الإجمالي الكلي',
-                  'ملاحظات'
-                ];
-                const rows = todayOrdersUnique.map((o: any) => [
-                  o.orderNumber ?? o.order_number ?? o.id ?? '',
-                  o.customerName ?? o.customer_name ?? '',
-                  o.phone ?? o.phone1 ?? '',
-                  o.governorate ?? '',
-                  o.address ?? '',
-                  o.employee ?? o.employee_name ?? o.assigneeName ?? o.assigned_to ?? (o.assigned && (o.assigned.name || o.assigned.employee)) ?? '',
-                  o.page ?? o.page_number ?? o.page_no ?? o.pageNumber ?? o.package_page ?? '',
-                  orderSubtotal(o),
-                  parseNumeric(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0),
-                  orderTotal(o),
-                  o.notes ?? ''
-                ]);
-                const csvContent = [
-                  'sep=,',
-                  headers.join(','),
-                  ...rows.map(row => row.map(cell => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(','))
-                ].join('\n');
-                const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
-                const url = URL.createObjectURL(blob);
-                const link = document.createElement('a');
-                link.href = url;
-                link.setAttribute('download', `daily_orders_${new Date().toISOString().slice(0, 10)}.csv`);
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
+                try {
+                  const workbook = new ExcelJS.Workbook();
+                  workbook.creator = 'DragonPro';
+                  const worksheet = workbook.addWorksheet('يومية المناديب', {
+                    views: [{ rightToLeft: true }]
+                  });
+                  
+                  worksheet.columns = [
+                    { header: 'رقم الاوردر', key: 'orderNumber', width: 15 },
+                    { header: 'اسم العميل', key: 'customerName', width: 25 },
+                    { header: 'الهاتف', key: 'phone', width: 15 },
+                    { header: 'المحافظة', key: 'governorate', width: 15 },
+                    { header: 'العنوان', key: 'address', width: 35 },
+                    { header: 'الموظف', key: 'employee', width: 20 },
+                    { header: 'البيدج', key: 'page', width: 20 },
+                    { header: 'الإجمالي', key: 'subtotal', width: 12 },
+                    { header: 'الشحن', key: 'shipping', width: 10 },
+                    { header: 'الإجمالي الكلي', key: 'total', width: 15 },
+                    { header: 'ملاحظات', key: 'notes', width: 30 }
+                  ];
+
+                  // Style header row
+                  const headerRow = worksheet.getRow(1);
+                  headerRow.font = { name: 'Arial', size: 12, bold: true, color: { argb: 'FFFFFFFF' } };
+                  headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F46E5' } };
+                  headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
+                  headerRow.height = 30;
+                  
+                  // Add rows
+                  todayOrdersUnique.forEach((o: any) => {
+                    const row = worksheet.addRow({
+                      orderNumber: o.orderNumber ?? o.order_number ?? o.id ?? '',
+                      customerName: o.customerName ?? o.customer_name ?? '',
+                      phone: o.phone ?? o.phone1 ?? '',
+                      governorate: o.governorate ?? '',
+                      address: o.address ?? '',
+                      employee: o.employee ?? o.employee_name ?? o.assigneeName ?? o.assigned_to ?? (o.assigned && (o.assigned.name || o.assigned.employee)) ?? '',
+                      page: o.page ?? o.page_number ?? o.page_no ?? o.pageNumber ?? o.package_page ?? '',
+                      subtotal: orderSubtotal(o),
+                      shipping: parseNumeric(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0),
+                      total: orderTotal(o),
+                      notes: o.notes ?? ''
+                    });
+                    
+                    row.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+                    
+                    // Style row borders
+                    row.eachCell((cell) => {
+                      cell.border = {
+                        top: {style:'thin', color: {argb:'FFE2E8F0'}},
+                        left: {style:'thin', color: {argb:'FFE2E8F0'}},
+                        bottom: {style:'thin', color: {argb:'FFE2E8F0'}},
+                        right: {style:'thin', color: {argb:'FFE2E8F0'}}
+                      };
+                    });
+                  });
+
+                  // Generate and download
+                  const buffer = await workbook.xlsx.writeBuffer();
+                  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+                  const url = URL.createObjectURL(blob);
+                  const link = document.createElement('a');
+                  link.href = url;
+                  link.setAttribute('download', `daily_orders_${new Date().toISOString().slice(0, 10)}.xlsx`);
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                  URL.revokeObjectURL(url);
+                } catch (e) {
+                  console.error('Export Error:', e);
+                  Swal.fire('خطأ', 'حدث خطأ أثناء التصدير', 'error');
+                }
               }}
               className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 px-4 py-2 rounded-xl flex items-center gap-2 hover:bg-slate-50 dark:hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-200 dark:focus:ring-slate-700"
             >
