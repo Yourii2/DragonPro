@@ -362,6 +362,14 @@ const SalesDailyClose: React.FC = () => {
         }
       }
 
+      // Merge old deferred orders from custody that are not explicitly linked to the current journal
+      const extraDeferred = custodyOrders.filter((o: any) => {
+        const st = String(o.status || '').toLowerCase();
+        const ost = String(o.order_status || '').toLowerCase();
+        return st === 'deferred' || ost === 'deferred' || st === 'postponed' || ost === 'postponed';
+      });
+      jDeferred = uniqOrdersById([...jDeferred, ...extraDeferred]);
+
       setDeliveredOrders(jDelivered);
       setReturnedOrders(jReturned);
       setDeferredOrders(jDeferred);

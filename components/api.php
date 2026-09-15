@@ -15175,24 +15175,36 @@ switch ($module) {
                         "SELECT id, journal_id FROM rep_journal_orders WHERE rep_id = ? AND order_id = ? LIMIT 1",
                         [$repId, $oid]
                     )->fetch(PDO::FETCH_ASSOC);
+                    
+                    $openJrnl = null;
+                    if (table_exists($pdo, 'rep_daily_journal')) {
+                        $openJrnl = execute_query($pdo,
+                            "SELECT id FROM rep_daily_journal WHERE rep_id = ? AND is_closed = 0 ORDER BY id DESC LIMIT 1",
+                            [$repId]
+                        )->fetch(PDO::FETCH_ASSOC);
+                    }
+                    $targetJournalId = intval($openJrnl['id'] ?? 0);
+
                     $journalId = intval($journalRow['journal_id'] ?? 0);
                     if ($journalRow) {
-                        // Row exists — just update status
-                        $res = execute_query($pdo,
-                            "UPDATE rep_journal_orders SET status=?, event_date=?, event_time=?, employee=?, notes=? WHERE rep_id=? AND order_id=?",
-                            [$status, $now, $nowTime, $employee, $notes, $repId, $oid]
-                        );
+                        // Row exists — update status and link to current open journal if exists
+                        $updateParams = [$status, $now, $nowTime, $employee, $notes];
+                        $updateSql = "UPDATE rep_journal_orders SET status=?, event_date=?, event_time=?, employee=?, notes=?";
+                        
+                        if ($targetJournalId > 0) {
+                            $updateSql .= ", journal_id=?";
+                            $updateParams[] = $targetJournalId;
+                            $journalId = $targetJournalId;
+                        }
+                        
+                        $updateSql .= " WHERE rep_id=? AND order_id=?";
+                        $updateParams[] = $repId;
+                        $updateParams[] = $oid;
+                        
+                        $res = execute_query($pdo, $updateSql, $updateParams);
                         $updated += $res->rowCount();
                     } else {
                         // No row — create one linked to the rep's open journal
-                        $openJrnl = null;
-                        if (table_exists($pdo, 'rep_daily_journal')) {
-                            $openJrnl = execute_query($pdo,
-                                "SELECT id FROM rep_daily_journal WHERE rep_id = ? AND is_closed = 0 ORDER BY id DESC LIMIT 1",
-                                [$repId]
-                            )->fetch(PDO::FETCH_ASSOC);
-                        }
-                        $targetJournalId = intval($openJrnl['id'] ?? 0);
                         execute_query($pdo,
                             "INSERT INTO rep_journal_orders (journal_id, rep_id, order_id, status, event_date, event_time, employee, notes)
                              VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
