@@ -879,51 +879,53 @@ const OrderConfirmations: React.FC = () => {
     setAssignBarcode(''); // Clear immediately to prevent scanner buffer concatenation
     setSubmitting(true);
     try {
-      const resolveResponse = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=resolveConfirmationBarcode&barcode=${encodeURIComponent(barcode)}`);
-      const resolveResult = await resolveResponse.json();
-      if (!resolveResult?.success) {
-        throw new Error(resolveResult?.message || 'تعذر العثور على الأوردر.');
-      }
-
-      const candidateOrderId = Number(resolveResult?.data?.order?.id || 0);
-      const candidateOrderIds = Array.from(
-        new Set([
-          ...activeSelectedRepOrders.map((assignment) => Number(assignment.order_id)),
-          candidateOrderId
-        ].filter((id) => id > 0))
-      );
-
-      const stockCheckResponse = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getConfirmationStockSummary`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ warehouse_id: selectedWarehouseId, order_ids: candidateOrderIds, include_all_reps_today: false })
-      });
-      const stockCheckResult = await stockCheckResponse.json();
-      if (!stockCheckResult?.success) {
-        throw new Error(stockCheckResult?.message || 'تعذر التحقق من المخزون.');
-      }
-
-      const shortages: StockSummaryRow[] = Array.isArray(stockCheckResult?.data?.shortages) ? stockCheckResult.data.shortages : [];
-      if (shortages.length > 0) {
-        const lines = shortages.slice(0, 6).map((row) => {
-          const colorLabel = row.color ? ` / ${row.color}` : '';
-          const sizeLabel = row.size ? ` / ${row.size}` : '';
-          return `${row.product_name || 'منتج'}${colorLabel}${sizeLabel}: مطلوب ${row.required_qty}، متاح ${row.available_qty}`;
-        });
-        await refreshStockSummary(candidateOrderIds);
-        throw new Error(`المخزون غير كافٍ في المخزن المختار:\n${lines.join('\n')}`);
-      }
-
       const response = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=assignOrderConfirmationByBarcode`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rep_id: selectedRepId, warehouse_id: selectedWarehouseId, barcode })
       });
       const result = await response.json();
-      if (!result?.success) throw new Error(result?.message || 'تعذر إسناد الأوردر.');
+
+      if (!result?.success) {
+        const shortages: StockSummaryRow[] = Array.isArray(result?.data?.shortages) ? result.data.shortages : [];
+        if (shortages.length > 0) {
+          const lines = shortages.map((row) => {
+            const colorLabel = row.color ? ` / ${row.color}` : '';
+            const sizeLabel = row.size ? ` / ${row.size}` : '';
+            return `• ${row.product_name || 'منتج'}${colorLabel}${sizeLabel}: مطلوب ${row.required_qty}، متاح ${row.available_qty}`;
+          });
+          // Do NOT include rejected order in stock summary! Keep current assignments clean:
+          await refreshStockSummary();
+          await Swal.fire({
+            icon: 'warning',
+            title: 'المخزون غير كافٍ لهذا الأوردر',
+            html: `<div style="text-align: right; line-height: 1.8;">
+              <p style="margin-bottom: 8px; font-weight: bold; color: #b91c1c;">لم يتم قبول الأوردر نظراً لعدم توفر كمية كافية في المخزن للمنتجات التالية:</p>
+              <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 10px; font-size: 13px; color: #991b1b;">
+                ${lines.join('<br/>')}
+              </div>
+              <p style="margin-top: 10px; font-size: 12px; color: #64748b;">(لم تتم إضافة الأوردر لقائمة التأكيد لتجنب حدوث عجز في المخزون المطلوب)</p>
+            </div>`,
+            confirmButtonText: 'حسناً',
+            confirmButtonColor: '#2563eb'
+          });
+          return;
+        }
+
+        throw new Error(result?.message || 'تعذر إسناد الأوردر.');
+      }
+
       await loadData(selectedRepId, { preserveStaged: true });
       await refreshStockSummary();
+      Swal.fire({
+        icon: 'success',
+        title: 'تم الإسناد',
+        text: 'تم إسناد الأوردر للمندوب بنجاح.',
+        timer: 1200,
+        showConfirmButton: false
+      });
     } catch (error: any) {
+      await refreshStockSummary();
       Swal.fire('تنبيه', error?.message || 'تعذر إسناد الأوردر.', 'warning');
     } finally {
       setAssignBarcode('');

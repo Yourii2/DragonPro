@@ -315,9 +315,6 @@ const RepsPerformanceSection: React.FC<{
 
 
 const HIDDEN_REPORT_SUBTABS = new Set([
-  'inventory',
-  'finance',
-  'daily',
   'sales-report',
   'crm-srm',
   'hrm',
@@ -326,8 +323,6 @@ const HIDDEN_REPORT_SUBTABS = new Set([
   'cash-flow',
   'returns-analysis',
   'inventory-valuation',
-  'reps',
-  'rep-custody',
 ]);
 
 const normalizeReportsView = (view?: string) => {

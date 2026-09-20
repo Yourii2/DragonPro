@@ -109,7 +109,6 @@ const Dashboard: React.FC = () => {
   const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
   const [startDate, setStartDate] = useState(firstDay.toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(today.toISOString().split('T')[0]);
-  const didAutoShiftInitialRange = useRef(false);
 
   const companyLogo = (typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_logo_url') || localStorage.getItem('Dragon_company_logo')) : null) || assetUrl('Dragon.png');
   const companyName = (typeof window !== 'undefined' ? localStorage.getItem('Dragon_company_name') : null) || 'Dragon Pro';
@@ -120,7 +119,9 @@ const Dashboard: React.FC = () => {
 
   const fetchOverview = async (rangeStart: string, rangeEnd: string) => {
     const qs = `&start_date=${encodeURIComponent(rangeStart)}&end_date=${encodeURIComponent(rangeEnd)}`;
-    const res = await fetch(`${API_BASE_PATH}/api.php?module=dashboard&action=overview${qs}`);
+    const res = await fetch(`${API_BASE_PATH}/api.php?module=dashboard&action=overview${qs}`, {
+      credentials: 'include'
+    });
     return res.json();
   };
 
@@ -128,35 +129,8 @@ const Dashboard: React.FC = () => {
     setLoading(true);
     try {
       const data = await fetchOverview(startDate, endDate);
-      if (data.success) {
-        const overviewData = data.data;
-        const latestOrderDate = String(overviewData?.latest_order_date || '').slice(0, 10);
-        const hasLeaderboardData =
-          Number(overviewData?.orders_month || 0) > 0 ||
-          (overviewData?.top_reps || []).length > 0 ||
-          (overviewData?.top_sales_offices || []).length > 0 ||
-          (overviewData?.top_employees || []).length > 0 ||
-          (overviewData?.top_products || []).length > 0;
-
-        if (!didAutoShiftInitialRange.current && !hasLeaderboardData && latestOrderDate) {
-          const latestDateObj = new Date(latestOrderDate);
-          if (!Number.isNaN(latestDateObj.getTime())) {
-            const nextStart = new Date(latestDateObj.getFullYear(), latestDateObj.getMonth(), 1).toISOString().split('T')[0];
-            const nextEnd = latestOrderDate;
-            if (nextStart !== startDate || nextEnd !== endDate) {
-              didAutoShiftInitialRange.current = true;
-              const shiftedData = await fetchOverview(nextStart, nextEnd);
-              setStartDate(nextStart);
-              setEndDate(nextEnd);
-              if (shiftedData?.success) {
-                setOverview(shiftedData.data);
-                return;
-              }
-            }
-          }
-        }
-
-        setOverview(overviewData);
+      if (data && data.success) {
+        setOverview(data.data);
       }
     } catch { /* keep placeholders */ }
     finally { setLoading(false); }
@@ -281,11 +255,11 @@ const Dashboard: React.FC = () => {
         <KpiCard title="أوردرات مسلَّمة وجزئية" gradient="bg-gradient-to-br from-emerald-500 to-green-700"
           value={loading ? '...' : fmt(ordersDelivered)}
           sub={loading ? undefined : `معلق: ${fmt(ordersPending)}`}
-          isPositive={ordersPending < 10} icon={ClipboardCheck} />
+          isPositive={ordersDelivered >= ordersReturned} icon={ClipboardCheck} />
         <KpiCard title="أوردرات مرتجعة" gradient="bg-gradient-to-br from-rose-500 to-pink-700"
           value={loading ? '...' : fmt(ordersReturned)}
-          sub={loading ? undefined : `إجمالي: ${fmt(ordersMonth)}`}
-          isPositive={ordersReturned === 0} icon={Briefcase} />
+          sub={loading ? undefined : `إنشاء الفترة: ${fmt(ordersMonth)}`}
+          isPositive={ordersDelivered + ordersReturned > 0 ? (ordersReturned / (ordersDelivered + ordersReturned)) < 0.20 : true} icon={Briefcase} />
       </div>
 
       {/* KPI Row 2 */}
@@ -297,7 +271,7 @@ const Dashboard: React.FC = () => {
         <KpiCard title="الحضور اليوم" gradient="bg-gradient-to-br from-cyan-500 to-sky-700"
           value={loading ? '...' : fmt(present)}
           sub={loading ? undefined : `غياب: ${fmt(absent)}`}
-          isPositive={absent === 0} icon={ClipboardCheck} />
+          isPositive={absent === 0 || present >= absent} icon={ClipboardCheck} />
         <KpiCard title="الإيرادات السابقة" gradient="bg-gradient-to-br from-slate-500 to-slate-700"
           value={loading ? '...' : fmtCur(prevRev, currencySymbol)}
           sub={overview?.prev_range_start ? overview.prev_range_start.slice(5) : undefined}
@@ -360,7 +334,7 @@ const Dashboard: React.FC = () => {
 </div>
               <div className="mt-3 space-y-1.5">
                 {topOffices.slice(0, 5).map((r: any, i: number) => (
-                  <div key={r.id} className="flex items-center justify-between text-xs">
+                  <div key={r.name || i} className="flex items-center justify-between text-xs">
                     <div className="flex items-center gap-2">
                        <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
                       <span className="text-slate-600 dark:text-slate-300 truncate max-w-[100px]">{r.name}</span>
@@ -388,7 +362,7 @@ const Dashboard: React.FC = () => {
     <BarChart data={salesByGov} layout="vertical">
       <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={isDark ? '#334155' : '#e2e8f0'} />
       <XAxis type="number" hide />
-      <YAxis dataKey="governorate" type="category" axisLine={false} tickLine={false} fontSize={11} width={80} tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
+      <YAxis dataKey="governorate" type="category" axisLine={false} tickLine={false} fontSize={11} width={115} tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
       <Tooltip contentStyle={tooltip_style} formatter={(v: any) => fmtCur(v, currencySymbol)} cursor={{ fill: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(59,130,246,0.04)' }} />
       <Bar dataKey="total" name="الإيرادات" fill="#8b5cf6" radius={[0, 6, 6, 0]} barSize={20} />
     </BarChart>
@@ -423,40 +397,44 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Daily path */}
+      {/* Orders Status & Delivery Performance Breakdown */}
       <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="font-black text-slate-800 dark:text-slate-100">مسار الإيرادات اليومي</h3>
-          <span className="text-[11px] bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 px-3 py-1 rounded-full font-bold">ديناميكي</span>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+          <div>
+            <h3 className="font-black text-slate-800 dark:text-slate-100 text-base">تحليل كفاءة التشغيل والتسليم</h3>
+            <p className="text-xs text-slate-500 mt-0.5">توزيع حالات الطلبات ومعدلات التسليم والمرتجع خلال الفترة المحددة</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-xl px-3 py-1.5 text-emerald-700 dark:text-emerald-300 text-xs font-bold">
+              معدل التسليم: {ordersDelivered + ordersReturned > 0 ? ((ordersDelivered / (ordersDelivered + ordersReturned)) * 100).toFixed(1) : 0}%
+            </div>
+            <div className="bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 rounded-xl px-3 py-1.5 text-rose-700 dark:text-rose-300 text-xs font-bold">
+              نسبة المرتجع: {ordersDelivered + ordersReturned > 0 ? ((ordersReturned / (ordersDelivered + ordersReturned)) * 100).toFixed(1) : 0}%
+            </div>
+          </div>
         </div>
-        <div style={{ width: '100%', height: '300px' }}>
-  <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1} initialDimension={{ width: 1, height: 1 }}>
-    <LineChart data={trend}>
-      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? '#334155' : '#e2e8f0'} />
-      <XAxis dataKey="name" axisLine={false} tickLine={false} fontSize={11} tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
-      <YAxis axisLine={false} tickLine={false} fontSize={11} orientation="right" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
-      <Tooltip contentStyle={tooltip_style} />
-      <Line 
-        type="monotone" 
-        dataKey="sales" 
-        name="الإيرادات" 
-        stroke="#3b82f6" 
-        strokeWidth={3}
-        dot={{ r: 4, fill: '#3b82f6', strokeWidth: 2, stroke: isDark ? '#0f172a' : '#fff' }} 
-        activeDot={{ r: 7 }} 
-      />
-      <Line 
-        type="monotone" 
-        dataKey="profit" 
-        name="الأرباح" 
-        stroke="#10b981" 
-        strokeWidth={3}
-        dot={{ r: 4, fill: '#10b981', strokeWidth: 2, stroke: isDark ? '#0f172a' : '#fff' }} 
-        activeDot={{ r: 7 }} 
-      />
-    </LineChart>
-  </ResponsiveContainer>
-</div>
+
+        {overview?.orders_by_status && overview.orders_by_status.length > 0 ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            {overview.orders_by_status.map((st: any) => {
+              const label = STATUS_LABELS[st.status] || st.status;
+              const colorClass = STATUS_COLORS[st.status] || 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-200';
+              return (
+                <div key={st.status} className="bg-slate-50 dark:bg-slate-900/40 rounded-2xl p-4 border border-slate-100 dark:border-slate-700/60 flex flex-col justify-between">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${colorClass}`}>{label}</span>
+                    <span className="text-xs font-black text-slate-700 dark:text-slate-300">{fmt(st.count)}</span>
+                  </div>
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400 font-semibold truncate">
+                    {fmtCur(st.total, currencySymbol)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="text-center text-sm text-slate-400 py-8">لا توجد بيانات لحالات الطلبات في هذه الفترة.</div>
+        )}
       </div>
 
       {/* Leaderboards */}

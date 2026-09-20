@@ -106,6 +106,7 @@ const AccountingReports: React.FC = () => {
   const revenue = Number(summary.revenue || 0);
   const cost = Number(summary.cost || 0);
   const profit = Number(summary.profit || 0);
+  const totalDiscounts = Number(summary.total_discounts || 0);
   const marginPct = Number(summary.margin_pct || 0);
   const ordersCount = Number(summary.orders_count || 0);
   const retOrders = Number(returned.returned_orders || 0);
@@ -256,7 +257,7 @@ const AccountingReports: React.FC = () => {
           gradient="bg-gradient-to-br from-orange-500 to-orange-700"
           icon={ShoppingCart} isPositive={false} />
         <KpiCard title="صافي الربح" value={`${fmt(profit)} ${sym}`}
-          sub={fmtPct(marginPct)} icon={profit >= 0 ? TrendingUp : TrendingDown}
+          sub={totalDiscounts > 0 ? `خصومات: ${fmt(totalDiscounts)} (${fmtPct(marginPct)})` : fmtPct(marginPct)} icon={profit >= 0 ? TrendingUp : TrendingDown}
           gradient={`bg-gradient-to-br ${profit >= 0 ? 'from-emerald-500 to-teal-700' : 'from-rose-500 to-red-700'}`}
           isPositive={profit >= 0} />
         <KpiCard title="أوردرات مسلَّمة" value={fmt(ordersCount)}

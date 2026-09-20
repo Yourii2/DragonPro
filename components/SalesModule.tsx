@@ -1314,8 +1314,19 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
     setTimeout(() => {
       // Normalize pasted script to avoid client-side encoding/hidden-char issues
       const normalizedText = scriptText
-        .normalize && scriptText.normalize('NFKC') || scriptText
-      const cleaned = normalizedText
+        .normalize && scriptText.normalize('NFKC') || scriptText;
+
+      // 1. WhatsApp timestamps & sender headers removal (supports bracketed [15/9, 9:41 ص] Sender: and dash 15/9/2026, 9:41 - Sender:)
+      const wpBracketRe = /(?:^|\n)\s*\[[^\]\n\r]*(?:[0-9\u0660-\u0669]|am|pm|ص|م)[^\]\n\r]*\]\s*[^:\n\r]{1,100}:\s*/gi;
+      const wpDashRe = /(?:^|\n)\s*[0-9\u0660-\u0669]{1,4}[\/\-\.\،,\s]+[0-9\u0660-\u0669]{1,4}[^-\n\r]{0,35}-\s*[^:\n\r]{1,100}:\s*/gi;
+      const wpStandaloneRe = /(?:^|\n)\s*(?:\[[^\]\n\r]+\]|محوّلة|محولة|رسالة محولة|تمت إعادة توجيهها|Forwarded|Forwarded message)\s*(?:\n|$)/gi;
+
+      const preCleaned = normalizedText
+        .replace(wpBracketRe, '\n')
+        .replace(wpDashRe, '\n')
+        .replace(wpStandaloneRe, '\n');
+
+      const cleaned = preCleaned
         .replace(/\u00A0/g, ' ')      // non-breaking space
         .replace(/[\u200E\u200F\u200C\u200D]/g, '') // remove bidi/zwj chars
         .replace(/[\u0610-\u061A\u064B-\u065F]/g, '') // remove Arabic diacritics

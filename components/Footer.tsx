@@ -2,7 +2,7 @@ import React from 'react';
 import { assetUrl } from '../services/assetUrl';
 
 const Footer: React.FC = () => {
-  const companyLogo = (typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_logo_url') || localStorage.getItem('Dragon_company_logo')) : null) || assetUrl('Dragon.png');
+  const dragonLogo = assetUrl('Dragon.png');
   const year = new Date().getFullYear();
 
   const contacts = [
@@ -18,10 +18,13 @@ const Footer: React.FC = () => {
         <div className="flex items-center gap-3">
           <div className="relative group">
             <img 
-              src={companyLogo} 
-              alt="logo" 
-              className="w-10 h-10 rounded-lg shadow-sm object-cover border border-slate-200 dark:border-slate-700" 
-              onError={(e: any) => { e.target.src = assetUrl('Dragon.png') }} 
+              src={dragonLogo} 
+              alt="Dragon Pro" 
+              className="w-10 h-10 rounded-lg shadow-sm object-contain border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-0.5" 
+              onError={(e: any) => { 
+                e.currentTarget.onerror = null; 
+                e.currentTarget.src = './Dragon.png'; 
+              }} 
             />
           </div>
           <div className="text-right">

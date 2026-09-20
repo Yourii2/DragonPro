@@ -1221,10 +1221,19 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
           credentials: 'include',
           body: JSON.stringify({
             ...receivingData,
-            items: (receivingData.items || []).map((item: any) => ({
-              ...item,
-              costPrice: Number(item.newCostPrice ?? item.costPrice ?? 0)
-            }))
+            items: (receivingData.items || []).map((item: any) => {
+              const vPrice = Number(item.vendorPrice || 0);
+              const cPrice = Number(item.newCostPrice ?? item.costPrice ?? 0);
+              const finalCost = purchasePriceType === 'vendor_price'
+                ? (vPrice > 0 ? vPrice : cPrice)
+                : (cPrice > 0 ? cPrice : vPrice);
+              return {
+                ...item,
+                vendorPrice: vPrice > 0 ? vPrice : finalCost,
+                costPrice: finalCost,
+                newCostPrice: finalCost
+              };
+            })
           })
         });
         const result = await readJsonSafely(response);

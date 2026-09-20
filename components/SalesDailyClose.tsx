@@ -111,16 +111,20 @@ const computeReturnedOrderValue = (order: any) => {
   return Math.max(toNum(order?.returned_value), toNum(order?.returned_value_fallback), 0);
 };
 
-const computeDeliveredNetPieces = (order: any) => computePieces(order);
-const computeDeliveredNetValue = (order: any) => computeOrderValueWithoutShipping(order);
-
-const computeOriginalPieces = (order: any) => {
-  return computeDeliveredNetPieces(order) + computeReturnedPieces(order);
+const computeDeliveredNetPieces = (order: any) => {
+  const total = computePieces(order);
+  const returned = computeReturnedPieces(order);
+  return Math.max(0, total - returned);
 };
 
-const computeOriginalOrderValue = (order: any) => {
-  return computeDeliveredNetValue(order) + computeReturnedOrderValue(order);
+const computeDeliveredNetValue = (order: any) => {
+  const totalVal = computeOrderValueWithoutShipping(order);
+  const returnedVal = computeReturnedOrderValue(order);
+  return Math.max(0, totalVal - returnedVal);
 };
+
+const computeOriginalPieces = (order: any) => computePieces(order);
+const computeOriginalOrderValue = (order: any) => computeOrderValueWithoutShipping(order);
 
 
 
@@ -244,15 +248,23 @@ const SalesDailyClose: React.FC = () => {
   // Derived Unified Lists (To solve partial return overlap where an order is both delivered and returned)
   const finalDeliveredList = useMemo(() => {
     const activeIds = new Set(activeOrders.map(getRealOrderId));
+    const deferredIds = new Set(deferredOrders.map(getRealOrderId));
     const fromRet = returnedOrders.filter(o => computeDeliveredNetPieces(o) > 0);
-    return uniqOrdersById([...deliveredOrders, ...fromRet]).filter(o => !activeIds.has(getRealOrderId(o)));
-  }, [deliveredOrders, returnedOrders, activeOrders]);
+    return uniqOrdersById([...deliveredOrders, ...fromRet]).filter(o => {
+      const id = getRealOrderId(o);
+      return !activeIds.has(id) && !deferredIds.has(id);
+    });
+  }, [deliveredOrders, returnedOrders, activeOrders, deferredOrders]);
 
   const finalReturnedList = useMemo(() => {
+    const deferredIds = new Set(deferredOrders.map(getRealOrderId));
     const fromDeliv = deliveredOrders.filter(o => computeReturnedPieces(o) > 0);
     const fromActive = activeOrders.filter(o => computeReturnedPieces(o) > 0);
-    return uniqOrdersById([...returnedOrders, ...fromDeliv, ...fromActive]);
-  }, [deliveredOrders, returnedOrders, activeOrders]);
+    return uniqOrdersById([...returnedOrders, ...fromDeliv, ...fromActive]).filter(o => {
+      const id = getRealOrderId(o);
+      return !deferredIds.has(id);
+    });
+  }, [deliveredOrders, returnedOrders, activeOrders, deferredOrders]);
 
   // Derived Stats
   const deliveredPieces = useMemo(() => finalDeliveredList.reduce((sum, o) => sum + computeDeliveredNetPieces(o), 0), [finalDeliveredList]);
@@ -336,53 +348,45 @@ const SalesDailyClose: React.FC = () => {
         return;
       }
 
-      // 3. Get Active Custody (Orders currently with rep)
-      const custodyRes = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getSalesActiveWithRep&rep_id=${encodeURIComponent(repId)}`).then(r => r.json()).catch(() => null);
-      const custodyOrders = custodyRes?.success && Array.isArray(custodyRes.data) ? custodyRes.data : [];
-
-      // 4. Get Journal Orders (Always fetch for rep to display delivered, returned, and deferred/nazool)
+      // 3. Get Journal Orders (Strictly for this open journal)
       let jDelivered: any[] = [];
       let jReturned: any[] = [];
       let jDeferred: any[] = [];
+      let jActive: any[] = [];
 
-      const journalParam = openJournalId !== 'none' ? `&journal_ids=${openJournalId}` : '';
+      const journalParam = `&journal_ids=${openJournalId}`;
       const ordersRes = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getJournalOrders&rep_id=${encodeURIComponent(repId)}${journalParam}`).then(r => r.json()).catch(() => null);
       if (ordersRes && ordersRes.success) {
         const rawDelivered = ordersRes.delivered || [];
         const rawReturned = ordersRes.returned || [];
         const rawDeferred = ordersRes.deferred || [];
-        if (openJournalId !== 'none') {
-          jDelivered = uniqOrdersById(rawDelivered.filter((o: any) => String(o.journal_id || o.journalId) === openJournalId));
-          jReturned = uniqOrdersById(rawReturned.filter((o: any) => String(o.journal_id || o.journalId) === openJournalId));
-          jDeferred = uniqOrdersById(rawDeferred.filter((o: any) => !o.journal_id || String(o.journal_id || o.journalId) === openJournalId));
-        } else {
-          jDelivered = uniqOrdersById(rawDelivered);
-          jReturned = uniqOrdersById(rawReturned);
-          jDeferred = uniqOrdersById(rawDeferred);
-        }
-      }
+        const rawActive = ordersRes.active || [];
 
-      // Merge old deferred orders from custody that are not explicitly linked to the current journal
-      const extraDeferred = custodyOrders.filter((o: any) => {
-        const st = String(o.status || '').toLowerCase();
-        const ost = String(o.order_status || '').toLowerCase();
-        return st === 'deferred' || ost === 'deferred' || st === 'postponed' || ost === 'postponed';
-      });
-      jDeferred = uniqOrdersById([...jDeferred, ...extraDeferred]);
+        jDelivered = uniqOrdersById(rawDelivered.filter((o: any) => String(o.journal_id || o.journalId) === openJournalId));
+        jReturned = uniqOrdersById(rawReturned.filter((o: any) => String(o.journal_id || o.journalId) === openJournalId));
+        jDeferred = uniqOrdersById(rawDeferred.filter((o: any) => String(o.journal_id || o.journalId) === openJournalId));
+        jActive = uniqOrdersById(rawActive.filter((o: any) => String(o.journal_id || o.journalId) === openJournalId));
+      }
 
       setDeliveredOrders(jDelivered);
       setReturnedOrders(jReturned);
       setDeferredOrders(jDeferred);
 
-      // 5. Filter Active Orders (exclude those that are already deferred or returned/delivered)
+      // 4. Filter Active Orders (Strictly unclosed orders from this same journal)
       const deferredIds = new Set(jDeferred.map(getRealOrderId));
-      const filteredActive = uniqOrdersById(custodyOrders).filter(o => {
+      const deliveredIds = new Set(jDelivered.map(getRealOrderId));
+      const returnedIds = new Set(jReturned.map(getRealOrderId));
+
+      const filteredActive = jActive.filter(o => {
         const id = getRealOrderId(o);
+        if (!id) return false;
+        if (deferredIds.has(id) || deliveredIds.has(id) || returnedIds.has(id)) return false;
         const status = String(o.status || '').toLowerCase();
         const orderStatus = String(o.order_status || '').toLowerCase();
-        if (status === 'delivered' || orderStatus === 'delivered') return false;
-        if (status === 'returned' || orderStatus === 'returned' || status === 'full_return' || orderStatus === 'full_return') return false;
-        if (deferredIds.has(id)) return false;
+        const journalStatus = String(o.journal_status || '').toLowerCase();
+        if (status === 'delivered' || orderStatus === 'delivered' || journalStatus === 'delivered') return false;
+        if (status === 'returned' || orderStatus === 'returned' || status === 'full_return' || orderStatus === 'full_return' || journalStatus === 'full_return' || journalStatus === 'returned') return false;
+        if (status === 'deferred' || orderStatus === 'deferred' || orderStatus === 'postponed' || journalStatus === 'deferred') return false;
         return true;
       });
 
