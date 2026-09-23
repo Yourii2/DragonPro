@@ -319,7 +319,11 @@ if ($action === 'run') {
     try {
         ensure_dir($root . '/logs');
         if (file_exists($lockPath)) {
-            throw new Exception('An update is already running. If this is wrong, delete logs/update.lock and retry.');
+            if ((time() - @filemtime($lockPath)) > 300) {
+                @unlink($lockPath);
+            } else {
+                throw new Exception('An update is already running. If this is wrong, delete logs/update.lock and retry.');
+            }
         }
         file_put_contents($lockPath, date('c'));
 

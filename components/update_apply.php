@@ -184,7 +184,12 @@ try {
 
     $lockPath = $root . '/logs/update.lock';
     if (file_exists($lockPath)) {
-        throw new Exception('An update is already running. If this is wrong, delete logs/update.lock and retry.');
+        // Auto-clear stale lock if older than 5 minutes (prevents locking after timeout)
+        if ((time() - @filemtime($lockPath)) > 300) {
+            @unlink($lockPath);
+        } else {
+            throw new Exception('An update is already running. If this is wrong, delete logs/update.lock and retry.');
+        }
     }
     ensure_dir($root . '/logs');
     file_put_contents($lockPath, date('c'));
