@@ -103,6 +103,10 @@ function copy_tree($srcRoot, $dstRoot, $excludeList) {
                 @mkdir($dstPath, 0775, true);
             }
         } else {
+            // Safety: If source is a file but target is an existing directory (e.g. legacy 'assets' file collision), skip it
+            if (is_dir($dstPath)) {
+                continue;
+            }
             $dstDir = dirname($dstPath);
             if (!is_dir($dstDir)) {
                 @mkdir($dstDir, 0775, true);

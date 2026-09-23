@@ -64,11 +64,15 @@ function copy_tree($srcRoot, $dstRoot, $excludeList) {
         $dstPath = rtrim($dstRoot, '/\\') . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $rel);
 
         if ($file->isDir()) {
-            if (!is_dir($dstPath)) mkdir($dstPath, 0775, true);
+            if (!is_dir($dstPath)) @mkdir($dstPath, 0775, true);
         } else {
+            if (is_dir($dstPath)) {
+                continue;
+            }
             $dstDir = dirname($dstPath);
-            if (!is_dir($dstDir)) mkdir($dstDir, 0775, true);
-            if (!copy($srcPath, $dstPath)) {
+            if (!is_dir($dstDir)) @mkdir($dstDir, 0775, true);
+            if (!@copy($srcPath, $dstPath)) {
+                if (preg_match('/\.bat$/i', $rel)) continue;
                 throw new Exception('Failed to copy: ' . $rel);
             }
         }

@@ -74,7 +74,8 @@ if exist "tools" (
 )
 
 if exist "dist\assets" (
-  powershell -NoProfile -Command "Copy-Item -Path 'dist\assets\*' -Destination '%STAGE%\assets' -Recurse -Force"
+  if not exist "%STAGE%\assets" mkdir "%STAGE%\assets" >nul
+  xcopy /e /i /y "dist\assets\*" "%STAGE%\assets\" >nul
 ) else (
   echo Missing dist\assets. Did build succeed?
   exit /b 1
@@ -88,11 +89,14 @@ if exist "dist\index.html" (
 )
 
 if exist "dist\assets" (
+  if not exist "assets" mkdir "assets" >nul
   del /f /q "assets\index-*.js" >nul 2>nul
   del /f /q "assets\index-*.css" >nul 2>nul
-  powershell -NoProfile -Command "Copy-Item -Path 'dist\assets\*' -Destination 'assets' -Recurse -Force"
+  xcopy /e /i /y "dist\assets\*" "assets\" >nul
 )
 if exist "dist\index.html" copy /y "dist\index.html" "index.html" >nul
+rem Immediately restore workspace index.html to source mode for future builds
+call node scripts/prepare-html.cjs
 
 if exist "Dragon.png" copy /y "Dragon.png" "%STAGE%\Dragon.png" >nul
 if exist "metadata.json" copy /y "metadata.json" "%STAGE%\metadata.json" >nul
