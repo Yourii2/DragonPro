@@ -4,6 +4,10 @@ if (function_exists('ob_start')) {
 }
 if (session_status() === PHP_SESSION_NONE) {
     @session_start();
+    // Immediately release session file lock so concurrent requests can run in parallel
+    if (!isset($_GET['write_session'])) {
+        @session_write_close();
+    }
 }
 
 // Set timezone to Egypt (UTC+2 — Africa/Cairo)

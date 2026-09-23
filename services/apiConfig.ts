@@ -1,26 +1,50 @@
 function getApiBasePath(): string {
-  // This function dynamically determines the absolute base path for the API.
-  // It assumes the project is either in a subfolder of the web root (e.g., /DragonPro)
-  // or directly at the web root.
+  if (typeof window === 'undefined') {
+    return '/components';
+  }
+
+  // If there is a stored override, validate that it matches current origin and protocol
+  const storedOverride = window.localStorage ? window.localStorage.getItem('apiBasePath') : null;
+  if (storedOverride) {
+    try {
+      const u = new URL(storedOverride, window.location.origin);
+      if (u.origin === window.location.origin && !(window.location.protocol === 'https:' && u.protocol === 'http:')) {
+        return storedOverride.replace(/\/+$/, '');
+      } else {
+        window.localStorage.removeItem('apiBasePath');
+      }
+    } catch {
+      window.localStorage.removeItem('apiBasePath');
+    }
+  }
+
   const envBase = (import.meta as any)?.env?.VITE_API_BASE_PATH as string | undefined;
   const globalOverride = (window as any)?.API_BASE_PATH_OVERRIDE as string | undefined;
-  const storedOverride = (typeof window !== 'undefined' && window.localStorage)
-    ? window.localStorage.getItem('apiBasePath') || undefined
-    : undefined;
-  const override = envBase || globalOverride || storedOverride;
-  if (override) return override.replace(/\/$/, '');
+  if (envBase || globalOverride) {
+    const custom = (envBase || globalOverride || '').replace(/\/+$/, '');
+    if (custom) return custom;
+  }
 
-  // If running in development (Vite dev server or CF Tunnel pointing to Vite),
-  // route requests via Vite's local dev server proxy to avoid CORS and Private Network Access issues.
+  // If running in development (Vite dev server)
   const isDev = !!(import.meta as any).env?.DEV;
   if (isDev) {
     return `${window.location.origin}/components`;
   }
 
-  // Production (or Apache-served build): derive the directory that the SPA is running under.
-  // This supports nested installs like /clients/Nexus/ as well as root installs.
-  const appDirPath = new URL('./', window.location.href).pathname; // always ends with '/'
-  return `${window.location.origin}${appDirPath}components`;
+  // Derive directory: e.g. '/' or '/DragonPro/'
+  let appDirPath = window.location.pathname || '/';
+  if (/\.[a-zA-Z0-9]+$/.test(appDirPath)) {
+    appDirPath = appDirPath.substring(0, appDirPath.lastIndexOf('/') + 1);
+  }
+  if (!appDirPath.endsWith('/')) {
+    appDirPath += '/';
+  }
+
+  if (appDirPath === '/') {
+    return `${window.location.origin}/components`;
+  }
+
+  return `${window.location.origin}${appDirPath.replace(/\/+$/, '')}/components`;
 }
 
 const buildCandidateApiBases = (initialBase: string): string[] => {

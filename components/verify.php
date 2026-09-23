@@ -1,5 +1,6 @@
 <?php
 session_start();
+session_write_close();
 
 // CORS
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';

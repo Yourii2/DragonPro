@@ -78,6 +78,19 @@ const migrateStorageKeys = () => {
         sessionStorage.removeItem(oldKey);
       }
     });
+
+    // Remove legacy/mismatched apiBasePath that causes mixed content NetworkError
+    const storedApi = localStorage.getItem('apiBasePath');
+    if (storedApi) {
+      try {
+        const u = new URL(storedApi, window.location.origin);
+        if (u.origin !== window.location.origin || (window.location.protocol === 'https:' && u.protocol === 'http:')) {
+          localStorage.removeItem('apiBasePath');
+        }
+      } catch {
+        localStorage.removeItem('apiBasePath');
+      }
+    }
   } catch (e) {
     // ignore storage failures
   }
