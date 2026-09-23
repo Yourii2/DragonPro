@@ -1,7 +1,7 @@
 {
   "name": "dragonpro",
   "private": true,
-  "version": "1.10.16",
+  "version": "1.10.17",
   "type": "module",
   "scripts": {
     "dev": "vite --port 3000 --strictPort --host 0.0.0.0",

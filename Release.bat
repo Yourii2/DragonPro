@@ -74,7 +74,7 @@ if exist "tools" (
 )
 
 if exist "dist\assets" (
-  xcopy /e /i /y "dist\assets" "%STAGE%\assets" >nul
+  powershell -NoProfile -Command "Copy-Item -Path 'dist\assets\*' -Destination '%STAGE%\assets' -Recurse -Force"
 ) else (
   echo Missing dist\assets. Did build succeed?
   exit /b 1
@@ -89,7 +89,8 @@ if exist "dist\index.html" (
 
 if exist "dist\assets" (
   del /f /q "assets\index-*.js" >nul 2>nul
-  xcopy /e /i /y "dist\assets" "assets" >nul
+  del /f /q "assets\index-*.css" >nul 2>nul
+  powershell -NoProfile -Command "Copy-Item -Path 'dist\assets\*' -Destination 'assets' -Recurse -Force"
 )
 if exist "dist\index.html" copy /y "dist\index.html" "index.html" >nul
 

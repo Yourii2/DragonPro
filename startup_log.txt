@@ -1,21 +1,24 @@
 ==================================== 
 Dragon Pro - Startup Log 
-Date: Sun 09/20/2026 18:20:52.85 
+Date: Wed 09/23/2026  4:27:11.24 
 ==================================== 
-[18:20:52.91] ==================================== 
-[18:20:52.92]    Dragon Pro - Starting Project 
-[18:20:52.93] ==================================== 
-[18:20:52.94] [1/4] Checking XAMPP services... 
-[18:20:53.07] [OK] Apache is already running. 
-[18:20:53.20] [OK] MySQL is already running. 
-[18:20:53.41] [OK] Node is available: v24.12.0 
-[18:20:54.11] [OK] npm.cmd is available: v11.9.0 
-[18:20:54.12] [3/4] Checking dependencies... 
-[18:20:54.13] [OK] Packages are already installed. 
-[18:20:54.14] [4/4] Starting server and launching application... 
-[18:20:59.17] Opening browser at http://localhost:3000... 
-[18:20:59.58] ==================================== 
-[18:20:59.59]    Dragon Pro is now RUNNING! 
-[18:20:59.60] ==================================== 
-[18:20:59.61] URL: http://localhost:3000 
+[ 4:27:11.32] ==================================== 
+[ 4:27:11.33]    Dragon Pro - Starting Project 
+[ 4:27:11.34] ==================================== 
+[ 4:27:14.15] [1/4] Checking XAMPP status... 
+[ 4:27:14.32] [OK] Apache is already running. 
+[ 4:27:14.45] [OK] MySQL is already running. 
+[ 4:27:17.00] [OK] Node is available: v24.12.0 
+[ 4:27:17.63] [OK] npm.cmd is available: v11.9.0 
+[ 4:27:19.23] [3/4] Checking for packages... 
+[ 4:27:19.24] [OK] Packages are already installed. 
+[ 4:27:21.16] [4/4] Starting production server... 
+[ 4:27:22.22] Waiting for server to start... 
+[ 4:27:25.23] Opening browser... 
+[ 4:27:25.69] ==================================== 
+[ 4:27:25.69]    Dragon Pro is now RUNNING! 
+[ 4:27:25.70] ==================================== 
+[ 4:27:25.71] Server is running at: http://localhost:3000 
+[ 4:27:25.72] To stop the server, close the server window. 
+[ 4:27:25.73] Verifying daily report/backup scheduler... 
 Daily email reports or backups are not fully configured (make sure email is verified and auto-send/backup options are checked). Scheduler task will not be registered.

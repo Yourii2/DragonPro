@@ -14875,8 +14875,6 @@ switch ($module) {
                                     $mappedStatus = 'full_return';
                                 } elseif ($orderStatus === 'delivered') {
                                     $mappedStatus = 'delivered';
-                                } elseif ($orderStatus === 'deferred' || $orderStatus === 'postponed' || $orderStatus === 'pending') {
-                                    $mappedStatus = 'deferred';
                                 }
 
                                 $existingRepairRow = execute_query($pdo,
@@ -15083,7 +15081,7 @@ switch ($module) {
                     } elseif ($st === 'full_return' || $st === 'returned' || $ordSt === 'returned' || $ordSt === 'full_return') {
                         if ($from && $to) { $ed = $r['event_date']; if ($ed >= $from && $ed <= $to) $returned[] = $order; }
                         else $returned[] = $order;
-                    } elseif ($st === 'deferred' || $ordSt === 'deferred' || $ordSt === 'postponed') {
+                    } elseif ($st === 'deferred') {
                         $deferred[] = $order;
                     } elseif ($st === 'partial_return' || $ordSt === 'partial' || $ordSt === 'partial_return') {
                         if ($from && $to) { $ed = $r['event_date']; if ($ed >= $from && $ed <= $to) $returned[] = $order; }
@@ -15200,14 +15198,9 @@ switch ($module) {
                             'products'     => $itemsMap[$currentOrderId] ?? [],
                         ];
 
-                        if ($currentOrderStatus === 'postponed' || $currentOrderStatus === 'deferred') {
-                            $fallbackEntry['status'] = 'deferred';
-                            $deferred[] = $fallbackEntry;
-                            $activeSeen[$currentOrderId] = true;
-                        } else {
-                            $active[] = $fallbackEntry;
-                            $activeSeen[$currentOrderId] = true;
-                        }
+                        $fallbackEntry['status'] = 'with_rep';
+                        $active[] = $fallbackEntry;
+                        $activeSeen[$currentOrderId] = true;
                     }
                 }
 

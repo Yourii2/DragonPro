@@ -385,20 +385,15 @@ const SalesDailyClose: React.FC = () => {
           if (!oid || deliveredIds.has(oid) || returnedIds.has(oid)) continue;
           if (deferredIds.has(oid) || activeIds.has(oid)) continue;
 
-          const st = String(ord.status || ord.order_status || '').toLowerCase();
           const enrichedOrd = {
             ...ord,
             journal_id: Number(openJournalId),
             journalId: Number(openJournalId)
           };
 
-          if (st === 'postponed' || st === 'deferred') {
-            jDeferred.push(enrichedOrd);
-            deferredIds.add(oid);
-          } else {
-            jActive.push(enrichedOrd);
-            activeIds.add(oid);
-          }
+          // All custody orders currently with the rep belong in active custody (العهدة الحالية)
+          jActive.push(enrichedOrd);
+          activeIds.add(oid);
         }
       }
 
@@ -420,7 +415,7 @@ const SalesDailyClose: React.FC = () => {
         const journalStatus = String(o.journal_status || '').toLowerCase();
         if (status === 'delivered' || orderStatus === 'delivered' || journalStatus === 'delivered') return false;
         if (status === 'returned' || orderStatus === 'returned' || status === 'full_return' || orderStatus === 'full_return' || journalStatus === 'full_return' || journalStatus === 'returned') return false;
-        if (status === 'deferred' || orderStatus === 'deferred' || orderStatus === 'postponed' || journalStatus === 'deferred') return false;
+        if (journalStatus === 'deferred') return false;
         return true;
       });
 
@@ -592,6 +587,30 @@ const SalesDailyClose: React.FC = () => {
     } catch (e) {
       console.error(e);
       Swal.fire('خطأ', 'فشل استرجاع الاوردر.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const moveAllDeferredBack = async () => {
+    if (deferredOrders.length === 0) return;
+    try {
+      setLoading(true);
+      const movedIds = deferredOrders.map(o => Number(getRealOrderId(o))).filter(id => id > 0);
+      if (movedIds.length === 0) return;
+      await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: movedIds, status: 'with_rep' })
+      });
+      await Promise.all(movedIds.map(id => fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, status: 'with_rep', rep_id: Number(selectedRepId), repId: Number(selectedRepId) })
+      }).catch(() => null)));
+      await loadRepData(selectedRepId);
+      Swal.fire('تم', `تم إرجاع جميع الأوردرات (${movedIds.length}) إلى العهدة الحالية بنجاح.`, 'success');
+    } catch (e) {
+      console.error(e);
+      Swal.fire('خطأ', 'فشل إرجاع الأوردرات.', 'error');
     } finally {
       setLoading(false);
     }
@@ -1328,7 +1347,14 @@ const SalesDailyClose: React.FC = () => {
             <div className="border border-slate-200 dark:border-slate-700 rounded-2xl p-3 flex flex-col max-h-[600px]">
               <div className="flex flex-col gap-2 mb-3">
                 <div className="flex items-center justify-between">
-                  <div className="text-sm font-bold text-slate-800 dark:text-slate-200">المؤجل لليومية ({deferredOrders.length})</div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm font-bold text-slate-800 dark:text-slate-200">المؤجل لليومية ({deferredOrders.length})</div>
+                    {deferredOrders.length > 0 && (
+                      <button onClick={moveAllDeferredBack} className="px-2 py-0.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 dark:text-indigo-400 text-[11px] font-bold transition-colors">
+                        ارجاع الكل
+                      </button>
+                    )}
+                  </div>
                   <div className="flex items-center bg-slate-100 dark:bg-slate-800 rounded-lg p-1">
                     <button onClick={() => setDeferredOrdersSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')} className="p-1 rounded-md text-slate-500 hover:bg-white dark:hover:bg-slate-700 transition-colors"><ArrowDown size={14} className={deferredOrdersSortOrder === 'asc' ? 'rotate-180' : ''} /></button>
                     <div className="w-px h-4 bg-slate-300 dark:bg-slate-600 mx-1"></div>

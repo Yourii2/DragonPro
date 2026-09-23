@@ -1,4 +1,4 @@
-const CACHE_NAME = 'dragonpro-cache-v31';
+const CACHE_NAME = 'dragonpro-cache-v32';
 const urlsToCache = [
   './',
   './Dragon.png',
