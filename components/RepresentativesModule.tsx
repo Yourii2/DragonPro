@@ -90,8 +90,16 @@ const computeReturnedOrderValue = (order: any) => {
   return Math.max(_toNum(order?.returned_value), _toNum(order?.returned_value_fallback), 0);
 };
 
-const computeDeliveredNetPieces = (order: any) => computePieces(order);
-const computeDeliveredNetValue = (order: any) => computeOrderValueWithoutShipping(order);
+const computeDeliveredNetPieces = (order: any) => {
+  const status = String(order?.status || order?.order_status || '').toLowerCase();
+  if (status === 'returned' || status === 'full_return') return 0;
+  return computePieces(order);
+};
+const computeDeliveredNetValue = (order: any) => {
+  const status = String(order?.status || order?.order_status || '').toLowerCase();
+  if (status === 'returned' || status === 'full_return') return 0;
+  return computeOrderValueWithoutShipping(order);
+};
 // ------------------------------------------
 
 interface RepresentativesModuleProps {
@@ -1613,8 +1621,8 @@ ${productsSummaryHtml}
         }
       }
 
-      // 2. دمج الأوردرات لضمان حساب المرتجع الجزئي (نفس منطق SalesDailyClose)
-      const uniqOrdersById = (arr: any[]) => {
+      // 2. دمج الأوردرات لضمان حساب المرتجع الجزئي (نفس منطق SalesDailyClose تماماً)
+      const _uniqOrdersById = (arr: any[]) => {
         const seen = new Set<string>();
         const out: any[] = [];
         for (const it of (arr || [])) {
@@ -1626,15 +1634,23 @@ ${productsSummaryHtml}
         return out;
       };
 
-      const finalDeliveredList = uniqOrdersById([
-        ...rawDelivered,
-        ...rawReturned.filter(o => computeDeliveredNetPieces(o) > 0)
-      ]);
+      const deferredIds = new Set(deferredList.map((o: any) => String(o?.order_id ?? o?.id ?? '')));
 
-      const finalReturnedList = uniqOrdersById([
+      const finalDeliveredList = _uniqOrdersById([
+        ...rawDelivered,
+        ...rawReturned.filter((o: any) => computeDeliveredNetPieces(o) > 0)
+      ]).filter((o: any) => {
+        const id = String(o?.order_id ?? o?.id ?? '');
+        return !deferredIds.has(id) && computeDeliveredNetPieces(o) > 0;
+      });
+
+      const finalReturnedList = _uniqOrdersById([
         ...rawReturned,
-        ...rawDelivered.filter(o => computeReturnedPieces(o) > 0)
-      ]);
+        ...rawDelivered.filter((o: any) => computeReturnedPieces(o) > 0)
+      ]).filter((o: any) => {
+        const id = String(o?.order_id ?? o?.id ?? '');
+        return !deferredIds.has(id);
+      });
 
       // 3. دوال الحسابات والإجماليات
       const sum = (arr: any[], fn: (o: any) => number) => arr.reduce((s, x) => s + fn(x), 0);
