@@ -44,6 +44,8 @@ if (empty($_SESSION['loggedin'])) {
     echo json_encode(['success' => false, 'message' => 'Unauthorized']);
     exit;
 }
+// Release session file lock so other requests from this user are not blocked
+session_write_close();
 
 function read_json_file($path) {
     if (!file_exists($path)) return null;
