@@ -14,6 +14,37 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="دراجون برو">
     <script>
+        // ─────────────────────────────────────────────────────────────────────
+        // EARLY SELF-HEAL: Fix stale/wrong apiBasePath BEFORE React loads.
+        // This runs immediately on every page load — before any module or
+        // React code executes — so even a broken cached app is fixed
+        // automatically without the user doing anything.
+        // Fixes: "no data shown" when apiBasePath cached from a different host
+        // (e.g. https://kasakis.dragon-systems.online cached while now on
+        // localhost:3000 or vice versa).
+        // ─────────────────────────────────────────────────────────────────────
+        (function () {
+            try {
+                var stored = localStorage.getItem('apiBasePath');
+                if (stored) {
+                    try {
+                        var storedUrl = new URL(stored, window.location.origin);
+                        var currentOrigin = window.location.origin;
+                        // Remove if pointing to a completely different host
+                        // OR if there is an http→https mismatch (mixed content)
+                        if (storedUrl.origin !== currentOrigin ||
+                            (window.location.protocol === 'https:' && storedUrl.protocol === 'http:')) {
+                            localStorage.removeItem('apiBasePath');
+                            console.warn('[DragonPro] Cleared stale apiBasePath:', stored, '→ will auto-detect correct path');
+                        }
+                    } catch (e) {
+                        localStorage.removeItem('apiBasePath');
+                    }
+                }
+            } catch (e) { /* ignore storage errors in private mode */ }
+        })();
+        // ─────────────────────────────────────────────────────────────────────
+
         // Global PWA prompt interceptor
         window.deferredPwaPrompt = null;
         window.addEventListener('beforeinstallprompt', (e) => {

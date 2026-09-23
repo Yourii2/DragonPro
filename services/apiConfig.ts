@@ -51,11 +51,21 @@ const buildCandidateApiBases = (initialBase: string): string[] => {
   const origin = window.location.origin;
   const pathname = window.location.pathname || '/';
   const firstSegment = pathname.split('/').filter(Boolean)[0] || '';
-  const candidates = [
+
+  // Build a comprehensive list of candidate paths.
+  // Covers: Vite proxy on port 3000 → Apache, direct Apache at /DragonPro,
+  // alternate folder names used on some machines, and root installs.
+  const candidates: string[] = [
     initialBase,
+    // Direct origin paths (works when served by Apache directly)
     `${origin}/components`,
     firstSegment ? `${origin}/${firstSegment}/components` : '',
+    // Common XAMPP subfolder names
+    `${origin}/DragonPro/components`,
+    `${origin}/Dragon/components`,
+    `${origin}/DragonERP/components`,
   ].filter(Boolean).map((x) => x.replace(/\/$/, ''));
+
   return Array.from(new Set(candidates));
 };
 
