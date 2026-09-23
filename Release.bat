@@ -40,7 +40,7 @@ if not exist "node_modules" (
 )
 
 rem RESTORE index.html to dev mode so Vite builds the source code instead of re-bundling the old output!
-powershell -NoProfile -Command "(Get-Content index.html) -replace '<script.*src=\"/assets/index-.*js\"></script>', '<script type=\"module\" src=\"/index.tsx\"></script>' -replace '<link.*rel=\"stylesheet\".*>', '' | Set-Content index.html"
+call node scripts/prepare-html.cjs
 
 call npm.cmd run build
 if errorlevel 1 (
