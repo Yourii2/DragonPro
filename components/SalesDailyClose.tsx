@@ -348,39 +348,73 @@ const SalesDailyClose: React.FC = () => {
         return;
       }
 
-      // 3. Get Journal Orders (Strictly for this open journal)
+      // 3. Get Journal Orders & Rep Active Custody Orders
       let jDelivered: any[] = [];
       let jReturned: any[] = [];
       let jDeferred: any[] = [];
       let jActive: any[] = [];
 
       const journalParam = `&journal_ids=${openJournalId}`;
-      const ordersRes = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getJournalOrders&rep_id=${encodeURIComponent(repId)}${journalParam}`).then(r => r.json()).catch(() => null);
+      const [ordersRes, custodyRes] = await Promise.all([
+        fetch(`${API_BASE_PATH}/api.php?module=sales&action=getJournalOrders&rep_id=${encodeURIComponent(repId)}${journalParam}`).then(r => r.json()).catch(() => null),
+        fetch(`${API_BASE_PATH}/api.php?module=orders&action=getByRep&rep_id=${encodeURIComponent(repId)}&status=active`).then(r => r.json()).catch(() => null)
+      ]);
+
       if (ordersRes && ordersRes.success) {
         const rawDelivered = ordersRes.delivered || [];
         const rawReturned = ordersRes.returned || [];
         const rawDeferred = ordersRes.deferred || [];
         const rawActive = ordersRes.active || [];
 
-        jDelivered = uniqOrdersById(rawDelivered.filter((o: any) => String(o.journal_id || o.journalId) === openJournalId));
-        jReturned = uniqOrdersById(rawReturned.filter((o: any) => String(o.journal_id || o.journalId) === openJournalId));
-        jDeferred = uniqOrdersById(rawDeferred.filter((o: any) => String(o.journal_id || o.journalId) === openJournalId));
-        jActive = uniqOrdersById(rawActive.filter((o: any) => String(o.journal_id || o.journalId) === openJournalId));
+        jDelivered = uniqOrdersById(rawDelivered.filter((o: any) => !o.journal_id || String(o.journal_id || o.journalId) === openJournalId));
+        jReturned = uniqOrdersById(rawReturned.filter((o: any) => !o.journal_id || String(o.journal_id || o.journalId) === openJournalId));
+        jDeferred = uniqOrdersById(rawDeferred.filter((o: any) => !o.journal_id || String(o.journal_id || o.journalId) === openJournalId));
+        jActive = uniqOrdersById(rawActive.filter((o: any) => !o.journal_id || String(o.journal_id || o.journalId) === openJournalId));
+      }
+
+      // Merge all active orders in rep's custody (including "نزول" / postponed / with_rep)
+      const custodyOrders = (custodyRes && custodyRes.success && Array.isArray(custodyRes.data)) ? custodyRes.data : [];
+      if (custodyOrders.length > 0) {
+        const deliveredIds = new Set(jDelivered.map(getRealOrderId));
+        const returnedIds = new Set(jReturned.map(getRealOrderId));
+        const deferredIds = new Set(jDeferred.map(getRealOrderId));
+        const activeIds = new Set(jActive.map(getRealOrderId));
+
+        for (const ord of custodyOrders) {
+          const oid = getRealOrderId(ord);
+          if (!oid || deliveredIds.has(oid) || returnedIds.has(oid)) continue;
+          if (deferredIds.has(oid) || activeIds.has(oid)) continue;
+
+          const st = String(ord.status || ord.order_status || '').toLowerCase();
+          const enrichedOrd = {
+            ...ord,
+            journal_id: Number(openJournalId),
+            journalId: Number(openJournalId)
+          };
+
+          if (st === 'postponed' || st === 'deferred') {
+            jDeferred.push(enrichedOrd);
+            deferredIds.add(oid);
+          } else {
+            jActive.push(enrichedOrd);
+            activeIds.add(oid);
+          }
+        }
       }
 
       setDeliveredOrders(jDelivered);
       setReturnedOrders(jReturned);
-      setDeferredOrders(jDeferred);
+      setDeferredOrders(uniqOrdersById(jDeferred));
 
-      // 4. Filter Active Orders (Strictly unclosed orders from this same journal)
-      const deferredIds = new Set(jDeferred.map(getRealOrderId));
-      const deliveredIds = new Set(jDelivered.map(getRealOrderId));
-      const returnedIds = new Set(jReturned.map(getRealOrderId));
+      // 4. Filter Active Orders (Strictly unclosed orders currently with the rep)
+      const finalDeferredIds = new Set(jDeferred.map(getRealOrderId));
+      const finalDeliveredIds = new Set(jDelivered.map(getRealOrderId));
+      const finalReturnedIds = new Set(jReturned.map(getRealOrderId));
 
-      const filteredActive = jActive.filter(o => {
+      const filteredActive = uniqOrdersById(jActive).filter(o => {
         const id = getRealOrderId(o);
         if (!id) return false;
-        if (deferredIds.has(id) || deliveredIds.has(id) || returnedIds.has(id)) return false;
+        if (finalDeferredIds.has(id) || finalDeliveredIds.has(id) || finalReturnedIds.has(id)) return false;
         const status = String(o.status || '').toLowerCase();
         const orderStatus = String(o.order_status || '').toLowerCase();
         const journalStatus = String(o.journal_status || '').toLowerCase();

@@ -15094,7 +15094,23 @@ switch ($module) {
                     }
                 }
 
-                $shouldIncludeCurrentCustody = (!$from && !$to && empty($journalIds) && $journalId <= 0);
+                $isOpenDailyQuery = false;
+                $activeJournalIdForFallback = null;
+                if (!empty($selectedJournalIds)) {
+                    $openJrnlRow = execute_query($pdo, "SELECT id FROM rep_daily_journal WHERE rep_id = ? AND id IN (" . implode(',', array_map('intval', $selectedJournalIds)) . ") AND is_closed = 0 LIMIT 1", [$repId])->fetch(PDO::FETCH_ASSOC);
+                    if ($openJrnlRow) {
+                        $isOpenDailyQuery = true;
+                        $activeJournalIdForFallback = intval($openJrnlRow['id']);
+                    }
+                } else {
+                    $openJrnlRow = execute_query($pdo, "SELECT id FROM rep_daily_journal WHERE rep_id = ? AND is_closed = 0 ORDER BY id DESC LIMIT 1", [$repId])->fetch(PDO::FETCH_ASSOC);
+                    if ($openJrnlRow) {
+                        $isOpenDailyQuery = true;
+                        $activeJournalIdForFallback = intval($openJrnlRow['id']);
+                    }
+                }
+
+                $shouldIncludeCurrentCustody = (!$from && !$to && ($isOpenDailyQuery || (empty($journalIds) && $journalId <= 0)));
 
                 if ($shouldIncludeCurrentCustody) {
                     // Include active (with_rep/partial/postponed/deferred) orders for this rep
@@ -15107,6 +15123,46 @@ switch ($module) {
                          ORDER BY o.created_at DESC",
                         [$repId]
                     )->fetchAll(PDO::FETCH_ASSOC);
+
+                    $missingOids = [];
+                    foreach ($currentOrdersRows as $coRow) {
+                        $coId = intval($coRow['id'] ?? 0);
+                        if ($coId > 0 && empty($itemsMap[$coId])) {
+                            $missingOids[] = $coId;
+                        }
+                    }
+                    if (!empty($missingOids)) {
+                        $inMissing = implode(',', $missingOids);
+                        if ($hasVariants) {
+                            $mRows = $pdo->query(
+                                "SELECT oi.order_id, oi.product_id, oi.quantity, oi.price_per_unit,
+                                        COALESCE(pv.name, '') AS name,
+                                        COALESCE(pv.color, '') AS color, COALESCE(pv.size, '') AS size
+                                 FROM order_items oi
+                                 LEFT JOIN product_variants pv ON pv.id = oi.product_id
+                                 WHERE oi.order_id IN ($inMissing)"
+                            )->fetchAll(PDO::FETCH_ASSOC);
+                        } else {
+                            $mRows = $pdo->query(
+                                "SELECT oi.order_id, oi.product_id, oi.quantity, oi.price_per_unit,
+                                        COALESCE(p.name, '') AS name, '' AS color, '' AS size
+                                 FROM order_items oi
+                                 LEFT JOIN products p ON p.id = oi.product_id
+                                 WHERE oi.order_id IN ($inMissing)"
+                            )->fetchAll(PDO::FETCH_ASSOC);
+                        }
+                        foreach ($mRows as $mit) {
+                            $itemsMap[intval($mit['order_id'])][] = [
+                                'productId' => intval($mit['product_id']),
+                                'name'      => $mit['name'],
+                                'color'     => $mit['color'],
+                                'size'      => $mit['size'],
+                                'quantity'  => intval($mit['quantity']),
+                                'qty'       => intval($mit['quantity']),
+                                'price'     => floatval($mit['price_per_unit']),
+                            ];
+                        }
+                    }
 
                     $activeSeen = [];
                     foreach ($active as $activeOrder)       { $activeSeen[intval($activeOrder['id']    ?? 0)] = true; }
@@ -15140,7 +15196,7 @@ switch ($module) {
                             'event_date'   => null,
                             'event_time'   => null,
                             'employee'     => null,
-                            'journal_id'   => null,
+                            'journal_id'   => $activeJournalIdForFallback,
                             'products'     => $itemsMap[$currentOrderId] ?? [],
                         ];
 
