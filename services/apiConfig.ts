@@ -1,71 +1,37 @@
 function getApiBasePath(): string {
-  if (typeof window === 'undefined') {
-    return '/components';
-  }
-
-  // If there is a stored override, validate that it matches current origin and protocol
-  const storedOverride = window.localStorage ? window.localStorage.getItem('apiBasePath') : null;
-  if (storedOverride) {
-    try {
-      const u = new URL(storedOverride, window.location.origin);
-      if (u.origin === window.location.origin && !(window.location.protocol === 'https:' && u.protocol === 'http:')) {
-        return storedOverride.replace(/\/+$/, '');
-      } else {
-        window.localStorage.removeItem('apiBasePath');
-      }
-    } catch {
-      window.localStorage.removeItem('apiBasePath');
-    }
-  }
-
+  // This function dynamically determines the absolute base path for the API.
+  // It assumes the project is either in a subfolder of the web root (e.g., /DragonPro)
+  // or directly at the web root.
   const envBase = (import.meta as any)?.env?.VITE_API_BASE_PATH as string | undefined;
   const globalOverride = (window as any)?.API_BASE_PATH_OVERRIDE as string | undefined;
-  if (envBase || globalOverride) {
-    const custom = (envBase || globalOverride || '').replace(/\/+$/, '');
-    if (custom) return custom;
-  }
+  const storedOverride = (typeof window !== 'undefined' && window.localStorage)
+    ? window.localStorage.getItem('apiBasePath') || undefined
+    : undefined;
+  const override = envBase || globalOverride || storedOverride;
+  if (override) return override.replace(/\/$/, '');
 
-  // If running in development (Vite dev server)
+  // If running in development (Vite dev server or CF Tunnel pointing to Vite),
+  // route requests via Vite's local dev server proxy to avoid CORS and Private Network Access issues.
   const isDev = !!(import.meta as any).env?.DEV;
   if (isDev) {
     return `${window.location.origin}/components`;
   }
 
-  // Derive directory: e.g. '/' or '/DragonPro/'
-  let appDirPath = window.location.pathname || '/';
-  if (/\.[a-zA-Z0-9]+$/.test(appDirPath)) {
-    appDirPath = appDirPath.substring(0, appDirPath.lastIndexOf('/') + 1);
-  }
-  if (!appDirPath.endsWith('/')) {
-    appDirPath += '/';
-  }
-
-  if (appDirPath === '/') {
-    return `${window.location.origin}/components`;
-  }
-
-  return `${window.location.origin}${appDirPath.replace(/\/+$/, '')}/components`;
+  // Production (or Apache-served build): derive the directory that the SPA is running under.
+  // This supports nested installs like /clients/Nexus/ as well as root installs.
+  const appDirPath = new URL('./', window.location.href).pathname; // always ends with '/'
+  return `${window.location.origin}${appDirPath}components`;
 }
 
 const buildCandidateApiBases = (initialBase: string): string[] => {
   const origin = window.location.origin;
   const pathname = window.location.pathname || '/';
   const firstSegment = pathname.split('/').filter(Boolean)[0] || '';
-
-  // Build a comprehensive list of candidate paths.
-  // Covers: Vite proxy on port 3000 → Apache, direct Apache at /DragonPro,
-  // alternate folder names used on some machines, and root installs.
-  const candidates: string[] = [
+  const candidates = [
     initialBase,
-    // Direct origin paths (works when served by Apache directly)
     `${origin}/components`,
     firstSegment ? `${origin}/${firstSegment}/components` : '',
-    // Common XAMPP subfolder names
-    `${origin}/DragonPro/components`,
-    `${origin}/Dragon/components`,
-    `${origin}/DragonERP/components`,
   ].filter(Boolean).map((x) => x.replace(/\/$/, ''));
-
   return Array.from(new Set(candidates));
 };
 

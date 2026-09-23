@@ -150,6 +150,10 @@ const App: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ force: false })
       });
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error('الخادم أعاد استجابة غير صالحة. يرجى التأكد من تشغيل Apache و MySQL في XAMPP.');
+      }
       const result = await response.json();
 
       if (result.status === 'not_installed') {

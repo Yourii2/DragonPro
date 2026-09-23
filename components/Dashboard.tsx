@@ -105,10 +105,16 @@ const Dashboard: React.FC = () => {
   const currencySymbol = localStorage.getItem('Dragon_currency') || 'ج.م';
   const [loading, setLoading] = useState(true);
   const [overview, setOverview] = useState<any>(null);
+  const toLocalDateString = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
   const today = new Date();
   const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
-  const [startDate, setStartDate] = useState(firstDay.toISOString().split('T')[0]);
-  const [endDate, setEndDate] = useState(today.toISOString().split('T')[0]);
+  const [startDate, setStartDate] = useState(toLocalDateString(firstDay));
+  const [endDate, setEndDate] = useState(toLocalDateString(today));
 
   const companyLogo = (typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_logo_url') || localStorage.getItem('Dragon_company_logo')) : null) || assetUrl('Dragon.png');
   const companyName = (typeof window !== 'undefined' ? localStorage.getItem('Dragon_company_name') : null) || 'Dragon Pro';

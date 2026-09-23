@@ -2420,6 +2420,8 @@ function ensure_rep_journal_orders_table($pdo) {
         try { execute_query($pdo, "ALTER TABLE rep_journal_orders DROP INDEX uk_rep_order"); } catch (Exception $ex) {}
         try { execute_query($pdo, "ALTER TABLE rep_journal_orders DROP INDEX rep_order_unique"); } catch (Exception $ex) {}
         try { $pdo->exec("ALTER TABLE rep_journal_orders ADD UNIQUE KEY uk_rep_order_journal (rep_id, order_id, journal_id)"); } catch (Exception $ex) {}
+        try { $pdo->exec("ALTER TABLE rep_journal_orders ADD INDEX idx_rjo_order_id (order_id)"); } catch (Exception $ex) {}
+        try { $pdo->exec("ALTER TABLE rep_journal_orders ADD INDEX idx_rjo_journal_id (journal_id)"); } catch (Exception $ex) {}
     } catch (Exception $e) {}
     $checked = true;
 }
