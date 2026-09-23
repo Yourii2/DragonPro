@@ -9109,29 +9109,23 @@ switch ($module) {
             // Standardized where condition matching profitReport:
             $statusIn = "'delivered','partial','partial_return'";
 
+            $eventDateExpr = "COALESCE(rjo.event_date, rdj.journal_date, DATE(rdj.created_at), DATE(o.created_at))";
+
             $baseWhere = "
                 (
-                    (rdj.id IS NOT NULL AND rdj.is_closed = 1 AND (
-                        (rdj.journal_date IS NOT NULL AND rdj.journal_date BETWEEN ? AND ?)
-                        OR (rdj.journal_date IS NULL AND DATE(rdj.created_at) BETWEEN ? AND ?)
-                    ) AND (rjo.status IN ($statusIn) OR o.status IN ($statusIn)))
-                    OR
-                    (rdj.id IS NULL AND o.status IN ($statusIn) AND DATE(o.created_at) BETWEEN ? AND ?)
+                    (rjo.status IN ($statusIn) OR (o.status IN ($statusIn) AND (rjo.status IS NULL OR rjo.status NOT IN ('returned', 'full_return', 'deferred'))))
+                    AND {$eventDateExpr} BETWEEN ? AND ?
                 )
             ";
-            $baseParams = [$rangeStart, $rangeEnd, $rangeStart, $rangeEnd, $rangeStart, $rangeEnd];
+            $baseParams = [$rangeStart, $rangeEnd];
 
             $prevWhere = "
                 (
-                    (rdj.id IS NOT NULL AND rdj.is_closed = 1 AND (
-                        (rdj.journal_date IS NOT NULL AND rdj.journal_date BETWEEN ? AND ?)
-                        OR (rdj.journal_date IS NULL AND DATE(rdj.created_at) BETWEEN ? AND ?)
-                    ) AND (rjo.status IN ($statusIn) OR o.status IN ($statusIn)))
-                    OR
-                    (rdj.id IS NULL AND o.status IN ($statusIn) AND DATE(o.created_at) BETWEEN ? AND ?)
+                    (rjo.status IN ($statusIn) OR (o.status IN ($statusIn) AND (rjo.status IS NULL OR rjo.status NOT IN ('returned', 'full_return', 'deferred'))))
+                    AND {$eventDateExpr} BETWEEN ? AND ?
                 )
             ";
-            $prevParams = [$prevStart, $prevEnd, $prevStart, $prevEnd, $prevStart, $prevEnd];
+            $prevParams = [$prevStart, $prevEnd];
 
             $hasPV = table_exists($pdo, 'product_variants');
             $costExpr = $hasPV
@@ -9152,7 +9146,21 @@ switch ($module) {
                 ) rjo_latest ON rjo1.id = rjo_latest.max_id
             ) rjo ON rjo.order_id = o.id";
 
-            $deliveredQtyExpr = "oi.quantity";
+            $orderTotJoin = "LEFT JOIN (
+                SELECT order_id, SUM(quantity) as tot_qty, SUM(quantity * price_per_unit) as tot_val
+                FROM order_items
+                GROUP BY order_id
+            ) o_tot ON o_tot.order_id = o.id";
+
+            $deliveredQtyExpr = "
+                CASE
+                    WHEN (rjo.status = 'partial' OR o.status = 'partial' OR rjo.status = 'partial_return') AND COALESCE(rjo.returned_pieces, 0) > 0 AND COALESCE(o_tot.tot_qty, 0) > 0
+                    THEN GREATEST(0, oi.quantity - (oi.quantity * (LEAST(rjo.returned_pieces, o_tot.tot_qty) / o_tot.tot_qty)))
+                    WHEN rjo.status IN ('returned', 'full_return') OR o.status IN ('returned', 'full_return')
+                    THEN 0
+                    ELSE oi.quantity
+                END
+            ";
 
             // 1. Financial KPIs for current period:
             $kpiStmt = execute_query($pdo,
@@ -9163,7 +9171,8 @@ switch ($module) {
                  FROM order_items oi
                  JOIN orders o ON o.id = oi.order_id
                  {$rjoSubquery}
-                 LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
+                 {$orderTotJoin}
+                 LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                  {$variantJoin}
                  WHERE {$baseWhere}",
                 $baseParams
@@ -9177,7 +9186,7 @@ switch ($module) {
                      SELECT DISTINCT o.id, o.discount_amount
                      FROM orders o
                      {$rjoSubquery}
-                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
+                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                      WHERE {$baseWhere}
                  ) o",
                 $baseParams
@@ -9196,7 +9205,8 @@ switch ($module) {
                  FROM order_items oi
                  JOIN orders o ON o.id = oi.order_id
                  {$rjoSubquery}
-                 LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
+                 {$orderTotJoin}
+                 LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                  {$variantJoin}
                  WHERE {$prevWhere}",
                 $prevParams
@@ -9209,7 +9219,7 @@ switch ($module) {
                      SELECT DISTINCT o.id, o.discount_amount
                      FROM orders o
                      {$rjoSubquery}
-                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
+                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                      WHERE {$prevWhere}
                  ) o",
                 $prevParams
@@ -9227,19 +9237,15 @@ switch ($module) {
             // Returned orders in period:
             $returnedWhere = "
                 (
-                    (rdj.id IS NOT NULL AND rdj.is_closed = 1 AND (
-                        (rdj.journal_date IS NOT NULL AND rdj.journal_date BETWEEN ? AND ?)
-                        OR (rdj.journal_date IS NULL AND DATE(rdj.created_at) BETWEEN ? AND ?)
-                    ) AND (rjo.status IN ('returned', 'full_return') OR o.status IN ('returned', 'full_return')))
-                    OR
-                    (rdj.id IS NULL AND o.status IN ('returned', 'full_return') AND DATE(o.created_at) BETWEEN ? AND ?)
+                    (rjo.status IN ('returned', 'full_return') OR (o.status IN ('returned', 'full_return') AND (rjo.status IS NULL OR rjo.status NOT IN ('delivered', 'partial'))))
+                    AND {$eventDateExpr} BETWEEN ? AND ?
                 )
             ";
             $ordersReturnedStmt = execute_query($pdo,
                 "SELECT COUNT(DISTINCT o.id)
                  FROM orders o
                  {$rjoSubquery}
-                 LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
+                 LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                  WHERE {$returnedWhere}",
                 $baseParams
             );
@@ -9279,7 +9285,7 @@ switch ($module) {
                         COALESCE(o.total_amount, 0) AS total_amount
                     FROM orders o
                     {$rjoSubquery}
-                    LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
+                    LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                     LEFT JOIN (
                         SELECT order_id, 
                                SUM(quantity) AS delivered_pieces, 
@@ -9287,14 +9293,7 @@ switch ($module) {
                         FROM order_items
                         GROUP BY order_id
                     ) oi_summary ON oi_summary.order_id = o.id
-                    WHERE (
-                        (rdj.id IS NOT NULL AND rdj.is_closed = 1 AND (
-                            (rdj.journal_date IS NOT NULL AND rdj.journal_date BETWEEN ? AND ?)
-                            OR (rdj.journal_date IS NULL AND DATE(rdj.created_at) BETWEEN ? AND ?)
-                        ))
-                        OR
-                        (rdj.id IS NULL AND DATE(o.created_at) BETWEEN ? AND ?)
-                    )
+                    WHERE {$eventDateExpr} BETWEEN ? AND ?
                 ";
                 $perfStmt = execute_query($pdo, $perfSql, $baseParams);
                 $perfRows = $perfStmt->fetchAll(PDO::FETCH_ASSOC);
@@ -9382,7 +9381,7 @@ switch ($module) {
             }
 
             // 5. Daily Trend (Sales & Profit):
-            $dateExpr = "COALESCE(rdj.journal_date, DATE(rdj.created_at), DATE(o.created_at))";
+            $dateExpr = "COALESCE(rjo.event_date, rdj.journal_date, DATE(rdj.created_at), DATE(o.created_at))";
             $salesByDate = [];
             $profitByDate = [];
             try {
@@ -9393,7 +9392,8 @@ switch ($module) {
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
                      {$rjoSubquery}
-                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
+                     {$orderTotJoin}
+                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                      {$variantJoin}
                      WHERE {$baseWhere}
                      GROUP BY d",
@@ -9407,14 +9407,14 @@ switch ($module) {
 
                 // Deduct daily discounts
                 $dailyDiscStmt = execute_query($pdo,
-                    "SELECT {$dateExpr} AS d, COALESCE(SUM(COALESCE(o.discount_amount, 0)), 0) AS discounts
+                    "SELECT d, COALESCE(SUM(COALESCE(discount_amount, 0)), 0) AS discounts
                      FROM (
-                         SELECT DISTINCT o.id, o.discount_amount, rdj.journal_date, rdj.created_at, o.created_at as o_created
+                         SELECT DISTINCT o.id, o.discount_amount, {$dateExpr} AS d
                          FROM orders o
                          {$rjoSubquery}
-                         LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
+                         LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                          WHERE {$baseWhere}
-                     ) o
+                     ) sub_disc
                      GROUP BY d",
                     $baseParams
                 );
@@ -9452,7 +9452,8 @@ switch ($module) {
                      LEFT JOIN customers c ON c.id = o.customer_id
                      JOIN order_items oi ON oi.order_id = o.id
                      {$rjoSubquery}
-                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
+                     {$orderTotJoin}
+                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                      WHERE {$baseWhere}
                      GROUP BY governorate
                      ORDER BY total DESC
@@ -9505,7 +9506,8 @@ switch ($module) {
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
                      {$rjoSubquery}
-                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
+                     {$orderTotJoin}
+                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                      LEFT JOIN representatives rep ON rep.id = COALESCE(rjo.rep_id, o.rep_id)
                      LEFT JOIN users rep_user ON rep_user.id = COALESCE(rjo.rep_id, o.rep_id)
                      WHERE {$baseWhere} AND COALESCE(rjo.rep_id, o.rep_id) > 0
@@ -9535,10 +9537,10 @@ switch ($module) {
                      JOIN orders o ON o.id = oi.order_id
                      LEFT JOIN sales_offices so ON so.id = o.sales_office_id
                      {$rjoSubquery}
-                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
+                     {$orderTotJoin}
+                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                      WHERE {$baseWhere}
-                     GROUP BY name
-                     HAVING name <> ''
+                     GROUP BY COALESCE(NULLIF(TRIM(o.page), ''), NULLIF(TRIM(so.name), ''), 'مباشر')
                      ORDER BY total_sales DESC, orders_count DESC
                      LIMIT 10",
                     $baseParams
@@ -9563,7 +9565,8 @@ switch ($module) {
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
                      {$rjoSubquery}
-                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
+                     {$orderTotJoin}
+                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                      WHERE {$baseWhere} AND o.employee IS NOT NULL AND TRIM(o.employee) <> ''
                      GROUP BY TRIM(o.employee)
                      ORDER BY total_sales DESC, orders_count DESC
@@ -9592,7 +9595,8 @@ switch ($module) {
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
                      {$rjoSubquery}
-                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
+                     {$orderTotJoin}
+                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                      {$variantJoin}
                      WHERE {$baseWhere}
                      GROUP BY product_name, color, size
