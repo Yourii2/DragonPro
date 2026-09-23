@@ -9140,14 +9140,17 @@ switch ($module) {
                    LEFT JOIN products ppar ON ppar.id = pv.product_id"
                 : "LEFT JOIN products ppar ON ppar.id = oi.product_id";
 
-            $deliveredQtyExpr = "
-                CASE
-                    WHEN (rjo.status IN ('partial','partial_return') OR o.status IN ('partial','partial_return')) AND COALESCE(rjo.returned_pieces, 0) > 0 AND COALESCE(o_tot.tot_qty, 0) > 0
-                    THEN GREATEST(0.0, oi.quantity * (1.0 - (LEAST(rjo.returned_pieces, o_tot.tot_qty) / o_tot.tot_qty)))
-                    ELSE oi.quantity
-                END
-            ";
-            $orderTotJoin = "LEFT JOIN (SELECT order_id, SUM(quantity) as tot_qty FROM order_items GROUP BY order_id) o_tot ON o_tot.order_id = o.id";
+            $rjoSubquery = "LEFT JOIN (
+                SELECT rjo1.*
+                FROM rep_journal_orders rjo1
+                JOIN (
+                    SELECT order_id, MAX(id) AS max_id
+                    FROM rep_journal_orders
+                    GROUP BY order_id
+                ) rjo_latest ON rjo1.id = rjo_latest.max_id
+            ) rjo ON rjo.order_id = o.id";
+
+            $deliveredQtyExpr = "oi.quantity";
 
             // 1. Financial KPIs for current period:
             $kpiStmt = execute_query($pdo,
@@ -9157,9 +9160,8 @@ switch ($module) {
                     COALESCE(SUM({$deliveredQtyExpr} * (oi.price_per_unit - {$costExpr})), 0) AS gross_profit
                  FROM order_items oi
                  JOIN orders o ON o.id = oi.order_id
-                 LEFT JOIN rep_journal_orders rjo ON rjo.order_id = o.id
+                 {$rjoSubquery}
                  LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
-                 {$orderTotJoin}
                  {$variantJoin}
                  WHERE {$baseWhere}",
                 $baseParams
@@ -9172,7 +9174,7 @@ switch ($module) {
                  FROM (
                      SELECT DISTINCT o.id, o.discount_amount
                      FROM orders o
-                     LEFT JOIN rep_journal_orders rjo ON rjo.order_id = o.id
+                     {$rjoSubquery}
                      LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
                      WHERE {$baseWhere}
                  ) o",
@@ -9191,9 +9193,8 @@ switch ($module) {
                     COALESCE(SUM({$deliveredQtyExpr} * (oi.price_per_unit - {$costExpr})), 0) AS gross_profit
                  FROM order_items oi
                  JOIN orders o ON o.id = oi.order_id
-                 LEFT JOIN rep_journal_orders rjo ON rjo.order_id = o.id
+                 {$rjoSubquery}
                  LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
-                 {$orderTotJoin}
                  {$variantJoin}
                  WHERE {$prevWhere}",
                 $prevParams
@@ -9205,7 +9206,7 @@ switch ($module) {
                  FROM (
                      SELECT DISTINCT o.id, o.discount_amount
                      FROM orders o
-                     LEFT JOIN rep_journal_orders rjo ON rjo.order_id = o.id
+                     {$rjoSubquery}
                      LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
                      WHERE {$prevWhere}
                  ) o",
@@ -9220,7 +9221,7 @@ switch ($module) {
                 $changePct = round((($revenueRange - $revenuePrev) / $revenuePrev) * 100, 1);
             }
 
-            // 3. Orders Counts:
+            // 3. Orders Counts & Delivery Performance:
             // Returned orders in period:
             $returnedWhere = "
                 (
@@ -9235,7 +9236,7 @@ switch ($module) {
             $ordersReturnedStmt = execute_query($pdo,
                 "SELECT COUNT(DISTINCT o.id)
                  FROM orders o
-                 LEFT JOIN rep_journal_orders rjo ON rjo.order_id = o.id
+                 {$rjoSubquery}
                  LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
                  WHERE {$returnedWhere}",
                 $baseParams
@@ -9254,6 +9255,81 @@ switch ($module) {
                 "SELECT COUNT(*) FROM orders WHERE status IN ('pending', 'confirmed', 'processing', 'with_rep', 'in_delivery', 'shipped')"
             );
             $ordersPending = intval($ordersPendingStmt->fetchColumn() ?: 0);
+
+            // Delivery & Return Performance Detailed Breakdown:
+            $deliveryPerformance = [
+                'full_delivery'    => ['count' => 0, 'pieces' => 0, 'amount' => 0.0],
+                'partial_delivery' => ['count' => 0, 'pieces' => 0, 'amount' => 0.0],
+                'full_return'      => ['count' => 0, 'pieces' => 0, 'amount' => 0.0],
+                'partial_return'   => ['count' => 0, 'pieces' => 0, 'amount' => 0.0],
+            ];
+            try {
+                $perfSql = "
+                    SELECT
+                        o.id,
+                        o.status AS order_status,
+                        COALESCE(rjo.status, '') AS rjo_status,
+                        COALESCE(rjo.returned_pieces, 0) AS returned_pieces,
+                        COALESCE(rjo.returned_value, 0) AS returned_value,
+                        COALESCE(oi_summary.delivered_pieces, 0) AS delivered_pieces,
+                        COALESCE(oi_summary.delivered_amount, 0) AS delivered_amount,
+                        COALESCE(o.discount_amount, 0) AS discount_amount,
+                        COALESCE(o.total_amount, 0) AS total_amount
+                    FROM orders o
+                    {$rjoSubquery}
+                    LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
+                    LEFT JOIN (
+                        SELECT order_id, 
+                               SUM(quantity) AS delivered_pieces, 
+                               SUM(quantity * price_per_unit) AS delivered_amount
+                        FROM order_items
+                        GROUP BY order_id
+                    ) oi_summary ON oi_summary.order_id = o.id
+                    WHERE (
+                        (rdj.id IS NOT NULL AND rdj.is_closed = 1 AND (
+                            (rdj.journal_date IS NOT NULL AND rdj.journal_date BETWEEN ? AND ?)
+                            OR (rdj.journal_date IS NULL AND DATE(rdj.created_at) BETWEEN ? AND ?)
+                        ))
+                        OR
+                        (rdj.id IS NULL AND DATE(o.created_at) BETWEEN ? AND ?)
+                    )
+                ";
+                $perfStmt = execute_query($pdo, $perfSql, $baseParams);
+                $perfRows = $perfStmt->fetchAll(PDO::FETCH_ASSOC);
+
+                foreach ($perfRows as $pRow) {
+                    $ost = strtolower(trim((string)$pRow['order_status']));
+                    $rst = strtolower(trim((string)$pRow['rjo_status']));
+                    $retP = intval($pRow['returned_pieces']);
+                    $retV = floatval($pRow['returned_value']);
+                    $delP = intval($pRow['delivered_pieces']);
+                    $delV = max(0.0, floatval($pRow['delivered_amount']) - floatval($pRow['discount_amount']));
+
+                    $isFullReturn = in_array($ost, ['returned', 'full_return']) || in_array($rst, ['returned', 'full_return']);
+                    $isPartial = ($ost === 'partial' || $ost === 'partial_return' || $rst === 'partial' || $rst === 'partial_return' || ($retP > 0 && !$isFullReturn));
+                    $isDelivered = in_array($ost, ['delivered']) || in_array($rst, ['delivered']);
+
+                    if ($isPartial) {
+                        $deliveryPerformance['partial_delivery']['count']++;
+                        $deliveryPerformance['partial_delivery']['pieces'] += $delP;
+                        $deliveryPerformance['partial_delivery']['amount'] += $delV;
+
+                        $deliveryPerformance['partial_return']['count']++;
+                        $deliveryPerformance['partial_return']['pieces'] += $retP;
+                        $deliveryPerformance['partial_return']['amount'] += ($retV > 0 ? $retV : max(0.0, floatval($pRow['total_amount']) - $delV));
+                    } elseif ($isFullReturn) {
+                        $deliveryPerformance['full_return']['count']++;
+                        $deliveryPerformance['full_return']['pieces'] += ($retP > 0 ? $retP : $delP);
+                        $deliveryPerformance['full_return']['amount'] += ($retV > 0 ? $retV : floatval($pRow['total_amount']));
+                    } elseif ($isDelivered) {
+                        $deliveryPerformance['full_delivery']['count']++;
+                        $deliveryPerformance['full_delivery']['pieces'] += $delP;
+                        $deliveryPerformance['full_delivery']['amount'] += $delV;
+                    }
+                }
+            } catch (Exception $e) {
+                // Keep default zeros
+            }
 
             // Customers count & active employees count:
             $customersCount = intval(execute_query($pdo, "SELECT COUNT(*) FROM customers")->fetchColumn() ?: 0);
@@ -9314,9 +9390,8 @@ switch ($module) {
                             COALESCE(SUM({$deliveredQtyExpr} * (oi.price_per_unit - {$costExpr})), 0) AS gross_profit
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
-                     LEFT JOIN rep_journal_orders rjo ON rjo.order_id = o.id
+                     {$rjoSubquery}
                      LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
-                     {$orderTotJoin}
                      {$variantJoin}
                      WHERE {$baseWhere}
                      GROUP BY d",
@@ -9334,7 +9409,7 @@ switch ($module) {
                      FROM (
                          SELECT DISTINCT o.id, o.discount_amount, rdj.journal_date, rdj.created_at, o.created_at as o_created
                          FROM orders o
-                         LEFT JOIN rep_journal_orders rjo ON rjo.order_id = o.id
+                         {$rjoSubquery}
                          LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
                          WHERE {$baseWhere}
                      ) o
@@ -9374,9 +9449,8 @@ switch ($module) {
                      FROM orders o
                      LEFT JOIN customers c ON c.id = o.customer_id
                      JOIN order_items oi ON oi.order_id = o.id
-                     LEFT JOIN rep_journal_orders rjo ON rjo.order_id = o.id
+                     {$rjoSubquery}
                      LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
-                     {$orderTotJoin}
                      WHERE {$baseWhere}
                      GROUP BY governorate
                      ORDER BY total DESC
@@ -9428,11 +9502,10 @@ switch ($module) {
                             COALESCE(SUM({$deliveredQtyExpr} * oi.price_per_unit), 0) AS total_sales
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
-                     LEFT JOIN rep_journal_orders rjo ON rjo.order_id = o.id
+                     {$rjoSubquery}
                      LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
                      LEFT JOIN representatives rep ON rep.id = COALESCE(rjo.rep_id, o.rep_id)
                      LEFT JOIN users rep_user ON rep_user.id = COALESCE(rjo.rep_id, o.rep_id)
-                     {$orderTotJoin}
                      WHERE {$baseWhere} AND COALESCE(rjo.rep_id, o.rep_id) > 0
                      GROUP BY id, name
                      ORDER BY total_sales DESC, orders_count DESC
@@ -9459,9 +9532,8 @@ switch ($module) {
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
                      LEFT JOIN sales_offices so ON so.id = o.sales_office_id
-                     LEFT JOIN rep_journal_orders rjo ON rjo.order_id = o.id
+                     {$rjoSubquery}
                      LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
-                     {$orderTotJoin}
                      WHERE {$baseWhere}
                      GROUP BY name
                      HAVING name <> ''
@@ -9488,9 +9560,8 @@ switch ($module) {
                             COALESCE(SUM({$deliveredQtyExpr} * oi.price_per_unit), 0) AS total_sales
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
-                     LEFT JOIN rep_journal_orders rjo ON rjo.order_id = o.id
+                     {$rjoSubquery}
                      LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
-                     {$orderTotJoin}
                      WHERE {$baseWhere} AND o.employee IS NOT NULL AND TRIM(o.employee) <> ''
                      GROUP BY TRIM(o.employee)
                      ORDER BY total_sales DESC, orders_count DESC
@@ -9518,9 +9589,8 @@ switch ($module) {
                             COALESCE(SUM({$deliveredQtyExpr} * oi.price_per_unit), 0) AS revenue
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
-                     LEFT JOIN rep_journal_orders rjo ON rjo.order_id = o.id
+                     {$rjoSubquery}
                      LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
-                     {$orderTotJoin}
                      {$variantJoin}
                      WHERE {$baseWhere}
                      GROUP BY product_name, color, size
@@ -9592,6 +9662,7 @@ switch ($module) {
                     'top_employees'      => $topEmployees,
                     'top_products'       => $topProducts,
                     'orders_by_status'   => $ordersByStatus,
+                    'delivery_performance' => $deliveryPerformance,
                     'low_stock_details'  => $lowStockDetails,
                     'sales_by_gov'       => $salesByGov,
                 ]
@@ -15007,8 +15078,20 @@ switch ($module) {
                      LEFT JOIN orders o ON o.id = rjo.order_id
                      LEFT JOIN customers c ON c.id = o.customer_id
                      WHERE " . implode(' AND ', $where) . "
-                     ORDER BY rjo.updated_at DESC",
+                     ORDER BY rjo.updated_at DESC, rjo.id DESC",
                     $params)->fetchAll(PDO::FETCH_ASSOC);
+
+                // Deduplicate journal rows by order_id (keep latest)
+                $uniqueRows = [];
+                $seenOrderIds = [];
+                foreach ($rows as $rowItem) {
+                    $oid = intval($rowItem['order_id'] ?? 0);
+                    if ($oid <= 0) continue;
+                    if (isset($seenOrderIds[$oid])) continue;
+                    $seenOrderIds[$oid] = true;
+                    $uniqueRows[] = $rowItem;
+                }
+                $rows = $uniqueRows;
 
                 // Fetch order items for all orders
                 $orderIds = array_unique(array_filter(array_column($rows, 'order_id'), 'intval'));
@@ -15109,19 +15192,29 @@ switch ($module) {
                     $allVisible[] = $order;
                     $st = strtolower(trim((string)($r['journal_status'] ?? '')));
                     $ordSt = strtolower(trim((string)($r['order_status'] ?? '')));
+                    $retPieces = intval($order['returned_pieces'] ?? 0) ?: intval($order['returned_pieces_fallback'] ?? 0);
 
-                    if ($st === 'delivered' || $ordSt === 'delivered') {
-                        if ($from && $to) { $ed = $r['event_date']; if ($ed >= $from && $ed <= $to) $delivered[] = $order; }
-                        else $delivered[] = $order;
+                    $isPartial = ($retPieces > 0 || in_array($st, ['partial', 'partial_return']) || in_array($ordSt, ['partial', 'partial_return']));
+
+                    if ($isPartial) {
+                        if ($from && $to) {
+                            $ed = $r['event_date'];
+                            if ($ed >= $from && $ed <= $to) {
+                                $delivered[] = $order;
+                                $returned[]  = $order;
+                            }
+                        } else {
+                            $delivered[] = $order;
+                            $returned[]  = $order;
+                        }
                     } elseif ($st === 'full_return' || $st === 'returned' || $ordSt === 'returned' || $ordSt === 'full_return') {
                         if ($from && $to) { $ed = $r['event_date']; if ($ed >= $from && $ed <= $to) $returned[] = $order; }
                         else $returned[] = $order;
+                    } elseif ($st === 'delivered' || $ordSt === 'delivered') {
+                        if ($from && $to) { $ed = $r['event_date']; if ($ed >= $from && $ed <= $to) $delivered[] = $order; }
+                        else $delivered[] = $order;
                     } elseif ($st === 'deferred') {
                         $deferred[] = $order;
-                    } elseif ($st === 'partial_return' || $ordSt === 'partial' || $ordSt === 'partial_return') {
-                        if ($from && $to) { $ed = $r['event_date']; if ($ed >= $from && $ed <= $to) $returned[] = $order; }
-                        else $returned[] = $order;
-                        $delivered[] = $order;
                     } else {
                         $active[] = $order;
                     }
@@ -15308,7 +15401,7 @@ switch ($module) {
             $orderIds = $input['order_ids'] ?? [];
             $status   = trim(strval($input['status'] ?? ''));
             $notes    = isset($input['notes']) ? trim($input['notes']) : null;
-            $allowed  = ['with_rep', 'delivered', 'deferred', 'full_return', 'partial_return'];
+            $allowed  = ['with_rep', 'delivered', 'deferred', 'full_return', 'partial_return', 'partial'];
             if (!$repId || !$status || !in_array($status, $allowed, true) || !is_array($orderIds) || count($orderIds) === 0) {
                 http_response_code(400);
                 echo json_encode(['success' => false, 'message' => 'rep_id, order_ids[], and valid status required']);
@@ -15376,6 +15469,8 @@ switch ($module) {
                         $mappedOrderStatus = 'delivered';
                     } elseif ($status === 'full_return') {
                         $mappedOrderStatus = 'returned';
+                    } elseif ($status === 'partial' || $status === 'partial_return') {
+                        $mappedOrderStatus = 'partial';
                     }
 
                     if ($mappedOrderStatus !== null) {

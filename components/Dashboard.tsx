@@ -8,7 +8,7 @@ import {
   TrendingUp, Users, Package, DollarSign,
   ArrowUpRight, ArrowDownRight, ClipboardCheck, Briefcase,
   AlertTriangle, Sparkles, Award, Building2, UserCheck,
-  ShoppingBag, Activity, Map, AlertCircle, CheckCircle
+  ShoppingBag, Activity, Map, AlertCircle, CheckCircle, RotateCcw
 } from 'lucide-react';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { assetUrl } from '../services/assetUrl';
@@ -23,11 +23,21 @@ const STATUS_LABELS: Record<string, string> = {
   pending: 'معلق', confirmed: 'مؤكد', processing: 'قيد التنفيذ',
   shipped: 'مشحون', delivered: 'مُسلَّم', cancelled: 'ملغي',
   returned: 'مرتجع', with_rep: 'مع المندوب', in_delivery: 'قيد التسليم',
+  partial: 'تسليم جزئي', partial_return: 'مرتجع جزئي', full_return: 'مرتجع كامل',
 };
 const STATUS_COLORS: Record<string, string> = {
-  pending: 'bg-amber-100 text-amber-700', confirmed: 'bg-blue-100 text-blue-700',
-  processing: 'bg-indigo-100 text-indigo-700', shipped: 'bg-cyan-100 text-cyan-700',
-  delivered: 'bg-emerald-100 text-emerald-700', cancelled: 'bg-rose-100 text-rose-700',
+  pending: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+  confirmed: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
+  processing: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300',
+  shipped: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/40 dark:text-cyan-300',
+  delivered: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+  cancelled: 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300',
+  returned: 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300',
+  full_return: 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300',
+  partial: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+  partial_return: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+  with_rep: 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300',
+  in_delivery: 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300',
 };
 
 const KpiCard = ({ title, value, sub, isPositive, icon: Icon, gradient }: any) => (
@@ -416,6 +426,101 @@ const Dashboard: React.FC = () => {
             </div>
             <div className="bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 rounded-xl px-3 py-1.5 text-rose-700 dark:text-rose-300 text-xs font-bold">
               نسبة المرتجع: {ordersDelivered + ordersReturned > 0 ? ((ordersReturned / (ordersDelivered + ordersReturned)) * 100).toFixed(1) : 0}%
+            </div>
+          </div>
+        </div>
+
+        {/* 4 Dedicated Operation Breakdown Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+          {/* 1. Full Delivery */}
+          <div className="bg-emerald-50/70 dark:bg-emerald-950/20 border border-emerald-200/80 dark:border-emerald-800/40 rounded-2xl p-4 flex flex-col justify-between">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-black text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+                <CheckCircle size={15} className="text-emerald-600" />
+                تسليم كامل
+              </span>
+              <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-100/80 dark:bg-emerald-900/40 px-2 py-0.5 rounded-full">
+                {fmt(overview?.delivery_performance?.full_delivery?.count || 0)} طلب
+              </span>
+            </div>
+            <div className="mt-1 space-y-1">
+              <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400">
+                <span>القطع المسلمة:</span>
+                <span className="font-bold text-slate-800 dark:text-slate-200">{fmt(overview?.delivery_performance?.full_delivery?.pieces || 0)} قطعة</span>
+              </div>
+              <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400">
+                <span>القيمة المسلمة:</span>
+                <span className="font-black text-emerald-600 dark:text-emerald-400">{fmtCur(overview?.delivery_performance?.full_delivery?.amount || 0, currencySymbol)}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* 2. Partial Delivery */}
+          <div className="bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200/80 dark:border-amber-800/40 rounded-2xl p-4 flex flex-col justify-between">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-black text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+                <ClipboardCheck size={15} className="text-amber-600" />
+                تسليم جزئي
+              </span>
+              <span className="text-[11px] font-bold text-amber-600 dark:text-amber-400 bg-amber-100/80 dark:bg-amber-900/40 px-2 py-0.5 rounded-full">
+                {fmt(overview?.delivery_performance?.partial_delivery?.count || 0)} طلب
+              </span>
+            </div>
+            <div className="mt-1 space-y-1">
+              <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400">
+                <span>القطع المسلمة:</span>
+                <span className="font-bold text-slate-800 dark:text-slate-200">{fmt(overview?.delivery_performance?.partial_delivery?.pieces || 0)} قطعة</span>
+              </div>
+              <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400">
+                <span>القيمة المسلمة:</span>
+                <span className="font-black text-amber-600 dark:text-amber-400">{fmtCur(overview?.delivery_performance?.partial_delivery?.amount || 0, currencySymbol)}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* 3. Full Return */}
+          <div className="bg-rose-50/70 dark:bg-rose-950/20 border border-rose-200/80 dark:border-rose-800/40 rounded-2xl p-4 flex flex-col justify-between">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-black text-rose-800 dark:text-rose-300 flex items-center gap-1.5">
+                <AlertCircle size={15} className="text-rose-600" />
+                ارتجاع كامل
+              </span>
+              <span className="text-[11px] font-bold text-rose-600 dark:text-rose-400 bg-rose-100/80 dark:bg-rose-900/40 px-2 py-0.5 rounded-full">
+                {fmt(overview?.delivery_performance?.full_return?.count || 0)} طلب
+              </span>
+            </div>
+            <div className="mt-1 space-y-1">
+              <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400">
+                <span>القطع المرتجعة:</span>
+                <span className="font-bold text-slate-800 dark:text-slate-200">{fmt(overview?.delivery_performance?.full_return?.pieces || 0)} قطعة</span>
+              </div>
+              <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400">
+                <span>القيمة المرتجعة:</span>
+                <span className="font-black text-rose-600 dark:text-rose-400">{fmtCur(overview?.delivery_performance?.full_return?.amount || 0, currencySymbol)}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* 4. Partial Return */}
+          <div className="bg-purple-50/70 dark:bg-purple-950/20 border border-purple-200/80 dark:border-purple-800/40 rounded-2xl p-4 flex flex-col justify-between">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-black text-purple-800 dark:text-purple-300 flex items-center gap-1.5">
+                <RotateCcw size={15} className="text-purple-600" />
+                ارتجاع جزئي
+              </span>
+              <span className="text-[11px] font-bold text-purple-600 dark:text-purple-400 bg-purple-100/80 dark:bg-purple-900/40 px-2 py-0.5 rounded-full">
+                {fmt(overview?.delivery_performance?.partial_return?.count || 0)} طلب
+              </span>
+            </div>
+            <div className="mt-1 space-y-1">
+              <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400">
+                <span>القطع المرتجعة:</span>
+                <span className="font-bold text-slate-800 dark:text-slate-200">{fmt(overview?.delivery_performance?.partial_return?.pieces || 0)} قطعة</span>
+              </div>
+              <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400">
+                <span>القيمة المرتجعة:</span>
+                <span className="font-black text-purple-600 dark:text-purple-400">{fmtCur(overview?.delivery_performance?.partial_return?.amount || 0, currencySymbol)}</span>
+              </div>
             </div>
           </div>
         </div>

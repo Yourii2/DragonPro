@@ -112,19 +112,24 @@ const computeReturnedOrderValue = (order: any) => {
 };
 
 const computeDeliveredNetPieces = (order: any) => {
-  const total = computePieces(order);
-  const returned = computeReturnedPieces(order);
-  return Math.max(0, total - returned);
+  const status = String(order?.status || order?.order_status || '').toLowerCase();
+  if (status === 'returned' || status === 'full_return') return 0;
+  return computePieces(order);
 };
 
 const computeDeliveredNetValue = (order: any) => {
-  const totalVal = computeOrderValueWithoutShipping(order);
-  const returnedVal = computeReturnedOrderValue(order);
-  return Math.max(0, totalVal - returnedVal);
+  const status = String(order?.status || order?.order_status || '').toLowerCase();
+  if (status === 'returned' || status === 'full_return') return 0;
+  return computeOrderValueWithoutShipping(order);
 };
 
-const computeOriginalPieces = (order: any) => computePieces(order);
-const computeOriginalOrderValue = (order: any) => computeOrderValueWithoutShipping(order);
+const computeOriginalPieces = (order: any) => {
+  return computeDeliveredNetPieces(order) + computeReturnedPieces(order);
+};
+
+const computeOriginalOrderValue = (order: any) => {
+  return computeDeliveredNetValue(order) + computeReturnedOrderValue(order);
+};
 
 
 
@@ -223,6 +228,7 @@ const SalesDailyClose: React.FC = () => {
 
   // UI State
   const [viewModal, setViewModal] = useState<'delivered' | 'returned' | 'deferred' | null>(null);
+  const [modalFilter, setModalFilter] = useState<'all' | 'full' | 'partial'>('all');
   const [activeOrdersViewMode, setActiveOrdersViewMode] = useState<'list' | 'card'>('card');
   const [activeOrdersSortOrder, setActiveOrdersSortOrder] = useState<'asc' | 'desc'>('desc');
   const [deferredOrdersViewMode, setDeferredOrdersViewMode] = useState<'list' | 'card'>('card');
@@ -265,6 +271,25 @@ const SalesDailyClose: React.FC = () => {
       return !deferredIds.has(id);
     });
   }, [deliveredOrders, returnedOrders, activeOrders, deferredOrders]);
+
+  // Sub-breakdowns: Full vs Partial
+  const delivFullList = useMemo(() => finalDeliveredList.filter(o => computeDeliveredNetPieces(o) > 0 && computeReturnedPieces(o) === 0), [finalDeliveredList]);
+  const delivPartialList = useMemo(() => finalDeliveredList.filter(o => computeDeliveredNetPieces(o) > 0 && computeReturnedPieces(o) > 0), [finalDeliveredList]);
+
+  const returnFullList = useMemo(() => finalReturnedList.filter(o => computeReturnedPieces(o) > 0 && computeDeliveredNetPieces(o) === 0), [finalReturnedList]);
+  const returnPartialList = useMemo(() => finalReturnedList.filter(o => computeReturnedPieces(o) > 0 && computeDeliveredNetPieces(o) > 0), [finalReturnedList]);
+
+  const delivFullPieces = useMemo(() => delivFullList.reduce((sum, o) => sum + computeDeliveredNetPieces(o), 0), [delivFullList]);
+  const delivFullAmount = useMemo(() => delivFullList.reduce((sum, o) => sum + computeDeliveredNetValue(o), 0), [delivFullList]);
+
+  const delivPartialPieces = useMemo(() => delivPartialList.reduce((sum, o) => sum + computeDeliveredNetPieces(o), 0), [delivPartialList]);
+  const delivPartialAmount = useMemo(() => delivPartialList.reduce((sum, o) => sum + computeDeliveredNetValue(o), 0), [delivPartialList]);
+
+  const returnFullPieces = useMemo(() => returnFullList.reduce((sum, o) => sum + computeReturnedPieces(o), 0), [returnFullList]);
+  const returnFullAmount = useMemo(() => returnFullList.reduce((sum, o) => sum + computeReturnedOrderValue(o), 0), [returnFullList]);
+
+  const returnPartialPieces = useMemo(() => returnPartialList.reduce((sum, o) => sum + computeReturnedPieces(o), 0), [returnPartialList]);
+  const returnPartialAmount = useMemo(() => returnPartialList.reduce((sum, o) => sum + computeReturnedOrderValue(o), 0), [returnPartialList]);
 
   // Derived Stats
   const deliveredPieces = useMemo(() => finalDeliveredList.reduce((sum, o) => sum + computeDeliveredNetPieces(o), 0), [finalDeliveredList]);
@@ -478,10 +503,10 @@ const SalesDailyClose: React.FC = () => {
           body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: partialIds.map(Number), status: 'partial_return' })
         }).catch(() => null);
 
-        // Also mark remaining portion as delivered in orders table
+        // Mark remaining portion as partial in orders table
         await Promise.all(partialIds.map(id => fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: Number(id), status: 'delivered', rep_id: Number(selectedRepId), repId: Number(selectedRepId) })
+          body: JSON.stringify({ id: Number(id), status: 'partial', rep_id: Number(selectedRepId), repId: Number(selectedRepId) })
         }).catch(() => null)));
       }
 
@@ -1148,8 +1173,19 @@ const SalesDailyClose: React.FC = () => {
                 <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400"><span>القطع المسلمة</span><span className="font-black">{statsLoading ? '—' : deliveredPieces}</span></div>
                 <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400"><span>القيمة</span><span className="font-black text-emerald-600">{statsLoading ? '—' : money(deliveredValue)} {currencySymbol}</span></div>
               </div>
+              {/* Full vs Partial Sub-breakdown */}
+              <div className="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800 grid grid-cols-2 gap-1 text-[10px]">
+                <div className="bg-emerald-50/60 dark:bg-emerald-950/20 p-1.5 rounded-lg border border-emerald-100 dark:border-emerald-900/30">
+                  <div className="font-bold text-emerald-700 dark:text-emerald-300">تسليم كامل: {statsLoading ? '—' : delivFullList.length}</div>
+                  <div className="text-slate-500 dark:text-slate-400">{statsLoading ? '—' : `${delivFullPieces} ق • ${money(delivFullAmount)}`}</div>
+                </div>
+                <div className="bg-amber-50/60 dark:bg-amber-950/20 p-1.5 rounded-lg border border-amber-100 dark:border-amber-900/30">
+                  <div className="font-bold text-amber-700 dark:text-amber-300">تسليم جزئي: {statsLoading ? '—' : delivPartialList.length}</div>
+                  <div className="text-slate-500 dark:text-slate-400">{statsLoading ? '—' : `${delivPartialPieces} ق • ${money(delivPartialAmount)}`}</div>
+                </div>
+              </div>
             </div>
-            <button onClick={() => setViewModal('delivered')} className="mt-3 flex items-center justify-center gap-1 text-xs bg-slate-50 dark:bg-slate-800 hover:bg-emerald-50 text-slate-600 hover:text-emerald-600 py-1.5 px-3 rounded-xl border border-slate-100 dark:border-slate-700 transition-colors"><Eye className="w-3.5 h-3.5" /> التفاصيل</button>
+            <button onClick={() => { setViewModal('delivered'); setModalFilter('all'); }} className="mt-3 flex items-center justify-center gap-1 text-xs bg-slate-50 dark:bg-slate-800 hover:bg-emerald-50 text-slate-600 hover:text-emerald-600 py-1.5 px-3 rounded-xl border border-slate-100 dark:border-slate-700 transition-colors"><Eye className="w-3.5 h-3.5" /> التفاصيل</button>
           </div>
 
           {/* Deferred */}
@@ -1167,7 +1203,7 @@ const SalesDailyClose: React.FC = () => {
                 <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400"><span>القيمة</span><span className="font-black text-amber-600">{statsLoading ? '—' : money(deferredValue)} {currencySymbol}</span></div>
               </div>
             </div>
-            <button onClick={() => setViewModal('deferred')} className="mt-3 flex items-center justify-center gap-1 text-xs bg-slate-50 dark:bg-slate-800 hover:bg-amber-50 text-slate-600 hover:text-amber-600 py-1.5 px-3 rounded-xl border border-slate-100 dark:border-slate-700 transition-colors"><Eye className="w-3.5 h-3.5" /> التفاصيل</button>
+            <button onClick={() => { setViewModal('deferred'); setModalFilter('all'); }} className="mt-3 flex items-center justify-center gap-1 text-xs bg-slate-50 dark:bg-slate-800 hover:bg-amber-50 text-slate-600 hover:text-amber-600 py-1.5 px-3 rounded-xl border border-slate-100 dark:border-slate-700 transition-colors"><Eye className="w-3.5 h-3.5" /> التفاصيل</button>
           </div>
 
           {/* Returned */}
@@ -1184,8 +1220,19 @@ const SalesDailyClose: React.FC = () => {
                 <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400"><span>القطع المرتجعة</span><span className="font-black">{statsLoading ? '—' : returnedPieces}</span></div>
                 <div className="flex justify-between text-xs text-slate-600 dark:text-slate-400"><span>القيمة</span><span className="font-black text-rose-600">{statsLoading ? '—' : money(returnedValue)} {currencySymbol}</span></div>
               </div>
+              {/* Full vs Partial Sub-breakdown */}
+              <div className="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800 grid grid-cols-2 gap-1 text-[10px]">
+                <div className="bg-rose-50/60 dark:bg-rose-950/20 p-1.5 rounded-lg border border-rose-100 dark:border-rose-900/30">
+                  <div className="font-bold text-rose-700 dark:text-rose-300">ارتجاع كامل: {statsLoading ? '—' : returnFullList.length}</div>
+                  <div className="text-slate-500 dark:text-slate-400">{statsLoading ? '—' : `${returnFullPieces} ق • ${money(returnFullAmount)}`}</div>
+                </div>
+                <div className="bg-amber-50/60 dark:bg-amber-950/20 p-1.5 rounded-lg border border-amber-100 dark:border-amber-900/30">
+                  <div className="font-bold text-amber-700 dark:text-amber-300">ارتجاع جزئي: {statsLoading ? '—' : returnPartialList.length}</div>
+                  <div className="text-slate-500 dark:text-slate-400">{statsLoading ? '—' : `${returnPartialPieces} ق • ${money(returnPartialAmount)}`}</div>
+                </div>
+              </div>
             </div>
-            <button onClick={() => setViewModal('returned')} className="mt-3 flex items-center justify-center gap-1 text-xs bg-slate-50 dark:bg-slate-800 hover:bg-rose-50 text-slate-600 hover:text-rose-600 py-1.5 px-3 rounded-xl border border-slate-100 dark:border-slate-700 transition-colors"><Eye className="w-3.5 h-3.5" /> التفاصيل</button>
+            <button onClick={() => { setViewModal('returned'); setModalFilter('all'); }} className="mt-3 flex items-center justify-center gap-1 text-xs bg-slate-50 dark:bg-slate-800 hover:bg-rose-50 text-slate-600 hover:text-rose-600 py-1.5 px-3 rounded-xl border border-slate-100 dark:border-slate-700 transition-colors"><Eye className="w-3.5 h-3.5" /> التفاصيل</button>
           </div>
         </div>
       </div>
@@ -1409,9 +1456,38 @@ const SalesDailyClose: React.FC = () => {
               </h3>
               <button onClick={() => setViewModal(null)} className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600">✕</button>
             </div>
+
+            {/* Filter Tabs for Delivered / Returned */}
+            {viewModal !== 'deferred' && (
+              <div className="px-5 py-2 border-b border-slate-100 dark:border-slate-800 flex items-center gap-2 bg-slate-50/50 dark:bg-slate-800/30">
+                <button
+                  onClick={() => setModalFilter('all')}
+                  className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${modalFilter === 'all' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100'}`}
+                >
+                  الكل ({viewModal === 'delivered' ? finalDeliveredList.length : finalReturnedList.length})
+                </button>
+                <button
+                  onClick={() => setModalFilter('full')}
+                  className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${modalFilter === 'full' ? (viewModal === 'delivered' ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white') : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100'}`}
+                >
+                  {viewModal === 'delivered' ? `تسليم كامل (${delivFullList.length})` : `ارتجاع كامل (${returnFullList.length})`}
+                </button>
+                <button
+                  onClick={() => setModalFilter('partial')}
+                  className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${modalFilter === 'partial' ? 'bg-amber-600 text-white' : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100'}`}
+                >
+                  {viewModal === 'delivered' ? `تسليم جزئي (${delivPartialList.length})` : `ارتجاع جزئي (${returnPartialList.length})`}
+                </button>
+              </div>
+            )}
+
             <div className="p-5 overflow-y-auto flex-1 custom-scrollbar">
               {(() => {
-                const list = viewModal === 'delivered' ? finalDeliveredList : viewModal === 'returned' ? finalReturnedList : deferredOrders;
+                const list = viewModal === 'delivered'
+                  ? (modalFilter === 'full' ? delivFullList : modalFilter === 'partial' ? delivPartialList : finalDeliveredList)
+                  : viewModal === 'returned'
+                  ? (modalFilter === 'full' ? returnFullList : modalFilter === 'partial' ? returnPartialList : finalReturnedList)
+                  : deferredOrders;
                 if (list.length === 0) return <div className="text-center text-slate-500 py-12">لا توجد اوردرات في هذه القائمة.</div>;
                 return (
                   <table className="w-full text-sm text-right">
