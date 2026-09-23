@@ -121,6 +121,8 @@ if (!isset($pdo)) {
             [
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::ATTR_PERSISTENT => true,
+                PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4",
             ]
         );
         // Set MySQL session timezone to Egypt (UTC+2)
@@ -15193,10 +15195,22 @@ switch ($module) {
                     $st = strtolower(trim((string)($r['journal_status'] ?? '')));
                     $ordSt = strtolower(trim((string)($r['order_status'] ?? '')));
                     $retPieces = intval($order['returned_pieces'] ?? 0) ?: intval($order['returned_pieces_fallback'] ?? 0);
+                    $totalOrderPieces = 0;
+                    foreach (($itemsMap[$oid] ?? []) as $it) {
+                        $totalOrderPieces += intval($it['quantity'] ?? 0);
+                    }
 
-                    $isPartial = ($retPieces > 0 || in_array($st, ['partial', 'partial_return']) || in_array($ordSt, ['partial', 'partial_return']));
+                    $isFullReturn = ($st === 'full_return' || $st === 'returned' || $ordSt === 'returned' || $ordSt === 'full_return');
+                    if (!$isFullReturn && $totalOrderPieces > 0 && $retPieces >= $totalOrderPieces) {
+                        $isFullReturn = true;
+                    }
 
-                    if ($isPartial) {
+                    $isPartial = !$isFullReturn && ($retPieces > 0 || in_array($st, ['partial', 'partial_return']) || in_array($ordSt, ['partial', 'partial_return']));
+
+                    if ($isFullReturn) {
+                        if ($from && $to) { $ed = $r['event_date']; if ($ed >= $from && $ed <= $to) $returned[] = $order; }
+                        else $returned[] = $order;
+                    } elseif ($isPartial) {
                         if ($from && $to) {
                             $ed = $r['event_date'];
                             if ($ed >= $from && $ed <= $to) {
@@ -15207,9 +15221,6 @@ switch ($module) {
                             $delivered[] = $order;
                             $returned[]  = $order;
                         }
-                    } elseif ($st === 'full_return' || $st === 'returned' || $ordSt === 'returned' || $ordSt === 'full_return') {
-                        if ($from && $to) { $ed = $r['event_date']; if ($ed >= $from && $ed <= $to) $returned[] = $order; }
-                        else $returned[] = $order;
                     } elseif ($st === 'delivered' || $ordSt === 'delivered') {
                         if ($from && $to) { $ed = $r['event_date']; if ($ed >= $from && $ed <= $to) $delivered[] = $order; }
                         else $delivered[] = $order;
@@ -15417,10 +15428,6 @@ switch ($module) {
                 foreach ($orderIds as $oid) {
                     $oid = intval($oid);
                     if ($oid <= 0) continue;
-                    $journalRow = execute_query($pdo,
-                        "SELECT id, journal_id FROM rep_journal_orders WHERE rep_id = ? AND order_id = ? LIMIT 1",
-                        [$repId, $oid]
-                    )->fetch(PDO::FETCH_ASSOC);
                     
                     $openJrnl = null;
                     if (table_exists($pdo, 'rep_daily_journal')) {
@@ -15431,29 +15438,50 @@ switch ($module) {
                     }
                     $targetJournalId = intval($openJrnl['id'] ?? 0);
 
+                    // Find row specifically for this journal first, or without journal
+                    $journalRow = null;
+                    if ($targetJournalId > 0) {
+                        $journalRow = execute_query($pdo,
+                            "SELECT id, journal_id FROM rep_journal_orders WHERE rep_id = ? AND order_id = ? AND journal_id = ? LIMIT 1",
+                            [$repId, $oid, $targetJournalId]
+                        )->fetch(PDO::FETCH_ASSOC);
+                    }
+                    if (!$journalRow) {
+                        $journalRow = execute_query($pdo,
+                            "SELECT id, journal_id FROM rep_journal_orders WHERE rep_id = ? AND order_id = ? AND (journal_id IS NULL OR journal_id = 0) LIMIT 1",
+                            [$repId, $oid]
+                        )->fetch(PDO::FETCH_ASSOC);
+                    }
+                    if (!$journalRow) {
+                        $journalRow = execute_query($pdo,
+                            "SELECT id, journal_id FROM rep_journal_orders WHERE rep_id = ? AND order_id = ? ORDER BY id DESC LIMIT 1",
+                            [$repId, $oid]
+                        )->fetch(PDO::FETCH_ASSOC);
+                    }
+
                     $journalId = intval($journalRow['journal_id'] ?? 0);
                     if ($journalRow) {
-                        // Row exists — update status and link to current open journal if exists
+                        $rowId = intval($journalRow['id']);
                         $updateParams = [$status, $now, $nowTime, $employee, $notes];
                         $updateSql = "UPDATE rep_journal_orders SET status=?, event_date=?, event_time=?, employee=?, notes=?";
                         
-                        if ($targetJournalId > 0) {
+                        // If target journal is defined and row has no journal, link it
+                        if ($targetJournalId > 0 && ($journalId <= 0 || $journalId === $targetJournalId)) {
                             $updateSql .= ", journal_id=?";
                             $updateParams[] = $targetJournalId;
                             $journalId = $targetJournalId;
                         }
                         
-                        $updateSql .= " WHERE rep_id=? AND order_id=?";
-                        $updateParams[] = $repId;
-                        $updateParams[] = $oid;
+                        $updateSql .= " WHERE id = ?";
+                        $updateParams[] = $rowId;
                         
                         $res = execute_query($pdo, $updateSql, $updateParams);
                         $updated += $res->rowCount();
                     } else {
-                        // No row — create one linked to the rep's open journal
                         execute_query($pdo,
                             "INSERT INTO rep_journal_orders (journal_id, rep_id, order_id, status, event_date, event_time, employee, notes)
-                             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                             ON DUPLICATE KEY UPDATE status=VALUES(status), event_date=VALUES(event_date), event_time=VALUES(event_time), employee=VALUES(employee), notes=VALUES(notes)",
                             [$targetJournalId > 0 ? $targetJournalId : null, $repId, $oid, $status, $now, $nowTime, $employee, $notes]
                         );
                         $updated++;
@@ -15525,18 +15553,25 @@ switch ($module) {
         }
 
         if ($action === 'undoDailyCloseOrder') {
-            $repId   = intval($input['rep_id']   ?? 0);
-            $orderId = intval($input['order_id'] ?? 0);
-            if (!$repId || !$orderId) {
-                http_response_code(400); echo json_encode(['success' => false, 'message' => 'rep_id and order_id are required.']); exit;
+            $repId    = intval($input['rep_id']    ?? 0);
+            $orderIds = [];
+            if (!empty($input['order_ids']) && is_array($input['order_ids'])) {
+                $orderIds = array_values(array_filter(array_map('intval', $input['order_ids']), function($id) { return $id > 0; }));
+            } elseif (!empty($input['order_id']) && intval($input['order_id']) > 0) {
+                $orderIds = [intval($input['order_id'])];
+            }
+
+            if (!$repId || empty($orderIds)) {
+                http_response_code(400); echo json_encode(['success' => false, 'message' => 'rep_id and order_id(s) are required.']); exit;
             }
 
             try {
                 $pdo->beginTransaction();
                 
-                $ordStmt = execute_query($pdo, "SELECT * FROM orders WHERE id = ? FOR UPDATE", [$orderId]);
-                $orderRow = $ordStmt->fetch(PDO::FETCH_ASSOC);
-                if (!$orderRow) { throw new Exception('Order not found'); }
+                foreach ($orderIds as $orderId) {
+                    $ordStmt = execute_query($pdo, "SELECT * FROM orders WHERE id = ? FOR UPDATE", [$orderId]);
+                    $orderRow = $ordStmt->fetch(PDO::FETCH_ASSOC);
+                    if (!$orderRow) { continue; }
 
                 // ── 1. Reverse return movements (stock + order_items where applicable) ─────
                 //
@@ -15671,10 +15706,11 @@ switch ($module) {
                 }
                 
                 try { log_order_history($pdo, $orderId, $repStatus, 'daily_close_undo', 'reverted_to_rep', $repId); } catch (Exception $e) {}
+                } // end foreach ($orderIds)
 
                 $pdo->commit();
                 if (ob_get_length()) ob_clean();
-                echo json_encode(['success' => true]);
+                echo json_encode(['success' => true, 'count' => count($orderIds)]);
             } catch (Exception $e) {
                 if ($pdo->inTransaction()) { $pdo->rollBack(); }
                 if (ob_get_length()) ob_clean();
@@ -17541,6 +17577,15 @@ switch ($module) {
                     END
                 ";
                 $orderTotJoin = "LEFT JOIN (SELECT order_id, SUM(quantity) as tot_qty FROM order_items GROUP BY order_id) o_tot ON o_tot.order_id = o.id";
+                $rjoLatestJoin = "LEFT JOIN (
+                    SELECT rjo1.*
+                    FROM rep_journal_orders rjo1
+                    JOIN (
+                        SELECT order_id, MAX(id) AS max_id
+                        FROM rep_journal_orders
+                        GROUP BY order_id
+                    ) latest ON rjo1.order_id = latest.order_id AND rjo1.id = latest.max_id
+                ) rjo ON rjo.order_id = o.id";
 
                 // ── Summary KPIs ──
                 $sumStmt = execute_query($pdo,
@@ -17552,7 +17597,7 @@ switch ($module) {
                         COALESCE(SUM({$deliveredQtyExpr} * (oi.price_per_unit - {$costExpr})), 0)     AS gross_profit
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
-                     LEFT JOIN rep_journal_orders rjo ON rjo.order_id = o.id
+                     {$rjoLatestJoin}
                      LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
                      {$orderTotJoin}
                      {$variantJoin}
@@ -17565,7 +17610,7 @@ switch ($module) {
                 $discStmt = execute_query($pdo,
                     "SELECT COALESCE(SUM(COALESCE(o.discount_amount, 0)), 0) AS total_discounts
                      FROM orders o
-                     LEFT JOIN rep_journal_orders rjo ON rjo.order_id = o.id
+                     {$rjoLatestJoin}
                      LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
                      WHERE $baseWhere",
                     $baseParams
@@ -17589,7 +17634,7 @@ switch ($module) {
                         COALESCE(SUM({$deliveredQtyExpr} * (oi.price_per_unit - {$costExpr})), 0) AS profit
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
-                     LEFT JOIN rep_journal_orders rjo ON rjo.order_id = o.id
+                     {$rjoLatestJoin}
                      LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
                      {$orderTotJoin}
                      {$variantJoin}
@@ -17618,7 +17663,7 @@ switch ($module) {
                         COALESCE(SUM({$deliveredQtyExpr} * (oi.price_per_unit - {$costExpr})), 0) AS profit
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
-                     LEFT JOIN rep_journal_orders rjo ON rjo.order_id = o.id
+                     {$rjoLatestJoin}
                      LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
                      LEFT JOIN users u ON u.id = COALESCE(rjo.rep_id, o.rep_id)
                      {$orderTotJoin}
@@ -17646,7 +17691,7 @@ switch ($module) {
                         COALESCE(SUM({$deliveredQtyExpr} * (oi.price_per_unit - {$costExpr})), 0) AS profit
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
-                     LEFT JOIN rep_journal_orders rjo ON rjo.order_id = o.id
+                     {$rjoLatestJoin}
                      LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
                      {$orderTotJoin}
                      {$variantJoin}
@@ -17672,7 +17717,7 @@ switch ($module) {
                         COALESCE(o.shipping_fees, 0) AS shipping
                      FROM orders o
                      JOIN order_items oi ON oi.order_id = o.id
-                     LEFT JOIN rep_journal_orders rjo ON rjo.order_id = o.id
+                     {$rjoLatestJoin}
                      LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
                      LEFT JOIN customers c ON c.id = o.customer_id
                      LEFT JOIN users u ON u.id = COALESCE(rjo.rep_id, o.rep_id)
@@ -17709,7 +17754,7 @@ switch ($module) {
                         COALESCE(SUM(oi.quantity * oi.price_per_unit),0) AS returned_revenue
                      FROM orders o
                      JOIN order_items oi ON oi.order_id = o.id
-                     LEFT JOIN rep_journal_orders rjo ON rjo.order_id = o.id
+                     {$rjoLatestJoin}
                      LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
                      WHERE $retBaseWhere",
                     $baseParams
@@ -17801,6 +17846,15 @@ switch ($module) {
                     END
                 ";
                 $orderTotJoin = "LEFT JOIN (SELECT order_id, SUM(quantity) as tot_qty FROM order_items GROUP BY order_id) o_tot ON o_tot.order_id = o.id";
+                $rjoLatestJoin = "LEFT JOIN (
+                    SELECT rjo1.*
+                    FROM rep_journal_orders rjo1
+                    JOIN (
+                        SELECT order_id, MAX(id) AS max_id
+                        FROM rep_journal_orders
+                        GROUP BY order_id
+                    ) latest ON rjo1.order_id = latest.order_id AND rjo1.id = latest.max_id
+                ) rjo ON rjo.order_id = o.id";
 
                 // salesByProduct
                 $salesByProductSql = "
@@ -17811,7 +17865,7 @@ switch ($module) {
                         COALESCE(SUM({$deliveredQtyExpr} * (oi.price_per_unit - {$costPriceExpr})), 0) as net_profit
                     FROM orders o
                     JOIN order_items oi ON oi.order_id = o.id
-                    LEFT JOIN rep_journal_orders rjo ON rjo.order_id = o.id
+                    {$rjoLatestJoin}
                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
                     {$orderTotJoin}
                     {$variantJoins}
@@ -17835,7 +17889,7 @@ switch ($module) {
                         COALESCE(SUM({$deliveredQtyExpr} * oi.price_per_unit), 0) as total
                     FROM orders o
                     JOIN order_items oi ON oi.order_id = o.id
-                    LEFT JOIN rep_journal_orders rjo ON rjo.order_id = o.id
+                    {$rjoLatestJoin}
                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
                     {$orderTotJoin}
                     WHERE {$salesWhere}
@@ -17860,7 +17914,7 @@ switch ($module) {
                     FROM orders o
                     LEFT JOIN order_items oi ON oi.order_id = o.id
                     LEFT JOIN customers c ON o.customer_id = c.id
-                    LEFT JOIN rep_journal_orders rjo ON rjo.order_id = o.id
+                    {$rjoLatestJoin}
                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
                     {$orderTotJoin}
                     WHERE {$salesWhere}
@@ -18177,6 +18231,36 @@ switch ($module) {
                        LEFT JOIN products pdir ON pdir.id = oi.product_id"
                     : "LEFT JOIN products pdir ON pdir.id = oi.product_id";
 
+                $orderTotJoin = "LEFT JOIN (SELECT order_id, SUM(quantity) as tot_qty FROM order_items GROUP BY order_id) o_tot ON o_tot.order_id = o.id";
+                $rjoLatestJoin = "LEFT JOIN (
+                    SELECT rjo1.*
+                    FROM rep_journal_orders rjo1
+                    JOIN (
+                        SELECT order_id, MAX(id) AS max_id
+                        FROM rep_journal_orders
+                        GROUP BY order_id
+                    ) latest ON rjo1.order_id = latest.order_id AND rjo1.id = latest.max_id
+                ) rjo ON rjo.order_id = o.id";
+
+                $deliveredQtyExpr = "
+                    CASE
+                        WHEN (rjo.status = 'partial' OR o.status = 'partial' OR rjo.status = 'partial_return') AND COALESCE(rjo.returned_pieces, 0) > 0 AND COALESCE(o_tot.tot_qty, 0) > 0
+                        THEN GREATEST(0.0, oi.quantity * (1.0 - (LEAST(rjo.returned_pieces, o_tot.tot_qty) / o_tot.tot_qty)))
+                        WHEN rjo.status IN ('delivered', 'partial') OR o.status IN ('delivered', 'partial')
+                        THEN oi.quantity
+                        ELSE 0
+                    END
+                ";
+                $returnedQtyExpr = "
+                    CASE
+                        WHEN (rjo.status = 'partial' OR o.status = 'partial' OR rjo.status = 'partial_return') AND COALESCE(rjo.returned_pieces, 0) > 0 AND COALESCE(o_tot.tot_qty, 0) > 0
+                        THEN LEAST(oi.quantity, oi.quantity * (LEAST(rjo.returned_pieces, o_tot.tot_qty) / o_tot.tot_qty))
+                        WHEN rjo.status IN ('returned', 'full_return', 'partial_return') OR o.status IN ('returned', 'full_return', 'partial_return')
+                        THEN oi.quantity
+                        ELSE 0
+                    END
+                ";
+
                 $sql = "
                     SELECT 
                         sub.product_id,
@@ -18190,22 +18274,15 @@ switch ($module) {
                         SELECT
                             {$productIdExpr} AS product_id,
                             {$parentNameExpr} AS product_name,
-                            COALESCE(SUM(CASE 
-                                WHEN rjo.status IN ('delivered', 'partial') OR o.status IN ('delivered', 'partial')
-                                THEN oi.quantity ELSE 0 END), 0) AS delivered_qty,
-                            COALESCE(SUM(CASE 
-                                WHEN rjo.status IN ('delivered', 'partial') OR o.status IN ('delivered', 'partial')
-                                THEN oi.quantity * oi.price_per_unit ELSE 0 END), 0) AS delivered_amount,
-                            COALESCE(SUM(CASE 
-                                WHEN rjo.status IN ('returned', 'full_return', 'partial_return') OR o.status IN ('returned', 'full_return', 'partial_return')
-                                THEN oi.quantity ELSE 0 END), 0) AS returned_qty,
-                            COALESCE(SUM(CASE 
-                                WHEN rjo.status IN ('returned', 'full_return', 'partial_return') OR o.status IN ('returned', 'full_return', 'partial_return')
-                                THEN oi.quantity * oi.price_per_unit ELSE 0 END), 0) AS returned_amount
+                            COALESCE(SUM({$deliveredQtyExpr}), 0) AS delivered_qty,
+                            COALESCE(SUM({$deliveredQtyExpr} * oi.price_per_unit), 0) AS delivered_amount,
+                            COALESCE(SUM({$returnedQtyExpr}), 0) AS returned_qty,
+                            COALESCE(SUM({$returnedQtyExpr} * oi.price_per_unit), 0) AS returned_amount
                         FROM orders o
                         JOIN order_items oi ON oi.order_id = o.id
-                        LEFT JOIN rep_journal_orders rjo ON rjo.order_id = o.id
+                        {$rjoLatestJoin}
                         LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
+                        {$orderTotJoin}
                         {$variantJoins}
                         WHERE (
                             (rdj.id IS NOT NULL AND (
@@ -18304,7 +18381,7 @@ switch ($module) {
                       )
                       AND (
                           rjo.status IN ('delivered', 'partial', 'returned', 'full_return', 'partial_return')
-                          OR o.status IN ('delivered', 'returned', 'full_return', 'partial_return')
+                          OR (rjo.status = 'with_rep' AND o.status IN ('delivered', 'returned', 'full_return', 'partial_return'))
                       )
                       $repFilter
                     GROUP BY event_d, rjo.rep_id, u.name, rjo.order_id, rjo.status, o.status, rjo.returned_pieces, rjo.returned_value
@@ -18580,44 +18657,72 @@ switch ($module) {
             }
         } elseif ($action === 'returnsAnalysis') {
             try {
+                $rjoLatestJoin = "LEFT JOIN (
+                    SELECT rjo1.*
+                    FROM rep_journal_orders rjo1
+                    JOIN (
+                        SELECT order_id, MAX(id) AS max_id
+                        FROM rep_journal_orders
+                        GROUP BY order_id
+                    ) latest ON rjo1.order_id = latest.order_id AND rjo1.id = latest.max_id
+                ) rjo ON rjo.order_id = o.id";
+
+                $retWhere = "
+                    (
+                        (rdj.id IS NOT NULL AND (
+                            (rdj.journal_date IS NOT NULL AND rdj.journal_date BETWEEN ? AND ?)
+                            OR (rdj.journal_date IS NULL AND DATE(rdj.created_at) BETWEEN ? AND ?)
+                        ) AND (rjo.status IN ('returned', 'full_return', 'partial_return') OR o.status IN ('returned', 'full_return', 'partial_return')))
+                        OR
+                        (rdj.id IS NULL AND (rjo.status IN ('returned', 'full_return', 'partial_return') OR o.status IN ('returned', 'full_return', 'partial_return')) AND DATE(o.created_at) BETWEEN ? AND ?)
+                    )
+                ";
+                $retParams = [$start_date, $end_date, $start_date, $end_date, $start_date, $end_date];
+
                 $repStmt = execute_query($pdo, "
-                    SELECT o.rep_id,
-                           COALESCE(u.name, CONCAT('مندوب #', o.rep_id)) as rep_name,
+                    SELECT COALESCE(rjo.rep_id, o.rep_id) AS rep_id,
+                           COALESCE(u.name, CONCAT('مندوب #', COALESCE(rjo.rep_id, o.rep_id))) as rep_name,
                            COUNT(DISTINCT o.id) as return_orders,
-                           SUM(oi.quantity) as return_pieces,
-                           SUM(oi.quantity * oi.price_per_unit) as return_value
+                           COALESCE(SUM(CASE WHEN rjo.status = 'partial_return' OR o.status = 'partial_return' THEN COALESCE(NULLIF(rjo.returned_pieces, 0), 1) ELSE oi.quantity END), 0) as return_pieces,
+                           COALESCE(SUM(CASE WHEN rjo.status = 'partial_return' OR o.status = 'partial_return' THEN COALESCE(NULLIF(rjo.returned_value, 0), oi.quantity * oi.price_per_unit) ELSE oi.quantity * oi.price_per_unit END), 0) as return_value
                     FROM orders o
                     JOIN order_items oi ON o.id = oi.order_id
-                    LEFT JOIN users u ON u.id = o.rep_id
-                    WHERE o.status IN ('returned', 'full_return') AND o.created_at BETWEEN ? AND ?
-                    GROUP BY o.rep_id, u.name
+                    {$rjoLatestJoin}
+                    LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
+                    LEFT JOIN users u ON u.id = COALESCE(rjo.rep_id, o.rep_id)
+                    WHERE {$retWhere}
+                    GROUP BY COALESCE(rjo.rep_id, o.rep_id), u.name
                     ORDER BY return_value DESC
-                ", [$start_date, $end_date . ' 23:59:59']);
+                ", $retParams);
                 
                 $hasPV = table_exists($pdo, 'product_variants');
                 if ($hasPV) {
-                    $prodSql = "SELECT COALESCE(p.name, CONCAT('منتج #', oi.product_id)) as product_name,
-                                       COALESCE(SUM(oi.quantity), 0) as return_pieces,
-                                       COALESCE(SUM(oi.quantity * oi.price_per_unit), 0) as return_value
+                    $prodSql = "SELECT COALESCE(ppar.name, pv.name, CONCAT('منتج #', oi.product_id)) as product_name,
+                                       COALESCE(SUM(CASE WHEN rjo.status = 'partial_return' OR o.status = 'partial_return' THEN COALESCE(NULLIF(rjo.returned_pieces, 0), 1) ELSE oi.quantity END), 0) as return_pieces,
+                                       COALESCE(SUM(CASE WHEN rjo.status = 'partial_return' OR o.status = 'partial_return' THEN COALESCE(NULLIF(rjo.returned_value, 0), oi.quantity * oi.price_per_unit) ELSE oi.quantity * oi.price_per_unit END), 0) as return_value
                                 FROM orders o
                                 JOIN order_items oi ON o.id = oi.order_id
+                                {$rjoLatestJoin}
+                                LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
                                 LEFT JOIN product_variants pv ON pv.id = oi.product_id
-                                LEFT JOIN products p ON p.id = pv.product_id
-                                WHERE o.status IN ('returned', 'full_return') AND o.created_at BETWEEN ? AND ?
-                                GROUP BY oi.product_id, p.name
+                                LEFT JOIN products ppar ON ppar.id = pv.product_id
+                                WHERE {$retWhere}
+                                GROUP BY oi.product_id, product_name
                                 ORDER BY return_pieces DESC";
                 } else {
                     $prodSql = "SELECT COALESCE(p.name, CONCAT('منتج #', oi.product_id)) as product_name,
-                                       COALESCE(SUM(oi.quantity), 0) as return_pieces,
-                                       COALESCE(SUM(oi.quantity * oi.price_per_unit), 0) as return_value
+                                       COALESCE(SUM(CASE WHEN rjo.status = 'partial_return' OR o.status = 'partial_return' THEN COALESCE(NULLIF(rjo.returned_pieces, 0), 1) ELSE oi.quantity END), 0) as return_pieces,
+                                       COALESCE(SUM(CASE WHEN rjo.status = 'partial_return' OR o.status = 'partial_return' THEN COALESCE(NULLIF(rjo.returned_value, 0), oi.quantity * oi.price_per_unit) ELSE oi.quantity * oi.price_per_unit END), 0) as return_value
                                 FROM orders o
                                 JOIN order_items oi ON o.id = oi.order_id
+                                {$rjoLatestJoin}
+                                LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id AND rdj.is_closed = 1
                                 LEFT JOIN products p ON p.id = oi.product_id
-                                WHERE o.status IN ('returned', 'full_return') AND o.created_at BETWEEN ? AND ?
+                                WHERE {$retWhere}
                                 GROUP BY oi.product_id, p.name
                                 ORDER BY return_pieces DESC";
                 }
-                $prodStmt = execute_query($pdo, $prodSql, [$start_date, $end_date . ' 23:59:59']);
+                $prodStmt = execute_query($pdo, $prodSql, $retParams);
                 
                 echo json_encode(['success' => true, 'data' => [
                     'by_rep' => $repStmt->fetchAll(PDO::FETCH_ASSOC),

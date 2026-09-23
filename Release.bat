@@ -90,8 +90,8 @@ if exist "dist\index.html" (
 
 if exist "dist\assets" (
   if not exist "assets" mkdir "assets" >nul
-  del /f /q "assets\index-*.js" >nul 2>nul
-  del /f /q "assets\index-*.css" >nul 2>nul
+  del /f /q "assets\*.js" >nul 2>nul
+  del /f /q "assets\*.css" >nul 2>nul
   xcopy /e /i /y "dist\assets\*" "assets\" >nul
 )
 if exist "dist\index.html" copy /y "dist\index.html" "index.html" >nul

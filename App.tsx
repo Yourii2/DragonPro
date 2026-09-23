@@ -226,6 +226,18 @@ const App: React.FC = () => {
 
     verifyInstallation();
 
+    // Enforce completely clean address bar (e.g., http://localhost:3000 without any #/ or hash)
+    const cleanHashFromUrl = () => {
+      if (typeof window !== 'undefined' && window.location.hash && !window.location.hash.includes('print_waybill')) {
+        try {
+          const cleanUrl = window.location.origin + window.location.pathname + window.location.search;
+          window.history.replaceState(null, '', cleanUrl);
+        } catch (e) { /* ignore */ }
+      }
+    };
+    cleanHashFromUrl();
+    window.addEventListener('hashchange', cleanHashFromUrl);
+
     // Sync navigation from stored route (if any)
     const applyInitialRoute = () => {
       try {
@@ -239,6 +251,10 @@ const App: React.FC = () => {
       } catch (e) { /* ignore */ }
     };
     applyInitialRoute();
+
+    return () => {
+      window.removeEventListener('hashchange', cleanHashFromUrl);
+    };
   }, []);
 
   const setActiveView = (slug: string, subSlug: string = '') => {
@@ -248,6 +264,10 @@ const App: React.FC = () => {
     if (typeof window !== 'undefined') {
       try {
         localStorage.setItem(lastRouteStorageKey, JSON.stringify({ slug, subSlug }));
+        if (window.location.hash && !window.location.hash.includes('print_waybill')) {
+          const cleanUrl = window.location.origin + window.location.pathname + window.location.search;
+          window.history.replaceState(null, '', cleanUrl);
+        }
       } catch (e) {
         // ignore storage failures
       }
@@ -260,8 +280,11 @@ const App: React.FC = () => {
     setIsLoggedIn(false);
     setActiveSlug('dashboard');
     setActiveSubSlug('');
-    if (typeof window !== 'undefined' && window.location.hash !== '#/dashboard') {
-      window.location.hash = '#/dashboard';
+    if (typeof window !== 'undefined') {
+      try {
+        const cleanUrl = window.location.origin + window.location.pathname + window.location.search;
+        window.history.replaceState(null, '', cleanUrl);
+      } catch (e) { /* ignore */ }
     }
   };
 
@@ -311,7 +334,19 @@ const App: React.FC = () => {
   }
 
   if (!isLoggedIn) {
-    return <Login onLogin={() => setIsLoggedIn(true)} />;
+    return (
+      <Login 
+        onLogin={() => {
+          setIsLoggedIn(true);
+          if (typeof window !== 'undefined') {
+            try {
+              const cleanUrl = window.location.origin + window.location.pathname + window.location.search;
+              window.history.replaceState(null, '', cleanUrl);
+            } catch (e) { /* ignore */ }
+          }
+        }} 
+      />
+    );
   }
 
 

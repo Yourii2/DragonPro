@@ -85,6 +85,28 @@ export default defineConfig(({ mode }) => {
         }
       },
     },
+    build: {
+      outDir: 'dist',
+      chunkSizeWarningLimit: 2000,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules')) {
+              if (id.includes('recharts') || id.includes('d3-')) {
+                return 'vendor-charts';
+              }
+              if (id.includes('sweetalert2')) {
+                return 'vendor-swal';
+              }
+              if (id.includes('lucide-react')) {
+                return 'vendor-icons';
+              }
+              return 'vendor-framework';
+            }
+          }
+        }
+      }
+    },
     plugins: [react()],
     define: {
       'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),

@@ -10,12 +10,13 @@ if (fs.existsSync(indexPath)) {
   html = html.replace(/<link rel="apple-touch-icon"[^>]+>/i, '<link rel="apple-touch-icon" href="/Dragon.png" />');
   html = html.replace(/<link rel="manifest"[^>]+>/i, '<link rel="manifest" href="/manifest.json">');
 
-  // Remove compiled stylesheet links
-  html = html.replace(/<link rel="stylesheet" crossorigin href="\/assets\/index-[^"]+\.css">/g, '');
-  html = html.replace(/<link rel="stylesheet"[^>]+href="\/assets\/index-[^"]+\.css"[^>]*>/g, '');
+  // Remove compiled preload and stylesheet links
+  html = html.replace(/<link rel="modulepreload"[^>]+>/g, '');
+  html = html.replace(/<link rel="stylesheet" crossorigin href="\/assets\/[^"]+\.css">/g, '');
+  html = html.replace(/<link rel="stylesheet"[^>]+href="\/assets\/[^"]+\.css"[^>]*>/g, '');
 
   // Reset script to source index.tsx
-  html = html.replace(/<script type="module"[^>]+src="\/assets\/index-[^"]+\.js"[^>]*><\/script>/g, '');
+  html = html.replace(/<script type="module"[^>]+src="\/assets\/[^"]+\.js"[^>]*><\/script>/g, '');
   html = html.replace(/<script type="module"[^>]+src="\/index\.tsx"[^>]*><\/script>/g, '');
 
   // Ensure clean script tag before </head>

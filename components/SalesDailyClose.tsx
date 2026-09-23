@@ -258,7 +258,7 @@ const SalesDailyClose: React.FC = () => {
     const fromRet = returnedOrders.filter(o => computeDeliveredNetPieces(o) > 0);
     return uniqOrdersById([...deliveredOrders, ...fromRet]).filter(o => {
       const id = getRealOrderId(o);
-      return !activeIds.has(id) && !deferredIds.has(id);
+      return !activeIds.has(id) && !deferredIds.has(id) && computeDeliveredNetPieces(o) > 0;
     });
   }, [deliveredOrders, returnedOrders, activeOrders, deferredOrders]);
 
@@ -602,18 +602,29 @@ const SalesDailyClose: React.FC = () => {
     try {
       setLoading(true);
       const oid = Number(getRealOrderId(order));
-      await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: [oid], status: 'with_rep' })
       });
+      const data = await res.json();
+      if (!data?.success) throw new Error(data?.message || 'فشل استرجاع الاوردر.');
+
       await fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: oid, status: 'with_rep', rep_id: Number(selectedRepId), repId: Number(selectedRepId) })
       });
       await loadRepData(selectedRepId);
-    } catch (e) {
+      Swal.fire({
+        toast: true,
+        position: 'top-end',
+        icon: 'success',
+        title: 'تم إرجاع الأوردر للعهدة بنجاح',
+        showConfirmButton: false,
+        timer: 1500
+      });
+    } catch (e: any) {
       console.error(e);
-      Swal.fire('خطأ', 'فشل استرجاع الاوردر.', 'error');
+      Swal.fire('خطأ', e.message || 'فشل استرجاع الاوردر.', 'error');
     } finally {
       setLoading(false);
     }
@@ -621,23 +632,78 @@ const SalesDailyClose: React.FC = () => {
 
   const moveAllDeferredBack = async () => {
     if (deferredOrders.length === 0) return;
+    const count = deferredOrders.length;
+    const conf = await Swal.fire({
+      title: 'إرجاع كل المؤجل (النزول)؟',
+      text: `سيتم إرجاع جميع أوردرات النزول (${count} أوردر) إلى قائمة العهدة الحالية للمندوب. هل أنت متأكد؟`,
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: 'نعم، إرجاع الكل',
+      cancelButtonText: 'إلغاء'
+    });
+    if (!conf.isConfirmed) return;
+
     try {
       setLoading(true);
       const movedIds = deferredOrders.map(o => Number(getRealOrderId(o))).filter(id => id > 0);
       if (movedIds.length === 0) return;
-      await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: movedIds, status: 'with_rep' })
       });
+      const data = await res.json();
+      if (!data?.success) throw new Error(data?.message || 'فشل إرجاع الأوردرات.');
+
       await Promise.all(movedIds.map(id => fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, status: 'with_rep', rep_id: Number(selectedRepId), repId: Number(selectedRepId) })
       }).catch(() => null)));
       await loadRepData(selectedRepId);
       Swal.fire('تم', `تم إرجاع جميع الأوردرات (${movedIds.length}) إلى العهدة الحالية بنجاح.`, 'success');
-    } catch (e) {
+      setViewModal(null);
+    } catch (e: any) {
       console.error(e);
-      Swal.fire('خطأ', 'فشل إرجاع الأوردرات.', 'error');
+      Swal.fire('خطأ', e.message || 'فشل إرجاع الأوردرات.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUndoAllOrders = async (ordersList: any[], label: string) => {
+    if (!ordersList || ordersList.length === 0) {
+      Swal.fire('تنبيه', 'لا توجد أوردرات لإرجاعها في هذه القائمة.', 'info');
+      return;
+    }
+    const count = ordersList.length;
+    const res = await Swal.fire({
+      title: `إرجاع جميع أوردرات ${label}؟`,
+      text: `سيتم استرجاع جميع الأوردرات (${count} أوردر) وإلغاء تسجيلها في اليومية وإعادتها لعهدة المندوب الحالية. هل أنت متأكد؟`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'نعم، إرجاع الكل',
+      cancelButtonText: 'إلغاء'
+    });
+    if (!res.isConfirmed) return;
+
+    try {
+      setLoading(true);
+      const orderIds = ordersList.map(o => Number(getRealOrderId(o))).filter(id => id > 0);
+      const req = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=undoDailyCloseOrder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rep_id: selectedRepId, order_ids: orderIds })
+      });
+      const data = await req.json();
+      if (!data.success) throw new Error(data.message || 'خطأ في استرجاع الأوردرات');
+
+      Swal.fire('نجاح', `تم استرجاع جميع الأوردرات (${count}) لعهدة المندوب بنجاح.`, 'success');
+      if (selectedRepId) {
+        await loadRepData(selectedRepId);
+      }
+      setViewModal(null);
+    } catch (e: any) {
+      console.error(e);
+      Swal.fire('خطأ', e.message || 'فشل استرجاع الأوردرات.', 'error');
     } finally {
       setLoading(false);
     }
@@ -1452,9 +1518,35 @@ const SalesDailyClose: React.FC = () => {
             <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
               <h3 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
                 {viewModal === 'delivered' ? <PackageCheck className="text-emerald-500" /> : viewModal === 'returned' ? <PackageX className="text-rose-500" /> : <PackageCheck className="text-amber-500" />}
-                {viewModal === 'delivered' ? 'الاوردرات المسلمة' : viewModal === 'returned' ? 'الاوردرات المرتجعة' : 'الاوردرات المؤجلة'}
+                {viewModal === 'delivered' ? 'الاوردرات المسلمة' : viewModal === 'returned' ? 'الاوردرات المرتجعة' : 'الاوردرات المؤجلة (النزول)'}
               </h3>
-              <button onClick={() => setViewModal(null)} className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600">✕</button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (viewModal === 'deferred') {
+                      moveAllDeferredBack();
+                    } else if (viewModal === 'delivered') {
+                      const curList = modalFilter === 'full' ? delivFullList : modalFilter === 'partial' ? delivPartialList : finalDeliveredList;
+                      handleUndoAllOrders(curList, 'المسلمة');
+                    } else if (viewModal === 'returned') {
+                      const curList = modalFilter === 'full' ? returnFullList : modalFilter === 'partial' ? returnPartialList : finalReturnedList;
+                      handleUndoAllOrders(curList, 'المرتجعة');
+                    }
+                  }}
+                  disabled={
+                    loading ||
+                    (viewModal === 'deferred' && deferredOrders.length === 0) ||
+                    (viewModal === 'delivered' && finalDeliveredList.length === 0) ||
+                    (viewModal === 'returned' && finalReturnedList.length === 0)
+                  }
+                  className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-xs font-black shadow-sm transition-all flex items-center gap-1.5"
+                  title="إرجاع جميع الأوردرات في هذه القائمة إلى العهدة الحالية"
+                >
+                  إرجاع الكل ↩️
+                </button>
+                <button onClick={() => setViewModal(null)} className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600">✕</button>
+              </div>
             </div>
 
             {/* Filter Tabs for Delivered / Returned */}
@@ -1524,11 +1616,21 @@ const SalesDailyClose: React.FC = () => {
                               {money(viewModal === 'returned' ? computeReturnedOrderValue(o) : viewModal === 'delivered' ? computeDeliveredNetValue(o) : computeOrderValueWithoutShipping(o))} {currencySymbol}
                             </td>
                             <td className="p-3 text-center">
-                              {viewModal !== 'deferred' && (
+                              {viewModal === 'deferred' ? (
+                                <button
+                                  onClick={() => moveDeferredBack(o)}
+                                  disabled={loading}
+                                  className="px-2 py-1 flex items-center justify-center gap-1 mx-auto bg-amber-50 hover:bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:hover:bg-amber-900/50 dark:text-amber-400 font-bold text-[10px] rounded border border-amber-200 dark:border-amber-800/50 transition-colors disabled:opacity-50"
+                                  title="إرجاع الأوردر إلى العهدة الحالية"
+                                >
+                                  إرجاع ↩️
+                                </button>
+                              ) : (
                                 <button
                                   onClick={() => handleUndoOrder(getRealOrderId(o))}
                                   disabled={loading}
                                   className="px-2 py-1 flex items-center justify-center gap-1 mx-auto bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:hover:bg-rose-900/50 dark:text-rose-400 font-bold text-[10px] rounded border border-rose-200 dark:border-rose-800/50 transition-colors disabled:opacity-50"
+                                  title="إرجاع الأوردر إلى العهدة الحالية"
                                 >
                                   إرجاع ↩️
                                 </button>

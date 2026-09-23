@@ -39,7 +39,44 @@ const Layout: React.FC<LayoutProps> = ({
   onLogout
 }) => {
   const { isDark, toggleTheme } = useTheme();
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth >= 1024;
+    }
+    return true;
+  });
+  const sidebarRef = useRef<HTMLElement>(null);
+
+  // Close sidebar on click outside in mobile view (< 1024px)
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent | TouchEvent) => {
+      if (typeof window !== 'undefined' && window.innerWidth < 1024 && isSidebarOpen) {
+        const target = e.target as HTMLElement;
+        if (target && target.closest('[data-sidebar-toggle]')) {
+          return;
+        }
+        if (sidebarRef.current && !sidebarRef.current.contains(e.target as Node)) {
+          setIsSidebarOpen(false);
+        }
+      }
+    };
+
+    const handleResize = () => {
+      if (window.innerWidth >= 1024) {
+        setIsSidebarOpen(true);
+      }
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('touchstart', handleOutsideClick, { passive: true });
+    window.addEventListener('resize', handleResize);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('touchstart', handleOutsideClick);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [isSidebarOpen]);
+
   const [allowedModules, setAllowedModules] = useState<string[] | null>(null);
   const [allowedModulesRaw, setAllowedModulesRaw] = useState<any | null>(null);
   const [showPermsModal, setShowPermsModal] = useState(false);
@@ -216,6 +253,9 @@ const Layout: React.FC<LayoutProps> = ({
     } else {
       setActiveView(item.slug, '');
     }
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      setIsSidebarOpen(false);
+    }
   };
 
   useEffect(() => {
@@ -314,8 +354,21 @@ const Layout: React.FC<LayoutProps> = ({
 
   return (
     <div className="min-h-screen flex bg-app font-['Cairo'] transition-colors duration-300" style={{ color: 'var(--text)' }}>
+      {/* Mobile Backdrop Overlay */}
+      {isSidebarOpen && (
+        <div 
+          onClick={() => setIsSidebarOpen(false)}
+          className="fixed inset-0 z-40 bg-slate-950/60 backdrop-blur-sm lg:hidden transition-opacity duration-300 animate-in fade-in"
+          aria-hidden="true"
+        />
+      )}
+
       {/* Sidebar */}
-      <aside className="fixed inset-y-0 right-0 z-50 w-64 transition-transform duration-300 transform card backdrop-blur-xl border-l border-card shadow-xl no-print" style={{ transform: isSidebarOpen ? 'translateX(0)' : 'translateX(100%)' }}>
+      <aside 
+        ref={sidebarRef}
+        className="fixed inset-y-0 right-0 z-50 w-64 transition-transform duration-300 transform card backdrop-blur-xl border-l border-card shadow-xl no-print" 
+        style={{ transform: isSidebarOpen ? 'translateX(0)' : 'translateX(100%)' }}
+      >
         <div className="flex flex-col h-full">
           <div className="flex items-center justify-between px-6 py-5 border-b border-gradient-to-r via-slate-200/50 dark:via-slate-700/50 bg-gradient-to-b from-blue-500/5 dark:from-blue-400/10 to-transparent">
             <div className="flex items-center gap-3">
@@ -387,7 +440,13 @@ const Layout: React.FC<LayoutProps> = ({
                     {item.subItems.map(sub => (
                       <button 
                         key={sub.slug}
-                        onClick={() => { console.debug('Layout: subitem click ->', item.slug, sub.slug); setActiveView(item.slug, sub.slug); }}
+                        onClick={() => { 
+                          console.debug('Layout: subitem click ->', item.slug, sub.slug); 
+                          setActiveView(item.slug, sub.slug); 
+                          if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+                            setIsSidebarOpen(false);
+                          }
+                        }}
                         className={`w-full text-right px-3 py-2.5 text-xs transition-all duration-200 rounded-lg
                           ${activeSlug === item.slug && activeSubSlug === sub.slug 
                             ? 'text-blue-600 dark:text-blue-400 font-bold bg-blue-50/80 dark:bg-blue-900/30 border-r-2 border-blue-600 dark:border-blue-400 -mr-[2px] shadow-sm' 
@@ -411,6 +470,7 @@ const Layout: React.FC<LayoutProps> = ({
           <div className="flex items-center gap-4">
             <button 
               onClick={() => setIsSidebarOpen(!isSidebarOpen)} 
+              data-sidebar-toggle="true"
               className="p-2.5 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-all duration-200 hover:shadow-md hover:scale-105 active:scale-95"
             >
               <Menu size={22} />
