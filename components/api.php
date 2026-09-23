@@ -2432,7 +2432,7 @@ function ensure_rep_daily_journal_table($pdo) {
     static $checked = false;
     if ($checked) return;
     try {
-        $pdo->query("SELECT is_closed, daily_code, orders_json FROM rep_daily_journal LIMIT 1");
+        $pdo->query("SELECT is_closed, daily_code, orders_json, closed_at, closed_by FROM rep_daily_journal LIMIT 1");
         $checked = true;
     } catch (Exception $e) {
         try { execute_query($pdo, "ALTER TABLE rep_daily_journal DROP INDEX rep_date_unique"); } catch (Exception $ex) {}
