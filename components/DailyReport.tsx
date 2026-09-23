@@ -214,20 +214,44 @@ const DailyReport: React.FC = () => {
   );
 
   const kpiClass = "p-4 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 text-right bg-white dark:bg-slate-800";
+  const quickRanges = [
+    { label: 'اليوم', value: formatDate(today) },
+    { label: 'أمس', value: formatDate(new Date(Date.now() - 86400000)) },
+    { label: 'آخر 7 أيام', value: formatDate(new Date(Date.now() - 6 * 86400000)) },
+    { label: 'آخر 30 يوم', value: formatDate(new Date(Date.now() - 29 * 86400000)) }
+  ];
 
   return (
     <div className="space-y-5">
-      {/* Controls */}
-      <div className="flex flex-wrap items-center gap-3">
-        <label className="text-sm font-bold text-slate-600 dark:text-slate-300">اختر التاريخ</label>
-        <input type="date" value={date} onChange={e => setDate(e.target.value)}
-          className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl p-2" />
-        <button onClick={load} disabled={loading}
-          className="px-4 py-2 bg-blue-600 text-white rounded-xl font-bold disabled:opacity-60">
-          {loading ? 'جارٍ التحميل...' : 'تحديث'}
-        </button>
-        <button onClick={exportCSV} className="px-4 py-2 bg-sky-600 text-white rounded-xl font-bold">تصدير CSV</button>
-        <button onClick={printReport} className="px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold">طباعة</button>
+      <div className="bg-gradient-to-r from-violet-700 via-purple-600 to-indigo-700 p-6 rounded-3xl text-white shadow-lg flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+        <div>
+          <h2 className="text-2xl font-black flex items-center gap-2"><span className="text-xl">📊</span> تقرير اليومية</h2>
+          <p className="text-white/80 mt-1">ملخص يومي شامل للإيرادات، المصروفات، المبيعات، وأداء المناديب</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap gap-2">
+            {quickRanges.map((range) => (
+              <button
+                key={range.label}
+                type="button"
+                onClick={() => setDate(range.value)}
+                className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition-all ${
+                  date === range.value ? 'bg-white text-violet-700' : 'bg-white/15 text-white hover:bg-white/20'
+                }`}
+              >
+                {range.label}
+              </button>
+            ))}
+          </div>
+          <input type="date" value={date} onChange={e => setDate(e.target.value)}
+            className="bg-white/15 text-white border-0 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-white/50" />
+          <button onClick={load} disabled={loading}
+            className="bg-white text-violet-700 p-2.5 rounded-xl hover:bg-violet-50 transition active:scale-95 shadow-sm">
+            {loading ? '...' : <span className="inline-flex items-center"><span className="ml-1">تحديث</span><span className="text-[14px]">↻</span></span>}
+          </button>
+          <button onClick={exportCSV} className="px-4 py-2 bg-sky-600 text-white rounded-xl font-bold">تصدير CSV</button>
+          <button onClick={printReport} className="px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold">طباعة</button>
+        </div>
       </div>
 
       {/* Finance KPIs */}

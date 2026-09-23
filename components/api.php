@@ -2481,6 +2481,8 @@ function ensure_rep_daily_journal_table($pdo) {
         if (!column_exists($pdo, 'rep_daily_journal', 'orders_json'))            execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN orders_json TEXT NULL");
         if (!column_exists($pdo, 'rep_daily_journal', 'daily_code'))             execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN daily_code VARCHAR(20) NULL");
         if (!column_exists($pdo, 'rep_daily_journal', 'is_closed'))              execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN is_closed TINYINT(1) NOT NULL DEFAULT 0");
+        if (!column_exists($pdo, 'rep_daily_journal', 'closed_at'))             execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN closed_at DATETIME NULL");
+        if (!column_exists($pdo, 'rep_daily_journal', 'closed_by'))             execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN closed_by INT NULL");
         $checked = true;
     }
 }
@@ -9106,8 +9108,9 @@ switch ($module) {
             $prevStart = $prevStartObj->format('Y-m-d');
             $prevEnd = $prevEndObj->format('Y-m-d');
 
-            // Standardized where condition matching profitReport:
-            $statusIn = "'delivered','partial','partial_return'";
+            // Standardized where condition matching profitReport.
+            // Include all active sales states so representatives/pages rankings stay populated when orders are not yet marked as fully delivered.
+            $statusIn = "'delivered','partial','partial_return','with_rep','in_delivery','processing','confirmed','shipped','pending','paid','new'";
 
             $eventDateExpr = "COALESCE(rjo.event_date, rdj.journal_date, DATE(rdj.created_at), DATE(o.created_at))";
 
@@ -9524,6 +9527,35 @@ switch ($module) {
                     $r['orders_count'] = intval($r['orders_count'] ?? 0);
                 }
                 unset($r);
+
+                if (empty($topReps)) {
+                    $fallbackRepsStmt = execute_query($pdo,
+                        "SELECT COALESCE(rjo.rep_id, o.rep_id) AS id,
+                                COALESCE(NULLIF(TRIM(rep.name), ''), NULLIF(TRIM(rep_user.name), ''), CONCAT('مندوب #', COALESCE(rjo.rep_id, o.rep_id))) AS name,
+                                COUNT(DISTINCT o.id) AS orders_count,
+                                COALESCE(SUM(oi.quantity * oi.price_per_unit), 0) AS total_sales
+                         FROM order_items oi
+                         JOIN orders o ON o.id = oi.order_id
+                         LEFT JOIN rep_journal_orders rjo ON rjo.order_id = o.id
+                         LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                         LEFT JOIN representatives rep ON rep.id = COALESCE(rjo.rep_id, o.rep_id)
+                         LEFT JOIN users rep_user ON rep_user.id = COALESCE(rjo.rep_id, o.rep_id)
+                         WHERE DATE(COALESCE(rjo.event_date, rdj.journal_date, DATE(rdj.created_at), DATE(o.created_at))) BETWEEN ? AND ?
+                           AND COALESCE(rjo.rep_id, o.rep_id) > 0
+                         GROUP BY id, name
+                         ORDER BY total_sales DESC, orders_count DESC
+                         LIMIT 10",
+                        [$rangeStart, $rangeEnd]
+                    );
+                    $topReps = $fallbackRepsStmt->fetchAll(PDO::FETCH_ASSOC);
+                    foreach ($topReps as &$r) {
+                        $r['id'] = intval($r['id'] ?? 0);
+                        $r['name'] = trim((string)($r['name'] ?? ''));
+                        $r['total_sales'] = floatval($r['total_sales'] ?? 0);
+                        $r['orders_count'] = intval($r['orders_count'] ?? 0);
+                    }
+                    unset($r);
+                }
             } catch (Exception $e) { $topReps = []; }
 
             // 9. Top Sales Offices / Pages:
@@ -9553,6 +9585,32 @@ switch ($module) {
                     $r['orders_count'] = intval($r['orders_count'] ?? 0);
                 }
                 unset($r);
+
+                if (empty($topSalesOffices)) {
+                    $fallbackOfficesStmt = execute_query($pdo,
+                        "SELECT COALESCE(NULLIF(TRIM(o.page), ''), NULLIF(TRIM(so.name), ''), 'مباشر') AS name,
+                                COUNT(DISTINCT o.id) AS orders_count,
+                                COALESCE(SUM(oi.quantity * oi.price_per_unit), 0) AS total_sales
+                         FROM order_items oi
+                         JOIN orders o ON o.id = oi.order_id
+                         LEFT JOIN sales_offices so ON so.id = o.sales_office_id
+                         LEFT JOIN rep_journal_orders rjo ON rjo.order_id = o.id
+                         LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                         WHERE DATE(COALESCE(rjo.event_date, rdj.journal_date, DATE(rdj.created_at), DATE(o.created_at))) BETWEEN ? AND ?
+                         GROUP BY COALESCE(NULLIF(TRIM(o.page), ''), NULLIF(TRIM(so.name), ''), 'مباشر')
+                         ORDER BY total_sales DESC, orders_count DESC
+                         LIMIT 10",
+                        [$rangeStart, $rangeEnd]
+                    );
+                    $topSalesOffices = $fallbackOfficesStmt->fetchAll(PDO::FETCH_ASSOC);
+                    foreach ($topSalesOffices as &$r) {
+                        $r['id'] = (string)($r['name'] ?? '');
+                        $r['name'] = trim((string)($r['name'] ?? ''));
+                        $r['total_sales'] = floatval($r['total_sales'] ?? 0);
+                        $r['orders_count'] = intval($r['orders_count'] ?? 0);
+                    }
+                    unset($r);
+                }
             } catch (Exception $e) { $topSalesOffices = []; }
 
             // 10. Top Employees:
@@ -13038,11 +13096,28 @@ switch ($module) {
                 $createdByParts[] = "'المدير العام'";
                 $createdByExpr = "COALESCE(" . implode(", ", $createdByParts) . ")";
 
+                $legacyRepSettlementMatch = "(
+                    JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(t.details) THEN t.details ELSE NULL END, '$.context')) IN ('close_daily', 'rep_settlement', 'rep_daily_close')
+                    OR JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(t.details) THEN t.details ELSE NULL END, '$.action')) IN ('settleDaily', 'close_daily', 'rep_settlement')
+                    OR JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(t.details) THEN t.details ELSE NULL END, '$.rep_id')) IS NOT NULL
+                    OR t.related_to_type IN ('rep', 'employee')
+                )";
+
                 $sql = "SELECT t.*, tr.name AS treasury_name, ($relatedNameExpr) AS related_name, ($createdByExpr) AS created_by_name
                     FROM transactions t
                     LEFT JOIN treasuries tr ON tr.id = t.treasury_id";
 
-                $conditions = ["t.treasury_id IS NOT NULL", "ABS(COALESCE(t.amount, 0)) > 0.001", "t.type NOT IN ('purchase', 'other', 'rep_bonus_in', 'rep_penalty', 'rep_assignment', 'rep_return_credit')"];
+                $conditions = [
+                    "t.treasury_id IS NOT NULL",
+                    "ABS(COALESCE(t.amount, 0)) > 0.001",
+                    "(
+                        t.type NOT IN ('purchase', 'other', 'rep_bonus_in', 'rep_penalty', 'rep_assignment', 'rep_return_credit')
+                        OR (
+                            t.type IN ('other', 'payment', 'payment_in', 'payment_out')
+                            AND " . $legacyRepSettlementMatch . "
+                        )
+                    )"
+                ];
                 $params = [];
                 if ($start_date) { $conditions[] = "DATE(t.transaction_date) >= ?"; $params[] = $start_date; }
                 if ($end_date)   { $conditions[] = "DATE(t.transaction_date) <= ?"; $params[] = $end_date; }
@@ -14280,8 +14355,8 @@ switch ($module) {
                 }
 
                 if (empty($openRows)) {
-                    $insertSql = "INSERT INTO rep_daily_journal (rep_id, employee, is_closed, created_at) VALUES (?, ?, 1, NOW())";
-                    execute_query($pdo, $insertSql, [$repId, $employeeInput ?: null]);
+                    $insertSql = "INSERT INTO rep_daily_journal (rep_id, employee, is_closed, closed_at, closed_by, created_at) VALUES (?, ?, 1, NOW(), ?, NOW())";
+                    execute_query($pdo, $insertSql, [$repId, $employeeInput ?: null, $userIdInput > 0 ? $userIdInput : null]);
                     $newJournalId = intval($pdo->lastInsertId());
                     audit_log($pdo, 'sales', 'close_rep_daily_archive', $repId, json_encode(['journal_id' => $newJournalId]));
                     echo json_encode(['success' => true, 'closed_count' => 1, 'closed_ids' => [$newJournalId], 'message' => 'تم إغلاق وتوثيق اليومية بنجاح.']);
@@ -14289,9 +14364,9 @@ switch ($module) {
                 }
 
                 if (!empty($employeeInput)) {
-                    execute_query($pdo, "UPDATE rep_daily_journal SET is_closed = 1, employee = COALESCE(NULLIF(employee, ''), ?) WHERE rep_id = ? AND is_closed = 0", [$employeeInput, $repId]);
+                    execute_query($pdo, "UPDATE rep_daily_journal SET is_closed = 1, closed_at = NOW(), closed_by = COALESCE(closed_by, ?), employee = COALESCE(NULLIF(employee, ''), ?) WHERE rep_id = ? AND is_closed = 0", [$userIdInput > 0 ? $userIdInput : null, $employeeInput, $repId]);
                 } else {
-                    execute_query($pdo, "UPDATE rep_daily_journal SET is_closed = 1 WHERE rep_id = ? AND is_closed = 0", [$repId]);
+                    execute_query($pdo, "UPDATE rep_daily_journal SET is_closed = 1, closed_at = NOW(), closed_by = COALESCE(closed_by, ?) WHERE rep_id = ? AND is_closed = 0", [$userIdInput > 0 ? $userIdInput : null, $repId]);
                 }
 
                 $closedIds = array_values(array_filter(array_map(function($row) {

@@ -487,7 +487,7 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
   }, [activeSubTab, compareYear]);
 
   const handleGenerateReport = (reportType: string) => {
-    Swal.fire('جاري التوليد', `يتم توليد تقرير ${reportType} للفترة ${startDate} إلى ${endDate}.`, 'info');
+    Swal.fire('جاري التحديث', `يتم تحديث تقرير ${reportType} للفترة ${startDate} إلى ${endDate}.`, 'info');
     // In a real app, this would trigger an API call to fetch data based on filters
   };
 
@@ -586,7 +586,7 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
               className="w-full md:w-auto bg-blue-600 text-white px-5 py-2.5 rounded-2xl text-sm font-black shadow-lg shadow-blue-500/20 hover:bg-blue-700 transition-all active:scale-95"
             >
               <Filter size={16} className="ml-2" />
-              توليد التقرير
+              تحديث
             </button>
           )}
           <button
@@ -609,8 +609,34 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
     </div>
   );
 
+  const quickRanges = [
+    { label: 'اليوم', start: new Date().toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) },
+    { label: 'هذا الشهر', start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) },
+    { label: 'آخر 7 أيام', start: new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) },
+    { label: 'آخر 30 يوم', start: new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) }
+  ];
+
   const dateRangeInputs = (
     <>
+      <div className="flex flex-wrap gap-2 w-full md:w-auto">
+        {quickRanges.map((range) => (
+          <button
+            key={range.label}
+            type="button"
+            onClick={() => {
+              setStartDate(range.start);
+              setEndDate(range.end);
+            }}
+            className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition-all ${
+              startDate === range.start && endDate === range.end
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
+            }`}
+          >
+            {range.label}
+          </button>
+        ))}
+      </div>
       <input
         type="date"
         value={startDate}
@@ -728,14 +754,9 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
         <div className="flex bg-white dark:bg-slate-800 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-x-auto max-w-full">
           <button onClick={() => setActiveSubTab('accounting')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'accounting' ? 'bg-violet-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Coins size={16} /> الأرباح والخسائر</button>
           <button onClick={() => setActiveSubTab('sales')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'sales' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><ShoppingCart size={16} /> المبيعات</button>
-          <button onClick={() => setActiveSubTab('daily')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'daily' ? 'bg-sky-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Calendar size={16} /> التقرير اليومي</button>
           <button onClick={() => setActiveSubTab('totals')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'totals' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><FileText size={16} /> ملخص الفترة</button>
           <button onClick={() => setActiveSubTab('product-report')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'product-report' ? 'bg-teal-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Package size={16} /> تسليمات المنتجات</button>
-          <button onClick={() => setActiveSubTab('inventory')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'inventory' ? 'bg-amber-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Warehouse size={16} /> المخزون والجرد</button>
-          <button onClick={() => setActiveSubTab('finance')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'finance' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Coins size={16} /> المالية والخزائن</button>
           <button onClick={() => setActiveSubTab('outstanding-balances')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'outstanding-balances' ? 'bg-rose-500 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><CreditCard size={16} /> أعمار الديون</button>
-          <button onClick={() => setActiveSubTab('reps')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'reps' ? 'bg-cyan-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Users size={16} /> أداء المناديب</button>
-          <button onClick={() => setActiveSubTab('rep-custody')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'rep-custody' ? 'bg-purple-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Package size={16} /> عهدة المناديب</button>
           <button onClick={() => setActiveSubTab('fines-incentives')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'fines-incentives' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Coins size={16} /> الغرامات و الحافز</button>
           <button onClick={() => setActiveSubTab('expenses')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'expenses' ? 'bg-rose-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Receipt size={16} /> المصروفات</button>
         </div>
@@ -748,8 +769,6 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
       {activeSubTab === 'outstanding-balances' && <ReportOutstandingBalances />}
       {activeSubTab === 'fines-incentives' && <ReportFinesIncentives />}
       {activeSubTab === 'expenses' && <ReportExpenses />}
-      {activeSubTab === 'rep-custody' && <ReportRepCustody />}
-
       {activeSubTab === 'sales' && (
         <ReportSection
           title="تقارير المبيعات الشاملة"
@@ -885,221 +904,10 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
         </ReportSection>
       )}
 
-      {activeSubTab === 'daily' && (
-        <div>
-          <DailyReport />
-        </div>
-      )}
       {activeSubTab === 'totals' && (
         <div>
           <TotalsReport />
         </div>
-      )}
-
-      {activeSubTab === 'reps' && (
-        <RepsPerformanceSection startDate={startDate} endDate={endDate} setStartDate={setStartDate} setEndDate={setEndDate} isDark={isDark} currencySymbol={currencySymbol} />
-      )}
-
-      {activeSubTab === 'inventory' && (
-        <ReportSection
-          title="تقارير حركة المخزون والجرد"
-          description="متابعة مستويات المخزون، الحركات، والتحويلات بين المستودعات."
-          icon={Package}
-          filters={inventoryFilters}
-          onGenerate={() => handleGenerateReport('Inventory')}
-        >
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-2xl border dark:border-slate-700">
-              <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2"><Warehouse size={16} className="text-slate-400" /> مستويات المخزون حسب المستودع</h4>
-              <div style={{ width: '100%', height: '300px' }}>
-  <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1} initialDimension={{ width: 1, height: 1 }}>
-    <BarChart data={inventoryStockByWarehouse}>
-      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#334155" : "#e2e8f0"} />
-      <XAxis dataKey="name" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
-      <YAxis tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
-      <Tooltip 
-        contentStyle={{ borderRadius: '12px', background: isDark ? '#1e293b' : 'white', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} 
-        itemStyle={{ color: isDark ? '#f1f5f9' : '#1e293b' }} 
-      />
-      <Bar dataKey="quantity" name="الكمية" fill="#60a5fa" radius={[4, 4, 0, 0]} />
-    </BarChart>
-  </ResponsiveContainer>
-</div>
-            </div>
-            <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-2xl border dark:border-slate-700">
-              <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2"><ArrowLeftRight size={16} className="text-slate-400" /> حركة المخزون</h4>
-              <div style={{ width: '100%', height: '300px' }}>
-  <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1} initialDimension={{ width: 1, height: 1 }}>
-    <LineChart data={inventoryMovement}>
-      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#334155" : "#e2e8f0"} />
-      <XAxis dataKey="date" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
-      <YAxis tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
-      <Tooltip 
-        contentStyle={{ borderRadius: '12px', background: isDark ? '#1e293b' : 'white', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} 
-        itemStyle={{ color: isDark ? '#f1f5f9' : '#1e293b' }} 
-      />
-      <Line 
-        type="monotone" 
-        dataKey="quantity" 
-        name="الكمية المحركة" 
-        stroke="#fbbf24" 
-        strokeWidth={2} 
-        activeDot={{ r: 6 }} 
-      />
-    </LineChart>
-  </ResponsiveContainer>
-</div>
-            </div>
-          </div>
-
-          <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2"><Table size={18} className="text-slate-400" /> الأصناف في المخزون</h4>
-          <div className="overflow-x-auto rounded-2xl border dark:border-slate-700">
-            <table className="w-full text-right text-sm">
-              <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400">
-                <tr>
-                  <th className="px-6 py-3 font-bold">المنتج</th>
-                  <th className="px-6 py-3 font-bold">باركود</th>
-                  <th className="px-6 py-3 font-bold">المستودع</th>
-                  <th className="px-6 py-3 font-bold">الكمية</th>
-                  <th className="px-6 py-3 font-bold">سعر الشراء ({currencySymbol})</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y dark:divide-slate-700 text-slate-700 dark:text-slate-300">
-                {inventoryStock.map((item: any, index) => (
-                  <tr key={index} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                    <td className="px-6 py-4 font-bold">{item.product}</td>
-                    <td className="px-6 py-4 font-mono text-xs">{item.barcode}</td>
-                    <td className="px-6 py-4 text-xs">{item.warehouse}</td>
-                    <td className="px-6 py-4"><span className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 px-3 py-1 rounded-lg text-[10px] font-black">{item.quantity}</span></td>
-                    <td className="px-6 py-4 font-black">{item.purchasePrice.toLocaleString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2"><History size={18} className="text-slate-400" /> سجل حركات المخزون</h4>
-          <div className="overflow-x-auto rounded-2xl border dark:border-slate-700">
-            <table className="w-full text-right text-sm">
-              <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400">
-                <tr>
-                  <th className="px-6 py-3 font-bold">رقم الحركة</th>
-                  <th className="px-6 py-3 font-bold">التاريخ</th>
-                  <th className="px-6 py-3 font-bold">المنتج</th>
-                  <th className="px-6 py-3 font-bold">النوع</th>
-                  <th className="px-6 py-3 font-bold">الكمية</th>
-                  <th className="px-6 py-3 font-bold">المصدر/الوجهة</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y dark:divide-slate-700 text-slate-700 dark:text-slate-300">
-                {inventoryMovementHistory.map((item: any) => (
-                  <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                    <td className="px-6 py-4 font-bold">{item.id}</td>
-                    <td className="px-6 py-4">{item.date}</td>
-                    <td className="px-6 py-4">{item.product}</td>
-                    <td className="px-6 py-4">
-                      <span className={`px-3 py-1 rounded-lg text-[10px] font-black ${item.type === 'in' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400'}`}>
-                        {item.type === 'in' ? 'إدخال' : 'إخراج'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">{item.quantity}</td>
-                    <td className="px-6 py-4 text-xs">{item.sourceDest}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </ReportSection>
-      )}
-
-      {activeSubTab === 'finance' && (
-        <ReportSection
-          title="التقارير المالية والتدفقات النقدية"
-          description="متابعة أرصدة الخزائن، الإيرادات، والمصروفات."
-          icon={Coins}
-          filters={financeFilters}
-          onGenerate={() => handleGenerateReport('Finance')}
-        >
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-2xl border dark:border-slate-700">
-              <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2"><Coins size={16} className="text-slate-400" /> أرصدة الخزائن (تاريخي)</h4>
-              <div style={{ width: '100%', height: '300px' }}>
-  <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1} initialDimension={{ width: 1, height: 1 }}>
-    <LineChart data={treasuryBalanceHistory}>
-      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDark ? "#334155" : "#e2e8f0"} />
-      <XAxis dataKey="date" tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
-      <YAxis tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} />
-      <Tooltip 
-        contentStyle={{ borderRadius: '12px', background: isDark ? '#1e293b' : 'white', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} 
-        itemStyle={{ color: isDark ? '#f1f5f9' : '#1e293b' }} 
-      />
-      <Line 
-        type="monotone" 
-        dataKey="balance" 
-        name="الرصيد" 
-        stroke="#10b981" 
-        strokeWidth={2} 
-        activeDot={{ r: 6 }} 
-      />
-    </LineChart>
-  </ResponsiveContainer>
-</div>
-            </div>
-            <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-2xl border dark:border-slate-700">
-              <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2"><Receipt size={16} className="text-slate-400" /> المصروفات حسب الفئة</h4>
-              <div className="h-64 flex items-center justify-center">
-                <ResponsiveContainer width="100%" height="100%" minHeight={300} initialDimension={{ width: 1, height: 1 }}>
-                  <PieChart>
-                    <Pie
-                      data={expenseCategories}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      outerRadius={80}
-                      fill="#8884d8"
-                      dataKey="value"
-                      nameKey="name"
-                      label={(p: any) => `${p.name} ${((p.percent ?? 0) * 100).toFixed(0)}%`}
-                    >
-
-                    </Pie>
-                    <Tooltip contentStyle={{ borderRadius: '12px', background: isDark ? '#1e293b' : 'white', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} itemStyle={{ color: isDark ? '#f1f5f9' : '#1e293b' }} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          </div>
-
-          <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2"><Table size={18} className="text-slate-400" /> سجل الإيرادات والمصروفات</h4>
-          <div className="overflow-x-auto rounded-2xl border dark:border-slate-700">
-            <table className="w-full text-right text-sm">
-              <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400">
-                <tr>
-                  <th className="px-6 py-3 font-bold">التاريخ</th>
-                  <th className="px-6 py-3 font-bold">النوع</th>
-                  <th className="px-6 py-3 font-bold">الوصف</th>
-                  <th className="px-6 py-3 font-bold">المبلغ ({currencySymbol})</th>
-                  <th className="px-6 py-3 font-bold">الخزينة</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y dark:divide-slate-700 text-slate-700 dark:text-slate-300">
-                {revenueAndExpenseRecords.map((item: any, index) => (
-                  <tr key={index} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                    <td className="px-6 py-4 font-bold">{item.date}</td>
-                    <td className="px-6 py-4">
-                      <span className={`px-3 py-1 rounded-lg text-[10px] font-black ${item.type === 'revenue' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
-                        {translateTxnLabel(item.type, item.desc, item.txn_type)}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-xs">{translateTxnLabel(item.type, item.desc, item.txn_type)}</td>
-                    <td className={`px-6 py-4 font-black ${item.amount >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{item.amount.toLocaleString()}</td>
-                    <td className="px-6 py-4 text-xs">{item.treasury}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </ReportSection>
       )}
 
       {activeSubTab === 'crm-srm' && (

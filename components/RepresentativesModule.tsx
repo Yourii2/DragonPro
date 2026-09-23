@@ -3405,13 +3405,15 @@ ${productsSummaryHtml}
                       >
                         <Box className="w-3.5 h-3.5" /> عرض و طباعة بوالص التسليم
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => printCloseReport(row)}
-                        className="flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-black transition-colors whitespace-nowrap"
-                      >
-                        <FileText className="w-3.5 h-3.5" /> عرض و طباعة تقرير الإغلاق
-                      </button>
+                      {Number(row.is_closed ?? row.closed ?? 0) === 1 && (
+                        <button
+                          type="button"
+                          onClick={() => printCloseReport(row)}
+                          className="flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-black transition-colors whitespace-nowrap"
+                        >
+                          <FileText className="w-3.5 h-3.5" /> عرض و طباعة تقرير الإغلاق
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>

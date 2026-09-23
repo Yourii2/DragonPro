@@ -141,6 +141,12 @@ const ReportRepPerformance: React.FC<ReportRepPerformanceProps> = ({ initialStar
   const MEDALS = ['🥇','🥈','🥉'];
   const totOrders = (totals.delivered_orders || 0) + (totals.returned_orders || 0);
   const totPieces = (totals.delivered_pieces || 0) + (totals.returned_pieces || 0);
+  const quickRanges = [
+    { label: 'اليوم', start: new Date().toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) },
+    { label: 'هذا الشهر', start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) },
+    { label: 'آخر 7 أيام', start: new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) },
+    { label: 'آخر 30 يوم', start: new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) }
+  ];
 
   return (
     <div className="space-y-5">
@@ -151,6 +157,22 @@ const ReportRepPerformance: React.FC<ReportRepPerformanceProps> = ({ initialStar
           <span className="text-base font-black text-slate-800 dark:text-slate-100">تقرير أداء المناديب</span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap gap-2">
+            {quickRanges.map((range) => (
+              <button
+                key={range.label}
+                type="button"
+                onClick={() => { setStartDate(range.start); setEndDate(range.end); }}
+                className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition-all ${
+                  startDate === range.start && endDate === range.end
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
+                }`}
+              >
+                {range.label}
+              </button>
+            ))}
+          </div>
           <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
             className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-2 px-3 text-xs font-bold" />
           <span className="text-slate-400">—</span>

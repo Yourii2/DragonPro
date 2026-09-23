@@ -215,7 +215,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
               </span>
               النظام متصل وجاهز للعمل
             </span>
-            <span className="text-slate-500 font-mono">v2.0.0</span>
+            <span className="text-slate-500 font-mono">v2.0.1</span>
           </div>
         </div>
 

@@ -251,6 +251,12 @@ const TotalsReport: React.FC = () => {
   }
 
   const kpiClass = "p-4 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-right";
+  const quickRanges = [
+    { label: 'اليوم', start: new Date().toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) },
+    { label: 'هذا الشهر', start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) },
+    { label: 'آخر 7 أيام', start: new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) },
+    { label: 'آخر 30 يوم', start: new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) }
+  ];
 
   return (
     <div className="space-y-5">
@@ -262,6 +268,22 @@ const TotalsReport: React.FC = () => {
           <option value="">كل الخزائن</option>
           {treasuries.map((t: any) => <option key={t.id} value={String(t.id)}>{t.name}</option>)}
         </select>
+        <div className="flex flex-wrap gap-2">
+          {quickRanges.map((range) => (
+            <button
+              key={range.label}
+              type="button"
+              onClick={() => { setStartDate(range.start); setEndDate(range.end); }}
+              className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition-all ${
+                startDate === range.start && endDate === range.end
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
+              }`}
+            >
+              {range.label}
+            </button>
+          ))}
+        </div>
         <label className="text-sm font-bold text-slate-600 dark:text-slate-300">من</label>
         <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
           className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl p-2" />

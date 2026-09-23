@@ -24,29 +24,37 @@ const AdminModule: React.FC<AdminModuleProps> = ({ initialView }) => {
 
   const [users, setUsers] = useState<any[]>([]);
 
-  const [formData, setFormData] = useState({ name: '', username: '', role: 'representative', phone: '', password: '' });
+  const [formData, setFormData] = useState({ name: '', username: '', role: 'admin', phone: '', password: '' });
   const [permissionsMap, setPermissionsMap] = useState<{[k:string]: boolean}>({});
+
+  const rolePresets: Record<string, string[]> = {
+    admin: ['dashboard', 'inventory', 'sales-daily', 'close-daily', 'finance', 'admin', 'sales-update-status'],
+    accountant: ['sales-daily', 'close-daily', 'finance'],
+    warehouse_manager: ['inventory', 'sales-update-status'],
+    representative: ['sales-daily', 'sales-update-status']
+  };
 
   const pages = [
     { slug: 'dashboard', label: 'لوحة التحكم' },
+    { slug: 'sales-daily', label: 'بدء اليومية' },
+    { slug: 'close-daily', label: 'إغلاق اليومية' },
+    { slug: 'sales-update-status', label: 'تسجيل المرتجعات' },
+    { slug: 'inventory', label: 'المخزون والمستودعات' },
+    { slug: 'finance', label: 'المالية والخزينة' },
+    { slug: 'treasuries', label: 'إدارة الخزائن' },
+    { slug: 'transactions', label: 'الإيرادات والمصروفات' },
+    { slug: 'admin', label: 'إدارة النظام' },
     { slug: 'crm', label: 'إدارة العملاء' },
-    { slug: 'inventory', label: 'المخزون' },
-    { slug: 'sales', label: 'المبيعات' },
-    { slug: 'hrm', label: 'اداره الموظفين' },
-    { slug: 'finance', label: 'المالية' },
+    { slug: 'hrm', label: 'إدارة الموظفين' },
+    { slug: 'reports', label: 'التقارير' },
   ];
-
-  const isRepresentative = (u: any) => {
-    const r = (u?.role || '').toString().toLowerCase();
-    return r === 'representative' || r.includes('مندوب');
-  };
 
   const fetchUsers = async () => {
     try {
       const response = await fetch(`${API_BASE_PATH}/api.php?module=users&action=getAll`);
       const result = await response.json();
       if (result.success) {
-        const list = Array.isArray(result.data) ? result.data.filter((u:any) => !isRepresentative(u)) : [];
+        const list = Array.isArray(result.data) ? result.data : [];
         setUsers(list);
         const defaults:any = {};
         pages.forEach(p => defaults[p.slug] = false);
@@ -64,10 +72,27 @@ const AdminModule: React.FC<AdminModuleProps> = ({ initialView }) => {
     fetchUsers();
   }, [initialView]);
 
+  const applyRolePreset = (role: string) => {
+    const defaults: any = {};
+    pages.forEach(p => defaults[p.slug] = false);
+    const normalized = role.toLowerCase();
+    const preset = rolePresets[normalized] || rolePresets[normalized.replace(/[-\s]+/g, '_')] || [];
+    preset.forEach((slug: string) => {
+      if (Object.prototype.hasOwnProperty.call(defaults, slug)) defaults[slug] = true;
+    });
+    setPermissionsMap(defaults);
+  };
+
   const handleOpenModal = (user: any = null) => {
     if (user) {
       setEditingUser(user);
-      setFormData({ name: user.name, username: user.username, role: user.role === 'مدير نظام' ? 'admin' : user.role, phone: user.phone, password: '' });
+      const userRole = String(user.role || '').trim();
+      const mappedEditingRole = userRole === 'مدير نظام' || userRole === 'admin' ? 'admin'
+        : userRole === 'محاسب' || userRole === 'accountant' ? 'accountant'
+        : userRole === 'مدير مخزن' || userRole === 'warehouse_manager' || userRole === 'warehouse-manager' ? 'warehouse_manager'
+        : userRole === 'representative' || userRole === 'مندوب' ? 'representative'
+        : userRole;
+      setFormData({ name: user.name, username: user.username, role: mappedEditingRole, phone: user.phone, password: '' });
       try {
         const perms = user.permissions ? (typeof user.permissions === 'string' ? JSON.parse(user.permissions) : user.permissions) : {};
         const map:any = {};
@@ -76,10 +101,8 @@ const AdminModule: React.FC<AdminModuleProps> = ({ initialView }) => {
       } catch (e) { setPermissionsMap({}); }
     } else {
       setEditingUser(null);
-      setFormData({ name: '', username: '', role: 'representative', phone: '', password: '' });
-      const defaults:any = {};
-      pages.forEach(p => defaults[p.slug] = false);
-      setPermissionsMap(defaults);
+      setFormData({ name: '', username: '', role: 'admin', phone: '', password: '' });
+      applyRolePreset('admin');
     }
     setIsModalOpen(true);
   };
@@ -88,7 +111,12 @@ const AdminModule: React.FC<AdminModuleProps> = ({ initialView }) => {
     e.preventDefault();
     if (!formData.name) return;
 
-    const mappedRole = formData.role === 'admin' ? 'admin' : formData.role === 'accountant' ? 'accountant' : 'representative';
+    const normalizedRole = String(formData.role || '').trim().toLowerCase();
+    const mappedRole = normalizedRole === 'admin' ? 'admin'
+      : normalizedRole === 'accountant' ? 'accountant'
+      : normalizedRole === 'warehouse_manager' || normalizedRole === 'warehouse-manager' ? 'warehouse_manager'
+      : normalizedRole === 'manager' ? 'manager'
+      : 'representative';
 
     try {
       const url = editingUser 
@@ -341,10 +369,14 @@ const AdminModule: React.FC<AdminModuleProps> = ({ initialView }) => {
                 <label className="text-xs font-bold text-slate-500 mr-2">الدور الوظيفي</label>
                 <CustomSelect
                   value={formData.role}
-                  onChange={v => setFormData({...formData, role: v})}
+                  onChange={v => {
+                    setFormData({ ...formData, role: v });
+                    if (!editingUser) applyRolePreset(v);
+                  }}
                   options={[
                     { value: 'representative', label: 'مندوب مبيعات' },
                     { value: 'accountant', label: 'محاسب' },
+                    { value: 'warehouse_manager', label: 'مدير مخزن' },
                     { value: 'admin', label: 'مدير نظام' }
                   ]}
                   className="w-full"

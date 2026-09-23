@@ -10,6 +10,10 @@ import { cleanBarcode, isOrderMatchingBarcode } from '../services/barcodeUtils';
 const SalesUpdateStatus: React.FC = () => {
   const deliveryMethod = (localStorage.getItem('Dragon_delivery_method') || 'reps').toString();
   const isShippingMode = deliveryMethod === 'shipping';
+  const isPermissionDeniedResponse = (status?: number, payload?: any) => {
+    const message = (payload && typeof payload.message === 'string') ? payload.message : '';
+    return Number(status) === 403 || /permission|صلاحية|insufficient/i.test(message);
+  };
 
   const [user, setUser] = useState<any>(null);
   const [orders, setOrders] = useState<any[]>([]);
@@ -45,17 +49,21 @@ const SalesUpdateStatus: React.FC = () => {
         // 1. Fetch assignees (reps or shipping companies)
         let repIdToNameMap = new Map<number, any>();
         if (isShippingMode) {
-          const cRes = await fetch(`${API_BASE_PATH}/api.php?module=shipping_companies&action=getAll`);
+          const cRes = await fetch(`${API_BASE_PATH}/api.php?module=shipping_companies&action=getAll`, { credentials: 'include' });
           const cJson = await cRes.json();
-          const allCompanies = (cJson.success ? (cJson.data || []) : []);
-          repIdToNameMap = new Map(allCompanies.map((c: any) => [Number(c.id), String(c.name || '')]));
+          if (!isPermissionDeniedResponse(cRes.status, cJson)) {
+            const allCompanies = (cJson.success ? (cJson.data || []) : []);
+            repIdToNameMap = new Map(allCompanies.map((c: any) => [Number(c.id), String(c.name || '')]));
+          }
         } else {
           // fetch reps with server-provided balance
-          const usersRes = await fetch(`${API_BASE_PATH}/api.php?module=users&action=getAllWithBalance&related_to_type=rep`);
+          const usersRes = await fetch(`${API_BASE_PATH}/api.php?module=users&action=getAllWithBalance&related_to_type=rep`, { credentials: 'include' });
           const usersJson = await usersRes.json();
-          const allReps = (usersJson.success ? (usersJson.data || []) : []);
-          // store the whole user object so we can read `balance` later
-          repIdToNameMap = new Map(allReps.map((r: any) => [Number(r.id), r]));
+          if (!isPermissionDeniedResponse(usersRes.status, usersJson)) {
+            const allReps = (usersJson.success ? (usersJson.data || []) : []);
+            // store the whole user object so we can read `balance` later
+            repIdToNameMap = new Map(allReps.map((r: any) => [Number(r.id), r]));
+          }
         }
 
         // 2. Fetch all orders
@@ -72,9 +80,13 @@ const SalesUpdateStatus: React.FC = () => {
         (async () => { try { await populateRepCounts?.(repsList); } catch (e) { } })();
         // load warehouses for returns
         try {
-          const w = await fetch(`${API_BASE_PATH}/api.php?module=warehouses&action=getAll`);
+          const w = await fetch(`${API_BASE_PATH}/api.php?module=warehouses&action=getAll`, { credentials: 'include' });
           const jw = await w.json();
-          setWarehouses(jw.success ? (jw.data || []) : []);
+          if (!isPermissionDeniedResponse(w.status, jw)) {
+            setWarehouses(jw.success ? (jw.data || []) : []);
+          } else {
+            setWarehouses([]);
+          }
           // fetch user defaults (warehouse/treasury) so returns can prefill
           try {
             const udRes = await fetch(`${API_BASE_PATH}/api.php?module=permissions&action=getUserDefaults&user_id=${jv.user?.id ?? 0}`, { credentials: 'include' });
@@ -99,15 +111,19 @@ const SalesUpdateStatus: React.FC = () => {
       // Refresh reps/companies and balances only (do not fetch all orders)
       let repIdToNameMap = new Map<number, any>();
       if (isShippingMode) {
-        const cRes = await fetch(`${API_BASE_PATH}/api.php?module=shipping_companies&action=getAll`);
+        const cRes = await fetch(`${API_BASE_PATH}/api.php?module=shipping_companies&action=getAll`, { credentials: 'include' });
         const cJson = await cRes.json();
-        const allCompanies = (cJson.success ? (cJson.data || []) : []);
-        repIdToNameMap = new Map(allCompanies.map((c: any) => [Number(c.id), String(c.name || '')]));
+        if (!isPermissionDeniedResponse(cRes.status, cJson)) {
+          const allCompanies = (cJson.success ? (cJson.data || []) : []);
+          repIdToNameMap = new Map(allCompanies.map((c: any) => [Number(c.id), String(c.name || '')]));
+        }
       } else {
-        const usersRes = await fetch(`${API_BASE_PATH}/api.php?module=users&action=getAllWithBalance&related_to_type=rep`);
+        const usersRes = await fetch(`${API_BASE_PATH}/api.php?module=users&action=getAllWithBalance&related_to_type=rep`, { credentials: 'include' });
         const usersJson = await usersRes.json();
-        const allReps = (usersJson.success ? (usersJson.data || []) : []);
-        repIdToNameMap = new Map(allReps.map((r: any) => [Number(r.id), r]));
+        if (!isPermissionDeniedResponse(usersRes.status, usersJson)) {
+          const allReps = (usersJson.success ? (usersJson.data || []) : []);
+          repIdToNameMap = new Map(allReps.map((r: any) => [Number(r.id), r]));
+        }
       }
 
       const repsList = Array.from(repIdToNameMap.entries()).map(([id, entry]) => {
@@ -122,9 +138,9 @@ const SalesUpdateStatus: React.FC = () => {
       (async () => { try { await populateRepCounts?.(repsList); } catch (e) { } })();
 
       try {
-        const w = await fetch(`${API_BASE_PATH}/api.php?module=warehouses&action=getAll`);
+        const w = await fetch(`${API_BASE_PATH}/api.php?module=warehouses&action=getAll`, { credentials: 'include' });
         const jw = await w.json();
-        setWarehouses(jw.success ? (jw.data || []) : []);
+        setWarehouses(isPermissionDeniedResponse(w.status, jw) ? [] : (jw.success ? (jw.data || []) : []));
       } catch (e) { setWarehouses([]); }
     } catch (e) {
       console.error('Failed to refresh data', e);
@@ -366,19 +382,20 @@ const SalesUpdateStatus: React.FC = () => {
     if (!repId) return [];
     try {
       if (isShippingMode) {
-        const r = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=in_delivery`);
+        const r = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll&status=in_delivery`, { credentials: 'include' });
         const jr = await r.json();
+        if (isPermissionDeniedResponse(r.status, jr)) return [];
         const list = jr && jr.success ? jr.data || [] : [];
         return list.filter((o: any) => Number(o.shipping_company_id ?? o.shippingCompanyId) === Number(repId));
       }
       // جلب جميع الطلبات الموجودة مع المندوب، بما في ذلك الطلبات التي تم إرجاعها جزئيًا
       // نطلب الحالات النشطة فقط (active) لضمان عدم سحب المرتجعات الكلية السابقة
-      const r = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getByRep&rep_id=${repId}&status=active`);
+      const r = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getByRep&rep_id=${repId}&status=active`, { credentials: 'include' });
       const jr = await r.json();
+      if (isPermissionDeniedResponse(r.status, jr)) return [];
       const list = jr && jr.success ? jr.data || [] : [];
       return normalizeOrdersForReturnsView(list);
     } catch (e) {
-      console.error('fetchOrdersForRep failed', e);
       return [];
     }
   };
@@ -1137,7 +1154,14 @@ const SalesUpdateStatus: React.FC = () => {
       {loading ? <div className="text-sm text-slate-500">جاري التحميل...</div> : (
         <div>
           {displayedReps.length === 0 ? (
-            <p className="text-sm text-slate-500">{isShippingMode ? 'لا توجد شركات شحن مطابقة.' : 'لا توجد مندوبين مطابقين.'}</p>
+            <div className="p-4 rounded-xl border border-amber-200 bg-amber-50 text-amber-900">
+              <p className="font-black mb-1">لا توجد بيانات متاحة في هذا العرض.</p>
+              <p className="text-sm">
+                {isShippingMode
+                  ? 'تم منحك صلاحية عرض صفحة تسجيل المرتجعات فقط، ولم يتم العثور على شركات شحن أو بيانات متاحة ضمن صلاحياتك الحالية.'
+                  : 'تم منحك صلاحية عرض صفحة تسجيل المرتجعات فقط، ولم يتم العثور على مندوبين أو بيانات متاحة ضمن صلاحياتك الحالية.'}
+              </p>
+            </div>
           ) : (
             <div className="space-y-3">
               {displayedReps.map((rep: any) => (

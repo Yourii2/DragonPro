@@ -8,7 +8,7 @@ ALTER TABLE `users`
   ADD COLUMN IF NOT EXISTS `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL AFTER `id`,
   ADD COLUMN IF NOT EXISTS `username` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL AFTER `name`,
   ADD COLUMN IF NOT EXISTS `password` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL AFTER `username`,
-  ADD COLUMN IF NOT EXISTS `role` enum('admin','manager','representative','accountant') COLLATE utf8mb4_unicode_ci DEFAULT 'representative' AFTER `password`,
+  ADD COLUMN IF NOT EXISTS `role` enum('admin','manager','representative','accountant','warehouse_manager') COLLATE utf8mb4_unicode_ci DEFAULT 'representative' AFTER `password`,
   ADD COLUMN IF NOT EXISTS `restricted_treasury_id` int(11) DEFAULT NULL AFTER `role`,
   ADD COLUMN IF NOT EXISTS `restricted_warehouse_id` int(11) DEFAULT NULL AFTER `restricted_treasury_id`,
   ADD COLUMN IF NOT EXISTS `avatar` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL AFTER `restricted_warehouse_id`,

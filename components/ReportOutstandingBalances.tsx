@@ -88,13 +88,13 @@ const ReportOutstandingBalances: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-6 rounded-3xl text-white shadow-lg flex justify-between items-center">
+      <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-6 rounded-3xl text-white shadow-lg flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
         <div>
-          <h2 className="text-2xl font-black flex items-center gap-2"><Clock /> تقرير أعمار الديون</h2>
+          <h2 className="text-2xl font-black flex items-center gap-2"><Clock className="ml-1" /> تقرير أعمار الديون</h2>
           <p className="text-white/80 mt-1">يعرض الأرصدة المستحقة على العملاء والمناديب والمدة الزمنية المنقضية</p>
         </div>
-        <button onClick={load} disabled={loading} className="bg-white/20 p-2 rounded-xl hover:bg-white/30 transition">
-          <RefreshCw className={loading ? 'animate-spin' : ''} />
+        <button onClick={load} disabled={loading} className="bg-white text-indigo-700 p-2.5 rounded-xl hover:bg-indigo-50 transition active:scale-95 shadow-sm">
+          <RefreshCw className={loading ? 'animate-spin' : ''} size={18} />
         </button>
       </div>
 

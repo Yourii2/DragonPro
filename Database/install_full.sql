@@ -1433,7 +1433,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `username` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `password` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `role` enum('admin','manager','representative','accountant') COLLATE utf8mb4_unicode_ci DEFAULT 'representative',
+  `role` enum('admin','manager','representative','accountant','warehouse_manager') COLLATE utf8mb4_unicode_ci DEFAULT 'representative',
   `restricted_treasury_id` int(11) DEFAULT NULL,
   `restricted_warehouse_id` int(11) DEFAULT NULL,
   `avatar` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,

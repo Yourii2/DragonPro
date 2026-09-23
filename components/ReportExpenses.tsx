@@ -286,6 +286,12 @@ const ReportExpenses: React.FC = () => {
   };
 
   const kpiClass = "p-5 rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-right shadow-sm flex flex-col justify-between";
+  const quickRanges = [
+    { label: 'اليوم', start: new Date().toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) },
+    { label: 'هذا الشهر', start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) },
+    { label: 'آخر 7 أيام', start: new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) },
+    { label: 'آخر 30 يوم', start: new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) }
+  ];
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -295,7 +301,23 @@ const ReportExpenses: React.FC = () => {
           <h2 className="text-2xl font-black flex items-center gap-2"><Receipt className="ml-1" /> تقرير المصروفات</h2>
           <p className="text-white/80 mt-1">تتبع وتحليل كافة النفقات والمصروفات العامة التي يتم صرفها في صفحة الإيرادات والمصروفات</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap gap-2">
+            {quickRanges.map((range) => (
+              <button
+                key={range.label}
+                type="button"
+                onClick={() => { setStartDate(range.start); setEndDate(range.end); }}
+                className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition-all ${
+                  startDate === range.start && endDate === range.end
+                    ? 'bg-white text-rose-700'
+                    : 'bg-white/15 text-white hover:bg-white/20'
+                }`}
+              >
+                {range.label}
+              </button>
+            ))}
+          </div>
           <input 
             type="date" 
             value={startDate} 

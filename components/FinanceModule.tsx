@@ -71,10 +71,14 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
         ]);
         const list = (tRes && tRes.success) ? (tRes.data || []) : [];
         const defaults = (dRes && dRes.success) ? (dRes.data || null) : null;
-        if (defaults && defaults.default_treasury_id && !defaults.can_change_treasury) {
-          setTreasuries(list.filter((tr:any)=>Number(tr.id)===Number(defaults.default_treasury_id)));
+        const restrictedTreasuryId = defaults && defaults.default_treasury_id && defaults.can_change_treasury === false ? Number(defaults.default_treasury_id) : null;
+        if (restrictedTreasuryId) {
+          const filtered = list.filter((tr:any)=>Number(tr.id)===restrictedTreasuryId);
+          setTreasuries(filtered);
+          setTxTreasuryId(String(restrictedTreasuryId));
         } else {
           setTreasuries(list);
+          setTxTreasuryId(prev => prev || '');
         }
         if (defaults && defaults.default_treasury_id) {
           const d = String(defaults.default_treasury_id);
@@ -82,6 +86,8 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
           setDepositData(prev => ({...prev, treasury_id: prev.treasury_id || d}));
           setTransferData(prev => ({...prev, from_treasury_id: prev.from_treasury_id || d}));
           setUserDefaults(defaults);
+        } else {
+          setUserDefaults(defaults || null);
         }
       } catch (error) {
         console.error('Failed to fetch treasuries:', error);
@@ -95,9 +101,13 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
         const res = await fetch(`${API_BASE_PATH}/api.php?module=permissions&action=getUserDefaults`);
         const jr = await res.json();
         if (jr && jr.success) {
-          setUserDefaults(jr.data || null);
-          if (jr.data && jr.data.default_treasury_id) {
-            const d = String(jr.data.default_treasury_id);
+          const defaults = jr.data || null;
+          setUserDefaults(defaults);
+          if (defaults && defaults.default_treasury_id && defaults.can_change_treasury === false) {
+            setTxTreasuryId(String(defaults.default_treasury_id));
+          }
+          if (defaults && defaults.default_treasury_id) {
+            const d = String(defaults.default_treasury_id);
             setExpenseData(prev => ({...prev, treasury_id: prev.treasury_id || d}));
             setDepositData(prev => ({...prev, treasury_id: prev.treasury_id || d}));
             setTransferData(prev => ({...prev, from_treasury_id: prev.from_treasury_id || d}));
@@ -124,10 +134,14 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
       ]);
       const list = (tRes && tRes.success) ? (tRes.data || []) : [];
       const defaults = (dRes && dRes.success) ? (dRes.data || null) : null;
-      if (defaults && defaults.default_treasury_id && !defaults.can_change_treasury) {
-        setTreasuries(list.filter((tr:any)=>Number(tr.id)===Number(defaults.default_treasury_id)));
+      const restrictedTreasuryId = defaults && defaults.default_treasury_id && defaults.can_change_treasury === false ? Number(defaults.default_treasury_id) : null;
+      if (restrictedTreasuryId) {
+        const filtered = list.filter((tr:any)=>Number(tr.id)===restrictedTreasuryId);
+        setTreasuries(filtered);
+        setTxTreasuryId(String(restrictedTreasuryId));
       } else {
         setTreasuries(list);
+        setTxTreasuryId(prev => prev || '');
       }
     } catch (error) {
       console.error('Failed to fetch treasuries:', error);
@@ -137,10 +151,14 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
   const fetchAllTransactions = async (fromDate?: string, toDate?: string, treasuryId?: string) => {
     setIsAllTxLoading(true);
     try {
+      const effectiveTreasuryId = (treasuryId && treasuryId !== '')
+        ? treasuryId
+        : (userDefaults && userDefaults.default_treasury_id && userDefaults.can_change_treasury === false ? String(userDefaults.default_treasury_id) : '');
+
       let url = `${API_BASE_PATH}/api.php?module=transactions&action=getAll`;
       if (fromDate) url += `&start_date=${encodeURIComponent(fromDate)}`;
       if (toDate) url += `&end_date=${encodeURIComponent(toDate)}`;
-      if (treasuryId) url += `&treasury_id=${encodeURIComponent(treasuryId)}`;
+      if (effectiveTreasuryId) url += `&treasury_id=${encodeURIComponent(effectiveTreasuryId)}`;
       const res = await fetch(url);
       const jr = await res.json();
       if (jr.success) {
@@ -275,8 +293,10 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
   };
 
   useEffect(() => {
-    if (activeTab === 'transactions') fetchAllTransactions(txFromDate, txToDate, txTreasuryId);
-  }, [activeTab]);
+    if (activeTab === 'transactions') {
+      fetchAllTransactions(txFromDate, txToDate, txTreasuryId);
+    }
+  }, [activeTab, txFromDate, txToDate, txTreasuryId, userDefaults?.default_treasury_id, userDefaults?.can_change_treasury]);
 
   const openAccountModal = (account?: any) => {
     if (account) {
@@ -590,7 +610,6 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
     };
 
     const labels: { [key: string]: string } = {
-        // New subtype-based labels
         deposit: 'إيداع نقدي',
         expense: 'مصروفات',
         supplier_payment: 'دفعة لمورد',
@@ -599,7 +618,6 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
         salary: 'دفع راتب',
         advance: 'سلفة موظف',
         rep_penalty: 'غرامة على مندوب',
-        // Original type-based labels
         bonus: 'مكافأة',
         penalty: 'خصم',
         sale: 'فاتورة مبيعات',
@@ -609,8 +627,8 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
         return_in: 'مرتجع عميل',
         return_out: 'مرتجع لمورد',
         rep_assignment: 'تسليم عهدة لمندوب',
-        rep_payment_in: 'بدء يومية',
-        rep_payment_out: 'بدء يومية',
+        rep_payment_in: 'إغلاق يومية',
+        rep_payment_out: 'إغلاق يومية',
         rep_settlement: 'تسوية مندوب',
     };
 
@@ -623,34 +641,27 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
             if (details.subtype && labels[details.subtype]) {
                 return labels[details.subtype];
             }
-            if (details.context === 'close_daily' && (type === 'rep_payment_in' || type === 'rep_payment_out')) {
+            if (details.context === 'close_daily' || details.action === 'settleDaily') {
+                return 'إغلاق يومية';
+            }
+            if (details.context === 'start_daily' || details.action === 'startDaily') {
+                return 'بدء يومية';
+            }
+            if (details.context === 'close_daily' && (type === 'payment_in' || type === 'payment_out' || type === 'payment' || type === 'other')) {
                 return 'إغلاق يومية';
             }
         } catch (e) {}
     }
 
-    return labels[type] || type;
-  };
-
-    const getTransactionNotes = (details: string | null) => {
-      if (!details) return '—';
-      try {
-        const parsed = JSON.parse(details);
-        return parsed.notes || parsed.note || (typeof parsed === 'string' ? parsed : '—');
-      } catch (e) {
-        return details;
-      }
-    };
-
-    const getTxDisplayLabel = (tx: any) => {
-    if (!tx) return '-';
+    if (type && labels[type]) return labels[type];
+    if (type === 'payment' || type === 'other') return 'إغلاق يومية';
+    return type || '—';
     if (tx.title && String(tx.title).trim()) return tx.title;
     if (tx.memo && String(tx.memo).trim()) return tx.memo;
-    // Detect rep payment even when type fell back to payment_in/out
     try {
       const d = tx.details ? JSON.parse(tx.details) : {};
       if (d && isRepPaymentTx(tx, d)) {
-        return d.context === 'close_daily' ? 'بدء يومية' : 'إغلاق يومية';
+        return d.context === 'start_daily' ? 'بدء يومية' : 'إغلاق يومية';
       }
     } catch { /* fallthrough */ }
     return getTransactionTypeLabel(tx.type, tx.details);
@@ -661,10 +672,10 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
     try {
       const d = tx.details ? JSON.parse(tx.details) : {};
       if (d && isRepPaymentTx(tx, d)) {
-        const isClose = d.context === 'close_daily';
+        const isStart = d.context === 'start_daily';
         const amt = parseFloat(tx.amount);
-        if (amt >= 0) return isClose ? 'تحصيل من المندوب في بدء اليومية' : 'تحصيل من المندوب في إغلاق اليومية';
-        return isClose ? 'دفع إلى المندوب في بدء اليومية' : 'دفع إلى المندوب في إغلاق اليومية';
+        if (amt >= 0) return isStart ? 'تحصيل من المندوب في بدء اليومية' : 'تحصيل من المندوب في إغلاق اليومية';
+        return isStart ? 'دفع إلى المندوب في بدء اليومية' : 'دفع إلى المندوب في إغلاق اليومية';
       }
     } catch { /* fallthrough */ }
     if (tx.memo && String(tx.memo).trim()) return tx.memo;
@@ -1049,6 +1060,16 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
                   {uniqueTypes.map(type => <option key={type} value={type}>{type}</option>)}
                 </select>
                 <button onClick={() => fetchAllTransactions(txFromDate, txToDate, txTreasuryId)} className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-black">تحديث</button>
+                <button
+                  onClick={() => {
+                    setTxFromDate('');
+                    setTxToDate('');
+                    fetchAllTransactions('', '', txTreasuryId);
+                  }}
+                  className="px-3 py-2 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-sm font-black"
+                >
+                  عرض الكل
+                </button>
                 <button onClick={printTxReport} title="طباعة" className="px-3 py-2 bg-slate-700 text-white rounded-xl text-sm font-black flex items-center gap-1"><Printer size={15}/> طباعة</button>
               </div>
             </div>
