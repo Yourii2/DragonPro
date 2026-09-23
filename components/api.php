@@ -1,6 +1,10 @@
 <?php
 if (function_exists('ob_start')) {
-    @ob_start();
+    if (!ini_get('zlib.output_compression') && function_exists('ob_gzhandler')) {
+        @ob_start('ob_gzhandler');
+    } else {
+        @ob_start();
+    }
 }
 if (session_status() === PHP_SESSION_NONE) {
     @session_start();
@@ -803,9 +807,19 @@ if (!function_exists('pick_allowed_enum')) {
 
 if (!function_exists('ensure_orders_status_column_supports_all_statuses')) {
     function ensure_orders_status_column_supports_all_statuses($pdo) {
+        static $statusChecked = false;
+        if ($statusChecked) return;
+        $statusChecked = true;
         if (!($pdo instanceof PDO)) return;
         if (!table_exists($pdo, 'orders') || !column_exists($pdo, 'orders', 'status')) return;
         try {
+            $col = $pdo->query("SHOW COLUMNS FROM `orders` LIKE 'status'")->fetch(PDO::FETCH_ASSOC);
+            if ($col) {
+                $type = strtolower((string)($col['Type'] ?? ''));
+                if (strpos($type, 'varchar') !== false) {
+                    return;
+                }
+            }
             execute_query($pdo, "ALTER TABLE `orders` MODIFY COLUMN `status` VARCHAR(50) NOT NULL DEFAULT 'pending'");
         } catch (Exception $e) {}
     }
@@ -9648,6 +9662,20 @@ switch ($module) {
                 $params[] = $targetRepId;
             }
             
+            // Get active rep IDs separately with a fast indexed query to avoid slow correlated subquery
+            $repInSql = "";
+            if ($targetRepId === 0) {
+                try {
+                    $activeRepIds = $pdo->query("SELECT DISTINCT rep_id FROM orders WHERE rep_id IS NOT NULL AND status IN ('with_rep', 'partial', 'in_delivery') LIMIT 100")->fetchAll(PDO::FETCH_COLUMN);
+                    if (!empty($activeRepIds)) {
+                        $cleanIds = array_map('intval', array_filter($activeRepIds));
+                        if (!empty($cleanIds)) {
+                            $repInSql = " OR u.id IN (" . implode(',', $cleanIds) . ")";
+                        }
+                    }
+                } catch (Exception $e) {}
+            }
+
             $sql = "SELECT 
                         u.*, 
                         COALESCE(t.balance, 0) as balance 
@@ -9660,10 +9688,7 @@ switch ($module) {
                         WHERE related_to_type = ? OR related_to_type = 'employee'
                         GROUP BY related_to_id
                     ) t ON u.id = t.related_to_id
-                    WHERE (u.role = 'representative' OR u.id IN (
-                        SELECT DISTINCT rep_id FROM orders 
-                        WHERE rep_id IS NOT NULL AND status IN ('with_rep', 'partial', 'in_delivery')
-                    )) $repFilterSql
+                    WHERE (u.role = 'representative' $repInSql) $repFilterSql
                     ORDER BY u.name ASC";
 
             $stmt = execute_query($pdo, $sql, $params);
@@ -14843,9 +14868,13 @@ switch ($module) {
                 }
 
                 if (!empty($selectedJournalIds) && table_exists($pdo, 'rep_daily_journal')) {
-                    try { execute_query($pdo, "ALTER TABLE rep_journal_orders DROP INDEX uk_rep_order"); } catch (Exception $ex) {}
-                    try { execute_query($pdo, "ALTER TABLE rep_journal_orders DROP INDEX rep_order_unique"); } catch (Exception $ex) {}
-                    try { $pdo->exec("ALTER TABLE rep_journal_orders ADD UNIQUE KEY uk_rep_order_journal (rep_id, order_id, journal_id)"); } catch (Exception $ex) {}
+                    static $repJournalIndexChecked = false;
+                    if (!$repJournalIndexChecked) {
+                        $repJournalIndexChecked = true;
+                        try { execute_query($pdo, "ALTER TABLE rep_journal_orders DROP INDEX uk_rep_order"); } catch (Exception $ex) {}
+                        try { execute_query($pdo, "ALTER TABLE rep_journal_orders DROP INDEX rep_order_unique"); } catch (Exception $ex) {}
+                        try { $pdo->exec("ALTER TABLE rep_journal_orders ADD UNIQUE KEY uk_rep_order_journal (rep_id, order_id, journal_id)"); } catch (Exception $ex) {}
+                    }
 
                     $selectedJournalIdsIn = implode(',', array_map('intval', $selectedJournalIds));
                     $repairRows = $pdo->query(

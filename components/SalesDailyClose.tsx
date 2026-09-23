@@ -282,8 +282,8 @@ const SalesDailyClose: React.FC = () => {
   const loadInitialData = async () => {
     try {
       const [rRes, tRes, pRes] = await Promise.all([
-        fetch(`${API_BASE_PATH}/api.php?module=users&action=getAllWithBalance&related_to_type=rep`).then(r => r.json()),
-        fetch(`${API_BASE_PATH}/api.php?module=treasuries&action=getAll`).then(r => r.json()),
+        fetch(`${API_BASE_PATH}/api.php?module=users&action=getAllWithBalance&related_to_type=rep`).then(r => r.json()).catch(err => { console.warn('Reps load error', err); return null; }),
+        fetch(`${API_BASE_PATH}/api.php?module=treasuries&action=getAll`).then(r => r.json()).catch(err => { console.warn('Treasuries load error', err); return null; }),
         fetch(`${API_BASE_PATH}/api.php?module=permissions&action=getUserDefaults`).then(r => r.json()).catch(() => null)
       ]);
 
@@ -321,14 +321,16 @@ const SalesDailyClose: React.FC = () => {
 
     setStatsLoading(true);
     try {
-      // 1. Refresh Rep Balance
-      const rRes = await fetch(`${API_BASE_PATH}/api.php?module=users&action=getAllWithBalance&related_to_type=rep`).then(r => r.json());
+      // 1. Refresh Rep Balance (pass rep_id to calculate only for this representative)
+      const rRes = await fetch(`${API_BASE_PATH}/api.php?module=users&action=getAllWithBalance&related_to_type=rep&rep_id=${encodeURIComponent(repId)}`).then(r => r.json()).catch(() => null);
       if (rRes?.success) {
         const repsList = (rRes.data || []).filter((u: any) => u.role === 'representative');
-        setReps(repsList);
-        const rep = repsList.find((u: any) => String(u.id) === String(repId));
-        const bal = toNum(rep?.balance ?? 0);
-        setRepBalance(bal);
+        if (repsList.length > 0) {
+          const rep = repsList.find((u: any) => String(u.id) === String(repId)) || repsList[0];
+          const bal = toNum(rep?.balance ?? 0);
+          setRepBalance(bal);
+          setReps(prev => prev.map(r => String(r.id) === String(repId) ? { ...r, balance: bal } : r));
+        }
         setPaidAmount(0); // لا يتم ملء المبلغ تلقائياً — يُدخله المستخدم يدوياً
       }
 
