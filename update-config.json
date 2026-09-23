@@ -14,7 +14,13 @@
     "logs/",
     "backups/",
     ".env.local",
-    "Dragon.png"
+    "Dragon.png",
+    "start.bat",
+    "restart.bat",
+    "stop.bat",
+    "install.bat",
+    "recreate_license.bat",
+    "update_and_restart.bat"
   ],
   "allowedHosts": [
     "github.com",
