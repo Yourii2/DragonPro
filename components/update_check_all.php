@@ -1,4 +1,25 @@
 <?php
+@ini_set('display_errors', '0');
+error_reporting(0);
+ob_start();
+
+register_shutdown_function(function() {
+    $error = error_get_last();
+    if ($error && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
+        if (ob_get_level()) {
+            ob_clean();
+        }
+        if (!headers_sent()) {
+            header('Content-Type: application/json; charset=utf-8');
+            http_response_code(500);
+        }
+        echo json_encode([
+            'success' => false,
+            'message' => 'PHP Fatal Error: ' . $error['message'] . ' in ' . basename($error['file']) . ':' . $error['line']
+        ]);
+    }
+});
+
 session_start();
 
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
@@ -6,7 +27,7 @@ if ($origin) header('Access-Control-Allow-Origin: ' . $origin);
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization');
 header('Access-Control-Allow-Credentials: true');
-header('Content-Type: application/json');
+header('Content-Type: application/json; charset=utf-8');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit(0); }
 
@@ -35,7 +56,9 @@ function http_get_json($url, $headers = []) {
     $ch = curl_init($url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 20);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
     $finalHeaders = array_merge([
         'Accept: application/vnd.github+json',
         'User-Agent: DragonERP-Updater'
@@ -150,6 +173,7 @@ try {
 
     $newCount = count(array_filter($releases, fn($r) => $r['status'] === 'new'));
 
+    if (ob_get_length()) ob_clean();
     echo json_encode([
         'success' => true,
         'data' => [
@@ -159,8 +183,11 @@ try {
             'releases'        => $releases,
         ]
     ]);
+    exit;
 
-} catch (Exception $e) {
+} catch (Throwable $e) {
+    if (ob_get_length()) ob_clean();
     http_response_code(500);
     echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+    exit;
 }

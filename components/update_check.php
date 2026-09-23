@@ -1,4 +1,10 @@
 <?php
+@ini_set('display_errors', '0');
+error_reporting(0);
+if (ob_get_level() === 0) {
+    ob_start();
+}
+
 session_start();
 
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
@@ -6,7 +12,7 @@ if ($origin) header('Access-Control-Allow-Origin: ' . $origin);
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization');
 header('Access-Control-Allow-Credentials: true');
-header('Content-Type: application/json');
+header('Content-Type: application/json; charset=utf-8');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit(0); }
 
@@ -35,7 +41,9 @@ function http_get_json($url, $headers = []) {
     $ch = curl_init($url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 20);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 25);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
     $finalHeaders = array_merge([
         'Accept: application/vnd.github+json',
         'User-Agent: DragonERP-Updater'
@@ -107,6 +115,9 @@ try {
 
     $updateAvailable = version_compare($latestVersion, $currentVersion, '>');
 
+    if (ob_get_length()) {
+        ob_clean();
+    }
     echo json_encode([
         'success' => true,
         'data' => [
@@ -122,7 +133,10 @@ try {
         ]
     ]);
 
-} catch (Exception $e) {
+} catch (Throwable $e) {
+    if (ob_get_length()) {
+        ob_clean();
+    }
     http_response_code(500);
     echo json_encode(['success' => false, 'message' => $e->getMessage()]);
 }

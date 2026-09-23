@@ -468,7 +468,15 @@ const SettingsModule: React.FC = () => {
     setUpdateLoading(true);
     try {
       const res = await fetch(`${API_BASE_PATH}/update_check_all.php`);
-      const data = await res.json();
+      const rawText = await res.text();
+      let data: any;
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        const cleanMsg = rawText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+        throw new Error(cleanMsg || `تعذر قراءة بيانات التحديث (رمز الخطأ: ${res.status})`);
+      }
+
       if (data.success) {
         const info = data.data || {};
         if (info.configured === false) {
@@ -487,8 +495,8 @@ const SettingsModule: React.FC = () => {
       } else {
         Swal.fire('خطأ', data.message || 'فشل فحص التحديثات.', 'error');
       }
-    } catch (e) {
-      Swal.fire('خطأ', 'تعذر الاتصال بالخادم لفحص التحديثات.', 'error');
+    } catch (e: any) {
+      Swal.fire('خطأ', e?.message || 'تعذر الاتصال بالخادم لفحص التحديثات.', 'error');
     } finally {
       setUpdateLoading(false);
     }
@@ -536,7 +544,15 @@ const SettingsModule: React.FC = () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ asset_url: release.asset_url })
         });
-        const data = await res.json();
+        const rawText = await res.text();
+        let data: any;
+        try {
+          data = JSON.parse(rawText);
+        } catch {
+          const cleanMsg = rawText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+          throw new Error(cleanMsg || `استجابة غير صالحة من السيرفر (كود: ${res.status})`);
+        }
+
         if (data.success) {
           setInstallLog(prev =>
             prev.map(l => l.tag === release.tag ? { ...l, status: 'done', message: data.message || 'تم بنجاح' } : l)
@@ -558,13 +574,17 @@ const SettingsModule: React.FC = () => {
 
     setIsInstalling(false);
     // Refresh release list after install
-    const refreshRes = await fetch(`${API_BASE_PATH}/update_check_all.php`);
-    const refreshData = await refreshRes.json().catch(() => null);
-    if (refreshData?.success) {
-      setAllReleases(refreshData.data?.releases || []);
-      setUpdateInfo({ current_version: refreshData.data?.current_version, new_count: refreshData.data?.new_count });
-      setSelectedTags(new Set());
-    }
+    try {
+      const refreshRes = await fetch(`${API_BASE_PATH}/update_check_all.php`);
+      const refreshText = await refreshRes.text().catch(() => '');
+      let refreshData: any = null;
+      try { refreshData = JSON.parse(refreshText); } catch {}
+      if (refreshData?.success) {
+        setAllReleases(refreshData.data?.releases || []);
+        setUpdateInfo({ current_version: refreshData.data?.current_version, new_count: refreshData.data?.new_count });
+        setSelectedTags(new Set());
+      }
+    } catch {}
   };
 
   const sendOtp = async () => {

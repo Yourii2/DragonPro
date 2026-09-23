@@ -1,4 +1,27 @@
 <?php
+@ini_set('display_errors', '0');
+error_reporting(0);
+@set_time_limit(600);
+@ini_set('memory_limit', '512M');
+ob_start();
+
+register_shutdown_function(function() {
+    $error = error_get_last();
+    if ($error && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
+        if (ob_get_level()) {
+            ob_clean();
+        }
+        if (!headers_sent()) {
+            header('Content-Type: application/json; charset=utf-8');
+            http_response_code(500);
+        }
+        echo json_encode([
+            'success' => false,
+            'message' => 'PHP Fatal Error: ' . $error['message'] . ' in ' . basename($error['file']) . ':' . $error['line']
+        ]);
+    }
+});
+
 session_start();
 
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
@@ -6,7 +29,7 @@ if ($origin) header('Access-Control-Allow-Origin: ' . $origin);
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization');
 header('Access-Control-Allow-Credentials: true');
-header('Content-Type: application/json');
+header('Content-Type: application/json; charset=utf-8');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit(0); }
 
@@ -77,14 +100,17 @@ function copy_tree($srcRoot, $dstRoot, $excludeList) {
 
         if ($file->isDir()) {
             if (!is_dir($dstPath)) {
-                mkdir($dstPath, 0775, true);
+                @mkdir($dstPath, 0775, true);
             }
         } else {
             $dstDir = dirname($dstPath);
             if (!is_dir($dstDir)) {
-                mkdir($dstDir, 0775, true);
+                @mkdir($dstDir, 0775, true);
             }
-            if (!copy($srcPath, $dstPath)) {
+            if (!@copy($srcPath, $dstPath)) {
+                if (preg_match('/\.bat$/i', $rel)) {
+                    continue;
+                }
                 throw new Exception('Failed to copy: ' . $rel);
             }
         }
@@ -102,13 +128,15 @@ function host_allowed($url, $allowedHosts) {
 }
 
 function download_file($url, $destPath) {
-    $fp = fopen($destPath, 'w');
+    $fp = @fopen($destPath, 'w');
     if (!$fp) throw new Exception('Cannot write to: ' . $destPath);
 
     $ch = curl_init($url);
     curl_setopt($ch, CURLOPT_FILE, $fp);
     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 120);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 300);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
     curl_setopt($ch, CURLOPT_HTTPHEADER, [
         'User-Agent: DragonERP-Updater'
     ]);
@@ -117,7 +145,7 @@ function download_file($url, $destPath) {
     $err = curl_error($ch);
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
-    fclose($fp);
+    @fclose($fp);
 
     if ($ok === false) {
         @unlink($destPath);
@@ -335,23 +363,27 @@ try {
         @pclose(@popen($cmd, "r"));
     }
 
+    if (ob_get_length()) ob_clean();
     echo json_encode([
         'success' => true,
         'message' => 'تم تثبيت التحديث بنجاح، ويجري الآن إعادة بناء وتحديث السيرفر تلقائياً في الخلفية.',
         'preserved' => $exclude,
         'backup_zips' => $backupZips
     ]);
+    exit;
 
-} catch (Exception $e) {
+} catch (Throwable $e) {
     try {
         $root = realpath(__DIR__ . '/..');
         if ($root) {
             $lockPath = $root . '/logs/update.lock';
             if (file_exists($lockPath)) @unlink($lockPath);
         }
-    } catch (Exception $ignore) {
+    } catch (Throwable $ignore) {
         // ignore
     }
+    if (ob_get_length()) ob_clean();
     http_response_code(500);
     echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+    exit;
 }
