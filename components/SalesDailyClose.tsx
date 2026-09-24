@@ -393,10 +393,10 @@ const SalesDailyClose: React.FC = () => {
         const rawDeferred = ordersRes.deferred || [];
         const rawActive = ordersRes.active || [];
 
-        jDelivered = uniqOrdersById(rawDelivered.filter((o: any) => !o.journal_id || String(o.journal_id || o.journalId) === openJournalId));
-        jReturned = uniqOrdersById(rawReturned.filter((o: any) => !o.journal_id || String(o.journal_id || o.journalId) === openJournalId));
-        jDeferred = uniqOrdersById(rawDeferred.filter((o: any) => !o.journal_id || String(o.journal_id || o.journalId) === openJournalId));
-        jActive = uniqOrdersById(rawActive.filter((o: any) => !o.journal_id || String(o.journal_id || o.journalId) === openJournalId));
+        jDelivered = uniqOrdersById(rawDelivered);
+        jReturned = uniqOrdersById(rawReturned);
+        jDeferred = uniqOrdersById(rawDeferred);
+        jActive = uniqOrdersById(rawActive);
       }
 
       // Merge all active orders in rep's custody (including "نزول" / postponed / with_rep)
@@ -490,17 +490,18 @@ const SalesDailyClose: React.FC = () => {
         }).catch(() => null)));
       }
 
+      const targetJournalId = openDailyInfo?.id ? Number(openDailyInfo.id) : undefined;
       // Update journal status
       if (fullIds.length > 0) {
         await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: fullIds.map(Number), status: 'delivered' })
+          body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: fullIds.map(Number), status: 'delivered', journal_id: targetJournalId })
         }).catch(() => null);
       }
       if (partialIds.length > 0) {
         await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: partialIds.map(Number), status: 'partial_return' })
+          body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: partialIds.map(Number), status: 'partial_return', journal_id: targetJournalId })
         }).catch(() => null);
 
         // Mark remaining portion as partial in orders table
@@ -559,9 +560,10 @@ const SalesDailyClose: React.FC = () => {
     try {
       setLoading(true);
       const movedIds = selectedOrderIds.map(Number);
+      const targetJournalId = openDailyInfo?.id ? Number(openDailyInfo.id) : undefined;
       await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: movedIds, status: 'deferred' })
+        body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: movedIds, status: 'deferred', journal_id: targetJournalId })
       });
       await Promise.all(movedIds.map(id => fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -581,9 +583,10 @@ const SalesDailyClose: React.FC = () => {
     try {
       setLoading(true);
       const oid = Number(getRealOrderId(order));
+      const targetJournalId = openDailyInfo?.id ? Number(openDailyInfo.id) : undefined;
       await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: [oid], status: 'deferred' })
+        body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: [oid], status: 'deferred', journal_id: targetJournalId })
       });
       await fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -602,9 +605,10 @@ const SalesDailyClose: React.FC = () => {
     try {
       setLoading(true);
       const oid = Number(getRealOrderId(order));
+      const targetJournalId = openDailyInfo?.id ? Number(openDailyInfo.id) : undefined;
       const res = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: [oid], status: 'with_rep' })
+        body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: [oid], status: 'with_rep', journal_id: targetJournalId })
       });
       const data = await res.json();
       if (!data?.success) throw new Error(data?.message || 'فشل استرجاع الاوردر.');
@@ -647,9 +651,10 @@ const SalesDailyClose: React.FC = () => {
       setLoading(true);
       const movedIds = deferredOrders.map(o => Number(getRealOrderId(o))).filter(id => id > 0);
       if (movedIds.length === 0) return;
+      const targetJournalId = openDailyInfo?.id ? Number(openDailyInfo.id) : undefined;
       const res = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: movedIds, status: 'with_rep' })
+        body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: movedIds, status: 'with_rep', journal_id: targetJournalId })
       });
       const data = await res.json();
       if (!data?.success) throw new Error(data?.message || 'فشل إرجاع الأوردرات.');

@@ -11272,11 +11272,23 @@ switch ($module) {
                     // Update rep_daily_journal returned aggregates on the exact open journal tied to this order.
                     try {
                         if (table_exists($pdo, 'rep_daily_journal') && table_exists($pdo, 'rep_journal_orders')) {
-                            $journalLookup = execute_query($pdo,
-                                "SELECT journal_id FROM rep_journal_orders WHERE rep_id = ? AND order_id = ? LIMIT 1",
-                                [$relatedRepId, $orderId]
-                            )->fetch(PDO::FETCH_ASSOC);
-                            $targetJournalId = intval($journalLookup['journal_id'] ?? 0);
+                            $targetJournalId = 0;
+                            if ($relatedRepId > 0) {
+                                $openJournalRow = execute_query($pdo,
+                                    "SELECT id FROM rep_daily_journal WHERE rep_id = ? AND is_closed = 0 ORDER BY id DESC LIMIT 1",
+                                    [$relatedRepId]
+                                )->fetch(PDO::FETCH_ASSOC);
+                                if ($openJournalRow) {
+                                    $targetJournalId = intval($openJournalRow['id']);
+                                }
+                            }
+                            if ($targetJournalId <= 0) {
+                                $journalLookup = execute_query($pdo,
+                                    "SELECT journal_id FROM rep_journal_orders WHERE rep_id = ? AND order_id = ? ORDER BY id DESC LIMIT 1",
+                                    [$relatedRepId, $orderId]
+                                )->fetch(PDO::FETCH_ASSOC);
+                                $targetJournalId = intval($journalLookup['journal_id'] ?? 0);
+                            }
                             if ($targetJournalId > 0) {
                                 // For the main journal, always ADD the pieces/value returned in THIS specific operation
                                 execute_query($pdo,
@@ -11330,13 +11342,18 @@ switch ($module) {
                             )->fetch(PDO::FETCH_ASSOC);
                         }
 
-                        $targetJournalId = intval($journalRow['journal_id'] ?? 0);
-                        if ($targetJournalId <= 0 && $journalRepId > 0 && table_exists($pdo, 'rep_daily_journal')) {
+                        $targetJournalId = 0;
+                        if ($journalRepId > 0 && table_exists($pdo, 'rep_daily_journal')) {
                             $openJournalRow = execute_query($pdo,
                                 "SELECT id FROM rep_daily_journal WHERE rep_id = ? AND is_closed = 0 ORDER BY id DESC LIMIT 1",
                                 [$journalRepId]
                             )->fetch(PDO::FETCH_ASSOC);
-                            $targetJournalId = intval($openJournalRow['id'] ?? 0);
+                            if ($openJournalRow) {
+                                $targetJournalId = intval($openJournalRow['id']);
+                            }
+                        }
+                        if ($targetJournalId <= 0 && $journalRow) {
+                            $targetJournalId = intval($journalRow['journal_id'] ?? 0);
                         }
 
                         if ($journalRow && intval($journalRow['id'] ?? 0) > 0) {
@@ -11444,7 +11461,7 @@ switch ($module) {
 
                 $totalReturnedValue  = max(0, floatval($orderRow['total_amount'] ?? 0) - floatval($orderRow['shipping_fees'] ?? 0));
                 $totalReturnedPieces = 0;
-                $repId = intval($orderRow['rep_id'] ?? 0);
+                $repId = intval($input['rep_id'] ?? $orderRow['rep_id'] ?? 0);
                 $notes = 'full_return';
                 $mt    = pick_allowed_enum($pdo, 'product_movements', 'movement_type', 'return_in',
                     ['return_in', 'return', 'purchase', 'transfer', 'return_out']);
@@ -11515,35 +11532,36 @@ switch ($module) {
                 // 4. Update (or insert) rep_journal_orders returned_pieces / returned_value
                 try {
                     if (table_exists($pdo, 'rep_journal_orders')) {
+                        $currentOpenJournalId = 0;
+                        if ($repId > 0 && table_exists($pdo, 'rep_daily_journal')) {
+                            $openJrnl = execute_query($pdo,
+                                "SELECT id FROM rep_daily_journal WHERE rep_id = ? AND is_closed = 0 ORDER BY id DESC LIMIT 1",
+                                [$repId]
+                            )->fetch(PDO::FETCH_ASSOC);
+                            if ($openJrnl) {
+                                $currentOpenJournalId = intval($openJrnl['id']);
+                            }
+                        }
+
                         $journalRow = execute_query($pdo,
                             "SELECT id, journal_id FROM rep_journal_orders WHERE rep_id = ? AND order_id = ? ORDER BY id DESC LIMIT 1",
                             [$repId, $orderId]
                         )->fetch(PDO::FETCH_ASSOC);
 
+                        $targetJid = $currentOpenJournalId > 0 ? $currentOpenJournalId : intval($journalRow['journal_id'] ?? 0);
+
                         if ($journalRow && intval($journalRow['id']) > 0) {
                             execute_query($pdo,
                                 "UPDATE rep_journal_orders SET status = 'full_return', event_date = CURDATE(), event_time = CURTIME(),
+                                 journal_id = COALESCE(NULLIF(?, 0), journal_id),
                                  returned_pieces = COALESCE(returned_pieces,0) + ?,
                                  returned_value  = COALESCE(returned_value,0)  + ?
                                  WHERE id = ?",
-                                [$totalReturnedPieces, $totalReturnedValue, intval($journalRow['id'])]
+                                [$targetJid, $totalReturnedPieces, $totalReturnedValue, intval($journalRow['id'])]
                             );
-                            $jid = intval($journalRow['journal_id'] ?? 0);
+                            $jid = $targetJid;
                         } else {
-                            $jid = 0;
-                            if (table_exists($pdo, 'rep_daily_journal')) {
-                                $openJrnl = execute_query($pdo,
-                                    "SELECT id, journal_date, created_at FROM rep_daily_journal WHERE rep_id = ? AND is_closed = 0 ORDER BY id DESC LIMIT 1",
-                                    [$repId]
-                                )->fetch(PDO::FETCH_ASSOC);
-                                if ($openJrnl) {
-                                    $dailyDate = $openJrnl['journal_date'] ?? substr($openJrnl['created_at'] ?? '', 0, 10);
-                                    $orderDate = substr($orderRow['created_at'] ?? '', 0, 10);
-                                    if ($orderDate >= $dailyDate) {
-                                        $jid = intval($openJrnl['id']);
-                                    }
-                                }
-                            }
+                            $jid = $targetJid;
                             execute_query($pdo,
                                 "INSERT INTO rep_journal_orders (journal_id, rep_id, order_id, status, event_date, event_time, returned_pieces, returned_value)
                                  VALUES (?, ?, ?, 'full_return', CURDATE(), CURTIME(), ?, ?)",
@@ -15636,63 +15654,64 @@ switch ($module) {
                     $oid = intval($oid);
                     if ($oid <= 0) continue;
                     
-                    $openJrnl = null;
-                    if (table_exists($pdo, 'rep_daily_journal')) {
+                    $inputJournalId = isset($input['journal_id']) ? intval($input['journal_id']) : 0;
+                    $targetJournalId = $inputJournalId;
+                    if ($targetJournalId <= 0 && table_exists($pdo, 'rep_daily_journal')) {
                         $openJrnl = execute_query($pdo,
                             "SELECT id FROM rep_daily_journal WHERE rep_id = ? AND is_closed = 0 ORDER BY id DESC LIMIT 1",
                             [$repId]
                         )->fetch(PDO::FETCH_ASSOC);
+                        $targetJournalId = intval($openJrnl['id'] ?? 0);
                     }
-                    $targetJournalId = intval($openJrnl['id'] ?? 0);
 
-                    // Find row specifically for this journal first, or without journal
-                    $journalRow = null;
+                    // 1. Check if a row exists specifically for this TARGET journal
+                    $targetRow = null;
                     if ($targetJournalId > 0) {
-                        $journalRow = execute_query($pdo,
+                        $targetRow = execute_query($pdo,
                             "SELECT id, journal_id FROM rep_journal_orders WHERE rep_id = ? AND order_id = ? AND journal_id = ? LIMIT 1",
                             [$repId, $oid, $targetJournalId]
                         )->fetch(PDO::FETCH_ASSOC);
                     }
-                    if (!$journalRow) {
-                        $journalRow = execute_query($pdo,
-                            "SELECT id, journal_id FROM rep_journal_orders WHERE rep_id = ? AND order_id = ? AND (journal_id IS NULL OR journal_id = 0) LIMIT 1",
-                            [$repId, $oid]
-                        )->fetch(PDO::FETCH_ASSOC);
-                    }
-                    if (!$journalRow) {
-                        $journalRow = execute_query($pdo,
-                            "SELECT id, journal_id FROM rep_journal_orders WHERE rep_id = ? AND order_id = ? ORDER BY id DESC LIMIT 1",
-                            [$repId, $oid]
-                        )->fetch(PDO::FETCH_ASSOC);
-                    }
 
-                    $journalId = intval($journalRow['journal_id'] ?? 0);
-                    if ($journalRow) {
-                        $rowId = intval($journalRow['id']);
-                        $updateParams = [$status, $now, $nowTime, $employee, $notes];
-                        $updateSql = "UPDATE rep_journal_orders SET status=?, event_date=?, event_time=?, employee=?, notes=?";
-                        
-                        // If target journal is defined and row has no journal, link it
-                        if ($targetJournalId > 0 && ($journalId <= 0 || $journalId === $targetJournalId)) {
-                            $updateSql .= ", journal_id=?";
-                            $updateParams[] = $targetJournalId;
-                            $journalId = $targetJournalId;
-                        }
-                        
-                        $updateSql .= " WHERE id = ?";
-                        $updateParams[] = $rowId;
-                        
-                        $res = execute_query($pdo, $updateSql, $updateParams);
-                        $updated += $res->rowCount();
-                    } else {
+                    if ($targetRow) {
+                        $rowId = intval($targetRow['id']);
                         execute_query($pdo,
-                            "INSERT INTO rep_journal_orders (journal_id, rep_id, order_id, status, event_date, event_time, employee, notes)
-                             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                             ON DUPLICATE KEY UPDATE status=VALUES(status), event_date=VALUES(event_date), event_time=VALUES(event_time), employee=VALUES(employee), notes=VALUES(notes)",
-                            [$targetJournalId > 0 ? $targetJournalId : null, $repId, $oid, $status, $now, $nowTime, $employee, $notes]
+                            "UPDATE rep_journal_orders SET status = ?, event_date = ?, event_time = ?, employee = ?, notes = ? WHERE id = ?",
+                            [$status, $now, $nowTime, $employee, $notes, $rowId]
                         );
                         $updated++;
                         $journalId = $targetJournalId;
+                    } else {
+                        // Check if an unassigned or older row exists for this order & rep
+                        $existingRow = execute_query($pdo,
+                            "SELECT id, journal_id FROM rep_journal_orders WHERE rep_id = ? AND order_id = ? ORDER BY (journal_id IS NULL OR journal_id = 0) DESC, id DESC LIMIT 1",
+                            [$repId, $oid]
+                        )->fetch(PDO::FETCH_ASSOC);
+
+                        if ($existingRow && $targetJournalId > 0) {
+                            // Link/move order to the current open daily journal
+                            execute_query($pdo,
+                                "UPDATE rep_journal_orders SET journal_id = ?, status = ?, event_date = ?, event_time = ?, employee = ?, notes = ? WHERE id = ?",
+                                [$targetJournalId, $status, $now, $nowTime, $employee, $notes, intval($existingRow['id'])]
+                            );
+                            $updated++;
+                            $journalId = $targetJournalId;
+                        } elseif ($existingRow) {
+                            execute_query($pdo,
+                                "UPDATE rep_journal_orders SET status = ?, event_date = ?, event_time = ?, employee = ?, notes = ? WHERE id = ?",
+                                [$status, $now, $nowTime, $employee, $notes, intval($existingRow['id'])]
+                            );
+                            $updated++;
+                            $journalId = intval($existingRow['journal_id'] ?? 0);
+                        } else {
+                            execute_query($pdo,
+                                "INSERT INTO rep_journal_orders (journal_id, rep_id, order_id, status, event_date, event_time, employee, notes)
+                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                                [$targetJournalId > 0 ? $targetJournalId : null, $repId, $oid, $status, $now, $nowTime, $employee, $notes]
+                            );
+                            $updated++;
+                            $journalId = $targetJournalId;
+                        }
                     }
                     // Synchronize orders table status & rep_id
                     $mappedOrderStatus = null;

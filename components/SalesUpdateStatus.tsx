@@ -279,7 +279,7 @@ const SalesUpdateStatus: React.FC = () => {
           // إعادة الكميات للمخزن
           await fetch(`${API_BASE_PATH}/api.php?module=orders&action=returnToStock`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ order_id: id, warehouse_id: warehouseId })
+            body: JSON.stringify({ order_id: id, warehouse_id: warehouseId, rep_id: Number(orderRepId) })
           });
           totalReturned += computeOrderSubtotal(ord);
         } else {
