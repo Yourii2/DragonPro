@@ -656,6 +656,20 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
     if (type && labels[type]) return labels[type];
     if (type === 'payment' || type === 'other') return 'إغلاق يومية';
     return type || '—';
+  };
+
+  const getTransactionNotes = (details: string | null) => {
+    if (!details) return '—';
+    try {
+      const parsed = JSON.parse(details);
+      return parsed.notes || parsed.note || (typeof parsed === 'string' ? parsed : '—');
+    } catch (e) {
+      return details;
+    }
+  };
+
+  const getTxDisplayLabel = (tx: any) => {
+    if (!tx) return '-';
     if (tx.title && String(tx.title).trim()) return tx.title;
     if (tx.memo && String(tx.memo).trim()) return tx.memo;
     try {
@@ -665,7 +679,7 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
       }
     } catch { /* fallthrough */ }
     return getTransactionTypeLabel(tx.type, tx.details);
-    };
+  };
 
     const getTxDisplayNotes = (tx: any) => {
     if (!tx) return '—';
