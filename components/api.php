@@ -2432,7 +2432,7 @@ function ensure_rep_daily_journal_table($pdo) {
     static $checked = false;
     if ($checked) return;
     try {
-        $pdo->query("SELECT is_closed, daily_code, orders_json, closed_at, closed_by FROM rep_daily_journal LIMIT 1");
+        $pdo->query("SELECT is_closed, daily_code, orders_json, closed_at, closed_by, prev_balance, payment_action, payment_amount, balance_after_payment, delivered_value, returned_value, postponed_value FROM rep_daily_journal LIMIT 1");
         $checked = true;
     } catch (Exception $e) {
         try { execute_query($pdo, "ALTER TABLE rep_daily_journal DROP INDEX rep_date_unique"); } catch (Exception $ex) {}
@@ -14354,19 +14354,147 @@ switch ($module) {
                     )->fetchAll(PDO::FETCH_ASSOC);
                 }
 
+                $prevBalance         = isset($input['prev_balance']) ? floatval($input['prev_balance']) : null;
+                $paymentAmount       = isset($input['payment_amount']) ? floatval($input['payment_amount']) : 0.0;
+                $paymentAction       = isset($input['payment_action']) && trim((string)$input['payment_action']) !== '' ? trim((string)$input['payment_action']) : 'collect';
+                $balanceAfterPayment = isset($input['balance_after_payment']) ? floatval($input['balance_after_payment']) : null;
+
+                $delivCount  = isset($input['delivered_orders_count']) ? intval($input['delivered_orders_count']) : null;
+                $delivPieces = isset($input['delivered_pieces']) ? intval($input['delivered_pieces']) : null;
+                $delivVal    = isset($input['delivered_value']) ? floatval($input['delivered_value']) : null;
+
+                $retCount    = isset($input['returned_orders_count']) ? intval($input['returned_orders_count']) : null;
+                $retPieces   = isset($input['returned_pieces']) ? intval($input['returned_pieces']) : null;
+                $retVal      = isset($input['returned_value']) ? floatval($input['returned_value']) : null;
+
+                $postCount   = isset($input['postponed_orders_count']) ? intval($input['postponed_orders_count']) : null;
+                $postPieces  = isset($input['postponed_pieces']) ? intval($input['postponed_pieces']) : null;
+                $postVal     = isset($input['postponed_value']) ? floatval($input['postponed_value']) : null;
+
+                if ($prevBalance === null) {
+                    try {
+                        $repRelatedType = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
+                        $balStmt = execute_query($pdo, "SELECT COALESCE(SUM(amount),0) AS bal FROM transactions WHERE related_to_type = ? AND related_to_id = ?", [$repRelatedType, $repId]);
+                        $balRow = $balStmt->fetch(PDO::FETCH_ASSOC);
+                        $prevBalance = floatval($balRow['bal'] ?? 0);
+                    } catch (Exception $ex) {
+                        $prevBalance = 0.0;
+                    }
+                }
+
+                if ($balanceAfterPayment === null) {
+                    if ($paymentAmount > 0) {
+                        if ($paymentAction === 'collect') {
+                            $balanceAfterPayment = $prevBalance + $paymentAmount;
+                        } else if ($paymentAction === 'pay') {
+                            $balanceAfterPayment = $prevBalance - $paymentAmount;
+                        } else {
+                            $balanceAfterPayment = $prevBalance;
+                        }
+                    } else {
+                        $balanceAfterPayment = $prevBalance;
+                    }
+                }
+
                 if (empty($openRows)) {
-                    $insertSql = "INSERT INTO rep_daily_journal (rep_id, employee, is_closed, closed_at, closed_by, created_at) VALUES (?, ?, 1, NOW(), ?, NOW())";
-                    execute_query($pdo, $insertSql, [$repId, $employeeInput ?: null, $userIdInput > 0 ? $userIdInput : null]);
+                    $insertSql = "INSERT INTO rep_daily_journal (
+                        rep_id, employee, is_closed, closed_at, closed_by, 
+                        prev_balance, payment_action, payment_amount, balance_after_payment, closing_amount,
+                        orders_delivered_count, pieces_delivered, delivered_value,
+                        orders_returned_count, pieces_returned, returned_value,
+                        orders_postponed_count, pieces_postponed, postponed_value,
+                        created_at
+                    ) VALUES (?, ?, 1, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
+                    execute_query($pdo, $insertSql, [
+                        $repId, $employeeInput ?: null, $userIdInput > 0 ? $userIdInput : null,
+                        $prevBalance, $paymentAction, $paymentAmount, $balanceAfterPayment, $balanceAfterPayment,
+                        $delivCount ?: 0, $delivPieces ?: 0, $delivVal ?: 0,
+                        $retCount ?: 0, $retPieces ?: 0, $retVal ?: 0,
+                        $postCount ?: 0, $postPieces ?: 0, $postVal ?: 0
+                    ]);
                     $newJournalId = intval($pdo->lastInsertId());
+                    $dailyCode = 'DLY-' . str_pad($newJournalId, 5, '0', STR_PAD_LEFT);
+                    try { execute_query($pdo, "UPDATE rep_daily_journal SET daily_code = ? WHERE id = ?", [$dailyCode, $newJournalId]); } catch (Exception $ex) {}
+
                     audit_log($pdo, 'sales', 'close_rep_daily_archive', $repId, json_encode(['journal_id' => $newJournalId]));
                     echo json_encode(['success' => true, 'closed_count' => 1, 'closed_ids' => [$newJournalId], 'message' => 'تم إغلاق وتوثيق اليومية بنجاح.']);
                     break;
                 }
 
+                $targetJournalId = ($jId > 0) ? $jId : intval($openRows[0]['id'] ?? 0);
+
+                $updateFields = [
+                    "is_closed = 1",
+                    "closed_at = NOW()",
+                    "closed_by = COALESCE(closed_by, ?)",
+                    "prev_balance = ?",
+                    "payment_action = ?",
+                    "payment_amount = ?",
+                    "balance_after_payment = ?",
+                    "closing_amount = ?"
+                ];
+                $updateParams = [
+                    $userIdInput > 0 ? $userIdInput : null,
+                    $prevBalance,
+                    $paymentAction,
+                    $paymentAmount,
+                    $balanceAfterPayment,
+                    $balanceAfterPayment
+                ];
+
                 if (!empty($employeeInput)) {
-                    execute_query($pdo, "UPDATE rep_daily_journal SET is_closed = 1, closed_at = NOW(), closed_by = COALESCE(closed_by, ?), employee = COALESCE(NULLIF(employee, ''), ?) WHERE rep_id = ? AND is_closed = 0", [$userIdInput > 0 ? $userIdInput : null, $employeeInput, $repId]);
-                } else {
-                    execute_query($pdo, "UPDATE rep_daily_journal SET is_closed = 1, closed_at = NOW(), closed_by = COALESCE(closed_by, ?) WHERE rep_id = ? AND is_closed = 0", [$userIdInput > 0 ? $userIdInput : null, $repId]);
+                    $updateFields[] = "employee = COALESCE(NULLIF(employee, ''), ?)";
+                    $updateParams[] = $employeeInput;
+                }
+                if ($delivCount !== null) {
+                    $updateFields[] = "orders_delivered_count = ?";
+                    $updateParams[] = $delivCount;
+                }
+                if ($delivPieces !== null) {
+                    $updateFields[] = "pieces_delivered = ?";
+                    $updateParams[] = $delivPieces;
+                }
+                if ($delivVal !== null) {
+                    $updateFields[] = "delivered_value = ?";
+                    $updateParams[] = $delivVal;
+                }
+                if ($retCount !== null) {
+                    $updateFields[] = "orders_returned_count = ?";
+                    $updateParams[] = $retCount;
+                }
+                if ($retPieces !== null) {
+                    $updateFields[] = "pieces_returned = ?";
+                    $updateParams[] = $retPieces;
+                }
+                if ($retVal !== null) {
+                    $updateFields[] = "returned_value = ?";
+                    $updateParams[] = $retVal;
+                }
+                if ($postCount !== null) {
+                    $updateFields[] = "orders_postponed_count = ?";
+                    $updateParams[] = $postCount;
+                }
+                if ($postPieces !== null) {
+                    $updateFields[] = "pieces_postponed = ?";
+                    $updateParams[] = $postPieces;
+                }
+                if ($postVal !== null) {
+                    $updateFields[] = "postponed_value = ?";
+                    $updateParams[] = $postVal;
+                }
+
+                $updateSql = "UPDATE rep_daily_journal SET " . implode(', ', $updateFields) . " WHERE id = ?";
+                $updateParams[] = $targetJournalId;
+                execute_query($pdo, $updateSql, $updateParams);
+
+                if (count($openRows) > 1) {
+                    $otherIds = array_values(array_filter(array_map('intval', array_column($openRows, 'id')), function($oid) use ($targetJournalId) {
+                        return $oid !== $targetJournalId;
+                    }));
+                    if (!empty($otherIds)) {
+                        $inOthers = implode(',', $otherIds);
+                        execute_query($pdo, "UPDATE rep_daily_journal SET is_closed = 1, closed_at = NOW(), closed_by = COALESCE(closed_by, ?) WHERE id IN ($inOthers)", [$userIdInput > 0 ? $userIdInput : null]);
+                    }
                 }
 
                 $closedIds = array_values(array_filter(array_map(function($row) {

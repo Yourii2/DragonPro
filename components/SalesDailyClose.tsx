@@ -842,7 +842,25 @@ const SalesDailyClose: React.FC = () => {
 
         const closeResp = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=closeRepDaily`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ rep_id: Number(selectedRepId), journal_id: openDailyInfo ? openDailyInfo.id : 0, employee: currentEmpName, created_by: currentUserId })
+          body: JSON.stringify({
+            rep_id: Number(selectedRepId),
+            journal_id: openDailyInfo ? openDailyInfo.id : 0,
+            employee: currentEmpName,
+            created_by: currentUserId,
+            prev_balance: repBalance,
+            payment_amount: amount,
+            payment_action: amount === 0 ? 'none' : settlementDirection,
+            balance_after_payment: amount === 0 ? repBalance : (settlementDirection === 'collect' ? (repBalance + amount) : (repBalance - amount)),
+            delivered_orders_count: finalDeliveredList.length,
+            delivered_pieces: deliveredPieces,
+            delivered_value: deliveredValue,
+            returned_orders_count: finalReturnedList.length,
+            returned_pieces: returnedPieces,
+            returned_value: returnedValue,
+            postponed_orders_count: deferredOrders.length,
+            postponed_pieces: deferredPieces,
+            postponed_value: deferredValue
+          })
         });
         const closeJson = await closeResp.json().catch(() => null);
         if (!closeJson?.success) {
@@ -905,7 +923,7 @@ const SalesDailyClose: React.FC = () => {
     const pRepName = selectedRep?.name || '';
     const pTotal = repBalance;
     const pTreasury = selectedTreasuryName || 'مدفوعات إليكترونية';
-    const pAmount = paidAmount;
+    const pAmount = isSplitPayment ? (cashPaidAmount + electronicPaidAmount) : paidAmount;
     
     // Generate Rows for Delivered
     const delivHTML = finalDeliveredList.map(o => {
@@ -968,7 +986,7 @@ const SalesDailyClose: React.FC = () => {
     const deferredPiecesSum = deferredPieces;
     const deferredAmountSum = deferredValue;
 
-    const estimatedRemaining = settlementDirection === 'collect' ? (repBalance + paidAmount) : (repBalance - paidAmount);
+    const estimatedRemaining = pAmount === 0 ? repBalance : (settlementDirection === 'collect' ? (repBalance + pAmount) : (repBalance - pAmount));
 
     const html = `
       <html dir="rtl" lang="ar">
@@ -1052,7 +1070,7 @@ const SalesDailyClose: React.FC = () => {
           <div class="account-box">
             <div class="title">💰 ملخص الحساب</div>
             <div class="row"><span>رصيد المندوب الحالي</span><b dir="ltr">${money(pTotal)} ${currencySymbol} (${balanceLabel(pTotal)})</b></div>
-            <div class="row"><span>طريقة التسوية</span><b>${settlementDirection === 'collect' ? 'تحصيل من المندوب' : 'دفع للمندوب'}</b></div>
+            <div class="row"><span>طريقة التسوية</span><b>${pAmount === 0 ? 'بدون حركة مالية' : (settlementDirection === 'collect' ? 'تحصيل من المندوب' : 'دفع للمندوب')}</b></div>
             <div class="row"><span>المبلغ المدفوع للتقفيل</span><b dir="ltr">${money(pAmount)} ${currencySymbol}</b></div>
             <div class="row"><span>الخزينة</span><b>${pTreasury}</b></div>
             ${repTxType !== 'none' && repTxAmount > 0 ? `<div class="row" style="margin-top:4px;padding-top:4px;border-top:1px solid #ddd;"><span>${repTxType === 'bonus' ? 'حافز' : 'غرامة'}</span><b dir="ltr">${money(repTxAmount)} ${currencySymbol}</b></div>` : ''}

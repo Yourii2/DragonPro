@@ -1685,10 +1685,13 @@ ${productsSummaryHtml}
       const openingBalance = Number(row.prev_balance ?? 0);
       const paidAmount = Number(row.payment_amount ?? 0);
       const settlementDirection = row.payment_action || 'collect';
-      const currentBalance = Number(row.balance_after_payment ?? 0);
+      let currentBalance = Number(row.balance_after_payment ?? row.closing_amount ?? 0);
+      if (paidAmount === 0 && (!row.balance_after_payment || Number(row.balance_after_payment) === 0) && openingBalance !== 0) {
+        currentBalance = openingBalance;
+      }
       
       const totalRequiredBeforeClose = openingBalance;
-      const estimatedRemaining = currentBalance;
+      const estimatedRemaining = paidAmount === 0 ? openingBalance : currentBalance;
 
       // 5. بناء جداول التقرير
       const delivHTML = finalDeliveredList.map((o: any) => {
@@ -1806,7 +1809,7 @@ ${productsSummaryHtml}
             <div class="account-box">
               <div class="title">💰 ملخص الحساب</div>
               <div class="row"><span>الحساب قبل الإغلاق</span><b dir="ltr">${totalRequiredBeforeClose.toLocaleString()} ج.م</b></div>
-              <div class="row"><span>طريقة التسوية</span><b>${settlementDirection === 'collect' ? 'تحصيل من المندوب' : 'دفع للمندوب'}</b></div>
+              <div class="row"><span>طريقة التسوية</span><b>${paidAmount === 0 ? 'بدون حركة مالية' : (settlementDirection === 'collect' ? 'تحصيل من المندوب' : 'دفع للمندوب')}</b></div>
               <div class="row"><span>المبلغ المدفوع للتقفيل</span><b dir="ltr">${paidAmount.toLocaleString()} ج.م</b></div>
             </div>
           </div>
