@@ -1,6 +1,7 @@
 import Custom12HourTimePicker from './Custom12HourTimePicker';
 import React, { useState, useEffect, useMemo } from 'react';
 import { API_BASE_PATH } from '../services/apiConfig';
+import { formatOrderTime, formatLocalDate } from '../services/dateUtils';
 import { assetUrl } from '../services/assetUrl';
 import { Calendar, ShoppingCart, Printer, History, Search, PlusCircle, MinusCircle, UploadCloud, FileText, RefreshCcw, ClipboardPaste, MapPin, Phone, User, CheckSquare, Square, Eye, Edit, ChevronRight, AlertTriangle, AlertCircle, Lock } from 'lucide-react';
 import Swal from 'sweetalert2';
@@ -590,29 +591,6 @@ const parseOrderDateTime = (raw: any): string => {
   return str;
 };
 
-const formatOrderTime = (dateStr?: string | null): string => {
-  if (!dateStr) return '';
-  try {
-    const str = String(dateStr).trim();
-    const parts = str.replace('T', ' ').split(' ');
-    if (parts.length >= 2) {
-      const [year, month, day] = parts[0].split('-');
-      const timeParts = parts[1].split(':');
-      let hour = parseInt(timeParts[0] || '0', 10);
-      const min = timeParts[1] || '00';
-      const period = hour >= 12 ? 'م' : 'ص';
-      hour = hour % 12;
-      if (hour === 0) hour = 12;
-      const hourDisplay = hour < 10 ? `0${hour}` : `${hour}`;
-      return `${hourDisplay}:${min} ${period} - ${month}/${day}`;
-    }
-    const d = new Date(str);
-    if (isNaN(d.getTime())) return str;
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' - ' + d.toLocaleDateString([], { month: '2-digit', day: '2-digit' });
-  } catch {
-    return dateStr || '';
-  }
-};
 
 const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
   const [view, setView] = useState<string>(initialView || 'new-order');
@@ -864,6 +842,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       case 'pending': return <span className="bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400 px-2 py-1 rounded-lg text-[10px] font-bold">قيد الانتظار</span>;
       case 'confirmed': return <span className="bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 px-2 py-1 rounded-lg text-[10px] font-bold">مؤكد</span>;
       case 'with_rep': return <span className="bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-400 px-2 py-1 rounded-lg text-[10px] font-bold">مع المندوب</span>;
+      case 'returned_with_rep': return <span className="bg-orange-100 text-orange-700 dark:bg-orange-950/60 dark:text-orange-400 px-2 py-1 rounded-lg text-[10px] font-bold">مرتجع جزئي مع المندوب</span>;
       case 'in_delivery': return <span className="bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-400 px-2 py-1 rounded-lg text-[10px] font-bold">قيد التسليم</span>;
       case 'delivered': return <span className="bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 px-2 py-1 rounded-lg text-[10px] font-bold">تم التسليم</span>;
       case 'partial': return <span className="bg-teal-100 text-teal-700 dark:bg-teal-950/60 dark:text-teal-400 px-2 py-1 rounded-lg text-[10px] font-bold">تسليم جزئي</span>;
@@ -2240,6 +2219,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                         { value: 'pending', label: 'قيد الانتظار' },
                         { value: 'confirmed', label: 'مؤكد' },
                         { value: 'with_rep', label: 'مع المندوب' },
+                        { value: 'returned_with_rep', label: 'مرتجع جزئي مع المندوب' },
                         { value: 'in_delivery', label: 'قيد التسليم' },
                         { value: 'delivered', label: 'تم التسليم' },
                         { value: 'partial', label: 'تسليم جزئي' },
@@ -2373,6 +2353,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                     { value: 'pending', label: 'قيد الانتظار' },
                     { value: 'confirmed', label: 'مؤكد' },
                     { value: 'with_rep', label: 'مع المندوب' },
+                    { value: 'returned_with_rep', label: 'مرتجع جزئي مع المندوب' },
                     { value: 'in_delivery', label: 'قيد التسليم' },
                     { value: 'delivered', label: 'تم التسليم' },
                     { value: 'partial', label: 'تسليم جزئي' },
@@ -2951,6 +2932,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                   { value: 'pending', label: 'قيد الانتظار' },
                   { value: 'confirmed', label: 'مؤكد' },
                   { value: 'with_rep', label: 'مع المندوب' },
+                  { value: 'returned_with_rep', label: 'مرتجع جزئي مع المندوب' },
                   { value: 'in_delivery', label: 'قيد التسليم' },
                   { value: 'delivered', label: 'تم التسليم' },
                   { value: 'partial', label: 'تسليم جزئي' },

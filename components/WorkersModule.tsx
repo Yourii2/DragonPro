@@ -3,6 +3,7 @@ import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { Briefcase, CircleDollarSign, FileText, Fingerprint, List, Pencil, Plus, ReceiptText, Trash2 } from 'lucide-react';
 import CustomSelect from './CustomSelect';
+import { formatLocalDate } from '../services/dateUtils';
 
 interface WorkersModuleProps {
 	initialView?: string;
@@ -48,7 +49,7 @@ type WorkerTxRow = {
 	created_at?: string;
 };
 
-const monthNow = () => new Date().toISOString().slice(0, 7);
+const monthNow = () => formatLocalDate().slice(0, 7);
 
 const WorkersModule: React.FC<WorkersModuleProps> = ({ initialView }) => {
 	const [activeView, setActiveView] = useState<string>(initialView || 'list');
@@ -545,7 +546,7 @@ const WorkersModule: React.FC<WorkersModuleProps> = ({ initialView }) => {
 						</div>
 						<div>
 							<label class="block text-xs font-black text-slate-600 dark:text-slate-300 mb-1">التاريخ</label>
-							<input id="tx_date" type="date" class="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30" value="${new Date().toISOString().slice(0, 10)}">
+							<input id="tx_date" type="date" class="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30" value="${formatLocalDate()}">
 						</div>
 					</div>
 					<div class="mt-3">

@@ -7,6 +7,7 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import Barcode from './Barcode';
 import { UniversalWaybill, getSelectedTemplateId } from './UniversalWaybillRenderer';
+import { formatLocalDate } from '../services/dateUtils';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -106,7 +107,7 @@ export const PrintableContent: React.FC<{
   const computedTotals = calculateOrderTotals(computedSubtotal, shippingVal, discountType, discountValue, taxType, taxValue, calcOrder);
   const computedTotal = (order.total && Number(order.total) > 0) ? Number(order.total) : computedTotals.total;
 
-  const currentDate = new Date().toISOString().split('T')[0];
+  const currentDate = formatLocalDate();
   const pageDisplay = order.page || order.pageName || order.page_name || order.page_number || order.page_no || order.source || '-';
 
   const getUserDisplayName = (emp: any) => {

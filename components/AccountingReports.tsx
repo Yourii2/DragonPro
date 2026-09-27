@@ -10,6 +10,7 @@ import {
   BarChart3, List, AlertCircle, Filter
 } from 'lucide-react';
 import { API_BASE_PATH } from '../services/apiConfig';
+import { formatLocalDate, getFirstDayOfMonth, getDaysAgo } from '../services/dateUtils';
 import { useTheme } from './ThemeContext';
 import Swal from 'sweetalert2';
 import CustomSelect from './CustomSelect';
@@ -54,10 +55,8 @@ const AccountingReports: React.FC = () => {
   const { isDark } = useTheme();
   const sym = localStorage.getItem('Dragon_currency') || 'ج.م';
 
-  const today = new Date();
-  const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
-  const [startDate, setStartDate] = useState(firstDay.toISOString().slice(0, 10));
-  const [endDate, setEndDate] = useState(today.toISOString().slice(0, 10));
+  const [startDate, setStartDate] = useState(getFirstDayOfMonth());
+  const [endDate, setEndDate] = useState(formatLocalDate());
   const [repFilter, setRepFilter] = useState('');
   const [tab, setTab] = useState<'summary' | 'products' | 'reps' | 'daily' | 'orders'>('summary');
   const [loading, setLoading] = useState(false);
@@ -158,10 +157,10 @@ const AccountingReports: React.FC = () => {
 
   // ─── Quick date ranges ────────────────────────────────────────────────────────
   const quickRanges = [
-    { label: 'اليوم', s: today.toISOString().slice(0, 10), e: today.toISOString().slice(0, 10) },
-    { label: 'هذا الشهر', s: firstDay.toISOString().slice(0, 10), e: today.toISOString().slice(0, 10) },
-    { label: 'آخر 7 أيام', s: new Date(today.getTime() - 6 * 864e5).toISOString().slice(0, 10), e: today.toISOString().slice(0, 10) },
-    { label: 'آخر 30 يوم', s: new Date(today.getTime() - 29 * 864e5).toISOString().slice(0, 10), e: today.toISOString().slice(0, 10) },
+    { label: 'اليوم', s: formatLocalDate(), e: formatLocalDate() },
+    { label: 'هذا الشهر', s: getFirstDayOfMonth(), e: formatLocalDate() },
+    { label: 'آخر 7 أيام', s: getDaysAgo(6), e: formatLocalDate() },
+    { label: 'آخر 30 يوم', s: getDaysAgo(29), e: formatLocalDate() },
   ];
 
   // ─── Tabs config ─────────────────────────────────────────────────────────────

@@ -4,6 +4,7 @@ import { Wallet, TrendingUp, TrendingDown, ArrowLeftRight, Landmark, Plus, Searc
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
 import CustomSelect from './CustomSelect';
+import { formatLocalDate, formatLocalDateTime, getDaysAgo } from '../services/dateUtils';
 
 interface FinanceModuleProps {
   initialView?: string;
@@ -26,12 +27,8 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
   const isSubmittingTxRef = useRef(false);
 
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
-  const [detailStartDate, setDetailStartDate] = useState<string>(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 30);
-    return d.toISOString().slice(0,10);
-  });
-  const [detailEndDate, setDetailEndDate] = useState<string>(() => new Date().toISOString().slice(0,10));
+  const [detailStartDate, setDetailStartDate] = useState<string>(() => getDaysAgo(30));
+  const [detailEndDate, setDetailEndDate] = useState<string>(() => formatLocalDate());
   const [editingTreasury, setEditingTreasury] = useState<any>(null);
   const [selectedTreasury, setSelectedTreasury] = useState<any>(null);
   const currencySymbol = 'ج.م';
@@ -41,8 +38,8 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
   const [treasuryTransactions, setTreasuryTransactions] = useState<any[]>([]);
   const [isTransactionsLoading, setIsTransactionsLoading] = useState(false);
   const [isAllTxLoading, setIsAllTxLoading] = useState(false);
-  const [txFromDate, setTxFromDate] = useState<string>(() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10); });
-  const [txToDate, setTxToDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [txFromDate, setTxFromDate] = useState<string>(() => getDaysAgo(30));
+  const [txToDate, setTxToDate] = useState<string>(() => formatLocalDate());
   const [txTreasuryId, setTxTreasuryId] = useState<string>('');
   const [txEmployee, setTxEmployee] = useState<string>('');
   const [txTypeFilter, setTxTypeFilter] = useState<string>('');
@@ -53,7 +50,7 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
   const [editingAccount, setEditingAccount] = useState<any>(null);
   const [accountForm, setAccountForm] = useState({ code: '', name: '', type: 'asset', parent_id: '' });
   const [isJournalModalOpen, setIsJournalModalOpen] = useState(false);
-  const [journalForm, setJournalForm] = useState({ entry_date: new Date().toISOString().slice(0, 10), memo: '', posted: true });
+  const [journalForm, setJournalForm] = useState({ entry_date: formatLocalDate(), memo: '', posted: true });
   const [journalLines, setJournalLines] = useState<any[]>([{ account_id: '', debit: '', credit: '', memo: '' }]);
   const [isJournalDetailOpen, setIsJournalDetailOpen] = useState(false);
   const [selectedJournalEntry, setSelectedJournalEntry] = useState<any>(null);
@@ -175,20 +172,39 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
     }
   };
 
-  const isRepPaymentTx = (tx: any, details: any): boolean => {
-    // rep_payment_in/out may fall back to payment_in/out in DB enum; use details.rep_id or related_to_type to detect
-    const repTypes = ['rep_payment_in', 'rep_payment_out'];
-    const repRelTypes = ['rep', 'employee']; // employee is fallback for rel_to_type enum
+  const getTxDetailsObj = (tx: any): any => {
+    if (!tx || !tx.details) return {};
+    try {
+      const parsed = typeof tx.details === 'string' ? JSON.parse(tx.details) : tx.details;
+      return (parsed && typeof parsed === 'object') ? parsed : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const isRepPaymentTx = (tx: any, details?: any): boolean => {
+    const d = details || getTxDetailsObj(tx);
+    const repTypes = ['rep_payment_in', 'rep_payment_out', 'rep_settlement'];
+    const repRelTypes = ['rep', 'employee'];
+    const txType = String(tx?.type || '').trim();
+    const relType = String(tx?.related_to_type || '').trim();
+    const action = String(d?.action || '').trim();
+    const context = String(d?.context || '').trim();
+
     return (
-      repTypes.includes(tx.type) ||
-      (repRelTypes.includes(tx.related_to_type) && (tx.type === 'payment_in' || tx.type === 'payment_out') && details.rep_id)
+      repTypes.includes(txType) ||
+      Boolean(d?.rep_id) ||
+      ['settleDaily', 'startDaily', 'interimDailyPayment'].includes(action) ||
+      ['start_daily', 'close_daily', 'interim_daily', 'rep_settlement', 'rep_daily_close'].includes(context) ||
+      (repRelTypes.includes(relType) && ['payment_in', 'payment_out', 'payment', 'other'].includes(txType))
     );
   };
 
-  const isSupplierPaymentTx = (tx: any, details: any): boolean => {
+  const isSupplierPaymentTx = (tx: any, details?: any): boolean => {
+    const d = details || getTxDetailsObj(tx);
     const txType = String(tx?.type || '').trim();
     const relType = String(tx?.related_to_type || '').trim();
-    const subtype = String(details?.subtype || '').trim();
+    const subtype = String(d?.subtype || '').trim();
     return (
       txType === 'supplier_payment' ||
       subtype === 'supplier_payment' ||
@@ -196,60 +212,127 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
     );
   };
 
+  const getRepTransactionExactLabel = (tx: any, details?: any): string | null => {
+    const d = details || getTxDetailsObj(tx);
+    if (!isRepPaymentTx(tx, d)) return null;
+
+    const action = String(d?.action || '').trim();
+    const context = String(d?.context || '').trim();
+    const title = String(tx?.title || d?.title || '').trim();
+    const notes = String(tx?.memo || d?.notes || d?.reason || '').trim();
+    const amt = parseFloat(tx?.amount ?? 0);
+    const isOut = amt < 0 || String(tx?.type).includes('out') || d?.direction === 'out';
+
+    // 1. Interim daily payment
+    if (
+      action === 'interimDailyPayment' ||
+      context === 'interim_daily' ||
+      title.includes('اثناء اليوم') ||
+      notes.includes('اثناء اليوم') ||
+      notes.includes('تحت الحساب')
+    ) {
+      return 'تحصيل من المندوب اثناء اليوميه';
+    }
+
+    // 2. Start daily
+    if (
+      action === 'startDaily' ||
+      context === 'start_daily' ||
+      title.includes('بدء اليوم') ||
+      notes.includes('بدء اليوم')
+    ) {
+      return isOut ? 'دفع الى المندوب فى بدء اليوميه' : 'تحصيل من المندوب فى بدء اليوميه';
+    }
+
+    // 3. Close daily / Settlement
+    if (
+      action === 'settleDaily' ||
+      context === 'close_daily' ||
+      context === 'rep_settlement' ||
+      context === 'rep_daily_close' ||
+      title.includes('اغلاق اليوم') ||
+      title.includes('إغلاق اليوم') ||
+      title.includes('تسوية') ||
+      notes.includes('اغلاق اليوم') ||
+      notes.includes('إغلاق اليوم') ||
+      tx?.type === 'rep_settlement' ||
+      tx?.type === 'rep_payment_in' ||
+      tx?.type === 'rep_payment_out' ||
+      d?.rep_id
+    ) {
+      return isOut ? 'دفع الى المندوب فى اغلاق اليوميه' : 'تحصيل من المندوب فى اغلاق اليوميه';
+    }
+
+    return isOut ? 'دفع الى المندوب فى اغلاق اليوميه' : 'تحصيل من المندوب فى اغلاق اليوميه';
+  };
+
+  const formatTxDateTime = (dateStr: string) => {
+    if (!dateStr) return '—';
+    try {
+      const d = new Date(String(dateStr).replace(' ', 'T'));
+      if (isNaN(d.getTime())) return dateStr;
+      return d.toLocaleString('ar-EG', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true
+      });
+    } catch {
+      return dateStr;
+    }
+  };
+
   const getTxSource = (tx: any): string => {
-    const details = tx.details ? (() => { try { const p = JSON.parse(tx.details); return (p && typeof p === 'object') ? p : {}; } catch { return {}; } })() : {};
+    const details = getTxDetailsObj(tx);
     const subtype = details.subtype || '';
     const amt = parseFloat(tx.amount);
+    const treasuryName = tx.treasury_name || treasuries.find((t: any) => String(t.id) === String(tx.treasury_id || details.treasury_id))?.name || 'خزينة';
+
     if (subtype === 'transfer_in' || tx.type === 'transfer_in') {
       const fromId = details.transfer_from;
       const found = fromId ? treasuries.find((t: any) => String(t.id) === String(fromId)) : null;
       return found ? found.name : (fromId ? `خزينة #${fromId}` : 'خزينة أخرى');
     }
-    if (subtype === 'transfer_out' || tx.type === 'transfer_out') return tx.treasury_name || 'خزينة';
+    if (subtype === 'transfer_out' || tx.type === 'transfer_out') return treasuryName;
     if (isSupplierPaymentTx(tx, details)) {
-      return tx.treasury_name || 'خزينة';
+      return treasuryName;
     }
     // Rep payment: collect from rep (positive) → source is rep; pay to rep (negative) → source is treasury
     if (isRepPaymentTx(tx, details)) {
       return amt >= 0
-        ? (tx.related_name || `مندوب #${tx.related_to_id || ''}`)
-        : (tx.treasury_name || 'خزينة');
+        ? (tx.related_name || (details.rep_id ? `مندوب #${details.rep_id}` : (tx.related_to_id ? `مندوب #${tx.related_to_id}` : 'مندوب')))
+        : treasuryName;
     }
     if (amt >= 0) return tx.related_name || 'إيداع خارجي';
-    return tx.treasury_name || 'خزينة';
+    return treasuryName;
   };
 
   const getTxDest = (tx: any): string => {
-    const details = tx.details ? (() => { try { const p = JSON.parse(tx.details); return (p && typeof p === 'object') ? p : {}; } catch { return {}; } })() : {};
+    const details = getTxDetailsObj(tx);
     const subtype = details.subtype || '';
     const amt = parseFloat(tx.amount);
+    const treasuryName = tx.treasury_name || treasuries.find((t: any) => String(t.id) === String(tx.treasury_id || details.treasury_id))?.name || 'خزينة';
+
     if (subtype === 'transfer_out' || tx.type === 'transfer_out') {
       const toId = details.transfer_to;
       const found = toId ? treasuries.find((t: any) => String(t.id) === String(toId)) : null;
       return found ? found.name : (toId ? `خزينة #${toId}` : 'خزينة أخرى');
     }
-    if (subtype === 'transfer_in' || tx.type === 'transfer_in') return tx.treasury_name || 'خزينة';
+    if (subtype === 'transfer_in' || tx.type === 'transfer_in') return treasuryName;
     if (isSupplierPaymentTx(tx, details)) {
       return tx.related_name || `مورد #${tx.related_to_id || ''}`;
     }
     // Rep payment: collect from rep (positive) → dest is treasury; pay to rep (negative) → dest is rep
     if (isRepPaymentTx(tx, details)) {
       return amt >= 0
-        ? (tx.treasury_name || 'خزينة')
-        : (tx.related_name || `مندوب #${tx.related_to_id || ''}`);
+        ? treasuryName
+        : (tx.related_name || (details.rep_id ? `مندوب #${details.rep_id}` : (tx.related_to_id ? `مندوب #${tx.related_to_id}` : 'مندوب')));
     }
-    if (amt >= 0) return tx.treasury_name || 'خزينة';
+    if (amt >= 0) return treasuryName;
     return tx.related_name || 'مصروف';
-  };
-
-  const getTxDetailsObj = (tx: any): any => {
-    if (!tx || !tx.details) return {};
-    try {
-      const parsed = JSON.parse(tx.details);
-      return (parsed && typeof parsed === 'object') ? parsed : {};
-    } catch {
-      return {};
-    }
   };
 
   // visibleTransactions moved below
@@ -257,7 +340,7 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
   const printTxReport = () => {
     const rows = visibleTransactions.map(tx => `
       <tr>
-        <td>${new Date(tx.transaction_date).toLocaleString('ar-EG')}</td>
+        <td>${formatTxDateTime(tx.transaction_date)}</td>
         <td>${getTxSource(tx)}</td>
         <td>${getTxDisplayLabel(tx)}</td>
         <td>${getTxDest(tx)}</td>
@@ -670,32 +753,29 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
 
   const getTxDisplayLabel = (tx: any) => {
     if (!tx) return '-';
+    const repLabel = getRepTransactionExactLabel(tx);
+    if (repLabel) return repLabel;
     if (tx.title && String(tx.title).trim()) return tx.title;
     if (tx.memo && String(tx.memo).trim()) return tx.memo;
-    try {
-      const d = tx.details ? JSON.parse(tx.details) : {};
-      if (d && isRepPaymentTx(tx, d)) {
-        return d.context === 'start_daily' ? 'بدء يومية' : 'إغلاق يومية';
-      }
-    } catch { /* fallthrough */ }
     return getTransactionTypeLabel(tx.type, tx.details);
   };
 
-    const getTxDisplayNotes = (tx: any) => {
+  const getTxDisplayNotes = (tx: any) => {
     if (!tx) return '—';
-    try {
-      const d = tx.details ? JSON.parse(tx.details) : {};
-      if (d && isRepPaymentTx(tx, d)) {
-        const isStart = d.context === 'start_daily';
-        const amt = parseFloat(tx.amount);
-        if (amt >= 0) return isStart ? 'تحصيل من المندوب في بدء اليومية' : 'تحصيل من المندوب في إغلاق اليومية';
-        return isStart ? 'دفع إلى المندوب في بدء اليومية' : 'دفع إلى المندوب في إغلاق اليومية';
+    const repLabel = getRepTransactionExactLabel(tx);
+    const d = getTxDetailsObj(tx);
+    const explicitNote = tx.memo || d.notes || d.reason || d.note || tx.title;
+    if (explicitNote && String(explicitNote).trim()) {
+      const s = String(explicitNote).trim();
+      if (!s.includes('اغلاق اليوميه تلقائيا') && !s.includes('تسوية يومية')) {
+        return s;
       }
-    } catch { /* fallthrough */ }
+    }
+    if (repLabel) return repLabel;
     if (tx.memo && String(tx.memo).trim()) return tx.memo;
     if (tx.title && String(tx.title).trim()) return tx.title;
     return getTransactionNotes(tx.details);
-    };
+  };
 
   const uniqueEmployees = useMemo(() => {
     const emps = new Set<string>();
@@ -718,11 +798,14 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
     return (transactions || []).filter((tx: any) => {
       const hasTreasury = tx.treasury_id !== null && tx.treasury_id !== undefined && String(tx.treasury_id).trim() !== '';
       if (!hasTreasury) return false;
+      if (userDefaults?.can_change_treasury === false && userDefaults?.default_treasury_id) {
+        if (String(tx.treasury_id) !== String(userDefaults.default_treasury_id)) return false;
+      }
       if (txEmployee && tx.created_by_name !== txEmployee) return false;
       if (txTypeFilter && getTxDisplayLabel(tx) !== txTypeFilter) return false;
       return true;
     });
-  }, [transactions, txEmployee, txTypeFilter]);
+  }, [transactions, txEmployee, txTypeFilter, userDefaults?.can_change_treasury, userDefaults?.default_treasury_id]);
 
   const printTreasuryReport = () => {
     if (!selectedTreasury) return;
@@ -736,9 +819,9 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
     if (treasuryTransactions.length > 0) {
         transactionsHtml = treasuryTransactions.map(tx => `
           <tr>
-            <td>${new Date(tx.transaction_date).toLocaleString('ar-EG')}</td>
-            <td>${(tx.title && String(tx.title).trim()) ? tx.title : ((tx.memo && String(tx.memo).trim()) ? tx.memo : getTransactionTypeLabel(tx.type, tx.details))}</td>
-            <td>${(tx.memo && String(tx.memo).trim()) ? tx.memo : getTransactionNotes(tx.details)}</td>
+            <td>${formatTxDateTime(tx.transaction_date)}</td>
+            <td>${getTxDisplayLabel(tx)}</td>
+            <td>${getTxDisplayNotes(tx)}</td>
             <td style="color: ${tx.amount >= 0 ? 'green' : 'red'}; font-weight: bold; text-align: left; direction: ltr;">${parseFloat(tx.amount).toLocaleString()} ${currencySymbol}</td>
           </tr>
         `).join('');
@@ -871,7 +954,7 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
       if (result.success) {
         Swal.fire('نجاح!', 'تم تسجيل العملية بنجاح.', 'success');
         closeTransactionModal();
-        const today = new Date().toISOString().slice(0, 10);
+        const today = formatLocalDate();
         const nextFromDate = txFromDate && txFromDate > today ? today : txFromDate;
         const nextToDate = !txToDate || txToDate < today ? today : txToDate;
         const nextTreasuryFilter = (affectedTreasuryId && txTreasuryId && txTreasuryId !== affectedTreasuryId) ? '' : txTreasuryId;
@@ -904,7 +987,7 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
             related_to_id: payload.related_to_id || null,
             related_name: null,
             amount: Number(payload.amount || 0),
-            transaction_date: new Date().toISOString().slice(0, 19).replace('T', ' '),
+            transaction_date: formatLocalDateTime(),
             details: JSON.stringify({ notes: payload.notes || '', subtype: payload.type || '' }),
             created_by_name: currentUserName,
           };
@@ -1052,9 +1135,12 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
                 <select
                   value={txTreasuryId}
                   onChange={e => setTxTreasuryId(e.target.value)}
+                  disabled={Boolean(userDefaults && userDefaults.default_treasury_id && userDefaults.can_change_treasury === false)}
                   className="bg-white dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm text-slate-700 dark:text-white"
                 >
-                  <option value="">جميع الخزائن</option>
+                  {!(userDefaults && userDefaults.default_treasury_id && userDefaults.can_change_treasury === false) && (
+                    <option value="">جميع الخزائن</option>
+                  )}
                   {treasuries.map((t: any) => <option key={t.id} value={String(t.id)}>{t.name}</option>)}
                 </select>
                 <select
@@ -1106,7 +1192,7 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
                   <tbody className="divide-y dark:divide-slate-700 text-slate-700 dark:text-slate-300">
                     {visibleTransactions.map((tx: any) => (
                       <tr key={tx.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                        <td className="px-4 py-3 text-xs whitespace-nowrap">{new Date(tx.transaction_date).toLocaleString('ar-EG')}</td>
+                        <td className="px-4 py-3 text-xs whitespace-nowrap">{formatTxDateTime(tx.transaction_date)}</td>
                         <td className="px-4 py-3 text-xs font-bold text-blue-600 dark:text-blue-400 whitespace-nowrap">{getTxSource(tx)}</td>
                         <td className="px-4 py-3 font-bold whitespace-nowrap">{getTxDisplayLabel(tx)}</td>
                         <td className="px-4 py-3 text-xs font-bold text-emerald-600 dark:text-emerald-400 whitespace-nowrap">{getTxDest(tx)}</td>
@@ -1157,19 +1243,21 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
                       <table className="w-full text-right text-sm">
                           <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 sticky top-0">
                               <tr>
-                                  <th className="px-4 py-3 font-bold">التاريخ والوقت</th>
-                                  <th className="px-4 py-3 font-bold">نوع العملية</th>
-                                  <th className="px-4 py-3 font-bold">البيان/السبب</th>
-                                  <th className="px-4 py-3 font-bold">المبلغ</th>
+                                  <th className="px-4 py-3 font-bold whitespace-nowrap">التاريخ والوقت</th>
+                                  <th className="px-4 py-3 font-bold whitespace-nowrap">نوع العملية</th>
+                                  <th className="px-4 py-3 font-bold whitespace-nowrap">البيان/السبب</th>
+                                  <th className="px-4 py-3 font-bold whitespace-nowrap">المبلغ</th>
+                                  <th className="px-4 py-3 font-bold whitespace-nowrap">الموظف</th>
                               </tr>
                           </thead>
                           <tbody className="divide-y dark:divide-slate-700">
                               {treasuryTransactions.map(tx => (
                                   <tr key={tx.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50">
-                                      <td className="px-4 py-3 text-xs">{new Date(tx.transaction_date).toLocaleString('ar-EG')}</td>
-                                      <td className="px-4 py-3 font-bold">{getTxDisplayLabel(tx)}</td>
-                                      <td className="px-4 py-3 text-xs">{getTxDisplayNotes(tx)}</td>
-                                      <td className={`px-4 py-3 font-black ${tx.amount >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{parseFloat(tx.amount).toLocaleString()} {currencySymbol}</td>
+                                      <td className="px-4 py-3 text-xs whitespace-nowrap">{formatTxDateTime(tx.transaction_date)}</td>
+                                      <td className="px-4 py-3 font-bold whitespace-nowrap">{getTxDisplayLabel(tx)}</td>
+                                      <td className="px-4 py-3 text-xs" title={getTxDisplayNotes(tx)}>{getTxDisplayNotes(tx)}</td>
+                                      <td className={`px-4 py-3 font-black whitespace-nowrap ${Number(tx.amount) >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{parseFloat(tx.amount).toLocaleString()} {currencySymbol}</td>
+                                      <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">{tx.created_by_name || '—'}</td>
                                   </tr>
                               ))}
                           </tbody>

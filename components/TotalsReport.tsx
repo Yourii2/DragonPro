@@ -2,8 +2,9 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { translateTxnLabel } from '../services/labelHelpers';
 import Swal from 'sweetalert2';
+import { formatLocalDate, getFirstDayOfMonth, getDaysAgo } from '../services/dateUtils';
 
-const formatDate = (d: Date) => d.toISOString().slice(0,10);
+const formatDate = (d?: Date | string | number | null) => formatLocalDate(d);
 
 const TotalsReport: React.FC = () => {
   const today = new Date();
@@ -252,10 +253,10 @@ const TotalsReport: React.FC = () => {
 
   const kpiClass = "p-4 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-right";
   const quickRanges = [
-    { label: 'اليوم', start: new Date().toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) },
-    { label: 'هذا الشهر', start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) },
-    { label: 'آخر 7 أيام', start: new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) },
-    { label: 'آخر 30 يوم', start: new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) }
+    { label: 'اليوم', start: formatLocalDate(), end: formatLocalDate() },
+    { label: 'هذا الشهر', start: getFirstDayOfMonth(), end: formatLocalDate() },
+    { label: 'آخر 7 أيام', start: getDaysAgo(6), end: formatLocalDate() },
+    { label: 'آخر 30 يوم', start: getDaysAgo(29), end: formatLocalDate() }
   ];
 
   return (

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { useTheme } from './ThemeContext';
+import { formatLocalDate, getFirstDayOfMonth, getDaysAgo } from '../services/dateUtils';
 import Swal from 'sweetalert2';
 import { RefreshCw, ArrowUpRight, ArrowDownRight, Printer, Download, Search, Coins } from 'lucide-react';
 
@@ -28,10 +29,8 @@ const ReportFinesIncentives: React.FC = () => {
   const { isDark } = useTheme();
   const sym = localStorage.getItem('Dragon_currency') || 'ج.م';
   
-  const today = new Date();
-  const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
-  const [startDate, setStartDate] = useState(firstDay.toISOString().slice(0, 10));
-  const [endDate, setEndDate] = useState(today.toISOString().slice(0, 10));
+  const [startDate, setStartDate] = useState(getFirstDayOfMonth());
+  const [endDate, setEndDate] = useState(formatLocalDate());
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   
@@ -237,10 +236,10 @@ const ReportFinesIncentives: React.FC = () => {
 
   const kpiClass = "p-5 rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-right shadow-sm flex flex-col justify-between";
   const quickRanges = [
-    { label: 'اليوم', start: new Date().toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) },
-    { label: 'هذا الشهر', start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) },
-    { label: 'آخر 7 أيام', start: new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) },
-    { label: 'آخر 30 يوم', start: new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) }
+    { label: 'اليوم', start: formatLocalDate(), end: formatLocalDate() },
+    { label: 'هذا الشهر', start: getFirstDayOfMonth(), end: formatLocalDate() },
+    { label: 'آخر 7 أيام', start: getDaysAgo(6), end: formatLocalDate() },
+    { label: 'آخر 30 يوم', start: getDaysAgo(29), end: formatLocalDate() }
   ];
 
   return (

@@ -2,8 +2,9 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { translateTxnLabel } from '../services/labelHelpers';
 import Swal from 'sweetalert2';
+import { formatLocalDate } from '../services/dateUtils';
 
-const formatDate = (d: Date) => d.toISOString().slice(0,10);
+const formatDate = (d?: Date | string | number | null) => formatLocalDate(d);
 
 const DailyReport: React.FC = () => {
   const today = new Date();

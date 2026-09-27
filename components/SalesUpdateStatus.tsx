@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
 import CustomSelect from './CustomSelect';
 import { PrintableContent, PrintableOrders, PrintableOrdersSingle } from './PrintTemplates';
 import { cleanBarcode, isOrderMatchingBarcode } from '../services/barcodeUtils';
+import { ArrowLeftRight, Check, AlertCircle, Loader2, RefreshCw, Search, X } from 'lucide-react';
 
 // --- المكون الرئيسي ---
 
@@ -31,6 +32,30 @@ const SalesUpdateStatus: React.FC = () => {
   const [scanInput, setScanInput] = useState('');
   const [scannedBarcodes, setScannedBarcodes] = useState<Array<{ code: string; orderId?: number }>>([]);
   const [repSearch, setRepSearch] = useState('');
+
+  // --- حالة الاستبدال (Exchange Order Item) ---
+  const [openExchangeOrder, setOpenExchangeOrder] = useState<any | null>(null);
+  const [exchangeWarehouse, setExchangeWarehouse] = useState<number | undefined>(undefined);
+  const [exchangeOldItem, setExchangeOldItem] = useState<{
+    lineId: string;
+    orderItemId?: number;
+    productId: number;
+    name: string;
+    color: string;
+    size: string;
+    price: number;
+    maxQty: number;
+    exchangeQty: number;
+  } | null>(null);
+  const [exchangeMode, setExchangeMode] = useState<'same_product' | 'other_product'>('same_product');
+  const [exchangeProductsCatalog, setExchangeProductsCatalog] = useState<any[]>([]);
+  const [exchangeTargetProductId, setExchangeTargetProductId] = useState<number | null>(null);
+  const [exchangeTargetVariantId, setExchangeTargetVariantId] = useState<number | null>(null);
+  const [exchangeCustomPrice, setExchangeCustomPrice] = useState<string>('');
+  const [exchangeProductSearch, setExchangeProductSearch] = useState<string>('');
+  const [exchangeNotes, setExchangeNotes] = useState<string>('');
+  const [exchangeLoadingCatalog, setExchangeLoadingCatalog] = useState<boolean>(false);
+  const [exchangeSubmitting, setExchangeSubmitting] = useState<boolean>(false);
 
   // حالة الطباعة
   const [ordersToPrint, setOrdersToPrint] = useState<any[] | null>(null);
@@ -158,27 +183,31 @@ const SalesUpdateStatus: React.FC = () => {
       'pending': 'مؤجل',
       'in_delivery': 'قيد التسليم',
       'cancelled': 'أُلغي',
-      'partial': 'مرتجع جزئي',
-      'new': 'جديد'
+      'partial': 'تسليم جزئي',
+      'partial_return': 'تسليم جزئي',
+      'new': 'جديد',
+      'returned_with_rep': 'مرتجع جزئي مع المندوب'
     };
     return map[st] || s;
   };
 
   const computeOrderSubtotal = (o: any) => {
     if (!o) return 0;
+    // Prioritize products list to accurately reflect current items after partial returns
+    if (Array.isArray(o.products) && o.products.length > 0) {
+      const prodSum = o.products.reduce((s: any, p: any) => s + (Number(p.quantity || p.qty || 0) * Number(p.price || p.sale_price || p.price_per_unit || 0)), 0);
+      if (prodSum > 0) return prodSum;
+    }
+    if (Array.isArray(o.order_items) && o.order_items.length > 0) {
+      const itemSum = o.order_items.reduce((s: any, it: any) => s + (Number(it.quantity || it.qty || 0) * Number(it.price || it.sale_price || it.unit_price || 0)), 0);
+      if (itemSum > 0) return itemSum;
+    }
     // Prioritize DB-level total/shipping to accurately account for discounts
-    if (o.total_amount !== undefined && o.shipping_fees !== undefined) return Number(o.total_amount || 0) - Number(o.shipping_fees || 0);
-    if (o.total !== undefined && o.shipping !== undefined) return Number(o.total || 0) - Number(o.shipping || 0);
+    if (o.total_amount !== undefined && o.shipping_fees !== undefined) return Math.max(0, Number(o.total_amount || 0) - Number(o.shipping_fees || 0));
+    if (o.total !== undefined && o.shipping !== undefined) return Math.max(0, Number(o.total || 0) - Number(o.shipping || 0));
 
     if (o.subTotal !== undefined) return Number(o.subTotal || 0);
     if (o.sub_total !== undefined) return Number(o.sub_total || 0);
-    // fallback to products list if no total info
-    if (o.order_items && Array.isArray(o.order_items) && o.order_items.length > 0) {
-      return o.order_items.reduce((s: any, it: any) => s + (Number(it.quantity || it.qty || 0) * Number(it.price || it.sale_price || it.unit_price || 0)), 0);
-    }
-    if (o.products && Array.isArray(o.products) && o.products.length > 0) {
-      return o.products.reduce((s: any, p: any) => s + (Number(p.quantity || p.qty || 0) * Number(p.price || p.sale_price || 0)), 0);
-    }
     return Number(o.total_amount || o.total || 0);
   };
 
@@ -194,10 +223,11 @@ const SalesUpdateStatus: React.FC = () => {
       })
       .filter((o: any) => {
         const status = String(o?.status || '').toLowerCase();
-        // استبعاد الطلبات التي تم إرجاعها بالكامل فقط
+        // استبعاد الطلبات التي تم إرجاعها بالكامل فقط أو التي لا تحتوي على قطع متبقية
         if (status === 'returned' || status === 'full_return') return false;
-        // الطلبات التي تم إرجاعها جزئيًا أو التي لا تزال تحتوي على قطع متبقية يجب أن تظهر
-        if (status === 'partial_return' || status === 'partial') return true;
+        if (Number(o?.remainingPieces || 0) <= 0) return false;
+        // الطلبات التي تم إرجاعها جزئيًا أو التي لا تزال تحتوي على قطع متبقية أو بحالة مرتجع مع المندوب يجب أن تظهر
+        if (status === 'partial_return' || status === 'partial' || status === 'returned_with_rep') return true;
         return Number(o?.remainingPieces || 0) > 0;
       });
   };
@@ -512,10 +542,28 @@ const SalesUpdateStatus: React.FC = () => {
             if (!prev) return prev;
             const newOrders = (prev.orders || []).map((o: any) => o.id === updatedOrder.id ? {
               ...o,
+              ...updatedOrder,
               orderNumber: updatedOrder.order_number ?? updatedOrder.orderNumber ?? o.orderNumber,
               customerName: updatedOrder.customer_name ?? updatedOrder.customerName ?? o.customerName,
-              products: Array.isArray(updatedOrder.products) ? updatedOrder.products.map((p: any) => ({ productId: p.productId || p.product_id, name: p.name, color: p.color, size: p.size, quantity: p.quantity, price: p.price || p.price_per_unit, total: p.total })) : o.products
-            } : o);
+              total_amount: Number(updatedOrder.total_amount ?? o.total_amount ?? 0),
+              total: Number(updatedOrder.total_amount ?? o.total ?? 0),
+              shipping_fees: Number(updatedOrder.shipping_fees ?? o.shipping_fees ?? 0),
+              shipping: Number(updatedOrder.shipping_fees ?? o.shipping ?? 0),
+              status: updatedOrder.status || 'partial',
+              products: Array.isArray(updatedOrder.products) ? updatedOrder.products.map((p: any) => ({
+                productId: p.productId || p.product_id,
+                name: p.name,
+                color: p.color,
+                size: p.size,
+                quantity: Number(p.quantity || 0),
+                qty: Number(p.quantity || 0),
+                price: Number(p.price || p.price_per_unit || 0),
+                total: Number(p.total || (Number(p.quantity || 0) * Number(p.price || p.price_per_unit || 0)))
+              })) : o.products,
+              remainingPieces: Array.isArray(updatedOrder.products)
+                ? updatedOrder.products.reduce((s: number, p: any) => s + Number(p.quantity || 0), 0)
+                : 0
+            } : o).filter((ord: any) => Number(ord.remainingPieces || 0) > 0 && String(ord.status || '').toLowerCase() !== 'returned');
             // Recalculate productsCount and ordersCount for this rep and update repsSummary
             try {
               const repIdLocal = prev.repId;
@@ -549,6 +597,14 @@ const SalesUpdateStatus: React.FC = () => {
           }
         } catch (jErr) { console.warn('updateJournalOrderStatus partial_return failed (non-critical)', jErr); }
 
+        // إعادة تحميل طلبات المندوب لضمان تحديث الحسابات والقيم
+        try {
+          if (savedOrderRepId) {
+            const freshOrders = await fetchOrdersForRep(Number(savedOrderRepId));
+            setOpenRepOrders((prev: any) => prev ? ({ ...prev, orders: freshOrders }) : prev);
+          }
+        } catch (freshErr) { console.warn('fetchOrdersForRep refresh failed', freshErr); }
+
         // Show concise confirmation with counts and warehouse name
         try {
           const ordersCount = 1;
@@ -575,6 +631,210 @@ const SalesUpdateStatus: React.FC = () => {
     } catch (e) {
       console.error(e);
       Swal.fire('خطأ', 'فشل في الاتصال بالخادم.', 'error');
+    }
+  };
+
+  // ============================================================
+  // Exchange Handlers (استبدال أصناف الطلب)
+  // ============================================================
+  const loadExchangeCatalog = async (wId?: number) => {
+    try {
+      setExchangeLoadingCatalog(true);
+      const url = wId 
+        ? `${API_BASE_PATH}/api.php?module=products&action=getAll&warehouse_id=${wId}`
+        : `${API_BASE_PATH}/api.php?module=products&action=getAll`;
+      const res = await fetch(url, { credentials: 'include' });
+      const json = await res.json();
+      if (json && json.success) {
+        setExchangeProductsCatalog(json.data || []);
+      }
+    } catch (e) {
+      console.error('Failed to load exchange catalog', e);
+    } finally {
+      setExchangeLoadingCatalog(false);
+    }
+  };
+
+  const openExchangeModal = async (order: any) => {
+    setOpenExchangeOrder(order);
+    const defaultWid = userDefaults && userDefaults.default_warehouse_id 
+      ? Number(userDefaults.default_warehouse_id) 
+      : (warehouses[0]?.id ? Number(warehouses[0].id) : undefined);
+    setExchangeWarehouse(defaultWid);
+    setExchangeMode('same_product');
+    setExchangeTargetProductId(null);
+    setExchangeTargetVariantId(null);
+    setExchangeCustomPrice('');
+    setExchangeProductSearch('');
+    setExchangeNotes('');
+
+    const prods = order.products || [];
+    if (prods.length > 0) {
+      const p0 = prods[0];
+      setExchangeOldItem({
+        lineId: p0.line_id ?? p0.lineId ?? `${order.id}-0`,
+        orderItemId: p0.id || p0.order_item_id,
+        productId: Number(p0.productId || p0.product_id || p0.id || 0),
+        name: p0.name || '',
+        color: (p0.color ?? p0.variant_color ?? p0.variant ?? p0.colorName) || '',
+        size: (p0.size ?? p0.variant_size ?? p0.measure ?? p0.sizeName) || '',
+        price: Number(p0.price || p0.sale_price || p0.price_per_unit || 0),
+        maxQty: Number(p0.quantity || p0.qty || 1),
+        exchangeQty: 1
+      });
+    } else {
+      setExchangeOldItem(null);
+    }
+
+    await loadExchangeCatalog(defaultWid);
+  };
+
+  const currentParentProduct = useMemo(() => {
+    if (!exchangeOldItem || exchangeProductsCatalog.length === 0) return null;
+    let found = exchangeProductsCatalog.find((p: any) => 
+      (p.variants || []).some((v: any) => Number(v.id) === Number(exchangeOldItem.productId))
+    );
+    if (!found) {
+      found = exchangeProductsCatalog.find((p: any) => 
+        (p.name || '').trim().toLowerCase() === (exchangeOldItem.name || '').trim().toLowerCase()
+      );
+    }
+    return found || null;
+  }, [exchangeOldItem, exchangeProductsCatalog]);
+
+  const selectedOtherParentProduct = useMemo(() => {
+    if (!exchangeTargetProductId || exchangeProductsCatalog.length === 0) return null;
+    return exchangeProductsCatalog.find((p: any) => Number(p.id) === Number(exchangeTargetProductId)) || null;
+  }, [exchangeTargetProductId, exchangeProductsCatalog]);
+
+  const currentAvailableVariants = useMemo(() => {
+    if (exchangeMode === 'same_product') {
+      return currentParentProduct?.variants || [];
+    } else {
+      return selectedOtherParentProduct?.variants || [];
+    }
+  }, [exchangeMode, currentParentProduct, selectedOtherParentProduct]);
+
+  const selectedNewVariant = useMemo(() => {
+    if (!exchangeTargetVariantId || currentAvailableVariants.length === 0) return null;
+    return currentAvailableVariants.find((v: any) => Number(v.id) === Number(exchangeTargetVariantId)) || null;
+  }, [exchangeTargetVariantId, currentAvailableVariants]);
+
+  const exchangeOldTotal = useMemo(() => {
+    if (!exchangeOldItem) return 0;
+    return Number(exchangeOldItem.exchangeQty || 0) * Number(exchangeOldItem.price || 0);
+  }, [exchangeOldItem]);
+
+  const exchangeNewUnitPrice = useMemo(() => {
+    if (!selectedNewVariant) return 0;
+    if (exchangeCustomPrice !== '' && !isNaN(Number(exchangeCustomPrice))) {
+      return Math.max(0, Number(exchangeCustomPrice));
+    }
+    return Number(selectedNewVariant.sale_price ?? selectedNewVariant.price ?? 0);
+  }, [selectedNewVariant, exchangeCustomPrice]);
+
+  const exchangeNewTotal = useMemo(() => {
+    if (!exchangeOldItem || !selectedNewVariant) return 0;
+    return Number(exchangeOldItem.exchangeQty || 0) * exchangeNewUnitPrice;
+  }, [exchangeOldItem, selectedNewVariant, exchangeNewUnitPrice]);
+
+  const exchangePriceDiff = useMemo(() => {
+    return exchangeNewTotal - exchangeOldTotal;
+  }, [exchangeNewTotal, exchangeOldTotal]);
+
+  const submitExchangeOrderItem = async () => {
+    if (!openExchangeOrder) return;
+    if (!exchangeWarehouse) {
+      Swal.fire('مطلوب', 'يرجى تحديد المستودع لإتمام الاستبدال.', 'warning');
+      return;
+    }
+    if (!exchangeOldItem) {
+      Swal.fire('مطلوب', 'يرجى اختيار المنتج المراد استبداله من الطلب.', 'warning');
+      return;
+    }
+    if (!selectedNewVariant) {
+      Swal.fire('مطلوب', 'يرجى اختيار المنتج البديل (اللون والمقاس).', 'warning');
+      return;
+    }
+    const availStock = Number(selectedNewVariant.total_stock || selectedNewVariant.stock || 0);
+    if (availStock < exchangeOldItem.exchangeQty) {
+      Swal.fire('رصيد غير كافٍ', `الكمية المتوفرة في المستودع للمنتج البديل هي ${availStock} قطعة فقط، ولا تكفي لاستبدال ${exchangeOldItem.exchangeQty} قطعة.`, 'error');
+      return;
+    }
+
+    try {
+      setExchangeSubmitting(true);
+      const payload = {
+        order_id: openExchangeOrder.id,
+        warehouse_id: exchangeWarehouse,
+        old_item: {
+          order_item_id: exchangeOldItem.orderItemId,
+          product_id: exchangeOldItem.productId,
+          quantity: exchangeOldItem.exchangeQty,
+          price: exchangeOldItem.price
+        },
+        new_item: {
+          variant_id: selectedNewVariant.id,
+          quantity: exchangeOldItem.exchangeQty,
+          price: exchangeNewUnitPrice
+        },
+        notes: exchangeNotes
+      };
+
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=exchangeOrderItem`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.message || 'فشل إتمام الاستبدال');
+      }
+
+      if (data.order && openRepOrders && Array.isArray(openRepOrders.orders)) {
+        const updated = data.order;
+        setOpenRepOrders((prev: any) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            orders: (prev.orders || []).map((o: any) => (o.id === updated.id ? { ...o, ...updated } : o))
+          };
+        });
+      }
+
+      if (openRepOrders && openRepOrders.repId) {
+        try {
+          const uRes = await fetch(`${API_BASE_PATH}/api.php?module=users&action=getAllWithBalance&related_to_type=rep&rep_id=${openRepOrders.repId}`, { credentials: 'include' });
+          const uJson = await uRes.json();
+          if (uJson?.success && Array.isArray(uJson.data) && uJson.data.length > 0) {
+            const freshBal = Number(uJson.data[0].balance || 0);
+            setRepsSummary(prev => prev.map(r => Number(r.repId) === Number(openRepOrders.repId) ? { ...r, balance: freshBal } : r));
+            setOpenRepOrders((prev: any) => prev ? { ...prev, balance: freshBal } : prev);
+          }
+        } catch (e) {}
+      }
+
+      setOpenExchangeOrder(null);
+      setExchangeOldItem(null);
+      setExchangeTargetVariantId(null);
+
+      let diffMsg = '';
+      if (Math.abs(data.price_diff) > 0.001) {
+        diffMsg = data.price_diff > 0
+          ? `<br><span style="color:#059669; font-weight:bold;">زيادة مطلوبة: +${data.price_diff} ج.م تم إضافتها لإجمالي الأوردر وزيادة المطلوب من المندوب.</span>`
+          : `<br><span style="color:#2563eb; font-weight:bold;">تخفيض للعميل: ${data.price_diff} ج.م تم خصمها من إجمالي الأوردر وتخفيض المطلوب من المندوب.</span>`;
+      }
+
+      Swal.fire({
+        title: 'تم الاستبدال بنجاح',
+        html: `تم استبدال المنتج بنجاح وتحديث حركة المخزون في المستودع.${diffMsg}`,
+        icon: 'success'
+      });
+    } catch (e: any) {
+      console.error('Exchange failed', e);
+      Swal.fire('خطأ', e.message || 'تعذر إتمام الاستبدال.', 'error');
+    } finally {
+      setExchangeSubmitting(false);
     }
   };
 
@@ -1211,8 +1471,15 @@ const SalesUpdateStatus: React.FC = () => {
                     <label className="flex items-center gap-3 flex-1 cursor-pointer">
                       <input type="checkbox" className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500" checked={selectedOrderIds.includes(o.id)} onChange={() => toggleSelectOrder(o.id)} />
                       <div className="flex-1">
-                        <div className="flex justify-between">
-                          <div className="font-bold text-slate-800">#{o.orderNumber || o.order_number} — {o.customerName || o.customer_name}</div>
+                        <div className="flex justify-between items-center">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-slate-800">#{o.orderNumber || o.order_number} — {o.customerName || o.customer_name}</span>
+                            {String(o.status || '').toLowerCase() === 'returned_with_rep' && (
+                              <span className="text-[10px] font-bold bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full border border-orange-200">
+                                مرتجع جزئي مع المندوب
+                              </span>
+                            )}
+                          </div>
                           <div className="font-bold text-blue-600">{computeOrderSubtotal(o).toLocaleString()} ج.م</div>
                         </div>
                         <div className="text-xs text-slate-500 mt-1 flex gap-4">
@@ -1225,7 +1492,17 @@ const SalesUpdateStatus: React.FC = () => {
                     </label>
 
                     <div className="flex items-center gap-2 ml-3">
-                      {piecesCount > 1 && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); openExchangeModal(o); }}
+                        className="px-3 py-1.5 rounded-lg bg-amber-600 text-white text-xs font-bold hover:bg-amber-700 flex items-center gap-1 shadow-sm transition-colors"
+                        title="استبدال منتج من هذا الطلب"
+                      >
+                        <ArrowLeftRight size={13} />
+                        <span>استبدال</span>
+                      </button>
+
+                      {(piecesCount > 1 || String(o.status || '').toLowerCase() === 'returned_with_rep') && (
                         <button onClick={(e) => { e.stopPropagation(); openPartialEditor(o); }} className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700">ارتجاع جزئي</button>
                       )}
                     </div>
@@ -1390,6 +1667,522 @@ const SalesUpdateStatus: React.FC = () => {
                 </div>
               </div>
             )}
+
+            {/* Exchange Modal (نافذة استبدال الأصناف) */}
+            {openExchangeOrder && (
+              <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 z-[70] animate-fadeIn">
+                <div className="rounded-2xl w-full max-w-4xl p-5 shadow-2xl card border border-slate-200 dark:border-slate-800 flex flex-col max-h-[92vh] overflow-hidden" style={{ backgroundColor: 'var(--card-bg, #ffffff)', color: 'var(--text, #0f172a)' }}>
+                  
+                  {/* Modal Header */}
+                  <div className="flex justify-between items-center pb-3 border-b border-slate-200 dark:border-slate-800">
+                    <div className="flex items-center gap-2">
+                      <div className="p-2 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                        <ArrowLeftRight size={22} />
+                      </div>
+                      <div>
+                        <h4 className="font-black text-base text-slate-800 dark:text-white">
+                          استبدال صنف للطلب: #{openExchangeOrder.orderNumber || openExchangeOrder.order_number}
+                        </h4>
+                        <div className="text-xs text-slate-500 mt-0.5">
+                          العميل: <span className="font-bold text-slate-700 dark:text-slate-300">{openExchangeOrder.customerName || openExchangeOrder.customer_name}</span> | المندوب: <span className="font-bold text-slate-700 dark:text-slate-300">{openRepOrders?.name || '—'}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { setOpenExchangeOrder(null); setExchangeOldItem(null); setExchangeTargetVariantId(null); }}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                    >
+                      <X size={20} />
+                    </button>
+                  </div>
+
+                  {/* Warehouse Selector Banner */}
+                  <div className="py-2.5 px-3 bg-amber-50/70 dark:bg-amber-950/20 border-b border-amber-200 dark:border-amber-900/40 flex flex-wrap items-center justify-between gap-3 text-xs">
+                    <div className="flex items-center gap-2 flex-1 min-w-[260px]">
+                      <span className="font-bold text-amber-900 dark:text-amber-200 whitespace-nowrap">مستودع الاستبدال (مطلوب):</span>
+                      <div className="w-64">
+                        <CustomSelect
+                          value={exchangeWarehouse ? String(exchangeWarehouse) : ''}
+                          onChange={v => {
+                            const wid = v ? Number(v) : undefined;
+                            setExchangeWarehouse(wid);
+                            if (wid) loadExchangeCatalog(wid);
+                          }}
+                          options={warehouses.map((w: any) => ({ value: String(w.id), label: w.name || w.title || ('المستودع ' + w.id) }))}
+                        />
+                      </div>
+                    </div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                      * يدخل المنتج القديم لهذا المستودع، ويخرج المنتج البديل منه.
+                    </div>
+                  </div>
+
+                  {/* Modal Body - 2 Columns */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-1 overflow-y-auto flex-1 custom-scrollbar my-3">
+                    
+                    {/* Column 1: Old Item Selection */}
+                    <div className="border border-slate-200 dark:border-slate-800 rounded-xl p-3 flex flex-col bg-slate-50/50 dark:bg-slate-900/30">
+                      <div className="flex justify-between items-center mb-2.5">
+                        <span className="font-black text-xs text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                          <span className="w-5 h-5 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-[11px]">1</span>
+                          <span>المنتج المطلوب استبداله من الطلب:</span>
+                        </span>
+                        {exchangeOldItem && (
+                          <span className="text-[11px] font-bold text-amber-600 bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 rounded-full">
+                            محدد للاستبدال
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="space-y-2 flex-1 overflow-y-auto max-h-72 pr-1 custom-scrollbar">
+                        {(openExchangeOrder.products || []).map((p: any, idx: number) => {
+                          const pId = Number(p.productId || p.product_id || p.id || 0);
+                          const lineId = p.line_id ?? p.lineId ?? `${openExchangeOrder.id}-${idx}`;
+                          const isSelected = exchangeOldItem?.lineId === lineId;
+                          const maxQty = Number(p.quantity || p.qty || 1);
+
+                          return (
+                            <div
+                              key={lineId}
+                              onClick={() => {
+                                setExchangeOldItem({
+                                  lineId,
+                                  orderItemId: p.id || p.order_item_id,
+                                  productId: pId,
+                                  name: p.name || '',
+                                  color: (p.color ?? p.variant_color ?? p.variant ?? p.colorName) || '',
+                                  size: (p.size ?? p.variant_size ?? p.measure ?? p.sizeName) || '',
+                                  price: Number(p.price || p.sale_price || p.price_per_unit || 0),
+                                  maxQty,
+                                  exchangeQty: isSelected ? exchangeOldItem.exchangeQty : 1
+                                });
+                                setExchangeTargetVariantId(null);
+                              }}
+                              className={`p-2.5 rounded-xl border transition-all cursor-pointer ${
+                                isSelected 
+                                  ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/30 shadow-sm' 
+                                  : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-slate-300'
+                              }`}
+                            >
+                              <div className="flex justify-between items-start">
+                                <div>
+                                  <div className="font-bold text-xs text-slate-800 dark:text-white">{p.name}</div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5">
+                                    {p.color && <span>اللون: <b className="text-slate-700 dark:text-slate-300">{p.color}</b></span>}
+                                    {p.size && <span className="mr-2">المقاس: <b className="text-slate-700 dark:text-slate-300">{p.size}</b></span>}
+                                  </div>
+                                </div>
+                                <div className="text-left font-black text-xs text-slate-700 dark:text-slate-200">
+                                  {Number(p.price || p.sale_price || p.price_per_unit || 0).toLocaleString()} ج.م
+                                </div>
+                              </div>
+
+                              <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-xs">
+                                <span className="text-[11px] text-slate-500">الكمية بالطلب: <b>{maxQty}</b> قطعة</span>
+                                {isSelected ? (
+                                  <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+                                    <span className="text-[11px] font-bold text-amber-700 dark:text-amber-300">الكمية المستبدلة:</span>
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      max={maxQty}
+                                      value={exchangeOldItem.exchangeQty}
+                                      onChange={e => {
+                                        const v = Math.max(1, Math.min(maxQty, Number(e.target.value || 1)));
+                                        setExchangeOldItem(prev => prev ? { ...prev, exchangeQty: v } : null);
+                                      }}
+                                      className="w-14 px-1.5 py-0.5 text-center text-xs font-black rounded border border-amber-400 bg-white dark:bg-slate-900 focus:outline-none"
+                                    />
+                                  </div>
+                                ) : (
+                                  <span className="text-[10px] text-blue-600 font-bold hover:underline">اضغط للتحديد</span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Column 2: New Item Selection */}
+                    <div className="border border-slate-200 dark:border-slate-800 rounded-xl p-3 flex flex-col bg-slate-50/50 dark:bg-slate-900/30">
+                      <div className="flex justify-between items-center mb-2.5">
+                        <span className="font-black text-xs text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                          <span className="w-5 h-5 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-[11px]">2</span>
+                          <span>المنتج البديل الجديد:</span>
+                        </span>
+                      </div>
+
+                      {/* Mode Toggle Buttons */}
+                      <div className="grid grid-cols-2 gap-1.5 bg-slate-200 dark:bg-slate-800 p-1 rounded-xl mb-3 text-xs font-bold">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setExchangeMode('same_product');
+                            setExchangeTargetVariantId(null);
+                            setExchangeCustomPrice('');
+                          }}
+                          className={`py-1.5 px-2 rounded-lg transition-all ${
+                            exchangeMode === 'same_product'
+                              ? 'bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-sm'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                          }`}
+                        >
+                          🔄 استبدال بنفس المنتج
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setExchangeMode('other_product');
+                            setExchangeTargetVariantId(null);
+                            setExchangeCustomPrice('');
+                          }}
+                          className={`py-1.5 px-2 rounded-lg transition-all ${
+                            exchangeMode === 'other_product'
+                              ? 'bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-sm'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                          }`}
+                        >
+                          ✨ استبدال بمنتج آخر
+                        </button>
+                      </div>
+
+                      {/* Mode Content */}
+                      <div className="flex-1 overflow-y-auto max-h-72 pr-1 custom-scrollbar">
+                        {exchangeLoadingCatalog ? (
+                          <div className="flex items-center justify-center py-10 gap-2 text-slate-400 text-xs">
+                            <Loader2 className="animate-spin" size={16} />
+                            <span>جاري فحص أرصدة المخزن...</span>
+                          </div>
+                        ) : exchangeMode === 'same_product' ? (
+                          <div>
+                            <div className="text-xs text-slate-600 dark:text-slate-400 mb-2 font-bold flex items-center justify-between">
+                              <span>المقاسات والألوان المتاحة لنفس المنتج:</span>
+                              <span className="text-[11px] text-amber-600 font-normal">
+                                {currentParentProduct?.name || exchangeOldItem?.name || ''}
+                              </span>
+                            </div>
+
+                            {currentAvailableVariants.length === 0 ? (
+                              <div className="text-center py-6 text-xs text-slate-400">
+                                لم يتم العثور على خيارات أخرى لنفس المنتج في النظام.
+                              </div>
+                            ) : (
+                              <div className="grid grid-cols-2 gap-2">
+                                {currentAvailableVariants.map((v: any) => {
+                                  const isCurrentOld = Number(v.id) === Number(exchangeOldItem?.productId);
+                                  const isSelected = Number(v.id) === Number(exchangeTargetVariantId);
+                                  const stock = Number(v.total_stock ?? v.stock ?? 0);
+                                  const isOutOfStock = stock < (exchangeOldItem?.exchangeQty || 1);
+
+                                  return (
+                                    <div
+                                      key={v.id}
+                                      onClick={() => {
+                                        if (!isOutOfStock) {
+                                          setExchangeTargetVariantId(Number(v.id));
+                                          setExchangeCustomPrice(String(Number(v.sale_price ?? v.price ?? 0)));
+                                        }
+                                      }}
+                                      className={`p-2.5 rounded-xl border text-xs transition-all relative ${
+                                        isOutOfStock 
+                                          ? 'border-slate-200 dark:border-slate-800 bg-slate-100/60 dark:bg-slate-900/20 opacity-60 cursor-not-allowed'
+                                          : isSelected
+                                            ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 shadow-sm cursor-pointer'
+                                            : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-amber-300 cursor-pointer'
+                                      }`}
+                                    >
+                                      <div className="flex justify-between items-start mb-1">
+                                        <span className="font-bold text-slate-800 dark:text-white">
+                                          {v.size || 'بدون مقاس'} — {v.color || 'افتراضي'}
+                                        </span>
+                                        {isSelected && (
+                                          <span className="w-4 h-4 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px]">
+                                            ✓
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      <div className="flex items-center justify-between text-[11px] mt-1.5">
+                                        <span className="font-black text-slate-700 dark:text-slate-300">
+                                          {Number(v.sale_price || v.price || 0).toLocaleString()} ج.م
+                                        </span>
+                                        <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold ${
+                                          stock > 0 
+                                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' 
+                                            : 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
+                                        }`}>
+                                          المتوفر: {stock}
+                                        </span>
+                                      </div>
+
+                                      {isCurrentOld && (
+                                        <div className="text-[9px] text-amber-600 font-semibold mt-1">
+                                          (الصنف الحالي المطلوب استبداله)
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div>
+                            <div className="mb-2">
+                              <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
+                                ابحث واختر المنتج البديل:
+                              </label>
+                              <div className="relative mb-2">
+                                <Search size={14} className="absolute right-2.5 top-2.5 text-slate-400" />
+                                <input
+                                  type="text"
+                                  placeholder="اكتب اسم المنتج للبحث..."
+                                  value={exchangeProductSearch}
+                                  onChange={e => setExchangeProductSearch(e.target.value)}
+                                  className="w-full pl-3 pr-8 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                                />
+                              </div>
+
+                              <div className="max-h-28 overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-lg divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900 text-xs">
+                                {exchangeProductsCatalog
+                                  .filter((p: any) => !exchangeProductSearch || (p.name || '').toLowerCase().includes(exchangeProductSearch.toLowerCase()))
+                                  .slice(0, 15)
+                                  .map((p: any) => {
+                                    const isPSelected = Number(p.id) === Number(exchangeTargetProductId);
+                                    const pMinPrice = (p.variants || []).reduce((min: number, v: any) => Math.min(min, Number(v.sale_price ?? v.price ?? 0)), Infinity);
+                                    return (
+                                      <div
+                                        key={p.id}
+                                        onClick={() => {
+                                          setExchangeTargetProductId(Number(p.id));
+                                          setExchangeTargetVariantId(null);
+                                          setExchangeCustomPrice('');
+                                        }}
+                                        className={`p-2 flex items-center justify-between cursor-pointer transition-colors ${
+                                          isPSelected ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-800 font-bold' : 'hover:bg-slate-50 dark:hover:bg-slate-800'
+                                        }`}
+                                      >
+                                        <div className="flex items-center gap-2">
+                                          <span>{p.name}</span>
+                                          <span className="text-[10px] text-slate-400">({(p.variants || []).length} خيارات)</span>
+                                        </div>
+                                        <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                                          {pMinPrice !== Infinity && pMinPrice > 0 ? `${pMinPrice.toLocaleString()} ج.م` : '0 ج.م'}
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
+                              </div>
+                            </div>
+
+                            {selectedOtherParentProduct && (
+                              <div className="mt-3">
+                                <div className="text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1.5">
+                                  اختر اللون والمقاس لمنتج: <span className="text-amber-600 font-bold">{selectedOtherParentProduct.name}</span>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                  {(selectedOtherParentProduct.variants || []).map((v: any) => {
+                                    const isSelected = Number(v.id) === Number(exchangeTargetVariantId);
+                                    const stock = Number(v.total_stock ?? v.stock ?? 0);
+                                    const isOutOfStock = stock < (exchangeOldItem?.exchangeQty || 1);
+
+                                    return (
+                                      <div
+                                        key={v.id}
+                                        onClick={() => {
+                                          if (!isOutOfStock) {
+                                            setExchangeTargetVariantId(Number(v.id));
+                                            setExchangeCustomPrice(String(Number(v.sale_price ?? v.price ?? 0)));
+                                          }
+                                        }}
+                                        className={`p-2.5 rounded-xl border text-xs transition-all relative ${
+                                          isOutOfStock 
+                                            ? 'border-slate-200 dark:border-slate-800 bg-slate-100/60 dark:bg-slate-900/20 opacity-60 cursor-not-allowed'
+                                            : isSelected
+                                              ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 shadow-sm cursor-pointer'
+                                              : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-amber-300 cursor-pointer'
+                                        }`}
+                                      >
+                                        <div className="flex justify-between items-start mb-1">
+                                          <span className="font-bold text-slate-800 dark:text-white">
+                                            {v.size || 'بدون مقاس'} — {v.color || 'افتراضي'}
+                                          </span>
+                                          {isSelected && (
+                                            <span className="w-4 h-4 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px]">
+                                              ✓
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        <div className="flex items-center justify-between text-[11px] mt-1.5">
+                                          <span className="font-black text-slate-700 dark:text-slate-300">
+                                            {Number(v.sale_price || v.price || 0).toLocaleString()} ج.م
+                                          </span>
+                                          <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold ${
+                                            stock > 0 
+                                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' 
+                                              : 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
+                                          }`}>
+                                            المتوفر: {stock}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Editable Price Box for Selected Variant */}
+                      {selectedNewVariant && (
+                        <div className="mt-3 p-3 rounded-xl bg-amber-500/10 border border-amber-300 dark:border-amber-700/60 shadow-sm animate-fadeIn">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-black text-amber-900 dark:text-amber-200">
+                                  سعر بيع القطعة للمنتج البديل:
+                                </span>
+                                {Number(selectedNewVariant.sale_price ?? selectedNewVariant.price ?? 0) === 0 && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-200 dark:bg-amber-900 text-amber-800 dark:text-amber-200 font-bold">
+                                    مسجل 0 ج.م
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-1">
+                                <span>السعر المسجل بالنظام:</span>
+                                <span className="font-bold text-slate-700 dark:text-slate-200">
+                                  {Number(selectedNewVariant.sale_price ?? selectedNewVariant.price ?? 0).toLocaleString()} ج.م
+                                </span>
+                                <span className="text-[10px] text-slate-400">(يمكنك تعديل السعر في الخانة المجاورة)</span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <div className="relative w-36">
+                                <input
+                                  type="number"
+                                  step="any"
+                                  min="0"
+                                  value={exchangeCustomPrice}
+                                  onChange={e => setExchangeCustomPrice(e.target.value)}
+                                  className="w-full pl-8 pr-3 py-1.5 text-sm font-black text-slate-900 dark:text-white bg-white dark:bg-slate-900 border-2 border-amber-500 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 text-center shadow-inner"
+                                  placeholder="0"
+                                />
+                                <span className="absolute left-2.5 top-2 text-[11px] text-slate-400 font-bold pointer-events-none">ج.م</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setExchangeCustomPrice(String(Number(selectedNewVariant.sale_price ?? selectedNewVariant.price ?? 0)))}
+                                className="px-2.5 py-1.5 text-[10px] font-bold rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 transition-colors whitespace-nowrap shadow-sm"
+                                title="استعادة السعر المسجل بقاعدة البيانات"
+                              >
+                                استعادة المسجل
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Summary & Price Difference Footer */}
+                  <div className="pt-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 rounded-xl p-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs mb-3">
+                      <div className="p-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                        <span className="text-[11px] text-slate-500 block">إجمالي القديم المستبدل:</span>
+                        <span className="font-black text-sm text-slate-800 dark:text-white">
+                          {exchangeOldTotal.toLocaleString()} ج.م
+                        </span>
+                        <span className="text-[10px] text-slate-400 block mt-0.5">
+                          ({exchangeOldItem?.exchangeQty || 0} قطعة × {Number(exchangeOldItem?.price || 0).toLocaleString()} ج.م)
+                        </span>
+                      </div>
+
+                      <div className="p-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                        <span className="text-[11px] text-slate-500 block">إجمالي البديل الجديد:</span>
+                        <span className="font-black text-sm text-emerald-600 dark:text-emerald-400">
+                          {selectedNewVariant ? `${exchangeNewTotal.toLocaleString()} ج.م` : '—'}
+                        </span>
+                        <span className="text-[10px] text-slate-400 block mt-0.5">
+                          {selectedNewVariant ? `(${exchangeOldItem?.exchangeQty || 0} قطعة × ${exchangeNewUnitPrice.toLocaleString()} ج.م)` : 'لم يتم اختيار البديل'}
+                        </span>
+                      </div>
+
+                      <div className={`p-2 rounded-lg border ${
+                        exchangePriceDiff > 0 
+                          ? 'bg-amber-50 border-amber-200 text-amber-900 dark:bg-amber-950/40 dark:border-amber-800 dark:text-amber-200' 
+                          : exchangePriceDiff < 0 
+                            ? 'bg-blue-50 border-blue-200 text-blue-900 dark:bg-blue-950/40 dark:border-blue-800 dark:text-blue-200' 
+                            : 'bg-white border-slate-200 dark:bg-slate-800 dark:border-slate-700'
+                      }`}>
+                        <span className="text-[11px] block">فرق السعر الناتج:</span>
+                        <span className="font-black text-sm">
+                          {selectedNewVariant ? (
+                            exchangePriceDiff === 0 
+                              ? '0 ج.م (متكافئ)' 
+                              : exchangePriceDiff > 0 
+                                ? `+ ${exchangePriceDiff.toLocaleString()} ج.م (زيادة مطلوبة)` 
+                                : `- ${Math.abs(exchangePriceDiff).toLocaleString()} ج.م (تخفيض للعميل)`
+                          ) : '—'}
+                        </span>
+                        <span className="text-[10px] block mt-0.5 opacity-80">
+                          {selectedNewVariant ? (
+                            exchangePriceDiff > 0 
+                              ? 'يُضاف لمديونية المندوب والأوردر' 
+                              : exchangePriceDiff < 0 
+                                ? 'يُخصم من مديونية المندوب والأوردر' 
+                                : 'لا يوجد تأثير مالي'
+                          ) : ''}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex-1 min-w-[200px]">
+                        <input
+                          type="text"
+                          placeholder="ملاحظات الاستبدال (اختياري)..."
+                          value={exchangeNotes}
+                          onChange={e => setExchangeNotes(e.target.value)}
+                          className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 focus:outline-none"
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => { setOpenExchangeOrder(null); setExchangeOldItem(null); setExchangeTargetVariantId(null); }}
+                          className="px-4 py-2 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold rounded-xl hover:bg-slate-300 transition-colors"
+                        >
+                          إلغاء
+                        </button>
+                        <button
+                          type="button"
+                          onClick={submitExchangeOrderItem}
+                          disabled={
+                            !exchangeWarehouse || 
+                            !exchangeOldItem || 
+                            !selectedNewVariant || 
+                            Number(selectedNewVariant.total_stock || selectedNewVariant.stock || 0) < (exchangeOldItem?.exchangeQty || 1) ||
+                            exchangeSubmitting
+                          }
+                          className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-black rounded-xl shadow-md transition-all flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {exchangeSubmitting ? <Loader2 size={14} className="animate-spin" /> : <ArrowLeftRight size={14} />}
+                          <span>{exchangeSubmitting ? 'جاري الاستبدال...' : 'تأكيد وإتمام الاستبدال'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1398,3 +2191,4 @@ const SalesUpdateStatus: React.FC = () => {
 };
 
 export default SalesUpdateStatus;
+

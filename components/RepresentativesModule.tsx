@@ -7,6 +7,7 @@ import * as ExcelJS from 'exceljs';
 import { API_BASE_PATH } from '../services/apiConfig';
 import CustomSelect from './CustomSelect';
 import { PrintableOrders } from './PrintableOrderCard';
+import { formatLocalDate, getFirstDayOfMonth, getDaysAgo } from '../services/dateUtils';
 
 // ------------------------------------------
 // --- Helpers for Print Close Report ---
@@ -100,6 +101,26 @@ const computeDeliveredNetValue = (order: any) => {
   if (status === 'returned' || status === 'full_return') return 0;
   return computeOrderValueWithoutShipping(order);
 };
+
+const balanceLabel = (bal: number) => (bal > 0 ? 'له' : bal < 0 ? 'عليه' : '');
+
+const isOrderPartialReturnInReturnedList = (order: any) => {
+  const st = String(order?.status || order?.order_status || order?.journal_status || '').toLowerCase();
+  if (st === 'partial_return' || st === 'partial' || st === 'returned_with_rep') return true;
+  if (computeDeliveredNetPieces(order) > 0) return true;
+  if (computePieces(order) > 0) return true;
+  return false;
+};
+
+const computeActiveOrderDisplayValue = (order: any) => {
+  const st = String(order?.status || order?.order_status || order?.journal_status || '').toLowerCase();
+  if (st === 'returned_with_rep') {
+    const rv = _toNum(order?.returned_value || order?.returned_value_fallback || 0);
+    if (rv > 0) return rv;
+    return computeOrderValueWithoutShipping(order);
+  }
+  return computeOrderValueWithoutShipping(order);
+};
 // ------------------------------------------
 
 interface RepresentativesModuleProps {
@@ -128,7 +149,7 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
   const [selectedRepId, setSelectedRepId] = useState<number | null>(null);
   const currencySymbol = 'ج.م';
   const [repTransactions, setRepTransactions] = useState<any[]>([]);
-  const [paymentForm, setPaymentForm] = useState<{ amount: string; type: 'payment'|'fine'|'settlement'; direction: 'in'|'out'; treasuryId: string; note: string }>({ amount: '', type: 'payment', direction: 'in', treasuryId: '', note: '' });
+  const [paymentForm, setPaymentForm] = useState<{ amount: string; type: 'payment' | 'fine' | 'settlement'; direction: 'in' | 'out'; treasuryId: string; note: string }>({ amount: '', type: 'payment', direction: 'in', treasuryId: '', note: '' });
   const [treasuries, setTreasuries] = useState<any[]>([]);
   const [warehouses, setWarehouses] = useState<any[]>([]);
   const [userDefaults, setUserDefaults] = useState<any>(null);
@@ -156,7 +177,7 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
     }
   };
 
-  const todayISO = new Date().toISOString().split('T')[0];
+  const todayISO = formatLocalDate();
   const [perfMode, setPerfMode] = useState<'date' | 'day' | 'week' | 'month' | 'year'>('month');
   const [perfDate, setPerfDate] = useState<string>(todayISO);
   const [perfMonth, setPerfMonth] = useState<string>(todayISO.slice(0, 7));
@@ -188,7 +209,7 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
             localStorage.setItem('Dragon_waybill_template', String(s.waybill_template));
           }
         }
-      } catch (e) {}
+      } catch (e) { }
     })();
   }, []);
   const [perfYear, setPerfYear] = useState<string>(String(new Date().getFullYear()));
@@ -244,7 +265,7 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
     setPeriodLoading(true);
     try {
       const repParam = journalRepId === 'all' ? '' : journalRepId;
-      
+
       // 1. جلب الإحصائيات الإجمالية بسرعة فائقة
       const statsUrl = `${API_BASE_PATH}/api.php?module=reports&action=getOrderStats&start_date=${journalFrom}&end_date=${journalTo}&rep_id=${repParam}`;
       const statsRes = await fetch(statsUrl).then(r => r.json()).catch(() => ({ success: false, data: null }));
@@ -290,14 +311,14 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
     } else {
       from.setDate(to.getDate() - days);
     }
-    const f = (d: Date) => d.toISOString().split('T')[0];
+    const f = (d: Date) => formatLocalDate(d);
     setJournalFrom(f(from));
     setJournalTo(f(to));
   };
 
   const showPeriodDetails = async (type: 'delivered' | 'returned') => {
     if (!periodSummary) return;
-    
+
     // تحميل تفاصيل الطلبات عند الطلب فقط (Lazy Loading)
     let list: any[] = [];
     if (type === 'delivered' && periodSummary._delivered_list) {
@@ -456,14 +477,14 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
     const fetchTreasuries = async () => {
       try {
         const [tr, ud] = await Promise.all([
-          fetch(`${API_BASE_PATH}/api.php?module=treasuries&action=getAll`).then(r=>r.json()),
-          fetch(`${API_BASE_PATH}/api.php?module=permissions&action=getUserDefaults`).then(r=>r.json()).catch(()=>({success:false}))
+          fetch(`${API_BASE_PATH}/api.php?module=treasuries&action=getAll`).then(r => r.json()),
+          fetch(`${API_BASE_PATH}/api.php?module=permissions&action=getUserDefaults`).then(r => r.json()).catch(() => ({ success: false }))
         ]);
         const list = (tr && tr.success) ? (tr.data || []) : [];
         const defaults = (ud && ud.success) ? (ud.data || null) : null;
-        if (defaults && defaults.default_treasury_id && !defaults.can_change_treasury) setTreasuries(list.filter((t:any)=>Number(t.id)===Number(defaults.default_treasury_id)));
+        if (defaults && defaults.default_treasury_id && !defaults.can_change_treasury) setTreasuries(list.filter((t: any) => Number(t.id) === Number(defaults.default_treasury_id)));
         else setTreasuries(list);
-        if (defaults && defaults.default_treasury_id && !paymentForm.treasuryId) setPaymentForm(prev => ({...prev, treasuryId: String(defaults.default_treasury_id)}));
+        if (defaults && defaults.default_treasury_id && !paymentForm.treasuryId) setPaymentForm(prev => ({ ...prev, treasuryId: String(defaults.default_treasury_id) }));
         if (defaults) setUserDefaults(defaults);
       } catch (e) { console.error('Failed to fetch treasuries', e); }
     };
@@ -474,7 +495,7 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
         const jr = await r.json();
         if (jr && jr.success) {
           setUserDefaults(jr.data || null);
-          if (jr.data && jr.data.default_treasury_id && !paymentForm.treasuryId) setPaymentForm(prev => ({...prev, treasuryId: String(jr.data.default_treasury_id)}));
+          if (jr.data && jr.data.default_treasury_id && !paymentForm.treasuryId) setPaymentForm(prev => ({ ...prev, treasuryId: String(jr.data.default_treasury_id) }));
         }
       } catch (e) { console.error('Failed to fetch user defaults', e); }
     };
@@ -498,7 +519,7 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
     String(r.phone || '').includes(searchTerm)
   );
 
-  const toISODate = (d: Date) => d.toISOString().split('T')[0];
+  const toISODate = (d: Date) => formatLocalDate(d);
 
   const getPerfDateRange = () => {
     const safeDate = (s: string) => {
@@ -622,7 +643,7 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
       const latestRow = sortedRows[sortedRows.length - 1];
       totals.withRep = toNum(latestRow?.deferred_orders_count ?? latestRow?.deferredCount ?? 0);
     }
-    
+
     // total received MUST mathematically equal what they accomplished + what's still with them
     totals.total = totals.delivered + totals.returned + totals.withRep;
 
@@ -753,7 +774,7 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
       try {
         if (editingRep) {
           // لا يتم تعديل مبلغ التأمين (ولا حالة دفع التأمين) عند التعديل
-          const res = await fetch(`${API_BASE_PATH}/api.php?module=users&action=update`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name: formData.name, phone: formData.phone, role: 'representative', id: editingRep.id, insurance_paid: editingRep.insurance_paid ? 1 : 0, insurance_amount: Number(editingRep.insurance_amount || 0) }) });
+          const res = await fetch(`${API_BASE_PATH}/api.php?module=users&action=update`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: formData.name, phone: formData.phone, role: 'representative', id: editingRep.id, insurance_paid: editingRep.insurance_paid ? 1 : 0, insurance_amount: Number(editingRep.insurance_amount || 0) }) });
           const raw = await res.text();
           let js: any = null;
           try { js = JSON.parse(raw); } catch (e) { console.error('Save rep raw response (update):', raw); Swal.fire('خطأ في الخادم', raw.substring(0, 1000), 'error'); return; }
@@ -766,7 +787,7 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
           // Default permissions: only update order status
           const defaultPerms = JSON.stringify({ update_order_status: true });
           const payload: any = { name: formData.name, phone: formData.phone, role: 'representative', permissions: defaultPerms, insurance_paid: formData.insurance_paid ? 1 : 0, insurance_amount: formData.insurance_paid ? Number(formData.insurance_amount || 0) : 0 };
-          const res = await fetch(`${API_BASE_PATH}/api.php?module=users&action=create`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+          const res = await fetch(`${API_BASE_PATH}/api.php?module=users&action=create`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
           const raw = await res.text();
           let js: any = null;
           try { js = JSON.parse(raw); } catch (e) { console.error('Save rep raw response (create):', raw); Swal.fire('خطأ في الخادم', raw.substring(0, 1000), 'error'); return; }
@@ -809,7 +830,7 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
       Swal.fire({
         icon: 'error',
         title: 'عملية مرفوضة',
-        text: `لا يمكن حذف المندوب "${rep.name}" لأن رصيده غير معروف.` ,
+        text: `لا يمكن حذف المندوب "${rep.name}" لأن رصيده غير معروف.`,
         confirmButtonText: 'موافق',
       });
       return;
@@ -836,7 +857,7 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
     }).then(async (result) => {
       if (result.isConfirmed) {
         try {
-          const res = await fetch(`${API_BASE_PATH}/api.php?module=users&action=delete`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ id: repId }) });
+          const res = await fetch(`${API_BASE_PATH}/api.php?module=users&action=delete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: repId }) });
           const js = await res.json();
           if (js.success) {
             setRepresentatives(prev => prev.filter(r => r.id !== repId));
@@ -1097,7 +1118,7 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
     }
   };
 
-  const _parseJournalOrders = (row: any): Array<{id: number; order_number: string; source: string}> => {
+  const _parseJournalOrders = (row: any): Array<{ id: number; order_number: string; source: string }> => {
     try {
       const raw = row.orders_json;
       if (!raw) return [];
@@ -1122,11 +1143,11 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
         setJournalLiveStats(prev => ({ ...prev, [row.id]: { loading: false, deliveredCount: 0, deliveredTotal: 0, returnedCount: 0, postponedCount: 0, postponedTotal: 0, oldOrdersCount: 0, todayOrdersCount: 0 } }));
         return;
       }
-      const ids = jOrders.map((o:any) => o.id).filter(Boolean);
+      const ids = jOrders.map((o: any) => o.id).filter(Boolean);
       const full = await _fetchOrdersByIds(ids);
 
       let delivered = 0, deliveredVal = 0, returned = 0, postponed = 0, postponedVal = 0;
-      full.forEach((o:any) => {
+      full.forEach((o: any) => {
         const status = o.status || o.order_status || '';
         const total = Number(o.total || o.total_amount || 0) || 0;
         if (status === 'delivered') { delivered++; deliveredVal += total; }
@@ -1143,8 +1164,8 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
           returnedCount: returned,
           postponedCount: postponed,
           postponedTotal: postponedVal,
-          oldOrdersCount: jOrders.filter((o:any) => o.source === 'old').length,
-          todayOrdersCount: jOrders.filter((o:any) => o.source === 'today').length
+          oldOrdersCount: jOrders.filter((o: any) => o.source === 'old').length,
+          todayOrdersCount: jOrders.filter((o: any) => o.source === 'today').length
         }
       }));
     } catch (e) {
@@ -1178,39 +1199,39 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
 
     let fullOrders: any[] = [];
     if (allIds.length > 0) {
-      try { fullOrders = await _fetchOrdersByIds(allIds); } catch (_) {}
+      try { fullOrders = await _fetchOrdersByIds(allIds); } catch (_) { }
     }
     const byId: Record<number, any> = {};
     fullOrders.forEach(o => { byId[o.id] = o; });
 
-    const oldIds   = new Set(journalOrders.filter(x => x.source === 'old').map(x => x.id));
+    const oldIds = new Set(journalOrders.filter(x => x.source === 'old').map(x => x.id));
     const todayIds = new Set(journalOrders.filter(x => x.source === 'today').map(x => x.id));
-    const oldOrders   = journalOrders.filter(x => x.source === 'old').map(x => byId[x.id] || {id: x.id, orderNumber: x.order_number, order_number: x.order_number, products: []});
-    const todayOrders = journalOrders.filter(x => x.source === 'today').map(x => byId[x.id] || {id: x.id, orderNumber: x.order_number, order_number: x.order_number, products: []});
-    const allOrdersFull = journalOrders.map(x => byId[x.id] || {id: x.id, orderNumber: x.order_number, order_number: x.order_number, products: []});
+    const oldOrders = journalOrders.filter(x => x.source === 'old').map(x => byId[x.id] || { id: x.id, orderNumber: x.order_number, order_number: x.order_number, products: [] });
+    const todayOrders = journalOrders.filter(x => x.source === 'today').map(x => byId[x.id] || { id: x.id, orderNumber: x.order_number, order_number: x.order_number, products: [] });
+    const allOrdersFull = journalOrders.map(x => byId[x.id] || { id: x.id, orderNumber: x.order_number, order_number: x.order_number, products: [] });
 
-    const prevBal         = _toN(row.prev_balance ?? 0);
-    const oldOrdersValue  = _toN(row.old_orders_value ?? 0);
-    const oldOrdersCount  = _toN(row.opening_orders_count ?? 0);
-    const oldPiecesCount  = _toN(row.opening_pieces_count ?? 0);
-    const sumValue        = _toN(row.assigned_value ?? 0);
-    const todayPieces     = _toN(row.pieces_assigned_count ?? 0);
+    const prevBal = _toN(row.prev_balance ?? 0);
+    const oldOrdersValue = _toN(row.old_orders_value ?? 0);
+    const oldOrdersCount = _toN(row.opening_orders_count ?? 0);
+    const oldPiecesCount = _toN(row.opening_pieces_count ?? 0);
+    const sumValue = _toN(row.assigned_value ?? 0);
+    const todayPieces = _toN(row.pieces_assigned_count ?? 0);
     const totalOrdersCount = _toN(row.total_orders_count ?? 0);
-    const totalPieces     = _toN(row.total_pieces_count ?? 0);
-    const totalValue      = _toN(row.total_orders_value ?? 0);
-    const finalBeforePay  = _toN(row.final_before_payment ?? 0);
-    const paymentAmt      = _toN(row.payment_amount ?? 0);
-    const paymentAction   = row.payment_action || 'collect';
-    const afterPay        = _toN(row.balance_after_payment ?? 0);
-    const paidNow         = paymentAction === 'collect' ? paymentAmt : -paymentAmt;
+    const totalPieces = _toN(row.total_pieces_count ?? 0);
+    const totalValue = _toN(row.total_orders_value ?? 0);
+    const finalBeforePay = _toN(row.final_before_payment ?? 0);
+    const paymentAmt = _toN(row.payment_amount ?? 0);
+    const paymentAction = row.payment_action || 'collect';
+    const afterPay = _toN(row.balance_after_payment ?? 0);
+    const paidNow = paymentAction === 'collect' ? paymentAmt : -paymentAmt;
     const localTotalShipping = allOrdersFull.reduce((s: number, o: any) => s + _toN(o.shipping ?? o.shipping_fees ?? 0), 0);
 
     // Products summary (old + today combined) - Product name and total quantity only
-    const summaryMap: Record<string, {name:string; qty:number}> = {};
+    const summaryMap: Record<string, { name: string; qty: number }> = {};
     allOrdersFull.forEach((o: any) => {
       (o.products || []).forEach((p: any) => {
         const name = (p.name || p.product_name || 'منتج غير محدد').trim();
-        if (!summaryMap[name]) summaryMap[name] = {name, qty: 0};
+        if (!summaryMap[name]) summaryMap[name] = { name, qty: 0 };
         summaryMap[name].qty += _toN(p.quantity ?? p.qty ?? 0);
       });
     });
@@ -1220,7 +1241,7 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
       const sub = _orderSub(o);
       const ship = _toN(o.shipping ?? o.shipping_fees ?? 0);
       const empVal = o.employee ?? o.employee_name ?? o.assigneeName ?? row.employee ?? '';
-      const pgVal  = o.page ?? o.page_raw ?? o.page_name ?? o.pageName ?? o.source ?? row.page ?? '';
+      const pgVal = o.page ?? o.page_raw ?? o.page_name ?? o.pageName ?? o.source ?? row.page ?? '';
       return `<tr>
         <td>${o.orderNumber ?? o.order_number ?? o.id ?? ''}</td>
         <td>${o.customerName ?? o.customer_name ?? ''}</td>
@@ -1244,7 +1265,7 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
       try {
         const u = JSON.parse(localStorage.getItem('Dragon_user') || '{}');
         empDisplay = u.name || u.username || '';
-      } catch (e) {}
+      } catch (e) { }
     }
 
     // helper: calc days between a date and now
@@ -1261,10 +1282,10 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
     let oldOrdersTableHtml = '';
     if (oldOrders.length > 0) {
       const oldRows = oldOrders.map((o: any) => {
-        const sub  = _orderSub(o);
+        const sub = _orderSub(o);
         const ship = _toN(o.shipping ?? o.shipping_fees ?? 0);
         const empVal = o.employee ?? o.employee_name ?? o.assigneeName ?? row.employee ?? '';
-        const pgVal  = o.page ?? o.page_raw ?? o.page_name ?? o.source ?? row.page ?? '';
+        const pgVal = o.page ?? o.page_raw ?? o.page_name ?? o.source ?? row.page ?? '';
         const assignDateRaw = o.assigned_at ?? o.with_rep_at ?? o.rep_assigned_at ?? o.updated_at ?? null;
         const assignDateFormatted = fmtDate(assignDateRaw);
         const daysAgo = calcDaysAgo(assignDateRaw);
@@ -1367,12 +1388,12 @@ ${productsSummaryHtml}
 
     let fullOrders: any[] = [];
     if (allIds.length > 0) {
-      try { fullOrders = await _fetchOrdersByIds(allIds); } catch (_) {}
+      try { fullOrders = await _fetchOrdersByIds(allIds); } catch (_) { }
     }
     const byId: Record<number, any> = {};
     fullOrders.forEach(o => { byId[o.id] = o; });
 
-    const allOrdersFull = journalOrders.map(x => byId[x.id] || {id: x.id, orderNumber: x.order_number, order_number: x.order_number, products: []});
+    const allOrdersFull = journalOrders.map(x => byId[x.id] || { id: x.id, orderNumber: x.order_number, order_number: x.order_number, products: [] });
 
     if (allOrdersFull.length === 0) {
       Swal.fire('تنبيه', 'لا توجد اوردرات لتصديرها.', 'info');
@@ -1385,7 +1406,7 @@ ${productsSummaryHtml}
       const worksheet = workbook.addWorksheet('يومية المندوب', {
         views: [{ rightToLeft: true }]
       });
-      
+
       worksheet.columns = [
         { header: 'رقم الاوردر', key: 'orderNumber', width: 15 },
         { header: 'اسم العميل', key: 'customerName', width: 25 },
@@ -1406,7 +1427,7 @@ ${productsSummaryHtml}
       headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F46E5' } };
       headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
       headerRow.height = 30;
-      
+
       // Add rows
       allOrdersFull.forEach((o: any) => {
         const rowData = worksheet.addRow({
@@ -1422,16 +1443,16 @@ ${productsSummaryHtml}
           total: _orderSub(o) + _toN(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0),
           notes: o.notes ?? ''
         });
-        
+
         rowData.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-        
+
         // Style row borders
         rowData.eachCell((cell) => {
           cell.border = {
-            top: {style:'thin', color: {argb:'FFE2E8F0'}},
-            left: {style:'thin', color: {argb:'FFE2E8F0'}},
-            bottom: {style:'thin', color: {argb:'FFE2E8F0'}},
-            right: {style:'thin', color: {argb:'FFE2E8F0'}}
+            top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
           };
         });
       });
@@ -1462,18 +1483,18 @@ ${productsSummaryHtml}
 
     let fullOrders: any[] = [];
     if (allIds.length > 0) {
-      try { fullOrders = await _fetchOrdersByIds(allIds); } catch (_) {}
+      try { fullOrders = await _fetchOrdersByIds(allIds); } catch (_) { }
     }
     const byId: Record<number, any> = {};
     fullOrders.forEach(o => { byId[o.id] = o; });
-    const allOrdersFull = journalOrders.map(x => byId[x.id] || {id: x.id, orderNumber: x.order_number, order_number: x.order_number, products: []});
+    const allOrdersFull = journalOrders.map(x => byId[x.id] || { id: x.id, orderNumber: x.order_number, order_number: x.order_number, products: [] });
 
     // Build products summary map (same as SalesDaily printThermal)
-    const summaryMap: Record<string, {name:string; color:string; size:string; qty:number}> = {};
+    const summaryMap: Record<string, { name: string; color: string; size: string; qty: number }> = {};
     allOrdersFull.forEach((o: any) => {
       (o.products || []).forEach((p: any) => {
-        const key = `${p.name||''}||${p.color||''}||${p.size||''}`;
-        if (!summaryMap[key]) summaryMap[key] = {name: p.name||'', color: p.color||'', size: p.size||'', qty: 0};
+        const key = `${p.name || ''}||${p.color || ''}||${p.size || ''}`;
+        if (!summaryMap[key]) summaryMap[key] = { name: p.name || '', color: p.color || '', size: p.size || '', qty: 0 };
         summaryMap[key].qty += _toN(p.quantity ?? p.qty ?? 0);
       });
     });
@@ -1485,7 +1506,7 @@ ${productsSummaryHtml}
     try {
       const u = JSON.parse(localStorage.getItem('Dragon_user') || 'null');
       cachedUserName = u && (u.name || u.username) ? (u.name || u.username) : '';
-    } catch(e) {}
+    } catch (e) { }
     const employeeName = userDefaults?.name || userDefaults?.username || cachedUserName || '';
     const noteCode = row.daily_code || '';
     const compName = localStorage.getItem('Dragon_company_name') || '';
@@ -1570,7 +1591,7 @@ ${productsSummaryHtml}
       return;
     }
     let fullOrders: any[] = [];
-    try { fullOrders = await _fetchOrdersByIds(allIds); } catch (_) {}
+    try { fullOrders = await _fetchOrdersByIds(allIds); } catch (_) { }
     if (fullOrders.length === 0) {
       Swal.fire('تنبيه', 'تعذر تحميل بيانات الأوردرات', 'warning');
       return;
@@ -1580,8 +1601,8 @@ ${productsSummaryHtml}
       ...o,
       orderNumber: o.orderNumber ?? o.order_number ?? String(o.id ?? ''),
       customerName: o.customerName ?? o.customer_name ?? '',
-      phone:  o.phone  ?? o.phone1 ?? '',
-      phone1: o.phone1 ?? o.phone  ?? '',
+      phone: o.phone ?? o.phone1 ?? '',
+      phone1: o.phone1 ?? o.phone ?? '',
       phone2: o.phone2 ?? '',
     }));
     setWaybillPrintOrders(normalised);
@@ -1593,7 +1614,9 @@ ${productsSummaryHtml}
     let dateStr = row.journal_date || row.opened_at || row.created_at || new Date().toISOString();
     const dateOnly = String(dateStr).slice(0, 10);
     const journalId = row.id;
-    
+
+    const currencySymbol = 'ج.م';
+
     try {
       // 1. جلب الأوردرات المرتبطة بهذه اليومية
       const ordersRes = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getJournalOrders&rep_id=${encodeURIComponent(repTargetId)}&journal_ids=${journalId}`).then(r => r.json()).catch(() => null);
@@ -1621,7 +1644,81 @@ ${productsSummaryHtml}
         }
       }
 
-      // 2. دمج الأوردرات لضمان حساب المرتجع الجزئي (نفس منطق SalesDailyClose تماماً)
+      // جلب العهدة النشطة المتبقية مع المندوب
+      let rawActive: any[] = [];
+      try {
+        const custodyRes = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getSalesActiveWithRep&rep_id=${encodeURIComponent(repTargetId)}`).then(r => r.json()).catch(() => null);
+        if (custodyRes && custodyRes.success && Array.isArray(custodyRes.data)) {
+          rawActive = custodyRes.data;
+        }
+      } catch (e) {}
+
+      // 2. معالجة الدفعات تحت الحساب (interim payments)
+      let interimPaymentsList: any[] = [];
+      let interimPaymentAmount = Number(row.interim_payment_amount || 0);
+
+      if (row.interim_payments_json) {
+        try {
+          const parsed = typeof row.interim_payments_json === 'string' ? JSON.parse(row.interim_payments_json) : row.interim_payments_json;
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            interimPaymentsList = parsed;
+          }
+        } catch (e) {}
+      }
+
+      if (interimPaymentsList.length === 0) {
+        try {
+          const txRes = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=getByRelated&related_to_type=rep&related_to_id=${encodeURIComponent(repTargetId)}`).then(r => r.json()).catch(() => null);
+          if (txRes && txRes.success && Array.isArray(txRes.data)) {
+            const matchedTxs = txRes.data.filter((t: any) => {
+              const dt = typeof t.details === 'string' ? JSON.parse(t.details || '{}') : (t.details || {});
+              return dt.action === 'interimDailyPayment' && String(dt.journal_id) === String(journalId);
+            });
+            if (matchedTxs.length > 0) {
+              interimPaymentsList = matchedTxs.map((t: any) => {
+                const dt = typeof t.details === 'string' ? JSON.parse(t.details || '{}') : (t.details || {});
+                return {
+                  payment_id: t.id,
+                  amount: Number(t.amount || 0),
+                  treasury_id: t.treasury_id,
+                  treasury_name: dt.treasury_name || 'خزينة',
+                  date: t.transaction_date ? String(t.transaction_date).slice(0, 10) : '',
+                  time: t.transaction_date ? new Date(t.transaction_date).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }) : '',
+                  notes: dt.notes || '',
+                  employee: dt.created_by_name || ''
+                };
+              });
+              if (interimPaymentAmount === 0) {
+                interimPaymentAmount = interimPaymentsList.reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
+              }
+            }
+          }
+        } catch (e) {}
+      }
+
+      // 3. تحديد الخزينة وتفاصيل الإغلاق
+      let pTreasury = 'مدفوعات إليكترونية';
+      if (row.payment_action === 'electronic' || row.payment_type === 'electronic') {
+        pTreasury = 'مدفوعات إليكترونية';
+      } else if (row.treasury_name) {
+        pTreasury = row.treasury_name;
+      } else if (row.treasury_id) {
+        const foundTr = treasuries.find((t: any) => Number(t.id) === Number(row.treasury_id));
+        pTreasury = foundTr ? foundTr.name : `خزينة #${row.treasury_id}`;
+      } else if (userDefaults?.default_treasury_id) {
+        const defTr = treasuries.find((t: any) => Number(t.id) === Number(userDefaults.default_treasury_id));
+        pTreasury = defTr ? defTr.name : 'الخزينة الرئيسية';
+      } else {
+        pTreasury = 'الخزينة الرئيسية';
+      }
+
+      const pRepName = repName;
+      const pDate = row.closed_at ? String(row.closed_at).slice(0, 10) : dateOnly;
+      const pTime = row.closed_at ? new Date(row.closed_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }) : '';
+      const pDailyCode = row.daily_code || ('DLY-' + String(row.id).padStart(5, '0'));
+      const pEmployee = row.employee || row.closed_by_name || userDefaults?.name || userDefaults?.username || '';
+
+      // 4. دمج وتصفية القوائم تماماً مثل SalesDailyClose
       const _uniqOrdersById = (arr: any[]) => {
         const seen = new Set<string>();
         const out: any[] = [];
@@ -1652,11 +1749,21 @@ ${productsSummaryHtml}
         return !deferredIds.has(id);
       });
 
-      // 3. دوال الحسابات والإجماليات
+      const deferredOrders = _uniqOrdersById(deferredList);
+
+      const activeOrders = _uniqOrdersById(rawActive).filter((o: any) => {
+        const id = String(o?.order_id ?? o?.id ?? '');
+        return !deferredIds.has(id) && !finalDeliveredList.some((d: any) => String(d?.order_id ?? d?.id ?? '') === id);
+      });
+
+      // 5. الإحصائيات والتجميعات
       const sum = (arr: any[], fn: (o: any) => number) => arr.reduce((s, x) => s + fn(x), 0);
 
-      const delivFullList = finalDeliveredList.filter((o: any) => computeReturnedPieces(o) === 0);
-      const delivPartialList = finalDeliveredList.filter((o: any) => computeReturnedPieces(o) > 0);
+      const delivFullList = finalDeliveredList.filter((o: any) => computeDeliveredNetPieces(o) > 0 && computeReturnedPieces(o) === 0);
+      const delivPartialList = finalDeliveredList.filter((o: any) => computeDeliveredNetPieces(o) > 0 && computeReturnedPieces(o) > 0);
+
+      const returnFullList = finalReturnedList.filter((o: any) => computeReturnedPieces(o) > 0 && !isOrderPartialReturnInReturnedList(o));
+      const returnPartialList = finalReturnedList.filter((o: any) => computeReturnedPieces(o) > 0 && isOrderPartialReturnInReturnedList(o));
 
       const delivFullCount = delivFullList.length;
       const delivFullPieces = sum(delivFullList, computeDeliveredNetPieces);
@@ -1666,9 +1773,6 @@ ${productsSummaryHtml}
       const delivPartialPieces = sum(delivPartialList, computeDeliveredNetPieces);
       const delivPartialAmount = sum(delivPartialList, computeDeliveredNetValue);
 
-      const returnFullList = finalReturnedList.filter((o: any) => computeDeliveredNetPieces(o) === 0);
-      const returnPartialList = finalReturnedList.filter((o: any) => computeDeliveredNetPieces(o) > 0);
-
       const returnFullCount = returnFullList.length;
       const returnFullPieces = sum(returnFullList, computeReturnedPieces);
       const returnFullAmount = sum(returnFullList, computeReturnedOrderValue);
@@ -1677,559 +1781,338 @@ ${productsSummaryHtml}
       const returnPartialPieces = sum(returnPartialList, computeReturnedPieces);
       const returnPartialAmount = sum(returnPartialList, computeReturnedOrderValue);
 
-      const deferredCount = deferredList.length;
-      const deferredPiecesSum = sum(deferredList, computePieces);
-      const deferredAmountSum = sum(deferredList, computeOrderValueWithoutShipping);
+      const deferredCount = deferredOrders.length;
+      const deferredPiecesSum = sum(deferredOrders, computePieces);
+      const deferredAmountSum = sum(deferredOrders, computeOrderValueWithoutShipping);
 
-      // 4. الحسابات المالية 
-      const openingBalance = Number(row.prev_balance ?? 0);
-      const paidAmount = Number(row.payment_amount ?? 0);
-      const settlementDirection = row.payment_action || 'collect';
-      let currentBalance = Number(row.balance_after_payment ?? row.closing_amount ?? 0);
-      if (paidAmount === 0 && (!row.balance_after_payment || Number(row.balance_after_payment) === 0) && openingBalance !== 0) {
-        currentBalance = openingBalance;
+      const activeCount = activeOrders.length;
+      const activePiecesSum = activeOrders.reduce((s: number, o: any) => s + computePieces(o), 0);
+      const activeAmountSum = activeOrders.reduce((s: number, o: any) => s + computeActiveOrderDisplayValue(o), 0);
+
+      const deliveredPieces = sum(finalDeliveredList, computeDeliveredNetPieces);
+      const deliveredValue = sum(finalDeliveredList, computeDeliveredNetValue);
+      const returnedPieces = sum(finalReturnedList, computeReturnedPieces);
+      const returnedValue = sum(finalReturnedList, computeReturnedOrderValue);
+      const deferredPieces = deferredPiecesSum;
+      const deferredValue = deferredAmountSum;
+
+      // 6. الحسابات المالية الدقيقة
+      const prevBalance = Number(row.prev_balance ?? 0);
+      const pAmount = Number(row.payment_amount ?? 0);
+      let balanceAfterPayment = Number(row.balance_after_payment ?? row.closing_amount ?? 0);
+      if (pAmount === 0 && (!row.balance_after_payment || Number(row.balance_after_payment) === 0) && prevBalance !== 0) {
+        balanceAfterPayment = prevBalance;
       }
-      
-      const totalRequiredBeforeClose = openingBalance;
-      const estimatedRemaining = paidAmount === 0 ? openingBalance : currentBalance;
 
-      // 5. بناء جداول التقرير
+      const currentDebt = prevBalance < 0 ? Math.abs(prevBalance) : 0;
+      const totalRequiredBeforeReturns = currentDebt + returnedValue + interimPaymentAmount;
+      const netAfterReturns = Math.max(0, totalRequiredBeforeReturns - returnedValue);
+      const estimatedRemaining = balanceAfterPayment;
+
+      // 7. إنشاء صفوف الجداول
       const delivHTML = finalDeliveredList.map((o: any) => {
         const isPartial = computeReturnedPieces(o) > 0 && computeDeliveredNetPieces(o) > 0;
         return `<tr>
           <td style="padding:4px;border:1px solid #ccc;text-align:right;">#${o.orderNumber || o.order_number || o.id} ${isPartial ? '<span style="font-size:10px;color:#d97706;">(جزئي)</span>' : ''}</td>
           <td style="padding:4px;border:1px solid #ccc;text-align:right;">${o.customerName || o.customer_name || o.name || ''}</td>
           <td style="padding:4px;border:1px solid #ccc;text-align:center;">${computeDeliveredNetPieces(o)}</td>
-          <td style="padding:4px;border:1px solid #ccc;text-align:center;">${Number(computeDeliveredNetValue(o)).toLocaleString()}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:center;">${money(computeDeliveredNetValue(o))}</td>
         </tr>`;
       }).join('');
 
       const retHTML = finalReturnedList.map((o: any) => {
-        const isPartial = computeReturnedPieces(o) > 0 && computeDeliveredNetPieces(o) > 0;
+        const isPartial = isOrderPartialReturnInReturnedList(o);
         return `<tr>
           <td style="padding:4px;border:1px solid #ccc;text-align:right;">#${o.orderNumber || o.order_number || o.id} ${isPartial ? '<span style="font-size:10px;color:#d97706;">(جزئي)</span>' : ''}</td>
           <td style="padding:4px;border:1px solid #ccc;text-align:right;">${o.customerName || o.customer_name || o.name || ''}</td>
           <td style="padding:4px;border:1px solid #ccc;text-align:center;">${computeReturnedPieces(o)}</td>
-          <td style="padding:4px;border:1px solid #ccc;text-align:center;">${Number(computeReturnedOrderValue(o)).toLocaleString()}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:center;">${money(computeReturnedOrderValue(o))}</td>
         </tr>`;
       }).join('');
 
-      const defHTML = (deferredList || []).map((o: any) => {
+      const defHTML = deferredOrders.map((o: any) => {
         return `<tr>
           <td style="padding:4px;border:1px solid #ccc;text-align:right;">#${o.orderNumber || o.order_number || o.id}</td>
           <td style="padding:4px;border:1px solid #ccc;text-align:right;">${o.customerName || o.customer_name || o.name || ''}</td>
           <td style="padding:4px;border:1px solid #ccc;text-align:center;">${computePieces(o)}</td>
-          <td style="padding:4px;border:1px solid #ccc;text-align:center;">${Number(computeOrderValueWithoutShipping(o)).toLocaleString()}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:center;">${money(computeOrderValueWithoutShipping(o))}</td>
         </tr>`;
       }).join('');
 
-      const deliveredPiecesTotal = delivFullPieces + delivPartialPieces;
-      const returnedPiecesTotal = returnFullPieces + returnPartialPieces;
-      const totalReceived = delivFullAmount + delivPartialAmount;
-      const totalPaid = returnFullAmount + returnPartialAmount;
+      const activeHTML = activeOrders.map((o: any) => {
+        const isRetWithRep = String(o.status || o.order_status || o.journal_status || '').toLowerCase() === 'returned_with_rep';
+        const isPart = String(o.status || o.order_status || o.journal_status || '').toLowerCase() === 'partial_return';
+        return `<tr>
+          <td style="padding:4px;border:1px solid #ccc;text-align:right;">#${o.orderNumber || o.order_number || o.id} ${isRetWithRep ? '<span style="font-size:10px;color:#ea580c;">(مرتجع مع المندوب)</span>' : isPart ? '<span style="font-size:10px;color:#dc2626;">(مرتجع جزئي)</span>' : ''}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:right;">${o.customerName || o.customer_name || o.name || ''}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:center;">${computePieces(o)}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:center;">${money(computeActiveOrderDisplayValue(o))}</td>
+        </tr>`;
+      }).join('');
+
+      const interimHTML = interimPaymentsList.map((p: any, idx: number) => {
+        const trName = treasuries.find((t: any) => String(t.id) === String(p.treasury_id))?.name || p.treasury_name || 'خزينة';
+        let dateDisplay = '';
+        if (p.date && p.time) {
+          dateDisplay = `${p.date} ${p.time}`;
+        } else if (p.created_at) {
+          dateDisplay = String(p.created_at);
+        } else if (p.datetime) {
+          dateDisplay = String(p.datetime);
+        } else if (p.date) {
+          dateDisplay = String(p.date);
+        } else if (p.time) {
+          dateDisplay = String(p.time);
+        } else {
+          dateDisplay = '—';
+        }
+
+        return `<tr>
+          <td style="padding:4px;border:1px solid #ccc;text-align:center;">${idx + 1}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:center;white-space:nowrap;" dir="ltr">${dateDisplay}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:right;">${trName}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:center;font-weight:bold;color:#059669;">${money(p.amount)} ${currencySymbol}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:right;">${p.notes || '—'}</td>
+          <td style="padding:4px;border:1px solid #ccc;text-align:right;">${p.employee || '—'}</td>
+        </tr>`;
+      }).join('');
 
       const html = `
-        <html dir="rtl" lang="ar">
-        <head>
-          <title>تقرير إغلاق اليومية</title>
-          <style>
-            body { font-family: Tahoma, Arial, sans-serif; font-size: 12px; margin: 16px; line-height: 1.5; direction: rtl; }
-            .header { text-align: center; margin-bottom: 14px; border-bottom: 2px solid #000; padding-bottom: 8px; }
-            h2 { margin: 0 0 4px; font-size: 16px; }
-            h4 { margin: 12px 0 4px; font-size: 12px; }
-            table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 11px; }
-            th { background: #eee; padding: 4px 6px; border: 1px solid #ccc; text-align: right; font-weight: bold; }
-            td { padding: 4px 6px; border: 1px solid #ccc; }
-            .summary-top { border: 1px solid #bbb; border-radius: 6px; padding: 8px 12px; background: #fafafa; margin-bottom: 10px; font-size: 12px; }
-            .summary-top .title { font-weight: bold; font-size: 13px; margin-bottom: 6px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
-            .summary-top .row { display: flex; justify-content: space-between; padding: 2px 0; }
-            .summary-top .row b { direction: ltr; }
-            .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
-            .box { border: 1px solid #bbb; border-radius: 6px; padding: 8px 10px; background: #fff; }
-            .box .box-title { font-weight: bold; font-size: 11px; border-bottom: 1px solid #ddd; padding-bottom: 4px; margin-bottom: 5px; color: #333; }
-            .box .row { display: flex; justify-content: space-between; font-size: 11px; padding: 1px 0; }
-            .box .row .val { font-weight: bold; direction: ltr; }
-            .remaining-box { border: 2px solid #000; border-radius: 6px; padding: 10px; background: #f0fdf4; text-align: center; margin-bottom: 10px; }
-            .remaining-box .label { font-size: 12px; color: #555; margin-bottom: 4px; }
-            .remaining-box .amount { font-size: 20px; font-weight: bold; direction: ltr; color: #065f46; }
-            .account-box { border: 1px solid #bbb; border-radius: 6px; padding: 8px 12px; background: #fffbea; margin-bottom: 10px; font-size: 12px; }
-            .account-box .title { font-weight: bold; margin-bottom: 5px; }
-            .account-box .row { display: flex; justify-content: space-between; padding: 2px 0; }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <h2>تقرير إغلاق اليومية — ${repName}</h2>
-            <div style="font-size:11px;">التاريخ: <span dir="ltr">${dateOnly}</span> | كود اليومية: ${row.daily_code || '---'}</div>
-            ${(() => { const empN = row.employee || userDefaults?.name || userDefaults?.username || ''; return empN ? `<div style="font-size:11px;margin-top:2px;">الموظف: <b>${empN}</b></div>` : ''; })()}
-          </div>
+      <html dir="rtl" lang="ar">
+      <head>
+        <title>تقرير إغلاق يومية مندوب - ${pRepName}</title>
+        <style>
+          body { font-family: Tahoma, Arial, sans-serif; font-size: 12px; margin: 16px; line-height: 1.5; direction: rtl; color: #111; }
+          .header { text-align: center; margin-bottom: 14px; border-bottom: 2px solid #000; padding-bottom: 8px; }
+          h2 { margin: 0 0 4px; font-size: 16px; }
+          h4 { margin: 12px 0 4px; font-size: 12px; }
+          table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 11px; }
+          th { background: #eee; padding: 4px 6px; border: 1px solid #ccc; text-align: right; font-weight: bold; }
+          td { padding: 4px 6px; border: 1px solid #ccc; }
+          .summary-top { border: 1px solid #bbb; border-radius: 6px; padding: 8px 12px; background: #fafafa; margin-bottom: 10px; font-size: 12px; }
+          .summary-top .title { font-weight: bold; font-size: 13px; margin-bottom: 6px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+          .summary-top .row { display: flex; justify-content: space-between; padding: 2px 0; }
+          .summary-top .row b { direction: ltr; }
+          .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+          .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+          .box { border: 1px solid #bbb; border-radius: 6px; padding: 8px 10px; background: #fff; }
+          .box .box-title { font-weight: bold; font-size: 11px; border-bottom: 1px solid #ddd; padding-bottom: 4px; margin-bottom: 5px; color: #333; }
+          .box .row { display: flex; justify-content: space-between; font-size: 11px; padding: 1px 0; }
+          .box .row .val { font-weight: bold; direction: ltr; }
+          .remaining-box { border: 2px solid #000; border-radius: 6px; padding: 10px; background: #f0fdf4; text-align: center; margin-bottom: 10px; }
+          .remaining-box .label { font-size: 12px; color: #555; margin-bottom: 4px; }
+          .remaining-box .amount { font-size: 20px; font-weight: bold; direction: ltr; color: #065f46; }
+          .account-box { border: 1px solid #bbb; border-radius: 6px; padding: 8px 12px; background: #fffbea; margin-bottom: 10px; font-size: 12px; }
+          .account-box .title { font-weight: bold; margin-bottom: 5px; }
+          .account-box .row { display: flex; justify-content: space-between; padding: 2px 0; }
+          @media print {
+            body { margin: 8px; font-size: 11px; }
+            .no-print { display: none; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h2>تقرير إغلاق يومية المندوب: ${pRepName}</h2>
+          <div style="font-size:11px;">تاريخ الإغلاق: <span dir="ltr">${pDate}${pTime ? ' ' + pTime : ''}</span> | رقم اليومية: ${pDailyCode}</div>
+          ${pEmployee ? `<div style="font-size:11px;margin-top:2px;">الموظف المسؤول: <b>${pEmployee}</b></div>` : ''}
+        </div>
 
-          <!-- ملخص قبل الإغلاق -->
-          <div class="summary-top">
-            <div class="title">ملخص قبل الإغلاق</div>
-            <div class="row"><span>إجمالى المبلغ المطلوب قبل إغلاق اليومية</span><b>${totalRequiredBeforeClose.toLocaleString()} ج.م</b></div>
+        <!-- بيان تصفية الحساب المالي لليومية بتسلسل الخصومات الدقيق -->
+        <div class="summary-top" style="background: #ffffff; border: 2px solid #059669; padding: 12px 14px; margin-bottom: 12px;">
+          <div class="title" style="color: #065f46; border-bottom: 1.5px solid #a7f3d0; font-size: 13px; margin-bottom: 8px; padding-bottom: 4px;">
+            💰 بيان تصفية الحساب المالي لليومية (خطوة بخطوة)
           </div>
+          
+          <table style="width: 100%; border: none; margin-bottom: 0; font-size: 12px;">
+            <tr style="background: #f8fafc; font-weight: bold; border-bottom: 1px solid #cbd5e1;">
+              <td style="padding: 6px; border: none; text-align: right;">1. إجمالي المبلغ المطلوب قبل خصم المرتجعات:</td>
+              <td style="padding: 6px; border: none; text-align: left; direction: ltr; font-size: 13px;"><b>${money(totalRequiredBeforeReturns)} ${currencySymbol}</b></td>
+            </tr>
 
-          <!-- صناديق الإحصاء -->
-          <div class="grid2">
-            <div class="box">
-              <div class="box-title">✅ التسليم الكامل</div>
-              <div class="row"><span>عدد الطلبات</span><span class="val">${delivFullCount} طلب</span></div>
-              <div class="row"><span>إجمالى القطع</span><span class="val">${delivFullPieces}</span></div>
-              <div class="row"><span>إجمالى المبلغ</span><span class="val">${delivFullAmount.toLocaleString()} ج.م</span></div>
-            </div>
-            <div class="box">
-              <div class="box-title">🔄 الارجاع الكلي</div>
-              <div class="row"><span>عدد الطلبات</span><span class="val">${returnFullCount} طلب</span></div>
-              <div class="row"><span>إجمالى القطع</span><span class="val">${returnFullPieces}</span></div>
-              <div class="row"><span>إجمالى المبلغ</span><span class="val">${returnFullAmount.toLocaleString()} ج.م</span></div>
-            </div>
-            <div class="box">
-              <div class="box-title">🔀 التسليم الجزئي</div>
-              <div class="row"><span>عدد الطلبات</span><span class="val">${delivPartialCount} طلب</span></div>
-              <div class="row"><span>إجمالى القطع</span><span class="val">${delivPartialPieces}</span></div>
-              <div class="row"><span>إجمالى المبلغ</span><span class="val">${delivPartialAmount.toLocaleString()} ج.م</span></div>
-            </div>
-            <div class="box">
-              <div class="box-title">↩️ الارجاع الجزئي</div>
-              <div class="row"><span>عدد الطلبات</span><span class="val">${returnPartialCount} طلب</span></div>
-              <div class="row"><span>إجمالى القطع</span><span class="val">${returnPartialPieces}</span></div>
-              <div class="row"><span>إجمالى المبلغ</span><span class="val">${returnPartialAmount.toLocaleString()} ج.م</span></div>
-            </div>
-          </div>
+            <tr style="color: #dc2626; border-bottom: 1px dashed #e2e8f0;">
+              <td style="padding: 6px; border: none; text-align: right;">
+                (-) يُخصم: إجمالي قيمة المرتجع (${finalReturnedList.length} طلب مرتجع كلي وجزئي):
+              </td>
+              <td style="padding: 6px; border: none; text-align: left; direction: ltr; font-weight: bold;">
+                - ${money(returnedValue)} ${currencySymbol}
+              </td>
+            </tr>
 
-          <!-- صندوق النزول وملخص الحساب -->
-          <div class="grid2" style="grid-template-columns:1fr 1fr;">
-            <div class="box">
-              <div class="box-title">⬇️ النزول (مؤجل)</div>
-              <div class="row"><span>عدد الطلبات</span><span class="val">${deferredCount} طلب</span></div>
-              <div class="row"><span>إجمالى القطع</span><span class="val">${deferredPiecesSum}</span></div>
-              <div class="row"><span>إجمالى المبلغ</span><span class="val">${deferredAmountSum.toLocaleString()} ج.م</span></div>
-            </div>
-            <div class="account-box">
-              <div class="title">💰 ملخص الحساب</div>
-              <div class="row"><span>الحساب قبل الإغلاق</span><b dir="ltr">${totalRequiredBeforeClose.toLocaleString()} ج.م</b></div>
-              <div class="row"><span>طريقة التسوية</span><b>${paidAmount === 0 ? 'بدون حركة مالية' : (settlementDirection === 'collect' ? 'تحصيل من المندوب' : 'دفع للمندوب')}</b></div>
-              <div class="row"><span>المبلغ المدفوع للتقفيل</span><b dir="ltr">${paidAmount.toLocaleString()} ج.م</b></div>
-            </div>
-          </div>
+            <tr style="background: #fffbeb; font-weight: bold; border-bottom: 1px solid #fef3c7;">
+              <td style="padding: 5px 6px; border: none; text-align: right; color: #92400e;">
+                = الصافي المطلوب بعد استبعاد المرتجع:
+              </td>
+              <td style="padding: 5px 6px; border: none; text-align: left; direction: ltr; color: #92400e;">
+                ${money(netAfterReturns)} ${currencySymbol}
+              </td>
+            </tr>
 
-          <!-- المبلغ المتبقى -->
-          <div class="remaining-box">
-            <div class="label">المبلغ المتبقى بعد الإغلاق</div>
-            <div class="amount">${estimatedRemaining.toLocaleString()} ج.م</div>
-          </div>
+            <tr style="color: #059669; border-bottom: 1px dashed #e2e8f0;">
+              <td style="padding: 6px; border: none; text-align: right;">
+                (-) يُخصم: إجمالي الدفعات المسددة تحت الحساب أثناء اليومية (${interimPaymentsList.length} دفعة):
+              </td>
+              <td style="padding: 6px; border: none; text-align: left; direction: ltr; font-weight: bold;">
+                - ${money(interimPaymentAmount)} ${currencySymbol}
+              </td>
+            </tr>
 
-          ${finalDeliveredList.length > 0 ? `
-          <h4>تفاصيل التسليم (${finalDeliveredList.length} طلب) — القطع: ${deliveredPiecesTotal} — إجمالي: ${Number(totalReceived).toLocaleString()} ج.م</h4>
-          <table>
-            <tr><th>رقم الأوردر</th><th>العميل</th><th style="text-align:center;">القطع</th><th style="text-align:center;">القيمة</th></tr>
-            ${delivHTML}
+            <tr style="background: #f0fdf4; font-weight: bold; border-bottom: 1px solid #bbf7d0;">
+              <td style="padding: 6px; border: none; text-align: right; color: #166534;">
+                = المبلغ المطلوب تسويته للتقفيل النهائي:
+              </td>
+              <td style="padding: 6px; border: none; text-align: left; direction: ltr; color: #166534; font-size: 13px;">
+                ${money(currentDebt)} ${currencySymbol} ${prevBalance !== 0 ? `(${balanceLabel(prevBalance)})` : ''}
+              </td>
+            </tr>
+
+            <tr style="color: #2563eb; border-bottom: 2px solid #059669;">
+              <td style="padding: 6px; border: none; text-align: right;">
+                (-) يُخصم: المبلغ المدفوع للتقفيل النهائي الآن (${pTreasury}):
+              </td>
+              <td style="padding: 6px; border: none; text-align: left; direction: ltr; font-weight: bold;">
+                - ${money(pAmount)} ${currencySymbol}
+              </td>
+            </tr>
+
+            <tr style="background: #fdf2f8; font-weight: bold;">
+              <td style="padding: 8px 6px; border: none; text-align: right; font-size: 13px; color: #9d174d;">
+                (=) الرصيد المتبقي على / للمندوب بعد الإغلاق:
+              </td>
+              <td style="padding: 8px 6px; border: none; text-align: left; direction: ltr; font-size: 15px; color: #be185d;">
+                <b>${money(Math.abs(estimatedRemaining))} ${currencySymbol}</b> <span style="font-size: 11px;">(${Math.abs(estimatedRemaining) === 0 ? 'خالص' : balanceLabel(estimatedRemaining)})</span>
+              </td>
+            </tr>
           </table>
-          ` : ''}
 
-          ${finalReturnedList.length > 0 ? `
-          <h4>تفاصيل المرتجع (${finalReturnedList.length} طلب) — القطع: ${returnedPiecesTotal} — إجمالي: ${Number(totalPaid).toLocaleString()} ج.م</h4>
-          <table>
-            <tr><th>رقم الأوردر</th><th>العميل</th><th style="text-align:center;">القطع</th><th style="text-align:center;">القيمة</th></tr>
-            ${retHTML}
-          </table>
+          ${(interimPaymentAmount > 0 || pAmount > 0) ? `
+          <div style="margin-top: 8px; padding-top: 6px; border-top: 1px solid #d1fae5; font-size: 11px; display: flex; justify-content: space-between; color: #047857;">
+            <span>💡 <b>إجمالي المبالغ المحصلة فعلياً لليومية (تحت الحساب + التقفيل):</b></span>
+            <b dir="ltr">${money(interimPaymentAmount + pAmount)} ${currencySymbol}</b>
+          </div>
           ` : ''}
+        </div>
 
-          ${deferredList.length > 0 ? `
-          <h4>تفاصيل النزول (${deferredList.length} طلب) — القطع: ${deferredPiecesSum} — إجمالي: ${Number(deferredAmountSum).toLocaleString()} ج.م</h4>
-          <table>
-            <tr><th>رقم الأوردر</th><th>العميل</th><th style="text-align:center;">القطع</th><th style="text-align:center;">القيمة</th></tr>
-            ${defHTML}
-          </table>
-          ` : ''}
+        ${interimPaymentsList.length > 0 ? `
+        <!-- جدول الدفعات المسددة تحت الحساب -->
+        <h4>💵 تفاصيل الدفعات المسددة تحت الحساب أثناء اليومية (${interimPaymentsList.length} دفعة — إجمالي: ${money(interimPaymentAmount)} ${currencySymbol})</h4>
+        <table>
+          <tr>
+            <th style="width:5%;text-align:center;">#</th>
+            <th style="width:20%;text-align:center;">التاريخ والوقت</th>
+            <th style="width:20%;text-align:right;">الخزينة</th>
+            <th style="width:15%;text-align:center;">المبلغ</th>
+            <th style="width:25%;text-align:right;">ملاحظات</th>
+            <th style="width:15%;text-align:right;">الموظف</th>
+          </tr>
+          ${interimHTML}
+        </table>
+        ` : ''}
 
-        </body>
-        </html>
-      `;
-      
-      const w = window.open('', '_blank', 'toolbar=0,location=0,menubar=0,scrollbars=1,width=960,height=720');
-      if (!w) { 
-        Swal.fire('تنبيه', 'يرجى السماح بفتح النوافذ المنبثقة', 'warning'); 
-        return; 
-      }
-      w.document.write(html);
-      w.document.close();
-      w.focus();
-      setTimeout(() => w.print(), 500);
+        <!-- صناديق الإحصاء الشاملة -->
+        <div class="grid3">
+          <div class="box">
+            <div class="box-title">✅ التسليم الكامل</div>
+            <div class="row"><span>عدد الطلبات</span><span class="val">${delivFullCount} طلب</span></div>
+            <div class="row"><span>إجمالى القطع</span><span class="val">${delivFullPieces}</span></div>
+            <div class="row"><span>إجمالى المبلغ</span><span class="val">${money(delivFullAmount)} ${currencySymbol}</span></div>
+          </div>
+          <div class="box">
+            <div class="box-title">🔀 التسليم الجزئي</div>
+            <div class="row"><span>عدد الطلبات</span><span class="val">${delivPartialCount} طلب</span></div>
+            <div class="row"><span>إجمالى القطع</span><span class="val">${delivPartialPieces}</span></div>
+            <div class="row"><span>إجمالى المبلغ</span><span class="val">${money(delivPartialAmount)} ${currencySymbol}</span></div>
+          </div>
+          <div class="box">
+            <div class="box-title">🔄 الارجاع الكلي</div>
+            <div class="row"><span>عدد الطلبات</span><span class="val">${returnFullCount} طلب</span></div>
+            <div class="row"><span>إجمالى القطع</span><span class="val">${returnFullPieces}</span></div>
+            <div class="row"><span>إجمالى المبلغ</span><span class="val">${money(returnFullAmount)} ${currencySymbol}</span></div>
+          </div>
+          <div class="box">
+            <div class="box-title">↩️ الارجاع الجزئي</div>
+            <div class="row"><span>عدد الطلبات</span><span class="val">${returnPartialCount} طلب</span></div>
+            <div class="row"><span>إجمالى القطع</span><span class="val">${returnPartialPieces}</span></div>
+            <div class="row"><span>إجمالى المبلغ</span><span class="val">${money(returnPartialAmount)} ${currencySymbol}</span></div>
+          </div>
+          <div class="box">
+            <div class="box-title">⬇️ النزول (المؤجل)</div>
+            <div class="row"><span>عدد الطلبات</span><span class="val">${deferredCount} طلب</span></div>
+            <div class="row"><span>إجمالى القطع</span><span class="val">${deferredPiecesSum}</span></div>
+            <div class="row"><span>إجمالى المبلغ</span><span class="val">${money(deferredAmountSum)} ${currencySymbol}</span></div>
+          </div>
+          <div class="box" style="border-color:#3b82f6;background:#eff6ff;">
+            <div class="box-title" style="color:#1d4ed8;">📦 متبقي في العهدة الحالية</div>
+            <div class="row"><span>عدد الطلبات</span><span class="val">${activeCount} طلب</span></div>
+            <div class="row"><span>إجمالى القطع</span><span class="val">${activePiecesSum}</span></div>
+            <div class="row"><span>إجمالى المبلغ</span><span class="val">${money(activeAmountSum)} ${currencySymbol}</span></div>
+          </div>
+        </div>
+
+        ${finalDeliveredList.length > 0 ? `
+        <h4>تفاصيل طلبات التسليم (${finalDeliveredList.length} طلب) — القطع: ${deliveredPieces} — إجمالي: ${money(deliveredValue)} ${currencySymbol}</h4>
+        <table>
+          <tr><th>رقم الأوردر</th><th>العميل</th><th style="text-align:center;">القطع</th><th style="text-align:center;">القيمة</th></tr>
+          ${delivHTML}
+        </table>
+        ` : ''}
+
+        ${finalReturnedList.length > 0 ? `
+        <h4>تفاصيل طلبات المرتجع (${finalReturnedList.length} طلب) — القطع: ${returnedPieces} — إجمالي: ${money(returnedValue)} ${currencySymbol}</h4>
+        <table>
+          <tr><th>رقم الأوردر</th><th>العميل</th><th style="text-align:center;">القطع</th><th style="text-align:center;">القيمة</th></tr>
+          ${retHTML}
+        </table>
+        ` : ''}
+
+        ${deferredOrders.length > 0 ? `
+        <h4>تفاصيل طلبات النزول (المؤجل) (${deferredOrders.length} طلب) — القطع: ${deferredPieces} — إجمالي: ${money(deferredValue)} ${currencySymbol}</h4>
+        <table>
+          <tr><th>رقم الأوردر</th><th>العميل</th><th style="text-align:center;">القطع</th><th style="text-align:center;">القيمة</th></tr>
+          ${defHTML}
+        </table>
+        ` : ''}
+
+        ${activeOrders.length > 0 ? `
+        <h4>تفاصيل طلبات العهدة الحالية المتبقية مع المندوب (${activeOrders.length} طلب) — القطع: ${activePiecesSum} — إجمالي: ${money(activeAmountSum)} ${currencySymbol}</h4>
+        <table>
+          <tr><th>رقم الأوردر</th><th>العميل</th><th style="text-align:center;">القطع</th><th style="text-align:center;">القيمة</th></tr>
+          ${activeHTML}
+        </table>
+        ` : ''}
+
+      </body>
+      </html>
+    `;
+
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      document.body.appendChild(iframe);
+
+      // Firefox fallback
+      iframe.contentDocument?.open();
+      iframe.contentDocument?.write(html);
+      iframe.contentDocument?.close();
+
+      iframe.onload = () => {
+        setTimeout(() => {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+          setTimeout(() => { document.body.removeChild(iframe); }, 1000);
+        }, 500);
+      };
     } catch (e) {
       console.error('Print close report error', e);
       Swal.fire('خطأ', 'فشل تحميل أو طباعة التقرير', 'error');
     }
   };
- /*  const printCloseReport = async (row: any) => {
-    console.log('DEBUG printCloseReport called with row:', row);
-    const repTargetId = row.rep_id || selectedRepId;
-    console.log('DEBUG resolved repTargetId:', repTargetId);
-    const repName = representatives.find((r: any) => Number(r.id) === Number(repTargetId))?.name || '';
-    
-    // Get the date from the row - extract just the date part
-    let dateStr = row.journal_date || row.opened_at || row.created_at || new Date().toISOString();
-    const dateOnly = String(dateStr).slice(0, 10); // Ensure YYYY-MM-DD format
-    
-    // Fetch summary data for this date and rep
-    try {
-      // Fetch rep balance information
-      let repRes: any = { success: false, data: [] };
-      try {
-        const repResp = await fetch(`${API_BASE_PATH}/api.php?module=users&action=getAllWithBalance&related_to_type=rep&rep_id=${repTargetId}`);
-        if (!repResp.ok) {
-          const t = await repResp.text().catch(() => null);
-          console.error('getAllWithBalance failed', repResp.status, t);
-        } else {
-          repRes = await repResp.json().catch(() => ({ success: false, data: [] }));
-        }
-      } catch (e) {
-        console.error('getAllWithBalance fetch error', e);
-      }
-        console.log('DEBUG getAllWithBalance result:', repRes);
-        try { (window as any).__REP_DEBUG = (window as any).__REP_DEBUG || {}; (window as any).__REP_DEBUG.repRes = repRes; } catch (e) {}
-      const repUser = Array.isArray(repRes.data) ? repRes.data[0] : repRes.data;
-      const currentBalance = Number(repUser?.balance ?? repUser?.current_balance ?? 0);
-      
-      // Fetch sales active with rep to calculate totals
-      let custodyRes: any = { success: false, data: [] };
-      try {
-        const cResp = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getSalesActiveWithRep&rep_id=${encodeURIComponent(repTargetId)}`);
-        if (!cResp.ok) {
-          const t2 = await cResp.text().catch(() => null);
-          console.error('getSalesActiveWithRep failed', cResp.status, t2);
-        } else {
-          custodyRes = await cResp.json().catch(() => ({ success: false, data: [] }));
-        }
-      } catch (e) {
-        console.error('getSalesActiveWithRep fetch error', e);
-      }
-      console.log('DEBUG getSalesActiveWithRep result:', custodyRes);
-      try { (window as any).__REP_DEBUG = (window as any).__REP_DEBUG || {}; (window as any).__REP_DEBUG.custodyRes = custodyRes; } catch (e) {}
-      const allOrders = Array.isArray(custodyRes.data) ? custodyRes.data : [];
-      console.log('DEBUG allOrders length:', allOrders.length, 'allOrders sample:', Array.isArray(allOrders) ? allOrders.slice(0,5) : allOrders);
-      try { (window as any).__REP_DEBUG.allOrders = Array.isArray(allOrders) ? allOrders.slice(0,200) : allOrders; } catch (e) {}
-      
-      // Get journal info
-      let journalRes: any = { success: false, data: [] };
-      try {
-        // Fetch all journals for this rep and select by daily code or id (more reliable than date)
-        const jResp = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getRepDailyJournal&rep_id=${repTargetId}`);
-        if (!jResp.ok) {
-          const t3 = await jResp.text().catch(() => null);
-          console.error('getRepDailyJournal failed', jResp.status, t3);
-        } else {
-          journalRes = await jResp.json().catch(() => ({ success: false, data: [] }));
-        }
-      } catch (e) {
-        console.error('getRepDailyJournal fetch error', e);
-      }
-      const journalData = (Array.isArray(journalRes.data) && journalRes.data.length > 0) ? (
-        // prefer exact id match, then daily_code match, then fall back to first
-        (journalRes.data.find((j: any) => Number(j.id) === Number(row.id))
-          || journalRes.data.find((j: any) => String(j.daily_code || '').trim() === String(row.daily_code || '').trim())
-          || journalRes.data[0])
-      ) : null;
-      console.log('DEBUG getRepDailyJournal result:', journalRes);
-      try { (window as any).__REP_DEBUG = (window as any).__REP_DEBUG || {}; (window as any).__REP_DEBUG.journalRes = journalRes; } catch (e) {}
-      
-      // Calculate order statistics (use product-level quantities/prices when present)
-      const getOrderPieces = (o: any) => {
-        const items = o.products || o.order_items || o.items || [];
-        if (Array.isArray(items) && items.length > 0) return items.reduce((s: number, p: any) => s + Number(p.quantity ?? p.qty ?? 0), 0);
-        return Number(o.qty_sum ?? o.delivered_pieces ?? o.pieces_count ?? 0);
-      };
-
-      const getOrderReturnedPieces = (o: any) => {
-        const items = o.products || o.order_items || o.items || [];
-        if (Array.isArray(items) && items.length > 0) return items.reduce((s: number, p: any) => s + Number(p.returned_quantity ?? p.returned_qty ?? 0), 0);
-        return Number(o.returned_pieces ?? o.returned_quantity ?? 0);
-      };
-
-      const deliveredOrders = allOrders.filter((o: any) => {
-        const pieces = getOrderPieces(o);
-        const returnedPieces = getOrderReturnedPieces(o);
-        return pieces > 0 && returnedPieces === 0;
-      });
-      console.log('DEBUG deliveredOrders count:', deliveredOrders.length, 'sample:', deliveredOrders.slice(0,5));
-      try { (window as any).__REP_DEBUG.deliveredOrders = deliveredOrders.slice(0,200); } catch (e) {}
-
-      const returnedOrders = allOrders.filter((o: any) => {
-        const returnedPieces = getOrderReturnedPieces(o);
-        const status = String(o.status || o.order_status || '').toLowerCase();
-        return returnedPieces > 0 || status === 'full_return' || status === 'partial_return' || status === 'returned' || Number(o.returned_value ?? 0) > 0;
-      });
-      console.log('DEBUG returnedOrders count:', returnedOrders.length, 'sample:', returnedOrders.slice(0,5));
-      try { (window as any).__REP_DEBUG.returnedOrders = returnedOrders.slice(0,200); } catch (e) {}
-
-      const totalReceived = Number(deliveredOrders.reduce((sum: number, o: any) => {
-        const items = o.products || o.order_items || o.items || [];
-        if (Array.isArray(items) && items.length > 0) {
-          return sum + items.reduce((s: number, p: any) => s + (Number(p.quantity ?? p.qty ?? 0) * Number(p.price ?? p.price_per_unit ?? p.unit_price ?? 0)), 0);
-        }
-        const qty = Number(o.qty_sum ?? 0);
-        const price = Number(o.price ?? o.unit_price ?? 0);
-        return sum + (qty * price);
-      }, 0));
-
-      const totalPaid = Number(returnedOrders.reduce((sum: number, o: any) => {
-        const items = o.products || o.order_items || o.items || [];
-        if (Array.isArray(items) && items.length > 0) {
-          return sum + items.reduce((s: number, p: any) => s + (Number(p.returned_quantity ?? p.returned_qty ?? 0) * Number(p.price ?? p.price_per_unit ?? p.unit_price ?? 0)), 0);
-        }
-        const returnedVal = Number(o.returned_value ?? 0);
-        return sum + returnedVal;
-      }, 0));
-      
-      const openingBalance = currentBalance + totalPaid - totalReceived;
-      
-      let returnedOrdersCount = { total: 0, full: 0, partial: 0 };
-      let returnedPieces = 0;
-      
-      returnedOrders.forEach((o: any) => {
-        returnedOrdersCount.total++;
-        if (o.status === 'full_return') returnedOrdersCount.full++;
-        if (o.status === 'partial_return') returnedOrdersCount.partial++;
-        returnedPieces += getOrderReturnedPieces(o);
-      });
-
-      // Additional aggregates to match SalesDailyClose report
-      const delivFullList = deliveredOrders.filter((o: any) => getOrderReturnedPieces(o) === 0);
-      const delivPartialList = deliveredOrders.filter((o: any) => getOrderReturnedPieces(o) > 0);
-
-      const returnFullList = returnedOrders.filter((o: any) => getOrderPieces(o) === 0);
-      const returnPartialList = returnedOrders.filter((o: any) => getOrderPieces(o) > 0);
-
-      const sum = (arr: any[], fn: (o: any) => number) => arr.reduce((s, x) => s + fn(x), 0);
-
-      const delivFullCount = delivFullList.length;
-      const delivFullPieces = sum(delivFullList, (o:any) => getOrderPieces(o));
-      const delivFullAmount = sum(delivFullList, (o:any) => {
-        const items = o.products || o.order_items || o.items || [];
-        if (Array.isArray(items) && items.length > 0) return items.reduce((s:number, p:any) => s + (Number(p.quantity ?? p.qty ?? 0) * Number(p.price ?? p.price_per_unit ?? p.unit_price ?? 0)), 0);
-        return Number(o.qty_sum ?? 0) * Number(o.price ?? o.unit_price ?? 0);
-      });
-
-      const delivPartialCount = delivPartialList.length;
-      const delivPartialPieces = sum(delivPartialList, (o:any) => getOrderPieces(o));
-      const delivPartialAmount = sum(delivPartialList, (o:any) => {
-        const items = o.products || o.order_items || o.items || [];
-        if (Array.isArray(items) && items.length > 0) return items.reduce((s:number, p:any) => s + (Number(p.quantity ?? p.qty ?? 0) * Number(p.price ?? p.price_per_unit ?? p.unit_price ?? 0)), 0);
-        return Number(o.qty_sum ?? 0) * Number(o.price ?? o.unit_price ?? 0);
-      });
-
-      const returnFullCount = returnFullList.length;
-      const returnFullPieces = sum(returnFullList, (o:any) => getOrderReturnedPieces(o));
-      const returnFullAmount = sum(returnFullList, (o:any) => {
-        const items = o.products || o.order_items || o.items || [];
-        if (Array.isArray(items) && items.length > 0) return items.reduce((s:number, p:any) => s + (Number(p.returned_quantity ?? p.returned_qty ?? 0) * Number(p.price ?? p.price_per_unit ?? p.unit_price ?? 0)), 0);
-        return Number(o.returned_value ?? (Number(o.returned_pieces ?? 0) * Number(o.price ?? o.unit_price ?? 0)));
-      });
-
-      const returnPartialCount = returnPartialList.length;
-      const returnPartialPieces = sum(returnPartialList, (o:any) => getOrderReturnedPieces(o));
-      const returnPartialAmount = sum(returnPartialList, (o:any) => {
-        const items = o.products || o.order_items || o.items || [];
-        if (Array.isArray(items) && items.length > 0) return items.reduce((s:number, p:any) => s + (Number(p.returned_quantity ?? p.returned_qty ?? 0) * Number(p.price ?? p.price_per_unit ?? p.unit_price ?? 0)), 0);
-        return Number(o.returned_value ?? (Number(o.returned_pieces ?? 0) * Number(o.price ?? o.unit_price ?? 0)));
-      });
-
-      const deferredList = allOrders.filter((o:any) => String(o.status || '').toLowerCase() === 'deferred' || String(o.status || '').toLowerCase() === 'deferred_order' || String(o.status || '').toLowerCase() === 'deferred_orders');
-      const deferredCount = deferredList.length;
-      const deferredPiecesSum = sum(deferredList, (o:any) => Number(o.qty_sum ?? o.pieces_count ?? 0));
-      const deferredAmountSum = sum(deferredList, (o:any) => Number(o.qty_sum ?? 0) * Number(o.price ?? o.unit_price ?? 0));
-
-      const totalRequiredBeforeClose = openingBalance;
-      const estimatedRemaining = currentBalance;
-
-      // Prepare row HTML for delivered/returned/deferred lists (match SalesDailyClose formatting)
-      const delivHTML = deliveredOrders.map((o: any) => {
-        const orderNum = o.orderNumber || o.order_number || o.id || '';
-        const cust = o.customerName || o.customer_name || o.name || '';
-        const pieces = Number(o.qty_sum ?? o.delivered_pieces ?? o.pieces_count ?? 0);
-        const value = Number(o.price ?? o.unit_price ?? o.total_amount ?? 0) * pieces;
-        const isPartial = (Number(o.returned_pieces ?? o.returned_quantity ?? 0) > 0) && pieces > 0;
-        return `<tr>
-          <td style="padding:4px;border:1px solid #ccc;text-align:right;">#${orderNum} ${isPartial ? '<span style="font-size:10px;color:#d97706;">(جزئي)</span>' : ''}</td>
-          <td style="padding:4px;border:1px solid #ccc;text-align:right;">${cust}</td>
-          <td style="padding:4px;border:1px solid #ccc;text-align:center;">${pieces}</td>
-          <td style="padding:4px;border:1px solid #ccc;text-align:center;">${Number(value).toLocaleString()}</td>
-        </tr>`;
-      }).join('');
-
-      const retHTML = returnedOrders.map((o: any) => {
-        const orderNum = o.orderNumber || o.order_number || o.id || '';
-        const cust = o.customerName || o.customer_name || o.name || '';
-        const pieces = Number(o.returned_pieces ?? o.returned_quantity ?? o.qty_sum ?? 0);
-        const value = Number(((o.returned_value ?? (pieces * Number(o.price ?? o.unit_price ?? 0))) || 0));
-        const isPartial = (Number(o.returned_pieces ?? o.returned_quantity ?? 0) > 0) && (Number(o.qty_sum ?? 0) > 0);
-        return `<tr>
-          <td style="padding:4px;border:1px solid #ccc;text-align:right;">#${orderNum} ${isPartial ? '<span style="font-size:10px;color:#d97706;">(جزئي)</span>' : ''}</td>
-          <td style="padding:4px;border:1px solid #ccc;text-align:right;">${cust}</td>
-          <td style="padding:4px;border:1px solid #ccc;text-align:center;">${pieces}</td>
-          <td style="padding:4px;border:1px solid #ccc;text-align:center;">${Number(value).toLocaleString()}</td>
-        </tr>`;
-      }).join('');
-
-      const defHTML = (deferredList || []).map((o: any) => {
-        const orderNum = o.orderNumber || o.order_number || o.id || '';
-        const cust = o.customerName || o.customer_name || o.name || '';
-        const pieces = Number(o.qty_sum ?? o.pieces_count ?? 0);
-        const value = Number(o.price ?? o.unit_price ?? o.total_amount ?? 0) * pieces;
-        return `<tr>
-          <td style="padding:4px;border:1px solid #ccc;text-align:right;">#${orderNum}</td>
-          <td style="padding:4px;border:1px solid #ccc;text-align:right;">${cust}</td>
-          <td style="padding:4px;border:1px solid #ccc;text-align:center;">${pieces}</td>
-          <td style="padding:4px;border:1px solid #ccc;text-align:center;">${Number(value).toLocaleString()}</td>
-        </tr>`;
-      }).join('');
-
-      // Map variables to match SalesDailyClose template names
-      const deliveredPiecesTotal = sum(deliveredOrders, (o:any) => Number(o.qty_sum ?? o.delivered_pieces ?? o.pieces_count ?? 0));
-      const deliveredValueTotal = totalReceived;
-
-      const pRepName = repName;
-      const pDate = dateOnly;
-      const pTotal = currentBalance;
-      const pAmount = 0;
-      const pTreasury = 'مدفوعات إليكترونية';
-      const repTxType = 'none';
-      const repTxAmount = 0;
-      const repTxReason = '';
-
-      // Generate HTML report (template identical to SalesDailyClose)
-      const html = `
-        <html dir="rtl" lang="ar">
-        <head>
-          <title>تقرير إغلاق اليومية</title>
-          <style>
-            body { font-family: Tahoma, Arial, sans-serif; font-size: 13px; margin: 20px; line-height: 1.5; direction: rtl; }
-            .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 10px; }
-            .flex { display: flex; justify-content: space-between; margin-bottom: 15px; gap: 10px; flex-wrap: wrap; }
-            .box { border: 1px solid #000; padding: 10px; border-radius: 5px; flex: 1; min-width: 200px; }
-            table { width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: 12px; }
-            th { background: #eee; padding: 8px; border: 1px solid #ccc; text-align: right; font-weight: bold; }
-            td { padding: 8px; border: 1px solid #ccc; text-align: right; }
-            .page-break { page-break-after: always; }
-            .section-title { font-weight: bold; margin: 15px 0 8px 0; font-size: 14px; border-bottom: 1px solid #ddd; padding-bottom: 5px; }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <h2 style="margin: 0 0 5px;">تقرير إغلاق اليومية — ${repName}</h2>
-            <div>التاريخ: <span dir="ltr">${dateOnly}</span></div>
-          </div>
-
-          <div class="flex">
-            <div class="box" style="background:#e8f5e9;">
-              <div style="font-weight:bold;margin-bottom:8px;color:#2e7d32;">رصيد الافتتاح</div>
-              <div style="font-size:16px;font-weight:bold;color:#1b5e20;direction:ltr;">${openingBalance.toLocaleString()} ج.م</div>
-            </div>
-            <div class="box" style="background:#e3f2fd;">
-              <div style="font-weight:bold;margin-bottom:8px;color:#1565c0;">إجمالي المقبوضات</div>
-              <div style="font-size:16px;font-weight:bold;color:#0d47a1;direction:ltr;">${totalReceived.toLocaleString()} ج.م</div>
-            </div>
-            <div class="box" style="background:#ffebee;">
-              <div style="font-weight:bold;margin-bottom:8px;color:#c62828;">إجمالي المدفوعات</div>
-              <div style="font-size:16px;font-weight:bold;color:#b71c1c;direction:ltr;">${totalPaid.toLocaleString()} ج.م</div>
-            </div>
-            <div class="box" style="background:#fff3e0;">
-              <div style="font-weight:bold;margin-bottom:8px;color:#e65100;">الرصيد الحالي</div>
-              <div style="font-size:16px;font-weight:bold;color:#bf360c;direction:ltr;">${currentBalance.toLocaleString()} ج.م</div>
-            </div>
-          </div>
-
-          <div style="margin-bottom:12px;border:1px solid #ddd;padding:10px;border-radius:6px;background:#fafafa;">
-            <div style="font-weight:bold;margin-bottom:8px;">ملخص قبل الإغلاق</div>
-            <table style="width:100%;border-collapse:collapse;font-size:12px;">
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;width:60%;">اجمالى المبلغ المطلوب قبل اغلاق اليومية</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${totalRequiredBeforeClose.toLocaleString()} ${'ج.م'}</td></tr>
-
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات التسليم الكامل</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${delivFullCount} طلب</td></tr>
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع التسليم الكامل</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${delivFullPieces}</td></tr>
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ التسليم الكامل</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${delivFullAmount.toLocaleString()} ${'ج.م'}</td></tr>
-
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات الارجاع الكلي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${returnFullCount} طلب</td></tr>
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع الارتجاع الكلى</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${returnFullPieces}</td></tr>
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ الارتجاع الكلى</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${returnFullAmount.toLocaleString()} ${'ج.م'}</td></tr>
-
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات التسليم الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${delivPartialCount} طلب</td></tr>
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع التسليم الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${delivPartialPieces}</td></tr>
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ التسليم الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${delivPartialAmount.toLocaleString()} ${'ج.م'}</td></tr>
-
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات الارجاع الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${returnPartialCount} طلب</td></tr>
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع الارتجاع الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${returnPartialPieces}</td></tr>
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ الارتجاع الجزئي</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${returnPartialAmount.toLocaleString()} ${'ج.م'}</td></tr>
-
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">اجمالى اوردرات النزول</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${deferredCount} طلب</td></tr>
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى قطع النزول</td><td style="padding:6px;border:1px solid #eee;text-align:left;">${deferredPiecesSum}</td></tr>
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;">اجمالى مبلغ النزول</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${deferredAmountSum.toLocaleString()} ${'ج.م'}</td></tr>
-
-              <tr><td style="padding:6px;border:1px solid #eee;text-align:right;font-weight:bold;">المبلغ المتبقى</td><td style="padding:6px;border:1px solid #eee;text-align:left;direction:ltr;">${estimatedRemaining.toLocaleString()} ${'ج.م'}</td></tr>
-            </table>
-          </div>
-
-          
-
-          ${deliveredOrders.length > 0 ? `
-          <h4 style="margin-bottom:5px;">جدول تفاصيل التسليم (${deliveredOrders.length} طلب) — القطع: ${deliveredPiecesTotal} — إجمالي: ${Number(deliveredValueTotal).toLocaleString()}</h4>
-          <table>
-            <tr><th>رقم الأوردر</th><th>العميل</th><th style="text-align:center;">القطع</th><th style="text-align:center;">القيمة</th></tr>
-            ${delivHTML}
-          </table>
-          ` : ''}
-
-          ${returnedOrders.length > 0 ? `
-          <h4 style="margin-bottom:5px;">جدول تفاصيل المرتجع (${returnedOrders.length} طلب) — القطع: ${returnedPieces} — إجمالي: ${Number(totalPaid).toLocaleString()}</h4>
-          <table>
-            <tr><th>رقم الأوردر</th><th>العميل</th><th style="text-align:center;">القطع</th><th style="text-align:center;">القيمة</th></tr>
-            ${retHTML}
-          </table>
-          ` : ''}
-
-          ${deferredList.length > 0 ? `
-          <h4 style="margin-bottom:5px;">جدول تفاصيل النزول (${deferredList.length} طلب) — القطع: ${deferredPiecesSum} — إجمالي: ${Number(deferredAmountSum).toLocaleString()}</h4>
-          <table>
-            <tr><th>رقم الأوردر</th><th>العميل</th><th style="text-align:center;">القطع</th><th style="text-align:center;">القيمة</th></tr>
-            ${defHTML}
-          </table>
-          ` : ''}
-
-         
-
-          <div style="margin-top:30px;padding:15px;border:2px solid #000;text-align:center;background:#f5f5f5;">
-            <div style="font-weight:bold;font-size:14px;margin-bottom:10px;">الحالة النهائية للحساب</div>
-            <div style="font-size:18px;font-weight:bold;direction:ltr;color:#1b5e20;">
-              ${Math.abs(currentBalance).toLocaleString()} ج.م 
-              <span>${currentBalance > 0 ? 'له' : currentBalance < 0 ? 'عليه' : ''}</span>
-            </div>
-          </div>
-        </body>
-        </html>
-      `;
-      
-      // Open in new window and print
-      const w = window.open('', '_blank', 'toolbar=0,location=0,menubar=0,scrollbars=1,width=960,height=720');
-      if (!w) { 
-        Swal.fire('تنبيه', 'يرجى السماح بفتح النوافذ المنبثقة', 'warning'); 
-        return; 
-      }
-      w.document.write(html);
-      w.document.close();
-      w.focus();
-      setTimeout(() => w.print(), 500);
-    } catch (e) {
-      console.error('Print close report error', e);
-      Swal.fire('خطأ', 'فشل تحميل أو طباعة التقرير', 'error');
-    }
-  }; */
 
   const fetchRepTransactions = async () => {
     try {
       const r = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=getByRelated&related_to_type=rep&related_to_id=${selectedRepId}`);
       const jr = await r.json();
       if (jr.success) {
-        const txs = (jr.data || []).map((t:any) => ({
+        const txs = (jr.data || []).map((t: any) => ({
           ...t,
           _label: (t.title && String(t.title).trim()) ? t.title : ((t.memo && String(t.memo).trim()) ? t.memo : getTxLabelEnhanced(t.type || t.tx_type || '', parseTxDetails(t.details || t.data || {})))
         }));
@@ -2262,7 +2145,7 @@ ${productsSummaryHtml}
     }
 
     const isFine = paymentForm.type === 'fine';
-    const direction: 'in'|'out' = isFine ? 'out' : paymentForm.direction;
+    const direction: 'in' | 'out' = isFine ? 'out' : paymentForm.direction;
     const txType = isFine
       ? 'rep_payment_out'
       : (direction === 'in' ? 'rep_payment_in' : 'rep_payment_out');
@@ -2285,7 +2168,7 @@ ${productsSummaryHtml}
     payload.memo = paymentForm.note || '';
 
     try {
-      const res = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=create`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=create`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const js = await res.json();
       if (js.success) {
         Swal.fire('تم التسجيل', 'تم تسجيل المعاملة بنجاح.', 'success');
@@ -2306,14 +2189,14 @@ ${productsSummaryHtml}
 
     try {
       const payload = { order_id: partialReturnOrder.id, rep_id: selectedRepId, items, warehouse_id: partialReturnWarehouse || null, notes: partialReturnNotes };
-      const res = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=partialReturn`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=partialReturn`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const js = await res.json();
       if (js.success) {
-        Swal.fire('تم', `تمت معالجة المرتجع الجزئي. المبلغ: ${Number(js.returnedValue||0).toLocaleString()} ${currencySymbol}`, 'success');
+        Swal.fire('تم', `تمت معالجة المرتجع الجزئي. المبلغ: ${Number(js.returnedValue || 0).toLocaleString()} ${currencySymbol}`, 'success');
         // تحديث rep_journal_orders (fire-and-forget)
         try {
           await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ rep_id: selectedRepId, order_ids: [partialReturnOrder.id], status: 'partial_return' })
           });
         } catch (jErr) { console.warn('updateJournalOrderStatus partial_return failed (non-critical)', jErr); }
@@ -2415,7 +2298,7 @@ ${productsSummaryHtml}
         try {
           if (!payload.title && payload.type) payload.title = getTxLabelEnhanced(payload.type, payload.details || {});
           if (!payload.memo && payload.details && (payload.details.notes || payload.details.note)) payload.memo = payload.details.notes || payload.details.note || '';
-        } catch (e) {}
+        } catch (e) { }
 
         const res = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=create`, {
           method: 'POST',
@@ -2517,7 +2400,7 @@ ${productsSummaryHtml}
         setRepTransactions(prev => {
           const merged = [...createdTxs, ...prev];
           // recompute balance from merged txs
-          const bal = merged.reduce((s:any, t:any) => s + Number(t.amount || 0), 0);
+          const bal = merged.reduce((s: any, t: any) => s + Number(t.amount || 0), 0);
           setRepresentatives(prevReps => prevReps.map(p => Number(p.id) === Number(selectedRepId) ? { ...p, balance: bal } : p));
           return merged;
         });
@@ -2546,9 +2429,9 @@ ${productsSummaryHtml}
   const [partialReturnInputs, setPartialReturnInputs] = useState<{ [productId: string]: number }>({});
   const [partialReturnWarehouse, setPartialReturnWarehouse] = useState<number | ''>('');
   const [partialReturnNotes, setPartialReturnNotes] = useState<string>('');
-  const repCashIn = repTransactions.reduce((s:any, t:any) => s + (Number(t.amount || 0) > 0 ? Number(t.amount || 0) : 0), 0);
-  const repCashOut = repTransactions.reduce((s:any, t:any) => s + (Number(t.amount || 0) < 0 ? Math.abs(Number(t.amount || 0)) : 0), 0);
-  const repCashBalance = repTransactions.reduce((s:any, t:any) => s + Number(t.amount || 0), 0);
+  const repCashIn = repTransactions.reduce((s: any, t: any) => s + (Number(t.amount || 0) > 0 ? Number(t.amount || 0) : 0), 0);
+  const repCashOut = repTransactions.reduce((s: any, t: any) => s + (Number(t.amount || 0) < 0 ? Math.abs(Number(t.amount || 0)) : 0), 0);
+  const repCashBalance = repTransactions.reduce((s: any, t: any) => s + Number(t.amount || 0), 0);
 
   // In settlement mode, auto-fill the amount with the remaining balance after applying insurance.
   useEffect(() => {
@@ -2618,7 +2501,7 @@ ${productsSummaryHtml}
       const allAssignedRes = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getByRep&rep_id=${repId}`);
       const allAssignedJs = await allAssignedRes.json();
       const allAssigned = (allAssignedJs && allAssignedJs.success) ? (allAssignedJs.data || []) : [];
-      const oldOrders = allAssigned.filter((o:any) => new Date(o.created_at) < new Date(startDate + 'T00:00:00'));
+      const oldOrders = allAssigned.filter((o: any) => new Date(o.created_at) < new Date(startDate + 'T00:00:00'));
 
       // 3) transactions for rep
       const tRes = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=getByRelated&related_to_type=rep&related_to_id=${repId}`);
@@ -2628,25 +2511,25 @@ ${productsSummaryHtml}
       const dayStart = new Date(startDate + 'T00:00:00');
       const dayEnd = new Date(endDate + 'T23:59:59');
 
-      const openingBalance = allTx.filter((tx:any)=> new Date(tx.transaction_date) < dayStart).reduce((s:any,tx:any)=>s+Number(tx.amount||0),0);
-      const todaysTx = allTx.filter((tx:any)=> { const d=new Date(tx.transaction_date); return d>=dayStart && d<=dayEnd; });
-      const accountToday = todaysTx.reduce((s:any,tx:any)=>s+Number(tx.amount||0),0);
+      const openingBalance = allTx.filter((tx: any) => new Date(tx.transaction_date) < dayStart).reduce((s: any, tx: any) => s + Number(tx.amount || 0), 0);
+      const todaysTx = allTx.filter((tx: any) => { const d = new Date(tx.transaction_date); return d >= dayStart && d <= dayEnd; });
+      const accountToday = todaysTx.reduce((s: any, tx: any) => s + Number(tx.amount || 0), 0);
 
-      const delivered = todaysOrders.filter((o:any)=> (o.status||'') === 'delivered');
-      const returned = todaysOrders.filter((o:any)=> (o.status||'') === 'returned');
-      const postponed = todaysOrders.filter((o:any)=> (o.status||'') === 'postponed' || (o.status||'') === 'in_delivery');
+      const delivered = todaysOrders.filter((o: any) => (o.status || '') === 'delivered');
+      const returned = todaysOrders.filter((o: any) => (o.status || '') === 'returned');
+      const postponed = todaysOrders.filter((o: any) => (o.status || '') === 'postponed' || (o.status || '') === 'in_delivery');
 
-      const sumOrderValue = (orders:any[]) => orders.reduce((s:any,o:any)=> s + Number(o.total || o.total_amount || 0),0);
-      const sumOrderPieces = (orders:any[]) => orders.reduce((s:any,o:any)=> s + (Array.isArray(o.products)? o.products.reduce((ss:any,p:any)=> ss + Number(p.quantity||0),0) : 0),0);
+      const sumOrderValue = (orders: any[]) => orders.reduce((s: any, o: any) => s + Number(o.total || o.total_amount || 0), 0);
+      const sumOrderPieces = (orders: any[]) => orders.reduce((s: any, o: any) => s + (Array.isArray(o.products) ? o.products.reduce((ss: any, p: any) => ss + Number(p.quantity || 0), 0) : 0), 0);
 
-      const partialDeliveryAmount = todaysTx.filter((tx:any)=>{
+      const partialDeliveryAmount = todaysTx.filter((tx: any) => {
         const d = parseTxDetails(tx.details);
-        return (d?.action === 'partial_delivered' || d?.subtype === 'partial_delivered' || (d?.notes||'').toString().toLowerCase().includes('partial_delivered'));
-      }).reduce((s:any,tx:any)=>s + Math.abs(Number(tx.amount||0)),0);
-      const partialReturnAmount = todaysTx.filter((tx:any)=>{
+        return (d?.action === 'partial_delivered' || d?.subtype === 'partial_delivered' || (d?.notes || '').toString().toLowerCase().includes('partial_delivered'));
+      }).reduce((s: any, tx: any) => s + Math.abs(Number(tx.amount || 0)), 0);
+      const partialReturnAmount = todaysTx.filter((tx: any) => {
         const d = parseTxDetails(tx.details);
-        return (d?.action === 'partial_returned' || d?.subtype === 'partial_return' || d?.subtype === 'partial_returned' || (d?.notes||'').toString().toLowerCase().includes('partial_return'));
-      }).reduce((s:any,tx:any)=>s + Math.abs(Number(tx.amount||0)),0);
+        return (d?.action === 'partial_returned' || d?.subtype === 'partial_return' || d?.subtype === 'partial_returned' || (d?.notes || '').toString().toLowerCase().includes('partial_return'));
+      }).reduce((s: any, tx: any) => s + Math.abs(Number(tx.amount || 0)), 0);
 
       const summary = {
         date: dateIso,
@@ -2656,7 +2539,7 @@ ${productsSummaryHtml}
         todaysOrdersCount: delivered.length,
         todaysPieces: sumOrderPieces(delivered),
         totalDeliveredValue: sumOrderValue(delivered),
-        prepaid: todaysTx.filter((tx:any)=> (tx.type||tx.tx_type||'').includes('rep_payment_in')).reduce((s:any,tx:any)=>s+Number(tx.amount||0),0),
+        prepaid: todaysTx.filter((tx: any) => (tx.type || tx.tx_type || '').includes('rep_payment_in')).reduce((s: any, tx: any) => s + Number(tx.amount || 0), 0),
         accountToday,
         deliveredCount: delivered.length,
         deliveredAmount: sumOrderValue(delivered),
@@ -2691,7 +2574,7 @@ ${productsSummaryHtml}
     if (!paymentForm.treasuryId) return Swal.fire('اختر الخزينة', 'يرجى اختيار الخزينة لتنفيذ حركة الصندوق ضمن التسوية.', 'warning');
 
     const amount = Math.abs(remaining);
-    const direction: 'in'|'out' = remaining < 0 ? 'in' : 'out';
+    const direction: 'in' | 'out' = remaining < 0 ? 'in' : 'out';
 
     const r = await Swal.fire({
       title: 'تأكيد تسوية ملخص اليوم',
@@ -2713,7 +2596,7 @@ ${productsSummaryHtml}
         direction,
         details: { notes: `تسوية يومية بتاريخ ${cycleDate}`, subtype: 'daily_summary_settlement' }
       };
-      const res = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=create`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=transactions&action=create`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const js = await res.json();
       if (js.success) {
         Swal.fire('تمت التسوية', 'تم تنفيذ تسوية ملخص اليوم بنجاح.', 'success');
@@ -2734,24 +2617,24 @@ ${productsSummaryHtml}
       const rows: any[] = [];
       rows.push(['الحقل', 'القيمة']);
       rows.push(['التاريخ', dailySummary.date || '']);
-      rows.push(['رصيد الافتتاح', Number(dailySummary.openingBalance||0).toString()]);
-      rows.push(['عدد الاوردرات القديمة', String(dailySummary.oldOrdersCount||0)]);
-      rows.push(['قطع قديمة', String(dailySummary.oldPieces||0)]);
-      rows.push(['استلام اليوم (عدد)', String(dailySummary.todaysOrdersCount||0)]);
-      rows.push(['قيمة المسلّم اليوم', Number(dailySummary.totalDeliveredValue||0).toString()]);
-      rows.push(['المبالغ المستلمة اليوم', Number(dailySummary.prepaid||0).toString()]);
-      rows.push(['مجموع التسليم الجزئي (قيمة)', Number(dailySummary.partialDeliveryAmount||0).toString()]);
-      rows.push(['مجموع المرتجع الجزئي (قيمة)', Number(dailySummary.partialReturnAmount||0).toString()]);
-      rows.push(['المبلغ المرتجع اليوم', Number(dailySummary.returnedAmount||0).toString()]);
-      rows.push(['المنقوص/المتبقي', Number(dailySummary.remaining||0).toString()]);
-      rows.push(['الاوردرات المؤجلة (عدد)', String(dailySummary.postponedCount||0)]);
+      rows.push(['رصيد الافتتاح', Number(dailySummary.openingBalance || 0).toString()]);
+      rows.push(['عدد الاوردرات القديمة', String(dailySummary.oldOrdersCount || 0)]);
+      rows.push(['قطع قديمة', String(dailySummary.oldPieces || 0)]);
+      rows.push(['استلام اليوم (عدد)', String(dailySummary.todaysOrdersCount || 0)]);
+      rows.push(['قيمة المسلّم اليوم', Number(dailySummary.totalDeliveredValue || 0).toString()]);
+      rows.push(['المبالغ المستلمة اليوم', Number(dailySummary.prepaid || 0).toString()]);
+      rows.push(['مجموع التسليم الجزئي (قيمة)', Number(dailySummary.partialDeliveryAmount || 0).toString()]);
+      rows.push(['مجموع المرتجع الجزئي (قيمة)', Number(dailySummary.partialReturnAmount || 0).toString()]);
+      rows.push(['المبلغ المرتجع اليوم', Number(dailySummary.returnedAmount || 0).toString()]);
+      rows.push(['المنقوص/المتبقي', Number(dailySummary.remaining || 0).toString()]);
+      rows.push(['الاوردرات المؤجلة (عدد)', String(dailySummary.postponedCount || 0)]);
 
       if (Array.isArray(dailySummary.postponedOrders) && dailySummary.postponedOrders.length > 0) {
         rows.push([]);
         rows.push(['الاوردرات المؤجلة — تفاصيل']);
         rows.push(['رقم الاوردر', 'العميل', 'قيمة', 'الحالة']);
         for (const o of dailySummary.postponedOrders) {
-          rows.push([o.order_number || o.orderNumber || ('#' + (o.id||'')), o.customer_name || o.customerName || '', String(o.total || o.total_amount || 0), o.status || '']);
+          rows.push([o.order_number || o.orderNumber || ('#' + (o.id || '')), o.customer_name || o.customerName || '', String(o.total || o.total_amount || 0), o.status || '']);
         }
       }
 
@@ -2781,11 +2664,11 @@ ${productsSummaryHtml}
           <p className="text-sm text-muted font-medium">متابعة أداء المناديب وعهدتهم ومعاملاتهم</p>
         </div>
         <div className="flex gap-1 p-1.5 rounded-2xl border border-card shadow-sm card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
-          <button onClick={handleOpenAuditModal} className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-black bg-indigo-600 text-white hover:opacity-90 transition-all shadow-sm"><RefreshCcw size={16}/> تدقيق ومطابقة الأرصدة</button>
-          <button onClick={() => handleOpenModal(null)} className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black bg-green-600 text-white hover:opacity-90"><PlusCircle size={16}/> إضافة مندوب</button>
-          <button onClick={() => setView('list')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${view === 'list' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Users size={16}/> قائمة المناديب</button>
-          <button onClick={() => setView('rep-cycle')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${view === 'rep-cycle' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Wallet size={16}/> يوميات المندوب</button>
-          <button onClick={() => setView('rep-performance')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${view === 'rep-performance' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><ShoppingCart size={16}/> أداء المناديب</button>
+          <button onClick={handleOpenAuditModal} className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-black bg-indigo-600 text-white hover:opacity-90 transition-all shadow-sm"><RefreshCcw size={16} /> تدقيق ومطابقة الأرصدة</button>
+          <button onClick={() => handleOpenModal(null)} className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black bg-green-600 text-white hover:opacity-90"><PlusCircle size={16} /> إضافة مندوب</button>
+          <button onClick={() => setView('list')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${view === 'list' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Users size={16} /> قائمة المناديب</button>
+          <button onClick={() => setView('rep-cycle')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${view === 'rep-cycle' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Wallet size={16} /> يوميات المندوب</button>
+          <button onClick={() => setView('rep-performance')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${view === 'rep-performance' ? 'bg-accent text-white shadow-md' : 'text-muted hover:bg-slate-50 dark:hover:bg-slate-700'}`}><ShoppingCart size={16} /> أداء المناديب</button>
         </div>
       </div>
 
@@ -2807,7 +2690,7 @@ ${productsSummaryHtml}
           <div className="overflow-x-auto">
             <table className="w-full text-right text-sm">
               <thead className="bg-slate-50 dark:bg-slate-900/50 text-muted">
-                  <tr>
+                <tr>
                   <th className="px-6 py-4 font-bold">اسم المندوب</th>
                   <th className="px-6 py-4 font-bold">رقم الهاتف</th>
                   <th className="px-6 py-4 font-bold">مبلغ التأمين</th>
@@ -2816,7 +2699,7 @@ ${productsSummaryHtml}
                 </tr>
               </thead>
               <tbody className="divide-y dark:divide-slate-700 text-slate-700 dark:text-slate-300">
-                {filteredReps.map((rep:any) => {
+                {filteredReps.map((rep: any) => {
                   const repBal = Number(rep.balance ?? 0);
                   const repIns = Number(rep.insurance_amount ?? 0);
                   const hasInsurance = (!!rep.insurance_paid && repIns > 0) || repIns > 0;
@@ -2833,7 +2716,7 @@ ${productsSummaryHtml}
                       <td className="px-6 py-4 text-sm font-black">{rep.insurance_amount ? Number(rep.insurance_amount).toLocaleString() : '—'} {currencySymbol}</td>
                       <td className="px-6 py-4 text-sm font-black">
                         {Math.abs(Number(rep.balance || 0)).toLocaleString()} {currencySymbol}{' '}
-                        <span className="text-sm font-bold" style={{color: (rep.balance>0? 'green': (rep.balance<0? 'red':'#666'))}}>{rep.balance>0? 'له' : (rep.balance<0? 'عليه' : '')}</span>
+                        <span className="text-sm font-bold" style={{ color: (rep.balance > 0 ? 'green' : (rep.balance < 0 ? 'red' : '#666')) }}>{rep.balance > 0 ? 'له' : (rep.balance < 0 ? 'عليه' : '')}</span>
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center justify-center gap-2">
@@ -2866,7 +2749,7 @@ ${productsSummaryHtml}
               <CustomSelect
                 value={String(selectedRepId || '')}
                 onChange={v => setSelectedRepId(v ? Number(v) : null)}
-                options={[{ value: '', label: '-- اختر مندوب --' }, ...representatives.map((rep:any) => ({ value: String(rep.id), label: rep.name }))]}
+                options={[{ value: '', label: '-- اختر مندوب --' }, ...representatives.map((rep: any) => ({ value: String(rep.id), label: rep.name }))]}
                 className="w-full mt-1"
               />
             </div>
@@ -2880,68 +2763,68 @@ ${productsSummaryHtml}
                   {repAssignedOrders.length > 0 ? (
                     <div>
 
-          {isPartialReturnOpen && partialReturnOrder && (
-            <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-              <div className="w-full max-w-2xl rounded-[2rem] shadow-2xl overflow-hidden border border-card card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
-                <div className="p-5 border-b flex justify-between items-center bg-slate-50 dark:bg-slate-900/50">
-                  <h3 className="font-black">مرتجع جزئي للطلب #{partialReturnOrder.orderNumber}</h3>
-                  <button onClick={() => setIsPartialReturnOpen(false)} className="text-slate-400 hover:text-rose-500"><X size={20} /></button>
-                </div>
-                <div className="p-6 space-y-4">
-                  <div className="grid grid-cols-1 gap-3">
-                    <div className="text-sm text-slate-500">اختر المستودع لإعادة الكميات (اختياري)</div>
-                    <CustomSelect
-                      value={String(partialReturnWarehouse || '')}
-                      onChange={v => setPartialReturnWarehouse(v ? Number(v) : '')}
-                      options={[{ value: '', label: '-- لا توجد إعادة إلى مستودع --' }, ...warehouses.map((w:any) => ({ value: String(w.id), label: w.name }))]}
-                      className="w-full"
-                    />
-                  </div>
-                  <div className="border rounded-2xl overflow-auto max-h-72">
-                    <table className="w-full text-right text-sm">
-                      <thead className="bg-slate-50 dark:bg-slate-900/50 text-muted">
-                        <tr><th className="p-3">الصنف</th><th className="p-3">الموجود</th><th className="p-3">سعر الوحدة</th><th className="p-3">كمية المرتجع</th></tr>
-                      </thead>
-                      <tbody className="divide-y dark:divide-slate-700">
-                        {(partialReturnOrder.products||[]).map((p:any)=> (
-                          <tr key={p.productId} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50">
-                            <td className="p-3">{p.name}</td>
-                            <td className="p-3">{p.quantity}</td>
-                            <td className="p-3">{Number(p.price||p.price_per_unit||0).toLocaleString()}</td>
-                            <td className="p-3"><input type="number" min={0} max={p.quantity} value={partialReturnInputs[String(p.productId)]||0} onChange={e=> setPartialReturnInputs(prev=>({...prev,[String(p.productId)]: Math.max(0, Math.min(Number(e.target.value||0), Number(p.quantity||0))) }))} className="w-24 bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm" /></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-500">ملاحظات</label>
-                    <input value={partialReturnNotes} onChange={e=>setPartialReturnNotes(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm mt-1" />
-                  </div>
-                  <div className="flex gap-2 justify-end">
-                    <button onClick={()=>setIsPartialReturnOpen(false)} className="px-4 py-2 rounded-2xl border">إلغاء</button>
-                    <button onClick={submitPartialReturn} className="px-4 py-2 rounded-2xl bg-blue-600 text-white font-black">تنفيذ المرتجع الجزئي</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+                      {isPartialReturnOpen && partialReturnOrder && (
+                        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+                          <div className="w-full max-w-2xl rounded-[2rem] shadow-2xl overflow-hidden border border-card card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
+                            <div className="p-5 border-b flex justify-between items-center bg-slate-50 dark:bg-slate-900/50">
+                              <h3 className="font-black">مرتجع جزئي للطلب #{partialReturnOrder.orderNumber}</h3>
+                              <button onClick={() => setIsPartialReturnOpen(false)} className="text-slate-400 hover:text-rose-500"><X size={20} /></button>
+                            </div>
+                            <div className="p-6 space-y-4">
+                              <div className="grid grid-cols-1 gap-3">
+                                <div className="text-sm text-slate-500">اختر المستودع لإعادة الكميات (اختياري)</div>
+                                <CustomSelect
+                                  value={String(partialReturnWarehouse || '')}
+                                  onChange={v => setPartialReturnWarehouse(v ? Number(v) : '')}
+                                  options={[{ value: '', label: '-- لا توجد إعادة إلى مستودع --' }, ...warehouses.map((w: any) => ({ value: String(w.id), label: w.name }))]}
+                                  className="w-full"
+                                />
+                              </div>
+                              <div className="border rounded-2xl overflow-auto max-h-72">
+                                <table className="w-full text-right text-sm">
+                                  <thead className="bg-slate-50 dark:bg-slate-900/50 text-muted">
+                                    <tr><th className="p-3">الصنف</th><th className="p-3">الموجود</th><th className="p-3">سعر الوحدة</th><th className="p-3">كمية المرتجع</th></tr>
+                                  </thead>
+                                  <tbody className="divide-y dark:divide-slate-700">
+                                    {(partialReturnOrder.products || []).map((p: any) => (
+                                      <tr key={p.productId} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50">
+                                        <td className="p-3">{p.name}</td>
+                                        <td className="p-3">{p.quantity}</td>
+                                        <td className="p-3">{Number(p.price || p.price_per_unit || 0).toLocaleString()}</td>
+                                        <td className="p-3"><input type="number" min={0} max={p.quantity} value={partialReturnInputs[String(p.productId)] || 0} onChange={e => setPartialReturnInputs(prev => ({ ...prev, [String(p.productId)]: Math.max(0, Math.min(Number(e.target.value || 0), Number(p.quantity || 0))) }))} className="w-24 bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-sm" /></td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                              <div>
+                                <label className="text-xs font-bold text-slate-500">ملاحظات</label>
+                                <input value={partialReturnNotes} onChange={e => setPartialReturnNotes(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm mt-1" />
+                              </div>
+                              <div className="flex gap-2 justify-end">
+                                <button onClick={() => setIsPartialReturnOpen(false)} className="px-4 py-2 rounded-2xl border">إلغاء</button>
+                                <button onClick={submitPartialReturn} className="px-4 py-2 rounded-2xl bg-blue-600 text-white font-black">تنفيذ المرتجع الجزئي</button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                       <p className="text-sm font-bold mb-2">الاوردرات المسندة لهذا المندوب:</p>
                       <ul className="space-y-2">
-                        {repAssignedOrders.map((order:any) => (
+                        {repAssignedOrders.map((order: any) => (
                           <li key={order.id} className="flex justify-between items-center p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800">
                             <div>
                               <div className="font-medium text-sm">#{order.orderNumber} - {order.customerName}</div>
                               <div className="text-xs text-muted">{order.phone1}</div>
                               <div className="text-xs text-slate-600 dark:text-slate-300 mt-1 flex flex-wrap gap-2">
                                 <span>المبلغ: {Number(order.total || order.total_amount || 0).toLocaleString()} {currencySymbol}</span>
-                                <span>القطع: {order.products?.reduce((s:any,p:any)=>s+(Number(p.quantity||0)),0) || 0}</span>
-                                <span>المتبقي: {Number(order.remainingPieces || order.remaining_pieces || order.remaining_qty || (order.products?.reduce((s:any,p:any)=>s+(Number(p.quantity||0)),0) || 0)).toLocaleString()}</span>
+                                <span>القطع: {order.products?.reduce((s: any, p: any) => s + (Number(p.quantity || 0)), 0) || 0}</span>
+                                <span>المتبقي: {Number(order.remainingPieces || order.remaining_pieces || order.remaining_qty || (order.products?.reduce((s: any, p: any) => s + (Number(p.quantity || 0)), 0) || 0)).toLocaleString()}</span>
                               </div>
                             </div>
                             <div className="flex items-center gap-2">
-                              <div className="font-bold text-sm">{order.products?.reduce((s:any,p:any)=>s+(Number(p.quantity||0)),0)} قطعة</div>
-                              <button onClick={() => { setPartialReturnOrder(order); setPartialReturnInputs(Object.fromEntries((order.products||[]).map((p:any)=>[p.productId, 0]))); setPartialReturnWarehouse(''); setPartialReturnNotes(''); setIsPartialReturnOpen(true); }} className="px-3 py-1 bg-amber-100 text-amber-800 rounded-lg text-xs font-bold hover:bg-amber-200">مرتجع جزئي</button>
+                              <div className="font-bold text-sm">{order.products?.reduce((s: any, p: any) => s + (Number(p.quantity || 0)), 0)} قطعة</div>
+                              <button onClick={() => { setPartialReturnOrder(order); setPartialReturnInputs(Object.fromEntries((order.products || []).map((p: any) => [p.productId, 0]))); setPartialReturnWarehouse(''); setPartialReturnNotes(''); setIsPartialReturnOpen(true); }} className="px-3 py-1 bg-amber-100 text-amber-800 rounded-lg text-xs font-bold hover:bg-amber-200">مرتجع جزئي</button>
                             </div>
                           </li>
                         ))}
@@ -2974,7 +2857,7 @@ ${productsSummaryHtml}
                       <div className="border-t dark:border-slate-700 pt-3">
                         <div className="text-xs font-bold mb-2">آخر الحركات</div>
                         <div className="space-y-2">
-                          {repTransactions.slice(0, 5).map((t:any) => {
+                          {repTransactions.slice(0, 5).map((t: any) => {
                             const details = parseTxDetails(t.details);
                             const label = t._label || getTxLabelEnhanced(t.type || t.tx_type || '', details);
                             const note = details.note || details.notes || t.note || '-';
@@ -3027,7 +2910,7 @@ ${productsSummaryHtml}
                     </tr>
                   </thead>
                   <tbody className="divide-y dark:divide-slate-700 text-slate-700 dark:text-slate-300">
-                    {repTransactions.map((t:any) => {
+                    {repTransactions.map((t: any) => {
                       const details = parseTxDetails(t.details);
                       const label = t._label || getTxLabelEnhanced(t.type || t.tx_type || '', details);
                       const note = details.note || details.notes || t.note || '-';
@@ -3036,7 +2919,7 @@ ${productsSummaryHtml}
                         <tr key={t.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
                           <td className="px-6 py-4 text-xs">{new Date(when).toLocaleString()}</td>
                           <td className="px-6 py-4 text-sm font-medium">{label}</td>
-                          <td className="px-6 py-4 text-sm font-black" style={{color: Number(t.amount||0) >= 0 ? 'green' : 'red'}}>{Number(t.amount||0).toLocaleString()} {currencySymbol}</td>
+                          <td className="px-6 py-4 text-sm font-black" style={{ color: Number(t.amount || 0) >= 0 ? 'green' : 'red' }}>{Number(t.amount || 0).toLocaleString()} {currencySymbol}</td>
                           <td className="px-6 py-4 text-xs">{note}</td>
                         </tr>
                       );
@@ -3107,7 +2990,7 @@ ${productsSummaryHtml}
               <CustomSelect
                 value={String(perfRepId || 'all')}
                 onChange={v => setPerfRepId(v)}
-                options={[{ value: 'all', label: 'الكل' }, ...representatives.map((rep:any) => ({ value: String(rep.id), label: rep.name }))]}
+                options={[{ value: 'all', label: 'الكل' }, ...representatives.map((rep: any) => ({ value: String(rep.id), label: rep.name }))]}
                 className="w-full"
               />
             </div>
@@ -3188,7 +3071,7 @@ ${productsSummaryHtml}
                 <CustomSelect
                   value={String(journalRepId || '')}
                   onChange={v => { setJournalRepId(v === 'all' ? 'all' : (v ? Number(v) : null)); setRepJournalRows([]); }}
-                  options={[{ value: 'all', label: '-- كل المناديب --' }, ...representatives.map((r:any) => ({ value: String(r.id), label: r.name }))]}
+                  options={[{ value: 'all', label: '-- كل المناديب --' }, ...representatives.map((r: any) => ({ value: String(r.id), label: r.name }))]}
                   className="w-full"
                 />
               </div>
@@ -3220,18 +3103,18 @@ ${productsSummaryHtml}
                 عرض اليوميات
               </button>
               <button type="button" className="px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-bold text-slate-600 hover:bg-blue-50 transition-colors"
-                onClick={() => { const d = new Date(); const f = (x:Date)=>x.toISOString().slice(0,10); setJournalFrom(f(d)); setJournalTo(f(d)); }}>اليوم</button>
+                onClick={() => { const today = formatLocalDate(); setJournalFrom(today); setJournalTo(today); }}>اليوم</button>
               <button type="button" className="px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-bold text-slate-600 hover:bg-blue-50 transition-colors"
-                onClick={() => { const f=(x:Date)=>x.toISOString().slice(0,10); const to=new Date(); const from=new Date(); from.setDate(to.getDate()-7); setJournalFrom(f(from)); setJournalTo(f(to)); }}>آخر أسبوع</button>
+                onClick={() => { setJournalFrom(getDaysAgo(7)); setJournalTo(formatLocalDate()); }}>آخر أسبوع</button>
               <button type="button" className="px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-bold text-slate-600 hover:bg-blue-50 transition-colors"
-                onClick={() => { const d=new Date(); const from=new Date(d.getFullYear(),d.getMonth(),1); const f=(x:Date)=>x.toISOString().slice(0,10); setJournalFrom(f(from)); setJournalTo(f(d)); }}>هذا الشهر</button>
+                onClick={() => { setJournalFrom(getFirstDayOfMonth()); setJournalTo(formatLocalDate()); }}>هذا الشهر</button>
             </div>
 
             <div className="mt-4 flex items-center gap-2">
               <label className="flex items-center gap-2 cursor-pointer text-sm font-bold text-slate-700 dark:text-slate-300 select-none">
-                <input 
-                  type="checkbox" 
-                  checked={journalOnlyOpen} 
+                <input
+                  type="checkbox"
+                  checked={journalOnlyOpen}
                   onChange={e => setJournalOnlyOpen(e.target.checked)}
                   className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                 />
@@ -3289,9 +3172,9 @@ ${productsSummaryHtml}
                         <span className="text-[10px] font-bold text-slate-500">ج.م</span>
                       </div>
                       <div className="text-[11px] font-bold text-emerald-700/60 dark:text-emerald-500/60 mt-1 flex items-center gap-1">
-                          <List className="w-3 h-3" /> {periodSummary?.deliveredCount || 0} طلب مكتمل
-                          {periodSummary?.deliveredPieces && <span className="mr-2">({periodSummary.deliveredPieces} قطعة)</span>}
-                        </div>
+                        <List className="w-3 h-3" /> {periodSummary?.deliveredCount || 0} طلب مكتمل
+                        {periodSummary?.deliveredPieces && <span className="mr-2">({periodSummary.deliveredPieces} قطعة)</span>}
+                      </div>
                     </div>
                     <button onClick={() => showPeriodDetails('delivered')} className="mr-auto p-2 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 rounded-lg transition-colors text-emerald-600">
                       <Eye className="w-4 h-4" />
@@ -3310,9 +3193,9 @@ ${productsSummaryHtml}
                         <span className="text-[10px] font-bold text-slate-500">ج.م</span>
                       </div>
                       <div className="text-[11px] font-bold text-rose-700/60 dark:text-rose-500/60 mt-1 flex items-center gap-1">
-                          <List className="w-3 h-3" /> {periodSummary?.returnedCount || 0} طلب مرتجع
-                          {periodSummary?.returnedPieces && <span className="mr-2">({periodSummary.returnedPieces} قطعة)</span>}
-                        </div>
+                        <List className="w-3 h-3" /> {periodSummary?.returnedCount || 0} طلب مرتجع
+                        {periodSummary?.returnedPieces && <span className="mr-2">({periodSummary.returnedPieces} قطعة)</span>}
+                      </div>
                     </div>
                     <button onClick={() => showPeriodDetails('returned')} className="mr-auto p-2 hover:bg-rose-100 dark:hover:bg-rose-900/40 rounded-lg transition-colors text-rose-600">
                       <Eye className="w-4 h-4" />
@@ -3357,86 +3240,87 @@ ${productsSummaryHtml}
                 const closedDateTime = row.closed_at || row.end_time || row.closing_time || row.closed_time || row.updated_at || '—';
 
                 return (
-                <div key={row.id} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm hover:shadow-md transition-shadow">
-                  <div className="flex flex-wrap items-start gap-4">
-                    <div className="flex-1 min-w-0">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-3">
-                          <div className="text-xs text-slate-500 font-bold mb-1">كود اليومية</div>
-                          <div className="text-sm font-black text-slate-800 dark:text-white pb-1">
-                            {row.daily_code || `DLY-${String(row.id || '').padStart(5, '0')}`}
-                            {journalRepId === 'all' && (
-                              <span className="mr-2 text-[11px] font-bold text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-full inline-block">
-                                {representatives.find((r:any) => Number(r.id) === Number(row.rep_id))?.name || `مندوب ${row.rep_id}`}
+                  <div key={row.id} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm hover:shadow-md transition-shadow">
+                    <div className="flex flex-wrap items-start gap-4">
+                      <div className="flex-1 min-w-0">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-3">
+                            <div className="text-xs text-slate-500 font-bold mb-1">كود اليومية</div>
+                            <div className="text-sm font-black text-slate-800 dark:text-white pb-1">
+                              {row.daily_code || `DLY-${String(row.id || '').padStart(5, '0')}`}
+                              {journalRepId === 'all' && (
+                                <span className="mr-2 text-[11px] font-bold text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-full inline-block">
+                                  {representatives.find((r: any) => Number(r.id) === Number(row.rep_id))?.name || `مندوب ${row.rep_id}`}
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-2 text-xs font-bold">
+                              حالة اليومية:{' '}
+                              <span className={isClosed ? 'text-rose-600' : 'text-emerald-600'}>
+                                {isClosed ? 'مغلقة' : 'مفتوحة'}
                               </span>
+                            </div>
+                          </div>
+                          <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-3">
+                            <div className="text-xs text-slate-500 font-bold mb-1">تاريخ ووقت بدء اليومية</div>
+                            <div className="text-sm font-black text-slate-800 dark:text-white">
+                              {startDateTime}
+                            </div>
+                            {isClosed && (
+                              <>
+                                <div className="text-xs text-slate-500 font-bold mt-2 mb-1">تاريخ الإغلاق</div>
+                                <div className="text-sm font-black text-slate-800 dark:text-white">
+                                  {closedDateTime}
+                                </div>
+                              </>
                             )}
                           </div>
-                          <div className="mt-2 text-xs font-bold">
-                            حالة اليومية:{' '}
-                            <span className={isClosed ? 'text-rose-600' : 'text-emerald-600'}>
-                              {isClosed ? 'مغلقة' : 'مفتوحة'}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="bg-slate-50 dark:bg-slate-800 rounded-xl p-3">
-                          <div className="text-xs text-slate-500 font-bold mb-1">تاريخ ووقت بدء اليومية</div>
-                          <div className="text-sm font-black text-slate-800 dark:text-white">
-                            {startDateTime}
-                          </div>
-                          {isClosed && (
-                            <>
-                              <div className="text-xs text-slate-500 font-bold mt-2 mb-1">تاريخ الإغلاق</div>
-                              <div className="text-sm font-black text-slate-800 dark:text-white">
-                                {closedDateTime}
-                              </div>
-                            </>
-                          )}
                         </div>
                       </div>
-                    </div>
 
-                    <div className="flex flex-col gap-2 shrink-0 w-full md:w-auto">
-                      <button
-                        type="button"
-                        onClick={() => printDailyJournalRow(row)}
-                        className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black transition-colors whitespace-nowrap"
-                      >
-                        <Eye className="w-3.5 h-3.5" /> عرض و طباعة يومية المندوب
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => exportDailyJournalExcel(row)}
-                        className="flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-black transition-colors whitespace-nowrap"
-                      >
-                        <FileText className="w-3.5 h-3.5" /> تصدير يوميه المندوب اكسيل
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => printDeliveryPermit(row)}
-                        className="flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black transition-colors whitespace-nowrap"
-                      >
-                        <FileText className="w-3.5 h-3.5" /> عرض و طباعة إذن التسليم
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => printWaybills(row)}
-                        className="flex items-center justify-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-black transition-colors whitespace-nowrap"
-                      >
-                        <Box className="w-3.5 h-3.5" /> عرض و طباعة بوالص التسليم
-                      </button>
-                      {Number(row.is_closed ?? row.closed ?? 0) === 1 && (
+                      <div className="flex flex-col gap-2 shrink-0 w-full md:w-auto">
                         <button
                           type="button"
-                          onClick={() => printCloseReport(row)}
-                          className="flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-black transition-colors whitespace-nowrap"
+                          onClick={() => printDailyJournalRow(row)}
+                          className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black transition-colors whitespace-nowrap"
                         >
-                          <FileText className="w-3.5 h-3.5" /> عرض و طباعة تقرير الإغلاق
+                          <Eye className="w-3.5 h-3.5" /> عرض و طباعة يومية المندوب
                         </button>
-                      )}
+                        <button
+                          type="button"
+                          onClick={() => exportDailyJournalExcel(row)}
+                          className="flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-black transition-colors whitespace-nowrap"
+                        >
+                          <FileText className="w-3.5 h-3.5" /> تصدير يوميه المندوب اكسيل
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => printDeliveryPermit(row)}
+                          className="flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black transition-colors whitespace-nowrap"
+                        >
+                          <FileText className="w-3.5 h-3.5" /> عرض و طباعة إذن التسليم
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => printWaybills(row)}
+                          className="flex items-center justify-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-black transition-colors whitespace-nowrap"
+                        >
+                          <Box className="w-3.5 h-3.5" /> عرض و طباعة بوالص التسليم
+                        </button>
+                        {Number(row.is_closed ?? row.closed ?? 0) === 1 && (
+                          <button
+                            type="button"
+                            onClick={() => printCloseReport(row)}
+                            className="flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-black transition-colors whitespace-nowrap"
+                          >
+                            <FileText className="w-3.5 h-3.5" /> عرض و طباعة تقرير الإغلاق
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              )})}
+                )
+              })}
             </div>
           )}
 
@@ -3454,20 +3338,20 @@ ${productsSummaryHtml}
             <form onSubmit={handleSubmit} className="p-8 space-y-6 text-right">
               <div className="space-y-1">
                 <label className="text-xs font-bold text-muted mr-2">الاسم بالكامل</label>
-                <input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm" />
+                <input type="text" required value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm" />
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-bold text-muted mr-2">رقم الهاتف</label>
-                <input type="text" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm" />
+                <input type="text" value={formData.phone} onChange={e => setFormData({ ...formData, phone: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm" />
               </div>
               <div className="space-y-1 flex items-center">
-                <input id="insurance_paid" type="checkbox" disabled={!!editingRep} checked={formData.insurance_paid} onChange={e => setFormData({...formData, insurance_paid: e.target.checked})} className="mr-2" />
+                <input id="insurance_paid" type="checkbox" disabled={!!editingRep} checked={formData.insurance_paid} onChange={e => setFormData({ ...formData, insurance_paid: e.target.checked })} className="mr-2" />
                 <label htmlFor="insurance_paid" className="text-xs font-bold text-muted">دفع تأمين</label>
               </div>
               {formData.insurance_paid && (
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-muted mr-2">مبلغ التأمين المدفوع</label>
-                  <input type="number" min="0" disabled={!!editingRep} required={!editingRep} value={formData.insurance_amount} onChange={e => setFormData({...formData, insurance_amount: e.target.value})} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm" />
+                  <input type="number" min="0" disabled={!!editingRep} required={!editingRep} value={formData.insurance_amount} onChange={e => setFormData({ ...formData, insurance_amount: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm" />
                 </div>
               )}
               <button type="submit" className="w-full bg-accent text-white py-4 rounded-2xl font-black shadow-xl shadow-blue-500/30 hover:bg-blue-700 transition-all flex items-center justify-center gap-2">

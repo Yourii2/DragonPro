@@ -6,6 +6,7 @@ import * as ExcelJS from 'exceljs';
 import SmallOrderCard from './OrderConfirmations';
 import CustomSelect from './CustomSelect';
 import { cleanBarcode, isOrderMatchingBarcode } from '../services/barcodeUtils';
+import { formatOrderTime, formatLocalDate } from '../services/dateUtils';
 
 const toNum = (v: any) => {
   const n = Number(v);
@@ -19,9 +20,9 @@ const parseNumeric = (v: any) => {
   let s = String(v || '').trim();
   if (s === '') return 0;
   // map Eastern Arabic and Persian numerals to Latin
-  const map: Record<string,string> = {
-    '٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9',
-    '۰':'0','۱':'1','۲':'2','۳':'3','۴':'4','۵':'5','۶':'6','۷':'7','۸':'8','۹':'9'
+  const map: Record<string, string> = {
+    '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9',
+    '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4', '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9'
   };
   s = s.split('').map(ch => map[ch] || ch).join('');
   // remove commas and spaces
@@ -112,6 +113,10 @@ const getOrderStatusLabelAr = (statusRaw: any) => {
       return 'مؤجل';
     case 'with_rep':
       return 'مع المندوب';
+    case 'returned_with_rep':
+      return 'مرتجع مع المندوب';
+    case 'partial':
+      return 'تسليم جزئي';
     case 'in_delivery':
       return 'مع شركة الشحن';
     case 'delivered':
@@ -138,9 +143,8 @@ const StatCard: React.FC<{ label: string; value: React.ReactNode; hint?: string;
   className
 }) => (
   <div
-    className={`rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 shadow-sm text-center ${
-      className || ''
-    }`}
+    className={`rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 shadow-sm text-center ${className || ''
+      }`}
   >
     <div className="text-xs text-slate-500 dark:text-slate-300">{label}</div>
     <div className="mt-1 text-lg font-black text-slate-900 dark:text-white">{value}</div>
@@ -148,33 +152,19 @@ const StatCard: React.FC<{ label: string; value: React.ReactNode; hint?: string;
   </div>
 ));
 
-const formatOrderTime = (dateStr?: string | null): string => {
-  if (!dateStr) return '';
-  try {
-    const isoStr = dateStr.replace(' ', 'T');
-    const d = new Date(isoStr);
-    if (isNaN(d.getTime())) {
-      const d2 = new Date(dateStr);
-      if (isNaN(d2.getTime())) return '';
-      return d2.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' - ' + d2.toLocaleDateString([], { month: '2-digit', day: '2-digit' });
-    }
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' - ' + d.toLocaleDateString([], { month: '2-digit', day: '2-digit' });
-  } catch {
-    return '';
-  }
-};
+
 
 const SalesDaily: React.FC = () => {
-      // عرض الأوردرات: قائمة أو بطاقات
-      const [todayViewMode, setTodayViewMode] = useState<'list' | 'card'>('list');
-      const [assignedViewMode, setAssignedViewMode] = useState<'list' | 'card'>('list');
-      // ترتيب الأوردرات: تصاعدي/تنازلي
-      const [todaySortAsc, setTodaySortAsc] = useState(false);
-      const [assignedSortAsc, setAssignedSortAsc] = useState(true);
-    // طريقة الدفع: كاش أو مدفوعات إليكترونية
-    const [paymentMethod, setPaymentMethod] = useState<'cash' | 'electronic'>('cash');
-    // حالة التحميل عند إنشاء خزينة إلكترونية
-    const [loading, setLoading] = useState(false);
+  // عرض الأوردرات: قائمة أو بطاقات
+  const [todayViewMode, setTodayViewMode] = useState<'list' | 'card'>('list');
+  const [assignedViewMode, setAssignedViewMode] = useState<'list' | 'card'>('list');
+  // ترتيب الأوردرات: تصاعدي/تنازلي
+  const [todaySortAsc, setTodaySortAsc] = useState(false);
+  const [assignedSortAsc, setAssignedSortAsc] = useState(true);
+  // طريقة الدفع: كاش أو مدفوعات إليكترونية
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'electronic'>('cash');
+  // حالة التحميل عند إنشاء خزينة إلكترونية
+  const [loading, setLoading] = useState(false);
   const deliveryMethod = (localStorage.getItem('Dragon_delivery_method') || 'reps').toString();
   const isShippingMode = deliveryMethod === 'shipping';
 
@@ -220,7 +210,7 @@ const SalesDaily: React.FC = () => {
   // Split Payment Auto Treasury Lock Effect
   useEffect(() => {
     if (!isSplitPayment || treasuries.length === 0) return;
-    const electronicTreasury = treasuries.find(t => 
+    const electronicTreasury = treasuries.find(t =>
       normalizeText(t.name).includes('الكترونى') ||
       normalizeText(t.name).includes('الكترونية') ||
       normalizeText(t.name).includes('فودافون') ||
@@ -540,7 +530,7 @@ const SalesDaily: React.FC = () => {
   };
 
   // Validate order products against product catalog and stock for the selected warehouse
-  const validateOrderProducts = async (order: any) : Promise<{ ok: boolean; message?: string }> => {
+  const validateOrderProducts = async (order: any): Promise<{ ok: boolean; message?: string }> => {
     if (!selectedWarehouseId) {
       return { ok: false, message: 'يرجى اختيار المستودع أولاً قبل إضافة الاوردرات.' };
     }
@@ -564,13 +554,13 @@ const SalesDaily: React.FC = () => {
         if (qty <= 0) return;
 
         if (pid <= 0 && allProducts.length > 0) {
-          let found = allProducts.find((ep:any) => 
-              norm(ep.name) === norm(name) && 
-              norm(ep.color) === norm(color) && 
-              norm(ep.size) === norm(size)
+          let found = allProducts.find((ep: any) =>
+            norm(ep.name) === norm(name) &&
+            norm(ep.color) === norm(color) &&
+            norm(ep.size) === norm(size)
           );
           if (!found) {
-            const potentials = allProducts.filter((ep:any) => norm(ep.name) === norm(name));
+            const potentials = allProducts.filter((ep: any) => norm(ep.name) === norm(name));
             if (potentials.length === 1) found = potentials[0];
           }
           if (found) pid = Number(found.id);
@@ -995,7 +985,7 @@ const SalesDaily: React.FC = () => {
     setPendingOrdersList(prev => prev.filter(p => Number(p.id) !== Number(match.id)));
     setBarcodeInput('');
   }; */
-const scanBarcodeAddOrder = async () => {
+  const scanBarcodeAddOrder = async () => {
     if (scanningLockRef.current) return;
     const rawCode = String(barcodeInput || '').trim();
     if (!rawCode) return;
@@ -1064,172 +1054,172 @@ const scanBarcodeAddOrder = async () => {
                 return;
               }
             }
-          } catch (e) {}
+          } catch (e) { }
 
           Swal.fire('غير موجود', `لم يتم العثور على اوردر برقم "${rawCode}". تأكد من رقم الأوردر أو مسح الباركود الصحيح.`, 'warning');
           return;
         }
       }
 
-    // --- 5. فحص حالة الاوردر والبحث عن اسم المندوب ---
-    const status = String(match.status || 'pending');
-    const allowedStatuses = ['pending', 'returned', 'cancelled', 'canceled', 'no_answer', 'closed', 'confirmed', 'postponed', 'deferred'];
-    
-    if (!allowedStatuses.includes(status)) {
-      
-      // 1. لو الاوردر في عهدة مندوب، نجيب اسمه ونعرض رسالتك المخصصة
-      const repId = match.rep_id ?? match.repId ?? match.assigned_to ?? match.assignee_id ?? null;
-      if (repId || status === 'with_rep') {
-        // البحث عن اسم المندوب
-        const repName = reps.find((r: any) => Number(r.id) === Number(repId))?.name 
-                        || match.assigneeName 
-                        || (match.assigned && (match.assigned.name || match.assigned.employee)) 
-                        || 'مندوب آخر';
-                        
-        Swal.fire('عفواً، غير مسموح', `لا يمكن إضافة الاوردر لأنها في عهدة "${repName}"`, 'warning');
-        setBarcodeInput('');
-        return;
-      }
+      // --- 5. فحص حالة الاوردر والبحث عن اسم المندوب ---
+      const status = String(match.status || 'pending');
+      const allowedStatuses = ['pending', 'returned', 'cancelled', 'canceled', 'no_answer', 'closed', 'confirmed', 'postponed', 'deferred'];
 
-      // 2. لو الاوردر مع شركة شحن (علشان نقفل كل الثغرات)
-      const compId = match.shipping_company_id ?? match.shippingCompanyId ?? match.shippingCompany ?? null;
-      if (compId || status === 'in_delivery') {
-        const compName = shippingCompanies.find((c: any) => Number(c.id) === Number(compId))?.name 
-                         || match.shipping_company_name 
-                         || match.shippingCompanyName 
-                         || 'شركة شحن';
-                         
-        Swal.fire('عفواً، غير مسموح', `لا يمكن إضافة الاوردر لأنها مع شركة شحن "${compName}"`, 'warning');
-        setBarcodeInput('');
-        return;
-      }
+      if (!allowedStatuses.includes(status)) {
 
-      // 3. لو الاوردر حالته حاجة تانية (تم التسليم مثلاً)
-      const statusAr = getOrderStatusLabelAr(status);
-      
-      Swal.fire('عفواً، غير مسموح', `لا يمكن إضافة الاوردر لأن حالته: "${statusAr}".\nمسموح فقط بإضافة الاوردرات "قيد الانتظار"، "المرتجعة"، "الملغية"، "لم يرد"، "مغلق"، أو "مؤكد".`, 'warning');
-      setBarcodeInput('');
-      return;
-    }
+        // 1. لو الاوردر في عهدة مندوب، نجيب اسمه ونعرض رسالتك المخصصة
+        const repId = match.rep_id ?? match.repId ?? match.assigned_to ?? match.assignee_id ?? null;
+        if (repId || status === 'with_rep') {
+          // البحث عن اسم المندوب
+          const repName = reps.find((r: any) => Number(r.id) === Number(repId))?.name
+            || match.assigneeName
+            || (match.assigned && (match.assigned.name || match.assigned.employee))
+            || 'مندوب آخر';
 
-    // منع التكرار في نفس اليومية
-    if (todayOrdersUnique.some(o => Number(o.id) === Number(match.id))) {
-      setBarcodeInput('');
-      return;
-    }
-    // --- فحص المخزون والـ Smart Match ---
-    // (باقي الكود كما هو من أول هنا بدون تغيير)
-
-    // --- بداية الجزء العبقري لفحص المخزون والتعرف على المنتجات تلقائياً ---
-    try {
-      // 1. جلب قائمة المنتجات من الداتابيز عشان ندور فيها لو المنتج مش مربوط
-      const prodsRes = await fetch(`${API_BASE_PATH}/api.php?module=products&action=getFlat`);
-      const prodsJson = await prodsRes.json().catch(() => null);
-      const allProducts = (prodsJson && prodsJson.success) ? prodsJson.data : [];
-
-      const norm = (txt: any) => (txt || "").toString().trim().replace(/[أإآ]/g, "ا").replace(/ة/g, "ه");
-
-      const prodMap: Record<string, any> = {};
-      const unlinkedItems: string[] = [];
-
-      (Array.isArray(match.products) ? match.products : []).forEach((p: any) => {
-        // حذاري نستخدم p.id لأنه ده بيكون رقم سطر الأوردر الوهمي مش المنتج!
-        let pid = Number(p.productId ?? p.product_id ?? 0); 
-        const name = (p.name ?? p.product_name ?? '').toString();
-        const color = (p.color ?? p.variant_color ?? p.variant ?? '').toString();
-        const size = (p.size ?? p.variant_size ?? p.measure ?? '').toString();
-        const qty = toNum(p.quantity ?? p.qty ?? 0);
-
-        if (qty <= 0) return;
-
-        // لو المنتج ملوش ID (جاي من استيراد نصي ومش مربوط)، ندور عليه بذكاء
-        if (pid <= 0 && allProducts.length > 0) {
-          let found = allProducts.find((ep:any) => 
-              norm(ep.name) === norm(name) && 
-              norm(ep.color) === norm(color) && 
-              norm(ep.size) === norm(size)
-          );
-          
-          if (!found) {
-            const potentials = allProducts.filter((ep:any) => norm(ep.name) === norm(name));
-            if (potentials.length === 1) found = potentials[0]; // لو مفيش غير منتج واحد بنفس الاسم
-          }
-
-          if (found) {
-             pid = Number(found.id);
-          }
-        }
-
-        // لو بعد الفحص الدقيق ملقيناش الـ ID، نرفض الأوردر ونطلب من المستخدم يربطه
-        if (pid <= 0) {
-          unlinkedItems.push(`${name} (لون: ${color || '-'}، مقاس: ${size || '-'})`);
-          return;
-        }
-
-        const key = `${pid}`;
-        if (!prodMap[key]) {
-          prodMap[key] = { product_id: pid, name: name, quantity: 0 };
-        }
-        prodMap[key].quantity += qty;
-      });
-
-      // لو فيه منتجات لسه مش مربوطة نعرض رسالة خطأ شيك
-      if (unlinkedItems.length > 0) {
-         let html = `<div style="text-align: right; font-size: 14px;">الاوردر يحتوي على منتجات غير متعرفة على المخزن (تم كتابتها يدوياً بدون ربطها). يرجى تعديل الاوردر من قسم الاوردرات أولاً.<br/><br/><ul style="padding-right: 20px; list-style-type: disc;">`;
-         unlinkedItems.forEach(item => { html += `<li style="color: #e11d48; margin-bottom: 4px;">${item}</li>`; });
-         html += `</ul></div>`;
-         
-         Swal.fire({ title: 'منتجات غير مرتبطة', html: html, icon: 'error', confirmButtonText: 'حسناً' });
-         setBarcodeInput('');
-         return;
-      }
-
-      const items = Object.values(prodMap);
-      if (items.length > 0) {
-        const candidateOrderIds = Array.from(new Set([
-          ...todayOrdersUnique.map((o: any) => Number(o.id)).filter((id: number) => id > 0),
-          Number(match.id)
-        ]));
-        const stockCheck = await checkCumulativeStockForOrderIds(candidateOrderIds);
-        if (!stockCheck.ok) {
-          if (stockCheck.shortages && stockCheck.shortages.length > 0) {
-            Swal.fire({
-              title: 'نقص في المخزون',
-              html: buildShortagesHtml(stockCheck.shortages, 'لا يمكن إضافة الأوردر بسبب نقص تراكمي في المخزون للمستودع المحدد:'),
-              icon: 'warning',
-              confirmButtonText: 'حسناً'
-            });
-          } else {
-            Swal.fire('خطأ', stockCheck.message || 'فشل التحقق من المخزون. حاول مرة أخرى.', 'error');
-          }
+          Swal.fire('عفواً، غير مسموح', `لا يمكن إضافة الاوردر لأنها في عهدة "${repName}"`, 'warning');
           setBarcodeInput('');
           return;
         }
-      }
-    } catch (e) {
-      console.debug('Stock check failed', e);
-    }
-    // --- نهاية الجزء العبقري ---
 
-    setSelectedOrders(prev => [...prev, match]);
-    setPendingOrdersList(prev => prev.filter(p => Number(p.id) !== Number(match.id)));
-    setBarcodeInput('');
-  } finally {
-    scanningLockRef.current = false;
-  }
-};
+        // 2. لو الاوردر مع شركة شحن (علشان نقفل كل الثغرات)
+        const compId = match.shipping_company_id ?? match.shippingCompanyId ?? match.shippingCompany ?? null;
+        if (compId || status === 'in_delivery') {
+          const compName = shippingCompanies.find((c: any) => Number(c.id) === Number(compId))?.name
+            || match.shipping_company_name
+            || match.shippingCompanyName
+            || 'شركة شحن';
+
+          Swal.fire('عفواً، غير مسموح', `لا يمكن إضافة الاوردر لأنها مع شركة شحن "${compName}"`, 'warning');
+          setBarcodeInput('');
+          return;
+        }
+
+        // 3. لو الاوردر حالته حاجة تانية (تم التسليم مثلاً)
+        const statusAr = getOrderStatusLabelAr(status);
+
+        Swal.fire('عفواً، غير مسموح', `لا يمكن إضافة الاوردر لأن حالته: "${statusAr}".\nمسموح فقط بإضافة الاوردرات "قيد الانتظار"، "المرتجعة"، "الملغية"، "لم يرد"، "مغلق"، أو "مؤكد".`, 'warning');
+        setBarcodeInput('');
+        return;
+      }
+
+      // منع التكرار في نفس اليومية
+      if (todayOrdersUnique.some(o => Number(o.id) === Number(match.id))) {
+        setBarcodeInput('');
+        return;
+      }
+      // --- فحص المخزون والـ Smart Match ---
+      // (باقي الكود كما هو من أول هنا بدون تغيير)
+
+      // --- بداية الجزء العبقري لفحص المخزون والتعرف على المنتجات تلقائياً ---
+      try {
+        // 1. جلب قائمة المنتجات من الداتابيز عشان ندور فيها لو المنتج مش مربوط
+        const prodsRes = await fetch(`${API_BASE_PATH}/api.php?module=products&action=getFlat`);
+        const prodsJson = await prodsRes.json().catch(() => null);
+        const allProducts = (prodsJson && prodsJson.success) ? prodsJson.data : [];
+
+        const norm = (txt: any) => (txt || "").toString().trim().replace(/[أإآ]/g, "ا").replace(/ة/g, "ه");
+
+        const prodMap: Record<string, any> = {};
+        const unlinkedItems: string[] = [];
+
+        (Array.isArray(match.products) ? match.products : []).forEach((p: any) => {
+          // حذاري نستخدم p.id لأنه ده بيكون رقم سطر الأوردر الوهمي مش المنتج!
+          let pid = Number(p.productId ?? p.product_id ?? 0);
+          const name = (p.name ?? p.product_name ?? '').toString();
+          const color = (p.color ?? p.variant_color ?? p.variant ?? '').toString();
+          const size = (p.size ?? p.variant_size ?? p.measure ?? '').toString();
+          const qty = toNum(p.quantity ?? p.qty ?? 0);
+
+          if (qty <= 0) return;
+
+          // لو المنتج ملوش ID (جاي من استيراد نصي ومش مربوط)، ندور عليه بذكاء
+          if (pid <= 0 && allProducts.length > 0) {
+            let found = allProducts.find((ep: any) =>
+              norm(ep.name) === norm(name) &&
+              norm(ep.color) === norm(color) &&
+              norm(ep.size) === norm(size)
+            );
+
+            if (!found) {
+              const potentials = allProducts.filter((ep: any) => norm(ep.name) === norm(name));
+              if (potentials.length === 1) found = potentials[0]; // لو مفيش غير منتج واحد بنفس الاسم
+            }
+
+            if (found) {
+              pid = Number(found.id);
+            }
+          }
+
+          // لو بعد الفحص الدقيق ملقيناش الـ ID، نرفض الأوردر ونطلب من المستخدم يربطه
+          if (pid <= 0) {
+            unlinkedItems.push(`${name} (لون: ${color || '-'}، مقاس: ${size || '-'})`);
+            return;
+          }
+
+          const key = `${pid}`;
+          if (!prodMap[key]) {
+            prodMap[key] = { product_id: pid, name: name, quantity: 0 };
+          }
+          prodMap[key].quantity += qty;
+        });
+
+        // لو فيه منتجات لسه مش مربوطة نعرض رسالة خطأ شيك
+        if (unlinkedItems.length > 0) {
+          let html = `<div style="text-align: right; font-size: 14px;">الاوردر يحتوي على منتجات غير متعرفة على المخزن (تم كتابتها يدوياً بدون ربطها). يرجى تعديل الاوردر من قسم الاوردرات أولاً.<br/><br/><ul style="padding-right: 20px; list-style-type: disc;">`;
+          unlinkedItems.forEach(item => { html += `<li style="color: #e11d48; margin-bottom: 4px;">${item}</li>`; });
+          html += `</ul></div>`;
+
+          Swal.fire({ title: 'منتجات غير مرتبطة', html: html, icon: 'error', confirmButtonText: 'حسناً' });
+          setBarcodeInput('');
+          return;
+        }
+
+        const items = Object.values(prodMap);
+        if (items.length > 0) {
+          const candidateOrderIds = Array.from(new Set([
+            ...todayOrdersUnique.map((o: any) => Number(o.id)).filter((id: number) => id > 0),
+            Number(match.id)
+          ]));
+          const stockCheck = await checkCumulativeStockForOrderIds(candidateOrderIds);
+          if (!stockCheck.ok) {
+            if (stockCheck.shortages && stockCheck.shortages.length > 0) {
+              Swal.fire({
+                title: 'نقص في المخزون',
+                html: buildShortagesHtml(stockCheck.shortages, 'لا يمكن إضافة الأوردر بسبب نقص تراكمي في المخزون للمستودع المحدد:'),
+                icon: 'warning',
+                confirmButtonText: 'حسناً'
+              });
+            } else {
+              Swal.fire('خطأ', stockCheck.message || 'فشل التحقق من المخزون. حاول مرة أخرى.', 'error');
+            }
+            setBarcodeInput('');
+            return;
+          }
+        }
+      } catch (e) {
+        console.debug('Stock check failed', e);
+      }
+      // --- نهاية الجزء العبقري ---
+
+      setSelectedOrders(prev => [...prev, match]);
+      setPendingOrdersList(prev => prev.filter(p => Number(p.id) !== Number(match.id)));
+      setBarcodeInput('');
+    } finally {
+      scanningLockRef.current = false;
+    }
+  };
 
   const printThermal = async (orders: any[], extra: any) => {
-            console.log('userDefaults at printThermal:', userDefaults);
-            // تحقق من وجود userDefaults.user_id قبل المتابعة
-            if (!userDefaults || !userDefaults.user_id) {
-              alert('لا يمكن الطباعة: لم يتم تحميل بيانات المستخدم بشكل صحيح. يرجى إعادة تحميل الصفحة أو تسجيل الدخول مجددًا.');
-              return;
-            }
-        // إذا لم يكن اسم الموظف موجودًا في extra (أي طباعة يدوية)، استخدم userDefaults
-        if (!extra.createdByName) {
-          extra.createdByName = userDefaults?.name || userDefaults?.username || '';
-        }
+    console.log('userDefaults at printThermal:', userDefaults);
+    // تحقق من وجود userDefaults.user_id قبل المتابعة
+    if (!userDefaults || !userDefaults.user_id) {
+      alert('لا يمكن الطباعة: لم يتم تحميل بيانات المستخدم بشكل صحيح. يرجى إعادة تحميل الصفحة أو تسجيل الدخول مجددًا.');
+      return;
+    }
+    // إذا لم يكن اسم الموظف موجودًا في extra (أي طباعة يدوية)، استخدم userDefaults
+    if (!extra.createdByName) {
+      extra.createdByName = userDefaults?.name || userDefaults?.username || '';
+    }
     // Prepare delivery note payload
     const repId = extra?.repId || (orders[0]?.rep_id ?? orders[0]?.repId ?? null);
     const warehouseId = extra?.warehouseId || null;
@@ -1238,7 +1228,7 @@ const scanBarcodeAddOrder = async () => {
       ? extra.createdBy
       : (userDefaults?.user_id ?? null);
     const orderId = orders[0]?.id ?? orders[0]?.order_id ?? null;
-    
+
     // Flatten all products from all orders
     const lines: any[] = [];
     orders.forEach(o => {
@@ -1252,7 +1242,7 @@ const scanBarcodeAddOrder = async () => {
         });
       });
     });
-    
+
     // Call backend to save delivery note
     let noteCode = '';
     try {
@@ -1263,7 +1253,7 @@ const scanBarcodeAddOrder = async () => {
         created_by: createdBy,
         lines_count: lines.length
       });
-      
+
       const res = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=createDeliveryNote`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1414,13 +1404,13 @@ const scanBarcodeAddOrder = async () => {
     const localOldPiecesCount = typeof oldPiecesCount !== 'undefined' ? oldPiecesCount : localOldOrders.reduce((s: number, o: any) => s + orderPieces(o), 0);
     const localOldDistinct = typeof oldDistinctProductsCount !== 'undefined' ? oldDistinctProductsCount : (() => {
       const set = new Set<string>();
-      (localOldOrders || []).forEach((o: any) => (Array.isArray(o.products) ? o.products : []).forEach((p:any)=> set.add(String(p.productId ?? p.product_id ?? p.id ?? p.name ?? ''))));
+      (localOldOrders || []).forEach((o: any) => (Array.isArray(o.products) ? o.products : []).forEach((p: any) => set.add(String(p.productId ?? p.product_id ?? p.id ?? p.name ?? ''))));
       return set.size;
     })();
-    const localTodayPieces = typeof todayPiecesCount !== 'undefined' ? todayPiecesCount : ordersParam.reduce((s:number,o:any)=> s + (Array.isArray(o.products) ? o.products.reduce((ss:number,p:any)=> ss + toNum(p.quantity ?? p.qty ?? 0),0) : 0),0);
+    const localTodayPieces = typeof todayPiecesCount !== 'undefined' ? todayPiecesCount : ordersParam.reduce((s: number, o: any) => s + (Array.isArray(o.products) ? o.products.reduce((ss: number, p: any) => ss + toNum(p.quantity ?? p.qty ?? 0), 0) : 0), 0);
     const localTodayDistinct = typeof todayDistinctProductsCount !== 'undefined' ? todayDistinctProductsCount : (() => {
       const set = new Set<string>();
-      (ordersParam || []).forEach((o:any) => (Array.isArray(o.products) ? o.products : []).forEach((p:any)=> set.add(String(p.productId ?? p.product_id ?? p.id ?? p.name ?? ''))));
+      (ordersParam || []).forEach((o: any) => (Array.isArray(o.products) ? o.products : []).forEach((p: any) => set.add(String(p.productId ?? p.product_id ?? p.id ?? p.name ?? ''))));
       return set.size;
     })();
     const localTotalPieces = (localOldPiecesCount || 0) + (localTodayPieces || 0);
@@ -1429,14 +1419,14 @@ const scanBarcodeAddOrder = async () => {
     const prevBal = toNum(extra?.prevBalance ?? prevBalance);
     const finalBalBeforePay = prevBal - sumValue;
     const afterPay = finalBalBeforePay + paidNowLocalSigned;
-    const localOldShipping = localOldOrders.reduce((s:number,o:any)=> s + parseNumeric(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0),0);
-    const localTodayShipping = ordersParam.reduce((s:number,o:any)=> s + parseNumeric(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0),0);
+    const localOldShipping = localOldOrders.reduce((s: number, o: any) => s + parseNumeric(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0), 0);
+    const localTodayShipping = ordersParam.reduce((s: number, o: any) => s + parseNumeric(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0), 0);
     const localTotalShipping = (localOldShipping || 0) + (localTodayShipping || 0);
 
     // Prepare and save a delivery session snapshot to server so the exact data can be retrieved/printed later
     try {
       const sessionPayload: any = {
-        rep_id: Number(reps.find((r:any)=> Number(r.id) === Number(selectedRepId))?.id || selectedRepId) || null,
+        rep_id: Number(reps.find((r: any) => Number(r.id) === Number(selectedRepId))?.id || selectedRepId) || null,
         treasury_id: selectedTreasuryId ? Number(selectedTreasuryId) : null,
         store_id: selectedWarehouseId ? Number(selectedWarehouseId) : null,
         previous_balance: prevBal,
@@ -1477,7 +1467,7 @@ const scanBarcodeAddOrder = async () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(sessionPayload)
         });
-        const jr = await r.json().catch(()=>null);
+        const jr = await r.json().catch(() => null);
         if (!(jr && jr.success)) console.warn('Failed to save delivery session', jr);
       } catch (err) {
         console.warn('Error saving delivery session', err);
@@ -1543,7 +1533,7 @@ const scanBarcodeAddOrder = async () => {
             </div>
           </div>`
         : '') +
-        `<table><thead><tr>
+      `<table><thead><tr>
           <th>رقم اوردر</th><th>اسم العميل</th><th>الهاتف</th><th>المحافظة</th><th>العنوان</th>
           <th>الموظف</th><th>البيدج</th><th>الإجمالي</th><th>شحن</th><th>الإجمالي الكلي</th><th>ملاحظات</th>
         </tr></thead><tbody>` +
@@ -1650,7 +1640,7 @@ const scanBarcodeAddOrder = async () => {
             </div>
           </div>` : ''}
       </div>` +
-        `<table><thead><tr>
+      `<table><thead><tr>
           <th>رقم اوردر</th><th>اسم العميل</th><th>الهاتف</th><th>المحافظة</th><th>العنوان</th>
           <th>الموظف</th><th>البيدج</th><th>الإجمالي</th><th>شحن</th><th>الإجمالي الكلي</th><th>ملاحظات</th>
         </tr></thead><tbody>` +
@@ -1779,87 +1769,87 @@ const scanBarcodeAddOrder = async () => {
     setIsSubmitting(true);
     try {
       const assigneeId = isShippingMode ? selectedShippingCompanyId : selectedRepId;
-    if (!assigneeId) {
-      Swal.fire(isShippingMode ? 'اختر شركة الشحن' : 'اختر المندوب', 'الرجاء اختيار جهة قبل إتمام اليومية', 'error');
-      return;
-    }
+      if (!assigneeId) {
+        Swal.fire(isShippingMode ? 'اختر شركة الشحن' : 'اختر المندوب', 'الرجاء اختيار جهة قبل إتمام اليومية', 'error');
+        return;
+      }
 
-    if (isShippingMode) {
-      const ordersToAssign = todayOrdersUnique;
+      if (isShippingMode) {
+        const ordersToAssign = todayOrdersUnique;
         if (ordersToAssign.length === 0) {
-        Swal.fire('اختر اوردرات', 'الرجاء اختيار اوردرات لتسليمها لشركة الشحن', 'error');
+          Swal.fire('اختر اوردرات', 'الرجاء اختيار اوردرات لتسليمها لشركة الشحن', 'error');
+          return;
+        }
+
+        try {
+          await Promise.all(
+            ordersToAssign.map((o: any) =>
+              fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: o.id, shippingCompanyId: assigneeId, repId: null, status: 'in_delivery', employee: employee || null, page: page || null })
+              })
+            )
+          );
+
+          const companyName = shippingCompanies.find(c => Number(c.id) === Number(assigneeId))?.name || '';
+          Swal.fire('تم', 'تم تسليم الاوردرات لشركة الشحن.', 'success');
+          printA4Report(ordersToAssign, {
+            assigneeLabel: 'شركة الشحن',
+            assigneeName: companyName,
+            reportTitle: 'يومية شركة الشحن',
+            prevBalance: 0
+          });
+
+          setSelectedOrders([]);
+          setSelectedPendingIds([]);
+          return;
+        } catch (e) {
+          console.error('Shipping daily assignment failed', e);
+          Swal.fire('خطأ', 'فشل إتمام اليومية لشركة الشحن.', 'error');
+          return;
+        }
+      }
+
+      const ordersToAssign = todayOrdersUnique;
+      if (ordersToAssign.length === 0) {
+        Swal.fire('اختر اوردرات', 'الرجاء اختيار اوردرات لليومية قبل الإتمام.', 'error');
         return;
       }
 
-      try {
-        await Promise.all(
-          ordersToAssign.map((o: any) =>
-            fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ id: o.id, shippingCompanyId: assigneeId, repId: null, status: 'in_delivery', employee: employee || null, page: page || null })
-            })
-          )
-        );
-
-        const companyName = shippingCompanies.find(c => Number(c.id) === Number(assigneeId))?.name || '';
-        Swal.fire('تم', 'تم تسليم الاوردرات لشركة الشحن.', 'success');
-        printA4Report(ordersToAssign, {
-          assigneeLabel: 'شركة الشحن',
-          assigneeName: companyName,
-          reportTitle: 'يومية شركة الشحن',
-          prevBalance: 0
-        });
-
-        setSelectedOrders([]);
-        setSelectedPendingIds([]);
-        return;
-      } catch (e) {
-        console.error('Shipping daily assignment failed', e);
-        Swal.fire('خطأ', 'فشل إتمام اليومية لشركة الشحن.', 'error');
+      const completeStockCheck = await checkCumulativeStockForOrderIds(ordersToAssign.map((o: any) => Number(o.id)));
+      if (!completeStockCheck.ok) {
+        if (completeStockCheck.shortages && completeStockCheck.shortages.length > 0) {
+          Swal.fire({
+            title: 'نقص في المخزون',
+            html: buildShortagesHtml(completeStockCheck.shortages, 'لا يمكن إتمام اليومية لأن المخزون غير كافٍ لهذه الأوردرات:'),
+            icon: 'warning'
+          });
+        } else {
+          Swal.fire('خطأ', completeStockCheck.message || 'فشل التحقق من المخزون.', 'error');
+        }
         return;
       }
-    }
 
-    const ordersToAssign = todayOrdersUnique;
-    if (ordersToAssign.length === 0) {
-      Swal.fire('اختر اوردرات', 'الرجاء اختيار اوردرات لليومية قبل الإتمام.', 'error');
-      return;
-    }
-
-    const completeStockCheck = await checkCumulativeStockForOrderIds(ordersToAssign.map((o: any) => Number(o.id)));
-    if (!completeStockCheck.ok) {
-      if (completeStockCheck.shortages && completeStockCheck.shortages.length > 0) {
-        Swal.fire({
-          title: 'نقص في المخزون',
-          html: buildShortagesHtml(completeStockCheck.shortages, 'لا يمكن إتمام اليومية لأن المخزون غير كافٍ لهذه الأوردرات:'),
-          icon: 'warning'
-        });
-      } else {
-        Swal.fire('خطأ', completeStockCheck.message || 'فشل التحقق من المخزون.', 'error');
+      if (Math.abs(paymentAdjustment) > 0 && !selectedTreasuryId) {
+        Swal.fire('اختر الخزينة', 'هناك مبلغ مدفوع الآن ويجب اختيار الخزينة الخاصة به.', 'warning');
+        return;
       }
-      return;
-    }
 
-    if (Math.abs(paymentAdjustment) > 0 && !selectedTreasuryId) {
-      Swal.fire('اختر الخزينة', 'هناك مبلغ مدفوع الآن ويجب اختيار الخزينة الخاصة به.', 'warning');
-      return;
-    }
+      // Automatically set movement reason to 'بدء اليومية' when warehouse is involved
+      let dailyReason = '';
+      if (selectedWarehouseId && todayPiecesCount > 0) {
+        dailyReason = 'بدء اليومية';
+      }
 
-    // Automatically set movement reason to 'بدء اليومية' when warehouse is involved
-    let dailyReason = '';
-    if (selectedWarehouseId && todayPiecesCount > 0) {
-      dailyReason = 'بدء اليومية';
-    }
-
-    const repName = reps.find(r => Number(r.id) === Number(selectedRepId))?.name || '';
-    const confirm = await Swal.fire({
-      title: 'تأكيد إتمام اليومية',
-      icon: 'question',
-      showCancelButton: true,
-      confirmButtonText: 'إتمام',
-      cancelButtonText: 'إلغاء',
-      html: `
+      const repName = reps.find(r => Number(r.id) === Number(selectedRepId))?.name || '';
+      const confirm = await Swal.fire({
+        title: 'تأكيد إتمام اليومية',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'إتمام',
+        cancelButtonText: 'إلغاء',
+        html: `
         <div style="text-align:right; line-height:1.9">
           <div><b>المندوب:</b> ${repName}</div>
           <hr/>
@@ -1880,28 +1870,28 @@ const scanBarcodeAddOrder = async () => {
           <div><b>إجمالي القطع:</b> ${totalPiecesCount.toLocaleString()}</div>
         </div>
       `
-    });
-    if (!confirm.isConfirmed) return;
+      });
+      if (!confirm.isConfirmed) return;
 
-    const splitPayments = isSplitPayment ? [
-      ...(cashAmount > 0 && cashTreasuryId ? [{ treasuryId: Number(cashTreasuryId), paidAmount: cashAmount, paymentAction, type: 'cash' }] : []),
-      ...(electronicAmount > 0 && electronicTreasuryId ? [{ treasuryId: Number(electronicTreasuryId), paidAmount: electronicAmount, paymentAction, type: 'electronic' }] : [])
-    ] : null;
+      const splitPayments = isSplitPayment ? [
+        ...(cashAmount > 0 && cashTreasuryId ? [{ treasuryId: Number(cashTreasuryId), paidAmount: cashAmount, paymentAction, type: 'cash' }] : []),
+        ...(electronicAmount > 0 && electronicTreasuryId ? [{ treasuryId: Number(electronicTreasuryId), paidAmount: electronicAmount, paymentAction, type: 'electronic' }] : [])
+      ] : null;
 
-    const payload: any = {
-      repId: Number(selectedRepId),
-      orders: ordersToAssign.map(o => Number(o.id)),
-      treasuryId: selectedTreasuryId ? Number(selectedTreasuryId) : null,
-      warehouseId: selectedWarehouseId ? Number(selectedWarehouseId) : null,
-      employee: employee || null,
-      page: page || null,
-      paymentAdjustment: paidNowSigned,
-      paymentAction: paymentAction,
-      totalAmount: todayValue,
-      productsCount: todayPiecesCount,
-      reason: dailyReason || null,
-      splitPayments: splitPayments && splitPayments.length > 0 ? splitPayments : null
-    };
+      const payload: any = {
+        repId: Number(selectedRepId),
+        orders: ordersToAssign.map(o => Number(o.id)),
+        treasuryId: selectedTreasuryId ? Number(selectedTreasuryId) : null,
+        warehouseId: selectedWarehouseId ? Number(selectedWarehouseId) : null,
+        employee: employee || null,
+        page: page || null,
+        paymentAdjustment: paidNowSigned,
+        paymentAction: paymentAction,
+        totalAmount: todayValue,
+        productsCount: todayPiecesCount,
+        reason: dailyReason || null,
+        splitPayments: splitPayments && splitPayments.length > 0 ? splitPayments : null
+      };
 
       const idempotencyToken = 'daily_' + Date.now() + '_' + Math.random().toString(36).slice(2);
       payload.idempotency_token = idempotencyToken;
@@ -2064,7 +2054,7 @@ const scanBarcodeAddOrder = async () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="flex items-center gap-3">
             <User className="text-blue-600" />
-              <div className="w-full">
+            <div className="w-full">
               <div className="text-xs text-slate-500">{isShippingMode ? 'شركة الشحن المختارة' : 'المندوب المختار'}</div>
               <CustomSelect
                 value={(isShippingMode ? String(selectedShippingCompanyId || '') : String(selectedRepId || ''))}
@@ -2073,7 +2063,7 @@ const scanBarcodeAddOrder = async () => {
                   if (isShippingMode) onSelectShippingCompany(num as any);
                   else onSelectRep(num as any);
                 }}
-                options={[{ value: '', label: isShippingMode ? 'اختر شركة الشحن' : 'اختر المندوب' }, ...((isShippingMode ? shippingCompanies : reps).map((r:any)=>({ value: String(r.id), label: r.name })))]}
+                options={[{ value: '', label: isShippingMode ? 'اختر شركة الشحن' : 'اختر المندوب' }, ...((isShippingMode ? shippingCompanies : reps).map((r: any) => ({ value: String(r.id), label: r.name })))]}
                 className="w-full"
               />
             </div>
@@ -2151,7 +2141,7 @@ const scanBarcodeAddOrder = async () => {
                 <CustomSelect
                   value={selectedTreasuryId ? String(selectedTreasuryId) : ''}
                   onChange={v => setSelectedTreasuryId(v ? Number(v) : '')}
-                  options={[{ value: '', label: 'بدون خزينة' }, ...treasuries.map((t:any)=>({ value: String(t.id), label: t.name }))]}
+                  options={[{ value: '', label: 'بدون خزينة' }, ...treasuries.map((t: any) => ({ value: String(t.id), label: t.name }))]}
                   className="w-full"
                   disabled={!repChosen}
                 />
@@ -2168,7 +2158,7 @@ const scanBarcodeAddOrder = async () => {
             <CustomSelect
               value={selectedWarehouseId ? String(selectedWarehouseId) : ''}
               onChange={v => setSelectedWarehouseId(v ? Number(v) : '')}
-              options={[{ value: '', label: 'بدون مستودع' }, ...warehouses.map((w:any)=>({ value: String(w.id), label: w.name }))]}
+              options={[{ value: '', label: 'بدون مستودع' }, ...warehouses.map((w: any) => ({ value: String(w.id), label: w.name }))]}
               className="w-full"
               disabled={!repChosen || !treasuryChosen}
             />
@@ -2238,14 +2228,14 @@ const scanBarcodeAddOrder = async () => {
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="space-y-2">
                       <StatCard label="قيمه اجمالى الاوردرات" value={`${(oldOrdersValue + todayValue).toLocaleString()} ج.م`} hint={`في عهدة: ${oldOrdersValue.toLocaleString()} + اليوم: ${todayValue.toLocaleString()}`} />
-                        <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/30 p-4 shadow-sm text-center">
+                      <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/30 p-4 shadow-sm text-center">
                         <div className="text-xs text-slate-500 dark:text-slate-400">الباقي النهائي (قديم + اليوم)</div>
                         <div className={`mt-2 text-2xl font-extrabold ${balanceClass(finalBalanceBeforePayment)}`}>{balanceLabel(finalBalanceBeforePayment)} {Math.abs(finalBalanceBeforePayment).toLocaleString()} ج.م</div>
                       </div>
-                       {/*  <div className="mt-2 text-xs text-slate-600">مصروفات الشحن: <span className="font-black">{totalShipping.toLocaleString()} ج.م</span></div>
+                      {/*  <div className="mt-2 text-xs text-slate-600">مصروفات الشحن: <span className="font-black">{totalShipping.toLocaleString()} ج.م</span></div>
                         <div className="mt-1 text-xs text-slate-600">الإجمالي شامل الشحن: <span className="font-black">{(oldOrdersValue + todayValue + totalShipping).toLocaleString()} ج.م</span></div> */}
                     </div>
-                      <StatCard
+                    <StatCard
                       label="إجمالي الاوردرات"
                       value={totalOrdersCount}
                       hint={`قديم ${oldOrdersCount} + اليوم ${todayOrdersCount}`}
@@ -2368,8 +2358,8 @@ const scanBarcodeAddOrder = async () => {
                   <div className="mt-1 text-xs text-slate-400">الرصيد بعد الدفع: {Math.abs(balanceAfterPayment).toLocaleString()} ({balanceLabel(balanceAfterPayment)})</div>
                 </div>
               </div>
-              </div>
-            
+            </div>
+
           )}
 
           <div className="flex gap-2">
@@ -2378,7 +2368,7 @@ const scanBarcodeAddOrder = async () => {
               disabled={!startDailyUnlocked || isSubmitting}
               className={`flex-1 bg-emerald-600 text-white py-2 rounded-xl flex items-center justify-center gap-2 focus:outline-none focus:ring-2 focus:ring-emerald-300 ${(!startDailyUnlocked || isSubmitting) ? 'opacity-50 cursor-not-allowed' : 'hover:bg-emerald-700'}`}
             >
-              {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <ArrowRight size={18} />} 
+              {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : <ArrowRight size={18} />}
               {isSubmitting ? 'جاري إتمام اليومية...' : 'إتمام و طباعه اليوميه'}
             </button>
 
@@ -2395,10 +2385,10 @@ const scanBarcodeAddOrder = async () => {
                 }
                 const selectedRep = reps.find((r: any) => r.id === selectedRepId);
                 const selectedWarehouse = warehouses.find((w: any) => w.id === selectedWarehouseId);
-                
+
                 if (isShippingMode) {
-                  printThermal(ordersForPrint, { 
-                    assigneeLabel: 'شركة الشحن', 
+                  printThermal(ordersForPrint, {
+                    assigneeLabel: 'شركة الشحن',
                     assigneeName,
                     repId: selectedRep?.id || null,
                     warehouseId: selectedWarehouse?.id || null,
@@ -2406,8 +2396,8 @@ const scanBarcodeAddOrder = async () => {
                     createdByName: employee || userDefaults?.name || userDefaults?.username || ''
                   });
                 } else {
-                  printThermal(ordersForPrint, { 
-                    assigneeLabel: 'المندوب', 
+                  printThermal(ordersForPrint, {
+                    assigneeLabel: 'المندوب',
                     assigneeName,
                     repId: selectedRep?.id || null,
                     warehouseId: selectedWarehouse?.id || null,
@@ -2433,7 +2423,7 @@ const scanBarcodeAddOrder = async () => {
                   const worksheet = workbook.addWorksheet('يومية المناديب', {
                     views: [{ rightToLeft: true }]
                   });
-                  
+
                   worksheet.columns = [
                     { header: 'رقم الاوردر', key: 'orderNumber', width: 15 },
                     { header: 'اسم العميل', key: 'customerName', width: 25 },
@@ -2454,7 +2444,7 @@ const scanBarcodeAddOrder = async () => {
                   headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F46E5' } };
                   headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
                   headerRow.height = 30;
-                  
+
                   // Add rows
                   todayOrdersUnique.forEach((o: any) => {
                     const row = worksheet.addRow({
@@ -2470,16 +2460,16 @@ const scanBarcodeAddOrder = async () => {
                       total: orderTotal(o),
                       notes: o.notes ?? ''
                     });
-                    
+
                     row.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-                    
+
                     // Style row borders
                     row.eachCell((cell) => {
                       cell.border = {
-                        top: {style:'thin', color: {argb:'FFE2E8F0'}},
-                        left: {style:'thin', color: {argb:'FFE2E8F0'}},
-                        bottom: {style:'thin', color: {argb:'FFE2E8F0'}},
-                        right: {style:'thin', color: {argb:'FFE2E8F0'}}
+                        top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+                        left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+                        bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+                        right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
                       };
                     });
                   });
@@ -2605,9 +2595,9 @@ const scanBarcodeAddOrder = async () => {
                 <Box className="text-slate-500" />
                 <h3 className="font-black">اوردرات اليوم المختارة ({todayOrdersCount})</h3>
                 <div className="flex gap-2 ml-auto">
-                  <button onClick={() => setTodayViewMode('list')} className={`p-2 rounded ${todayViewMode==='list'?'bg-blue-100 text-blue-700':'bg-slate-100'}`} title="عرض كقائمة"><LayoutList size={18} /></button>
-                  <button onClick={() => setTodayViewMode('card')} className={`p-2 rounded ${todayViewMode==='card'?'bg-blue-100 text-blue-700':'bg-slate-100'}`} title="عرض كبطاقات"><LayoutGrid size={18} /></button>
-                  <button onClick={() => setTodaySortAsc(v=>!v)} className="p-2 rounded bg-slate-100" title={todaySortAsc ? 'من الأقدم إضافةً إلى الأحدث (اضغط للعكس)' : 'من الأحدث إضافةً إلى الأقدم (اضغط للعكس)'}><ArrowDownAZ size={18} style={{display: todaySortAsc?'inline':'none'}} /><ArrowUpAZ size={18} style={{display: !todaySortAsc?'inline':'none'}} /></button>
+                  <button onClick={() => setTodayViewMode('list')} className={`p-2 rounded ${todayViewMode === 'list' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100'}`} title="عرض كقائمة"><LayoutList size={18} /></button>
+                  <button onClick={() => setTodayViewMode('card')} className={`p-2 rounded ${todayViewMode === 'card' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100'}`} title="عرض كبطاقات"><LayoutGrid size={18} /></button>
+                  <button onClick={() => setTodaySortAsc(v => !v)} className="p-2 rounded bg-slate-100" title={todaySortAsc ? 'من الأقدم إضافةً إلى الأحدث (اضغط للعكس)' : 'من الأحدث إضافةً إلى الأقدم (اضغط للعكس)'}><ArrowDownAZ size={18} style={{ display: todaySortAsc ? 'inline' : 'none' }} /><ArrowUpAZ size={18} style={{ display: !todaySortAsc ? 'inline' : 'none' }} /></button>
                 </div>
               </div>
               <div className="text-sm text-slate-500">
@@ -2642,7 +2632,7 @@ const scanBarcodeAddOrder = async () => {
                   );
                 })}
               </div>
-           ) : (
+            ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg gap-5 max-h-[440px] overflow-auto p-2">
                 {todayOrdersCount === 0 && <div className="col-span-full p-6 text-center text-slate-400">لم يتم اختيار اوردرات اليوم بعد</div>}
                 {(todaySortAsc ? todayOrdersUnique.slice() : todayOrdersUnique.slice().reverse()).map((o: any) => {
@@ -2671,7 +2661,7 @@ const scanBarcodeAddOrder = async () => {
                         {/* Details */}
                         <div className="space-y-2 mb-4">
                           <div className="flex items-center gap-2 text-xs text-slate-500">
-                            <Phone size={14} className="text-blue-500 shrink-0"/>
+                            <Phone size={14} className="text-blue-500 shrink-0" />
                             <div className="flex flex-col">
                               <span className="font-mono dir-ltr">{o.phone || o.phone1 || ''}</span>
                               {o.phone2 && String(o.phone2).trim() !== '' && (
@@ -2680,7 +2670,7 @@ const scanBarcodeAddOrder = async () => {
                             </div>
                           </div>
                           <div className="flex items-start gap-2 text-xs text-slate-500">
-                            <MapPin size={14} className="text-rose-500 mt-0.5 shrink-0"/>
+                            <MapPin size={14} className="text-rose-500 mt-0.5 shrink-0" />
                             <span className="line-clamp-2 leading-relaxed">{o.governorate || ''} {o.address ? `- ${o.address}` : ''}</span>
                           </div>
                         </div>
@@ -2689,7 +2679,7 @@ const scanBarcodeAddOrder = async () => {
                         <div className="bg-slate-50 rounded-xl p-3 mb-4 border border-slate-100">
                           <p className="text-[10px] text-slate-400 font-bold mb-2">ملخص المنتجات:</p>
                           <div className="space-y-1">
-                            {(Array.isArray(o.products) ? o.products : []).slice(0, 2).map((p:any, i:number) => (
+                            {(Array.isArray(o.products) ? o.products : []).slice(0, 2).map((p: any, i: number) => (
                               <div key={i} className="flex justify-between text-[11px]">
                                 <span className="text-slate-700 truncate max-w-[70%]">{p.name}</span>
                                 <span className="text-slate-500 font-mono">x{p.quantity || p.qty || 1}</span>
@@ -2720,7 +2710,7 @@ const scanBarcodeAddOrder = async () => {
                             className="w-10 h-10 flex items-center justify-center bg-white border border-slate-200 rounded-xl text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 transition-colors shadow-sm"
                             title="حذف من اليومية"
                           >
-                            <Trash2 size={18}/>
+                            <Trash2 size={18} />
                           </button>
                         </div>
                       </div>
@@ -2761,9 +2751,9 @@ const scanBarcodeAddOrder = async () => {
                   <Box className="text-slate-500" />
                   <h3 className="font-black">اوردرات نزول ({assignedOrders.length})</h3>
                   <div className="flex gap-2 ml-auto">
-                    <button onClick={() => setAssignedViewMode('list')} className={`p-2 rounded ${assignedViewMode==='list'?'bg-blue-100 text-blue-700':'bg-slate-100'}`} title="عرض كقائمة"><LayoutList size={18} /></button>
-                    <button onClick={() => setAssignedViewMode('card')} className={`p-2 rounded ${assignedViewMode==='card'?'bg-blue-100 text-blue-700':'bg-slate-100'}`} title="عرض كبطاقات"><LayoutGrid size={18} /></button>
-                    <button onClick={() => setAssignedSortAsc(v=>!v)} className="p-2 rounded bg-slate-100" title="تبديل ترتيب الفرز"><ArrowDownAZ size={18} style={{display: assignedSortAsc?'inline':'none'}} /><ArrowUpAZ size={18} style={{display: !assignedSortAsc?'inline':'none'}} /></button>
+                    <button onClick={() => setAssignedViewMode('list')} className={`p-2 rounded ${assignedViewMode === 'list' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100'}`} title="عرض كقائمة"><LayoutList size={18} /></button>
+                    <button onClick={() => setAssignedViewMode('card')} className={`p-2 rounded ${assignedViewMode === 'card' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100'}`} title="عرض كبطاقات"><LayoutGrid size={18} /></button>
+                    <button onClick={() => setAssignedSortAsc(v => !v)} className="p-2 rounded bg-slate-100" title="تبديل ترتيب الفرز"><ArrowDownAZ size={18} style={{ display: assignedSortAsc ? 'inline' : 'none' }} /><ArrowUpAZ size={18} style={{ display: !assignedSortAsc ? 'inline' : 'none' }} /></button>
                   </div>
                 </div>
                 <div className="text-sm text-slate-500">اجمالي: <span className="font-black">{oldOrdersValue.toLocaleString()}</span></div>
@@ -2792,7 +2782,7 @@ const scanBarcodeAddOrder = async () => {
                     );
                   })}
                 </div>
-             ) : (
+              ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg gap-5 max-h-[340px] overflow-auto p-2">
                   {(assignedSortAsc ? assignedOrders.slice() : assignedOrders.slice().reverse()).map((o: any) => {
                     const tot = orderTotal(o);
@@ -2820,7 +2810,7 @@ const scanBarcodeAddOrder = async () => {
                           {/* Details */}
                           <div className="space-y-2 mb-4">
                             <div className="flex items-center gap-2 text-xs text-slate-500">
-                              <Phone size={14} className="text-blue-500 shrink-0"/>
+                              <Phone size={14} className="text-blue-500 shrink-0" />
                               <div className="flex flex-col">
                                 <span className="font-mono dir-ltr">{o.phone || o.phone1 || ''}</span>
                                 {o.phone2 && String(o.phone2).trim() !== '' && (
@@ -2829,7 +2819,7 @@ const scanBarcodeAddOrder = async () => {
                               </div>
                             </div>
                             <div className="flex items-start gap-2 text-xs text-slate-500">
-                              <MapPin size={14} className="text-rose-500 mt-0.5 shrink-0"/>
+                              <MapPin size={14} className="text-rose-500 mt-0.5 shrink-0" />
                               <span className="line-clamp-2 leading-relaxed">{o.governorate || ''} {o.address ? `- ${o.address}` : ''}</span>
                             </div>
                           </div>
@@ -2838,7 +2828,7 @@ const scanBarcodeAddOrder = async () => {
                           <div className="bg-slate-50 rounded-xl p-3 mb-4 border border-slate-100">
                             <p className="text-[10px] text-slate-400 font-bold mb-2">ملخص المنتجات:</p>
                             <div className="space-y-1">
-                              {(Array.isArray(o.products) ? o.products : []).slice(0, 2).map((p:any, i:number) => (
+                              {(Array.isArray(o.products) ? o.products : []).slice(0, 2).map((p: any, i: number) => (
                                 <div key={i} className="flex justify-between text-[11px]">
                                   <span className="text-slate-700 truncate max-w-[70%]">{p.name}</span>
                                   <span className="text-slate-500 font-mono">x{p.quantity || p.qty || 1}</span>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
+import { formatLocalDate, getFirstDayOfMonth, getDaysAgo } from '../services/dateUtils';
 
 const CloseDaily: React.FC = () => {
   useEffect(() => {
@@ -8,13 +9,13 @@ const CloseDaily: React.FC = () => {
   }, []);
   const [loading, setLoading] = useState(false);
   const [summary, setSummary] = useState<any>(null);
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0,10));
+  const [date, setDate] = useState(() => formatLocalDate());
   // Period summary state
   // default period: last 7 days
   const defaultEnd = new Date();
   const defaultStart = new Date(); defaultStart.setDate(defaultEnd.getDate() - 6);
-  const [periodStart, setPeriodStart] = useState(() => defaultStart.toISOString().slice(0,10));
-  const [periodEnd, setPeriodEnd] = useState(() => defaultEnd.toISOString().slice(0,10));
+  const [periodStart, setPeriodStart] = useState(() => getDaysAgo(6));
+  const [periodEnd, setPeriodEnd] = useState(() => formatLocalDate());
   const [periodSummary, setPeriodSummary] = useState<any>(null);
   const [periodLoading, setPeriodLoading] = useState(false);
 
@@ -97,7 +98,7 @@ const CloseDaily: React.FC = () => {
 
   const setPresetRange = (preset: 'today'|'week'|'month'|'year') => {
     const now = new Date();
-    const fmt = (d:Date) => d.toISOString().slice(0,10);
+    const fmt = (d: Date) => formatLocalDate(d);
     if (preset === 'today') {
       setPeriodStart(fmt(now)); setPeriodEnd(fmt(now));
     } else if (preset === 'week') {

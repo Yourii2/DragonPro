@@ -3,8 +3,9 @@ import Swal from 'sweetalert2';
 import CustomSelect from './CustomSelect';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { translateTxnLabel } from '../services/labelHelpers';
+import { formatLocalDate } from '../services/dateUtils';
 
-const formatDateInput = (d: Date) => d.toISOString().slice(0, 10);
+const formatDateInput = (d?: Date | string | number | null) => formatLocalDate(d);
 
 const toNum = (v: any) => {
   const n = Number(v);

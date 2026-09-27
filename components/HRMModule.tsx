@@ -6,6 +6,7 @@ import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
 import AttendanceModule from './AttendanceModule';
 import EmployeeSalaryReport from './EmployeeSalaryReport';
+import { formatLocalDate } from '../services/dateUtils';
 
 interface HRMModuleProps {
   initialView?: string;
@@ -123,7 +124,7 @@ const HRMModule: React.FC<HRMModuleProps> = ({ initialView }) => {
         jobTitle: '',
         salary: '',
         phone: '',
-        hireDate: new Date().toISOString().split('T')[0],
+        hireDate: formatLocalDate(),
         fingerprintDeviceId: '',
         fingerprintUserId: ''
       });
@@ -319,7 +320,7 @@ const HRMModule: React.FC<HRMModuleProps> = ({ initialView }) => {
   
   const SalariesComponent = ({ treasuries }: { treasuries: any[] }) => {
     const [salaries, setSalaries] = useState<any[]>([]);
-    const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
+    const [selectedMonth, setSelectedMonth] = useState(formatLocalDate().slice(0, 7));
     const [loading, setLoading] = useState(false);
     const [includeAttendance, setIncludeAttendance] = useState(true);
     const [generateAttendance, setGenerateAttendance] = useState(true);
@@ -492,7 +493,7 @@ const HRMModule: React.FC<HRMModuleProps> = ({ initialView }) => {
   const EmployeeTransactionsComponent = ({ treasuries, employees }: { treasuries: any[], employees: any[] }) => {
     const [transactions, setTransactions] = useState<any[]>([]);
     const [isTransactionModalOpen, setIsTransactionModalOpen] = useState(false);
-    const [newTransactionData, setNewTransactionData] = useState({ employee_id: '', amount: '', type: 'advance', date: new Date().toISOString().split('T')[0], notes: '', treasury_id: '' });
+    const [newTransactionData, setNewTransactionData] = useState({ employee_id: '', amount: '', type: 'advance', date: formatLocalDate(), notes: '', treasury_id: '' });
     
     const [financialSummary, setFinancialSummary] = useState<any>(null);
     const [isTransactionDetailModalOpen, setIsTransactionDetailModalOpen] = useState(false);

@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { assetUrl } from '../services/assetUrl';
+import { formatLocalDate, getFirstDayOfMonth, getDaysAgo } from '../services/dateUtils';
 
 const fmt = (n: number) => n.toLocaleString('ar-EG');
 const fmtCur = (n: number, sym = 'ج.م') => `${fmt(n)} ${sym}`;
@@ -123,8 +124,8 @@ const Dashboard: React.FC = () => {
   };
   const today = new Date();
   const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
-  const [startDate, setStartDate] = useState(toLocalDateString(firstDay));
-  const [endDate, setEndDate] = useState(toLocalDateString(today));
+  const [startDate, setStartDate] = useState(getFirstDayOfMonth());
+  const [endDate, setEndDate] = useState(formatLocalDate());
 
   const companyLogo = (typeof window !== 'undefined' ? (localStorage.getItem('Dragon_company_logo_url') || localStorage.getItem('Dragon_company_logo')) : null) || assetUrl('Dragon.png');
   const companyName = (typeof window !== 'undefined' ? localStorage.getItem('Dragon_company_name') : null) || 'Dragon Pro';
@@ -241,9 +242,9 @@ const Dashboard: React.FC = () => {
         </div>
         <div className="flex flex-wrap gap-2 items-center">
           {[
-            { label: 'اليوم', s: today.toISOString().split('T')[0], e: today.toISOString().split('T')[0] },
-            { label: 'هذا الشهر', s: firstDay.toISOString().split('T')[0], e: today.toISOString().split('T')[0] },
-            { label: 'آخر 90 يوم', s: new Date(today.getTime() - 89 * 86400000).toISOString().split('T')[0], e: today.toISOString().split('T')[0] },
+            { label: 'اليوم', s: formatLocalDate(), e: formatLocalDate() },
+            { label: 'هذا الشهر', s: getFirstDayOfMonth(), e: formatLocalDate() },
+            { label: 'آخر 90 يوم', s: getDaysAgo(89), e: formatLocalDate() },
           ].map(q => (
             <button key={q.label} onClick={() => { setStartDate(q.s); setEndDate(q.e); }}
               className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${startDate === q.s && endDate === q.e ? 'bg-blue-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'}`}>

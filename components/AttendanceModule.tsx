@@ -3,6 +3,7 @@ import { CalendarDays, Fingerprint, Plus, RefreshCw, Save, Upload, Wifi, WifiOff
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
 import CustomSelect from './CustomSelect';
+import { formatLocalDate } from '../services/dateUtils';
 
 const dayOptions = [
   { value: 0, label: 'الأحد' },
@@ -187,7 +188,7 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
       const enabledDevices = devices.filter(d => d.enabled && (d.driver === 'hikvision_isapi' || d.driver === 'http_json_pull'));
       if (enabledDevices.length === 0) return;
 
-      const today = new Date().toISOString().split('T')[0];
+      const today = formatLocalDate();
       
       for (const dev of enabledDevices) {
         try {
@@ -598,7 +599,7 @@ const AttendanceModule: React.FC<AttendanceModuleProps> = ({ initialTab }) => {
       Swal.fire('تنبيه', 'اختر جهاز HikVision أولاً.', 'warning');
       return;
     }
-    const today = new Date().toISOString().split('T')[0];
+    const today = formatLocalDate();
     setHikPullLogsLoading(true);
     try {
       const res = await fetch(`${API_BASE_PATH}/api.php?module=attendance_devices&action=pullLogs`, {

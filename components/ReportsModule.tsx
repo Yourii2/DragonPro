@@ -40,6 +40,7 @@ import {
   Cell
 } from 'recharts';
 import { API_BASE_PATH } from '../services/apiConfig';
+import { formatLocalDate, getFirstDayOfMonth, getDaysAgo } from '../services/dateUtils';
 import Swal from 'sweetalert2';
 import DailyReport from './DailyReport';
 import TotalsReport from './TotalsReport';
@@ -332,10 +333,8 @@ const normalizeReportsView = (view?: string) => {
 
 const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
   const [activeSubTab, setActiveSubTab] = useState<string>(normalizeReportsView(initialView));
-  const today = new Date();
-  const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-  const [startDate, setStartDate] = useState(firstDayOfMonth.toISOString().split('T')[0]);
-  const [endDate, setEndDate] = useState(today.toISOString().split('T')[0]);
+  const [startDate, setStartDate] = useState(getFirstDayOfMonth());
+  const [endDate, setEndDate] = useState(formatLocalDate());
   const currencySymbol = 'ج.م';
   const { isDark } = useTheme();
 
@@ -384,7 +383,7 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
   const [warehouses, setWarehouses] = useState<any[]>([]);
   const [treasuries, setTreasuries] = useState<any[]>([]);
 
-  const [compareYear, setCompareYear] = useState<number>(today.getFullYear());
+  const [compareYear, setCompareYear] = useState<number>(new Date().getFullYear());
   const [compareData, setCompareData] = useState<any>(null);
 
   useEffect(() => {
@@ -610,10 +609,10 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
   );
 
   const quickRanges = [
-    { label: 'اليوم', start: new Date().toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) },
-    { label: 'هذا الشهر', start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) },
-    { label: 'آخر 7 أيام', start: new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) },
-    { label: 'آخر 30 يوم', start: new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) }
+    { label: 'اليوم', start: formatLocalDate(), end: formatLocalDate() },
+    { label: 'هذا الشهر', start: getFirstDayOfMonth(), end: formatLocalDate() },
+    { label: 'آخر 7 أيام', start: getDaysAgo(6), end: formatLocalDate() },
+    { label: 'آخر 30 يوم', start: getDaysAgo(29), end: formatLocalDate() }
   ];
 
   const dateRangeInputs = (
@@ -718,7 +717,7 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
         value={String(compareYear)}
         onChange={(v) => setCompareYear(Number(v))}
         options={Array.from({ length: 5 }).map((_, i) => {
-          const y = today.getFullYear() - i;
+          const y = new Date().getFullYear() - i;
           return { value: String(y), label: String(y) };
         })}
       />

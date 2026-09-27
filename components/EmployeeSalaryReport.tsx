@@ -3,6 +3,7 @@ import { FileText, RefreshCw } from 'lucide-react';
 import CustomSelect from './CustomSelect';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
+import { formatLocalDate } from '../services/dateUtils';
 
 interface EmployeeSalaryReportProps {
   employees: any[];
@@ -10,7 +11,7 @@ interface EmployeeSalaryReportProps {
 
 const EmployeeSalaryReport: React.FC<EmployeeSalaryReportProps> = ({ employees }) => {
   const [selectedEmployee, setSelectedEmployee] = useState('');
-  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [month, setMonth] = useState(formatLocalDate().slice(0, 7));
   const [loading, setLoading] = useState(false);
   const [report, setReport] = useState<any>(null);
 

@@ -42,7 +42,7 @@ try {
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         ]
     );
-    $pdo->exec("SET time_zone = '+02:00'");
+    $pdo->exec("SET time_zone = '" . date('P') . "'");
 } catch (Exception $e) {
     http_response_code(500);
     echo json_encode(['success' => false, 'message' => 'Database connection failed.']);

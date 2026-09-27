@@ -3,6 +3,7 @@ import { UserCheck, RefreshCw } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { useTheme } from './ThemeContext';
+import { formatLocalDate, getFirstDayOfMonth, getDaysAgo } from '../services/dateUtils';
 
 interface ReportRepPerformanceProps {
   initialStartDate?: string;
@@ -13,10 +14,8 @@ const ReportRepPerformance: React.FC<ReportRepPerformanceProps> = ({ initialStar
   const { isDark } = useTheme();
   const currencySymbol = localStorage.getItem('Dragon_currency') || 'ج.م';
   
-  const today = new Date();
-  const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-  const [startDate, setStartDate] = useState(initialStartDate || firstDayOfMonth.toISOString().split('T')[0]);
-  const [endDate, setEndDate] = useState(initialEndDate || today.toISOString().split('T')[0]);
+  const [startDate, setStartDate] = useState(initialStartDate || getFirstDayOfMonth());
+  const [endDate, setEndDate] = useState(initialEndDate || formatLocalDate());
 
   const [repStats, setRepStats] = useState<any[]>([]);
   const [totals, setTotals] = useState<any>({});
@@ -142,10 +141,10 @@ const ReportRepPerformance: React.FC<ReportRepPerformanceProps> = ({ initialStar
   const totOrders = (totals.delivered_orders || 0) + (totals.returned_orders || 0);
   const totPieces = (totals.delivered_pieces || 0) + (totals.returned_pieces || 0);
   const quickRanges = [
-    { label: 'اليوم', start: new Date().toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) },
-    { label: 'هذا الشهر', start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) },
-    { label: 'آخر 7 أيام', start: new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) },
-    { label: 'آخر 30 يوم', start: new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) }
+    { label: 'اليوم', start: formatLocalDate(), end: formatLocalDate() },
+    { label: 'هذا الشهر', start: getFirstDayOfMonth(), end: formatLocalDate() },
+    { label: 'آخر 7 أيام', start: getDaysAgo(6), end: formatLocalDate() },
+    { label: 'آخر 30 يوم', start: getDaysAgo(29), end: formatLocalDate() }
   ];
 
   return (
