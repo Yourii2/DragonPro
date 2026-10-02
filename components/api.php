@@ -827,6 +827,21 @@ if (!function_exists('ensure_orders_status_column_supports_all_statuses')) {
     }
 }
 
+if (!function_exists('ensure_orders_has_exchange_details')) {
+    function ensure_orders_has_exchange_details($pdo) {
+        static $checked = false;
+        if ($checked) return;
+        $checked = true;
+        if (!($pdo instanceof PDO)) return;
+        if (!table_exists($pdo, 'orders')) return;
+        if (!column_exists($pdo, 'orders', 'exchange_details')) {
+            try {
+                execute_query($pdo, "ALTER TABLE `orders` ADD COLUMN `exchange_details` LONGTEXT NULL");
+            } catch (Exception $e) {}
+        }
+    }
+}
+
 if (!function_exists('ensure_orders_status_has_cancelled')) {
     function ensure_orders_status_has_cancelled($pdo) {
         if (!($pdo instanceof PDO)) return;
@@ -2484,7 +2499,7 @@ function ensure_rep_daily_journal_table($pdo) {
     static $checked = false;
     if ($checked) return;
     try {
-        $pdo->query("SELECT is_closed, daily_code, orders_json, closed_at, closed_by, prev_balance, payment_action, payment_amount, balance_after_payment, delivered_value, returned_value, postponed_value, interim_payment_amount, interim_payments_json FROM rep_daily_journal LIMIT 1");
+        $pdo->query("SELECT is_closed, daily_code, orders_json, closed_at, closed_by, prev_balance, payment_action, payment_amount, balance_after_payment, delivered_value, returned_value, postponed_value, interim_payment_amount, interim_payments_json, idempotency_token FROM rep_daily_journal LIMIT 1");
         $checked = true;
     } catch (Exception $e) {
         try { execute_query($pdo, "ALTER TABLE rep_daily_journal DROP INDEX rep_date_unique"); } catch (Exception $ex) {}
@@ -2537,9 +2552,63 @@ function ensure_rep_daily_journal_table($pdo) {
         if (!column_exists($pdo, 'rep_daily_journal', 'closed_by'))             execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN closed_by INT NULL");
         if (!column_exists($pdo, 'rep_daily_journal', 'interim_payment_amount')) execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN interim_payment_amount DECIMAL(14,2) DEFAULT 0");
         if (!column_exists($pdo, 'rep_daily_journal', 'interim_payments_json'))  execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN interim_payments_json LONGTEXT NULL");
+        if (!column_exists($pdo, 'rep_daily_journal', 'idempotency_token'))      execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN idempotency_token VARCHAR(64) NULL");
         try { execute_query($pdo, "ALTER TABLE rep_daily_journal ADD INDEX idx_rep_open_journal (rep_id, is_closed)"); } catch (Exception $idxEx) {}
+        try { execute_query($pdo, "ALTER TABLE rep_daily_journal ADD INDEX idx_rdj_token (idempotency_token)"); } catch (Exception $tIdxEx) {}
         $checked = true;
     }
+    if (!column_exists($pdo, 'rep_daily_journal', 'idempotency_token')) {
+        try {
+            execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN idempotency_token VARCHAR(64) NULL");
+            execute_query($pdo, "ALTER TABLE rep_daily_journal ADD INDEX idx_rdj_token (idempotency_token)");
+        } catch (Exception $exTok) {}
+    }
+}
+
+/**
+ * فحص أمان صارم: التحقق من أن الأوردر ليس مسجلاً ضمن يومية مندوب مغلقة ومقفلة نهائياً.
+ * في حالة كانت اليومية مغلقة يمنع التعديل ويرمي Exception صريح.
+ */
+function assert_order_not_in_closed_journal($pdo, $orderId, $repId = null) {
+    $orderId = intval($orderId);
+    if ($orderId <= 0) return true;
+
+    ensure_rep_journal_orders_table($pdo);
+    ensure_rep_daily_journal_table($pdo);
+
+    $sql = "SELECT rjo.journal_id, rjo.rep_id, rdj.is_closed, rdj.daily_code, rdj.journal_date 
+            FROM rep_journal_orders rjo
+            INNER JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+            WHERE rjo.order_id = ?";
+    $params = [$orderId];
+    if ($repId !== null && intval($repId) > 0) {
+        $sql .= " AND rjo.rep_id = ?";
+        $params[] = intval($repId);
+    }
+    $sql .= " ORDER BY rjo.id DESC LIMIT 1";
+
+    $row = execute_query($pdo, $sql, $params)->fetch(PDO::FETCH_ASSOC);
+    if ($row && intval($row['is_closed']) === 1) {
+        $dailyCode = !empty($row['daily_code']) ? $row['daily_code'] : ('#' . $row['journal_id']);
+        throw new Exception("لا يمكن تعديل هذا الطلب (رقم #{$orderId}) لأنه مسجل ضمن يومية مندوب مغلقة ومقفلة نهائياً (كود: {$dailyCode}). لإجراء أي تعديل، يجب على الإدارة إعادة فتح اليومية أولاً.");
+    }
+    return true;
+}
+
+/**
+ * التحقق من أن اليومية مفتوحة وليست مغلقة ومقفلة.
+ */
+function assert_rep_daily_is_open($pdo, $journalId) {
+    $journalId = intval($journalId);
+    if ($journalId <= 0) return true;
+
+    ensure_rep_daily_journal_table($pdo);
+    $j = execute_query($pdo, "SELECT is_closed, daily_code FROM rep_daily_journal WHERE id = ? LIMIT 1", [$journalId])->fetch(PDO::FETCH_ASSOC);
+    if ($j && intval($j['is_closed']) === 1) {
+        $dailyCode = !empty($j['daily_code']) ? $j['daily_code'] : ('#' . $journalId);
+        throw new Exception("اليومية (كود: {$dailyCode}) مغلقة ومقفلة ولا يمكن تنفيذ أي عمليات أو تعديلات عليها.");
+    }
+    return true;
 }
 
 function ensure_order_confirmation_assignments_table($pdo) {
@@ -9163,24 +9232,25 @@ switch ($module) {
             $prevStart = $prevStartObj->format('Y-m-d');
             $prevEnd = $prevEndObj->format('Y-m-d');
 
-            // Standardized where condition matching profitReport.
-            // Include all active sales states so representatives/pages rankings stay populated when orders are not yet marked as fully delivered.
-            $statusIn = "'delivered','partial','partial_return','with_rep','in_delivery','processing','confirmed','shipped','pending','paid','new'";
-
-            $eventDateExpr = "COALESCE(rjo.event_date, rdj.journal_date, DATE(rdj.created_at), DATE(o.created_at))";
+            // Closed daily journals only - realized sales and accounting
+            $statusIn = "'delivered','partial'";
 
             $baseWhere = "
                 (
-                    (rjo.status IN ($statusIn) OR (o.status IN ($statusIn) AND (rjo.status IS NULL OR rjo.status NOT IN ('returned', 'full_return', 'deferred'))))
-                    AND {$eventDateExpr} BETWEEN ? AND ?
+                    rjo.id IS NOT NULL 
+                    AND rdj.is_closed = 1 
+                    AND rdj.journal_date BETWEEN ? AND ?
+                    AND (rjo.status IN ($statusIn) OR (o.status IN ($statusIn) AND rjo.status NOT IN ('returned', 'full_return', 'with_rep', 'postponed')))
                 )
             ";
             $baseParams = [$rangeStart, $rangeEnd];
 
             $prevWhere = "
                 (
-                    (rjo.status IN ($statusIn) OR (o.status IN ($statusIn) AND (rjo.status IS NULL OR rjo.status NOT IN ('returned', 'full_return', 'deferred'))))
-                    AND {$eventDateExpr} BETWEEN ? AND ?
+                    rjo.id IS NOT NULL 
+                    AND rdj.is_closed = 1 
+                    AND rdj.journal_date BETWEEN ? AND ?
+                    AND (rjo.status IN ($statusIn) OR (o.status IN ($statusIn) AND rjo.status NOT IN ('returned', 'full_return', 'with_rep', 'postponed')))
                 )
             ";
             $prevParams = [$prevStart, $prevEnd];
@@ -9220,7 +9290,7 @@ switch ($module) {
                 END
             ";
 
-            // 1. Financial KPIs for current period:
+            // 1. Financial KPIs for current period (Closed Dailies Only):
             $kpiStmt = execute_query($pdo,
                 "SELECT
                     COUNT(DISTINCT o.id) AS orders_count,
@@ -9230,7 +9300,7 @@ switch ($module) {
                  JOIN orders o ON o.id = oi.order_id
                  {$rjoSubquery}
                  {$orderTotJoin}
-                 LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                 JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                  {$variantJoin}
                  WHERE {$baseWhere}",
                 $baseParams
@@ -9244,7 +9314,7 @@ switch ($module) {
                      SELECT DISTINCT o.id, o.discount_amount
                      FROM orders o
                      {$rjoSubquery}
-                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                     JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                      WHERE {$baseWhere}
                  ) o",
                 $baseParams
@@ -9255,7 +9325,7 @@ switch ($module) {
             $profitRange = max(0.0, floatval($kpiData['gross_profit']) - $totalDiscounts);
             $ordersDelivered = intval($kpiData['orders_count']);
 
-            // 2. Previous Period Financials:
+            // 2. Previous Period Financials (Closed Dailies Only):
             $prevKpiStmt = execute_query($pdo,
                 "SELECT
                     COALESCE(SUM({$deliveredQtyExpr} * oi.price_per_unit), 0) AS gross_revenue,
@@ -9264,7 +9334,7 @@ switch ($module) {
                  JOIN orders o ON o.id = oi.order_id
                  {$rjoSubquery}
                  {$orderTotJoin}
-                 LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                 JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                  {$variantJoin}
                  WHERE {$prevWhere}",
                 $prevParams
@@ -9277,7 +9347,7 @@ switch ($module) {
                      SELECT DISTINCT o.id, o.discount_amount
                      FROM orders o
                      {$rjoSubquery}
-                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                     JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                      WHERE {$prevWhere}
                  ) o",
                 $prevParams
@@ -9291,38 +9361,50 @@ switch ($module) {
                 $changePct = round((($revenueRange - $revenuePrev) / $revenuePrev) * 100, 1);
             }
 
-            // 3. Orders Counts & Delivery Performance:
+            // 3. Orders Counts & Delivery Performance (Closed Dailies Only):
             // Returned orders in period:
             $returnedWhere = "
                 (
-                    (rjo.status IN ('returned', 'full_return') OR (o.status IN ('returned', 'full_return') AND (rjo.status IS NULL OR rjo.status NOT IN ('delivered', 'partial'))))
-                    AND {$eventDateExpr} BETWEEN ? AND ?
+                    rjo.id IS NOT NULL 
+                    AND rdj.is_closed = 1 
+                    AND rdj.journal_date BETWEEN ? AND ?
+                    AND (rjo.status IN ('returned', 'full_return', 'partial_return') OR o.status IN ('returned', 'full_return'))
                 )
             ";
             $ordersReturnedStmt = execute_query($pdo,
                 "SELECT COUNT(DISTINCT o.id)
                  FROM orders o
                  {$rjoSubquery}
-                 LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                 JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                  WHERE {$returnedWhere}",
                 $baseParams
             );
             $ordersReturned = intval($ordersReturnedStmt->fetchColumn() ?: 0);
 
-            // Total orders created in this period:
+            // Total orders processed in closed journals in this period:
             $ordersRangeStmt = execute_query($pdo,
-                "SELECT COUNT(*) FROM orders WHERE DATE(created_at) BETWEEN ? AND ?",
+                "SELECT COUNT(DISTINCT rjo.order_id)
+                 FROM rep_journal_orders rjo
+                 JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                 WHERE rdj.is_closed = 1 AND rdj.journal_date BETWEEN ? AND ?",
                 [$rangeStart, $rangeEnd]
             );
             $ordersRange = intval($ordersRangeStmt->fetchColumn() ?: 0);
 
-            // Pending orders currently in the pipeline:
+            // Pending orders currently in pipeline (not yet settled in closed daily):
             $ordersPendingStmt = execute_query($pdo,
-                "SELECT COUNT(*) FROM orders WHERE status IN ('pending', 'confirmed', 'processing', 'with_rep', 'in_delivery', 'shipped')"
+                "SELECT COUNT(*) FROM orders 
+                 WHERE status IN ('pending', 'confirmed', 'processing', 'with_rep', 'in_delivery', 'shipped')
+                   AND id NOT IN (
+                       SELECT rjo_sub.order_id 
+                       FROM rep_journal_orders rjo_sub 
+                       JOIN rep_daily_journal rdj_sub ON rdj_sub.id = rjo_sub.journal_id 
+                       WHERE rdj_sub.is_closed = 1 AND rjo_sub.status IN ('delivered', 'partial', 'returned', 'full_return')
+                   )"
             );
             $ordersPending = intval($ordersPendingStmt->fetchColumn() ?: 0);
 
-            // Delivery & Return Performance Detailed Breakdown:
+            // Delivery & Return Performance Detailed Breakdown (Closed Dailies Only):
             $deliveryPerformance = [
                 'full_delivery'    => ['count' => 0, 'pieces' => 0, 'amount' => 0.0],
                 'partial_delivery' => ['count' => 0, 'pieces' => 0, 'amount' => 0.0],
@@ -9343,7 +9425,7 @@ switch ($module) {
                         COALESCE(o.total_amount, 0) AS total_amount
                     FROM orders o
                     {$rjoSubquery}
-                    LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                    JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                     LEFT JOIN (
                         SELECT order_id, 
                                SUM(quantity) AS delivered_pieces, 
@@ -9351,7 +9433,7 @@ switch ($module) {
                         FROM order_items
                         GROUP BY order_id
                     ) oi_summary ON oi_summary.order_id = o.id
-                    WHERE {$eventDateExpr} BETWEEN ? AND ?
+                    WHERE rdj.is_closed = 1 AND rdj.journal_date BETWEEN ? AND ?
                 ";
                 $perfStmt = execute_query($pdo, $perfSql, $baseParams);
                 $perfRows = $perfStmt->fetchAll(PDO::FETCH_ASSOC);
@@ -9438,8 +9520,8 @@ switch ($module) {
                 $lowStockDetails = [];
             }
 
-            // 5. Daily Trend (Sales & Profit):
-            $dateExpr = "COALESCE(rjo.event_date, rdj.journal_date, DATE(rdj.created_at), DATE(o.created_at))";
+            // 5. Daily Trend (Sales & Profit) - Closed Dailies Only:
+            $dateExpr = "rdj.journal_date";
             $salesByDate = [];
             $profitByDate = [];
             try {
@@ -9451,7 +9533,7 @@ switch ($module) {
                      JOIN orders o ON o.id = oi.order_id
                      {$rjoSubquery}
                      {$orderTotJoin}
-                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                     JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                      {$variantJoin}
                      WHERE {$baseWhere}
                      GROUP BY d",
@@ -9470,7 +9552,7 @@ switch ($module) {
                          SELECT DISTINCT o.id, o.discount_amount, {$dateExpr} AS d
                          FROM orders o
                          {$rjoSubquery}
-                         LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                         JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                          WHERE {$baseWhere}
                      ) sub_disc
                      GROUP BY d",
@@ -9499,7 +9581,7 @@ switch ($module) {
                 $cursor->modify('+1 day');
             }
 
-            // 6. Sales by Governorate (using o.governorate with fallback to c.governorate):
+            // 6. Sales by Governorate (Closed Dailies Only):
             $salesByGov = [];
             try {
                 $govStmt = execute_query($pdo,
@@ -9511,7 +9593,7 @@ switch ($module) {
                      JOIN order_items oi ON oi.order_id = o.id
                      {$rjoSubquery}
                      {$orderTotJoin}
-                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                     JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                      WHERE {$baseWhere}
                      GROUP BY governorate
                      ORDER BY total DESC
@@ -9553,22 +9635,22 @@ switch ($module) {
                 $attendanceToday = ['present' => 0, 'absent' => 0];
             }
 
-            // 8. Top Representatives:
+            // 8. Top Representatives (Closed Dailies Only):
             $topReps = [];
             try {
                 $topRepsStmt = execute_query($pdo,
-                    "SELECT COALESCE(rjo.rep_id, o.rep_id) AS id,
-                            COALESCE(NULLIF(TRIM(rep.name), ''), NULLIF(TRIM(rep_user.name), ''), CONCAT('مندوب #', COALESCE(rjo.rep_id, o.rep_id))) AS name,
+                    "SELECT COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id) AS id,
+                            COALESCE(NULLIF(TRIM(rep.name), ''), NULLIF(TRIM(rep_user.name), ''), CONCAT('مندوب #', COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id))) AS name,
                             COUNT(DISTINCT o.id) AS orders_count,
                             COALESCE(SUM({$deliveredQtyExpr} * oi.price_per_unit), 0) AS total_sales
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
                      {$rjoSubquery}
                      {$orderTotJoin}
-                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
-                     LEFT JOIN representatives rep ON rep.id = COALESCE(rjo.rep_id, o.rep_id)
-                     LEFT JOIN users rep_user ON rep_user.id = COALESCE(rjo.rep_id, o.rep_id)
-                     WHERE {$baseWhere} AND COALESCE(rjo.rep_id, o.rep_id) > 0
+                     JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                     LEFT JOIN representatives rep ON rep.id = COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id)
+                     LEFT JOIN users rep_user ON rep_user.id = COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id)
+                     WHERE {$baseWhere} AND COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id) > 0
                      GROUP BY id, name
                      ORDER BY total_sales DESC, orders_count DESC
                      LIMIT 10",
@@ -9585,18 +9667,20 @@ switch ($module) {
 
                 if (empty($topReps)) {
                     $fallbackRepsStmt = execute_query($pdo,
-                        "SELECT COALESCE(rjo.rep_id, o.rep_id) AS id,
-                                COALESCE(NULLIF(TRIM(rep.name), ''), NULLIF(TRIM(rep_user.name), ''), CONCAT('مندوب #', COALESCE(rjo.rep_id, o.rep_id))) AS name,
+                        "SELECT COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id) AS id,
+                                COALESCE(NULLIF(TRIM(rep.name), ''), NULLIF(TRIM(rep_user.name), ''), CONCAT('مندوب #', COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id))) AS name,
                                 COUNT(DISTINCT o.id) AS orders_count,
-                                COALESCE(SUM(oi.quantity * oi.price_per_unit), 0) AS total_sales
+                                COALESCE(SUM({$deliveredQtyExpr} * oi.price_per_unit), 0) AS total_sales
                          FROM order_items oi
                          JOIN orders o ON o.id = oi.order_id
-                         LEFT JOIN rep_journal_orders rjo ON rjo.order_id = o.id
-                         LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
-                         LEFT JOIN representatives rep ON rep.id = COALESCE(rjo.rep_id, o.rep_id)
-                         LEFT JOIN users rep_user ON rep_user.id = COALESCE(rjo.rep_id, o.rep_id)
-                         WHERE DATE(COALESCE(rjo.event_date, rdj.journal_date, DATE(rdj.created_at), DATE(o.created_at))) BETWEEN ? AND ?
-                           AND COALESCE(rjo.rep_id, o.rep_id) > 0
+                         {$rjoSubquery}
+                         {$orderTotJoin}
+                         JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                         LEFT JOIN representatives rep ON rep.id = COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id)
+                         LEFT JOIN users rep_user ON rep_user.id = COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id)
+                         WHERE rdj.is_closed = 1 AND rdj.journal_date BETWEEN ? AND ?
+                           AND (rjo.status IN ('delivered', 'partial') OR o.status IN ('delivered', 'partial'))
+                           AND COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id) > 0
                          GROUP BY id, name
                          ORDER BY total_sales DESC, orders_count DESC
                          LIMIT 10",
@@ -9613,7 +9697,7 @@ switch ($module) {
                 }
             } catch (Exception $e) { $topReps = []; }
 
-            // 9. Top Sales Offices / Pages:
+            // 9. Top Sales Offices / Pages (Closed Dailies Only):
             $topSalesOffices = [];
             try {
                 $soStmt = execute_query($pdo,
@@ -9625,7 +9709,7 @@ switch ($module) {
                      LEFT JOIN sales_offices so ON so.id = o.sales_office_id
                      {$rjoSubquery}
                      {$orderTotJoin}
-                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                     JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                      WHERE {$baseWhere}
                      GROUP BY COALESCE(NULLIF(TRIM(o.page), ''), NULLIF(TRIM(so.name), ''), 'مباشر')
                      ORDER BY total_sales DESC, orders_count DESC
@@ -9645,13 +9729,15 @@ switch ($module) {
                     $fallbackOfficesStmt = execute_query($pdo,
                         "SELECT COALESCE(NULLIF(TRIM(o.page), ''), NULLIF(TRIM(so.name), ''), 'مباشر') AS name,
                                 COUNT(DISTINCT o.id) AS orders_count,
-                                COALESCE(SUM(oi.quantity * oi.price_per_unit), 0) AS total_sales
+                                COALESCE(SUM({$deliveredQtyExpr} * oi.price_per_unit), 0) AS total_sales
                          FROM order_items oi
                          JOIN orders o ON o.id = oi.order_id
                          LEFT JOIN sales_offices so ON so.id = o.sales_office_id
-                         LEFT JOIN rep_journal_orders rjo ON rjo.order_id = o.id
-                         LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
-                         WHERE DATE(COALESCE(rjo.event_date, rdj.journal_date, DATE(rdj.created_at), DATE(o.created_at))) BETWEEN ? AND ?
+                         {$rjoSubquery}
+                         {$orderTotJoin}
+                         JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                         WHERE rdj.is_closed = 1 AND rdj.journal_date BETWEEN ? AND ?
+                           AND (rjo.status IN ('delivered', 'partial') OR o.status IN ('delivered', 'partial'))
                          GROUP BY COALESCE(NULLIF(TRIM(o.page), ''), NULLIF(TRIM(so.name), ''), 'مباشر')
                          ORDER BY total_sales DESC, orders_count DESC
                          LIMIT 10",
@@ -9668,7 +9754,7 @@ switch ($module) {
                 }
             } catch (Exception $e) { $topSalesOffices = []; }
 
-            // 10. Top Employees:
+            // 10. Top Employees (Closed Dailies Only):
             $topEmployees = [];
             try {
                 $teStmt = execute_query($pdo,
@@ -9679,7 +9765,7 @@ switch ($module) {
                      JOIN orders o ON o.id = oi.order_id
                      {$rjoSubquery}
                      {$orderTotJoin}
-                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                     JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                      WHERE {$baseWhere} AND o.employee IS NOT NULL AND TRIM(o.employee) <> ''
                      GROUP BY TRIM(o.employee)
                      ORDER BY total_sales DESC, orders_count DESC
@@ -9696,7 +9782,7 @@ switch ($module) {
                 unset($r);
             } catch (Exception $e) { $topEmployees = []; }
 
-            // 11. Top Products:
+            // 11. Top Products (Closed Dailies Only):
             $topProducts = [];
             try {
                 $tpStmt = execute_query($pdo,
@@ -9709,7 +9795,7 @@ switch ($module) {
                      JOIN orders o ON o.id = oi.order_id
                      {$rjoSubquery}
                      {$orderTotJoin}
-                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                     JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                      {$variantJoin}
                      WHERE {$baseWhere}
                      GROUP BY product_name, color, size
@@ -9725,14 +9811,17 @@ switch ($module) {
                 unset($r);
             } catch (Exception $e) { $topProducts = []; }
 
-            // 12. Orders by Status for the period:
+            // 12. Orders by Status for the period (Closed Dailies):
             $ordersByStatus = [];
             try {
                 $osStmt = execute_query($pdo,
-                    "SELECT status, COUNT(*) as cnt, COALESCE(SUM(total_amount), 0) as total
-                     FROM orders
-                     WHERE DATE(created_at) BETWEEN ? AND ?
-                     GROUP BY status
+                    "SELECT COALESCE(rjo.status, o.status) AS status, COUNT(DISTINCT o.id) as cnt, COALESCE(SUM(oi.quantity * oi.price_per_unit), 0) as total
+                     FROM orders o
+                     JOIN rep_journal_orders rjo ON rjo.order_id = o.id
+                     JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                     LEFT JOIN order_items oi ON oi.order_id = o.id
+                     WHERE rdj.is_closed = 1 AND rdj.journal_date BETWEEN ? AND ?
+                     GROUP BY COALESCE(rjo.status, o.status)
                      ORDER BY cnt DESC",
                     [$rangeStart, $rangeEnd]
                 );
@@ -9747,7 +9836,7 @@ switch ($module) {
 
             $latestOrderDate = null;
             try {
-                $latestOrderDateRaw = execute_query($pdo, "SELECT MAX(DATE(created_at)) FROM orders")->fetchColumn();
+                $latestOrderDateRaw = execute_query($pdo, "SELECT MAX(journal_date) FROM rep_daily_journal WHERE is_closed = 1")->fetchColumn();
                 if ($latestOrderDateRaw) {
                     $latestOrderDate = (new DateTime((string)$latestOrderDateRaw))->format('Y-m-d');
                 }
@@ -9868,9 +9957,29 @@ switch ($module) {
                 } catch (Exception $e) {}
             }
 
+            $hasJournalTable = table_exists($pdo, 'rep_daily_journal');
+            $journalJoin = "";
+            $journalSelect = ", 0 AS has_open_daily, NULL AS open_daily_id, NULL AS open_daily_code";
+            if ($hasJournalTable) {
+                $journalJoin = "
+                    LEFT JOIN (
+                        SELECT rdj1.rep_id, rdj1.id as open_daily_id, rdj1.daily_code as open_daily_code
+                        FROM rep_daily_journal rdj1
+                        INNER JOIN (
+                            SELECT rep_id, MAX(id) as max_id 
+                            FROM rep_daily_journal 
+                            WHERE is_closed = 0 
+                            GROUP BY rep_id
+                        ) rdj2 ON rdj1.id = rdj2.max_id
+                    ) rdj ON rdj.rep_id = u.id
+                ";
+                $journalSelect = ", (CASE WHEN rdj.open_daily_id IS NOT NULL THEN 1 ELSE 0 END) AS has_open_daily, rdj.open_daily_id, rdj.open_daily_code";
+            }
+
             $sql = "SELECT 
                         u.*, 
                         COALESCE(t.balance, 0) as balance 
+                        $journalSelect
                     FROM users u
                     LEFT JOIN (
                         SELECT 
@@ -9880,6 +9989,7 @@ switch ($module) {
                         WHERE related_to_type = ? OR related_to_type = 'employee'
                         GROUP BY related_to_id
                     ) t ON u.id = t.related_to_id
+                    $journalJoin
                     WHERE (u.role = 'representative' $repInSql) $repFilterSql
                     ORDER BY u.name ASC";
 
@@ -11134,6 +11244,18 @@ switch ($module) {
             if ($statusFilter !== '') {
                 if ($statusFilter === 'active') {
                     $where[] = "(o.status = 'with_rep' OR o.status = 'partial' OR o.status = 'in_delivery' OR o.status = 'postponed' OR o.status = 'returned_with_rep')";
+                    if (table_exists($pdo, 'rep_journal_orders')) {
+                        $where[] = "NOT EXISTS (
+                            SELECT 1 FROM rep_journal_orders current_rjo
+                            WHERE current_rjo.order_id = o.id
+                              AND current_rjo.rep_id = o.rep_id
+                              AND current_rjo.status = 'delivered'
+                              AND current_rjo.id = (
+                                  SELECT MAX(latest_rjo.id) FROM rep_journal_orders latest_rjo
+                                  WHERE latest_rjo.order_id = o.id AND latest_rjo.rep_id = o.rep_id
+                              )
+                        )";
+                    }
                 } else {
                     $where[] = 'o.status = ?';
                     $params[] = $statusFilter;
@@ -11253,12 +11375,24 @@ switch ($module) {
             }
 
             try {
+                assert_order_not_in_closed_journal($pdo, $orderId, $repId ?: ($orderRow['rep_id'] ?? null));
+            } catch (Exception $eJourn) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => $eJourn->getMessage()]);
+                break;
+            }
+
+            try {
                 $pdo->beginTransaction();
                 $returnedValue = 0.0;
                 $returnedPieces = 0; // track total pieces returned in this operation
 
                 // Get total pieces BEFORE updates to accurately detect full vs partial return
-                $stmtTotalBefore = execute_query($pdo, "SELECT COALESCE(SUM(quantity), 0) FROM order_items WHERE order_id = ?", [$orderId]);
+                $hasDeliveredQuantity = column_exists($pdo, 'order_items', 'delivered_quantity');
+                $totalPiecesExpr = $hasDeliveredQuantity
+                    ? 'COALESCE(SUM(quantity + COALESCE(delivered_quantity, 0)), 0)'
+                    : 'COALESCE(SUM(quantity), 0)';
+                $stmtTotalBefore = execute_query($pdo, "SELECT {$totalPiecesExpr} FROM order_items WHERE order_id = ?", [$orderId]);
                 $totalOrderPiecesBefore = intval($stmtTotalBefore->fetchColumn());
 
                 foreach ($items as $it) {
@@ -11288,14 +11422,19 @@ switch ($module) {
                     }
                     $oi = $oiStmt->fetch(PDO::FETCH_ASSOC);
                     if (!$oi) { if ($pdo->inTransaction()) $pdo->rollBack(); http_response_code(400); echo json_encode(['success'=>false,'message'=>'Order item not found for product ' . $prodId]); break 2; }
+                    if ($prodId > 0 && intval($oi['product_id'] ?? 0) !== $prodId) { if ($pdo->inTransaction()) $pdo->rollBack(); http_response_code(400); echo json_encode(['success'=>false,'message'=>'Order item does not match the selected product']); break 2; }
 
                     $prevQty = intval($oi['quantity']);
                     if ($retQty > $prevQty) { if ($pdo->inTransaction()) $pdo->rollBack(); http_response_code(400); echo json_encode(['success'=>false,'message'=>'Returned quantity greater than item quantity for product ' . ($oi['product_id'] ?? $prodId)]); break 2; }
 
                     $newQty = $prevQty - $retQty;
-                    execute_query($pdo, "UPDATE order_items SET quantity = ? WHERE id = ?", [$newQty, $oi['id']]);
-
                     $linePrice = floatval($oi['price_per_unit'] ?? 0);
+                    if (column_exists($pdo, 'order_items', 'total_price')) {
+                        execute_query($pdo, "UPDATE order_items SET quantity = ?, total_price = ? WHERE id = ?", [$newQty, $newQty * $linePrice, $oi['id']]);
+                    } else {
+                        execute_query($pdo, "UPDATE order_items SET quantity = ? WHERE id = ?", [$newQty, $oi['id']]);
+                    }
+
                     $lineValue = $retQty * $linePrice;
                     $returnedValue += $lineValue;
                     $returnedPieces += $retQty;
@@ -11358,12 +11497,12 @@ switch ($module) {
                                 $targetJournalId = intval($journalLookup['journal_id'] ?? 0);
                             }
                             if ($targetJournalId > 0) {
-                                // For the main journal, always ADD the pieces/value returned in THIS specific operation
+                                // For the main journal, only ADD the pieces/value if journal is open
                                 execute_query($pdo,
                                     "UPDATE rep_daily_journal
                                      SET pieces_returned = COALESCE(pieces_returned, 0) + ?,
                                          returned_value = COALESCE(returned_value, 0) + ?
-                                     WHERE id = ?",
+                                     WHERE id = ? AND is_closed = 0",
                                     [$returnedPieces, $returnedValue, $targetJournalId]
                                 );
                             }
@@ -11494,31 +11633,27 @@ switch ($module) {
                 break;
             }
         }
-        if ($action === 'exchangeOrderItem') {
-            // Exchange an item in the order with another variant (same product or different product)
+        if ($action === 'exchangeOrderItem' || $action === 'recordOrderExchange') {
+            // New Exchange workflow:
+            // Customer requested exchange; order contains the NEW product delivered to customer.
+            // Representative delivers the new product to customer and receives the OLD/RETURNED product from customer.
+            // In warehouse (returns page), warehouse receives the old/returned product into warehouse stock.
+            // Rep consignment debt: debited for new item, credited for returned item.
+            // Rep collects: (Price Difference if positive + Shipping fees).
+            // Order status becomes 'exchange', tracking both delivered and returned pieces/values.
+            ensure_orders_has_exchange_details($pdo);
+
             $orderId = intval($input['order_id'] ?? 0);
             $warehouseId = intval($input['warehouse_id'] ?? 0);
-            $oldItem = $input['old_item'] ?? [];
-            $newItem = $input['new_item'] ?? [];
             $notes = trim((string)($input['notes'] ?? ''));
 
-            if (!$orderId || !$warehouseId || empty($oldItem) || empty($newItem)) {
+            // Support both new structure (delivered_item / returned_item) and client old_item / new_item naming
+            $delivInput = $input['delivered_item'] ?? ($input['old_item'] ?? []);
+            $retInput = $input['returned_item'] ?? ($input['new_item'] ?? []);
+
+            if (!$orderId || !$warehouseId) {
                 http_response_code(400);
-                echo json_encode(['success' => false, 'message' => 'بيانات الاستبدال غير مكتملة (رقم الطلب، المستودع، المنتج القديم، والمنتج البديل مطلوبون)']);
-                break;
-            }
-
-            $oldOrderItemId = intval($oldItem['order_item_id'] ?? 0);
-            $oldProdId = intval($oldItem['product_id'] ?? ($oldItem['productId'] ?? 0));
-            $oldQty = intval($oldItem['quantity'] ?? ($oldItem['qty'] ?? 0));
-
-            $newVariantId = intval($newItem['variant_id'] ?? ($newItem['variantId'] ?? ($newItem['productId'] ?? 0)));
-            $newQty = intval($newItem['quantity'] ?? ($newItem['qty'] ?? $oldQty));
-            $newPriceInput = isset($newItem['price']) ? floatval($newItem['price']) : null;
-
-            if ($oldQty <= 0 || $newQty <= 0 || $newVariantId <= 0) {
-                http_response_code(400);
-                echo json_encode(['success' => false, 'message' => 'يجب تحديد كميات أكبر من صفر ومتغير صحيح للمنتج البديل']);
+                echo json_encode(['success' => false, 'message' => 'رقم الطلب والمستودع مطلوبان']);
                 break;
             }
 
@@ -11531,192 +11666,278 @@ switch ($module) {
                 break;
             }
 
-            // 2. Fetch Old Order Item
+            $repId = intval($orderRow['rep_id'] ?? ($input['rep_id'] ?? 0));
+
+            try {
+                assert_order_not_in_closed_journal($pdo, $orderId, $repId);
+            } catch (Exception $eJourn) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => $eJourn->getMessage()]);
+                break;
+            }
+
+            // 2. Fetch Delivered Item (from order_items)
+            $deliveredOiId = intval($delivInput['order_item_id'] ?? 0);
+            $deliveredProdId = intval($delivInput['product_id'] ?? ($delivInput['productId'] ?? 0));
+            $deliveredQty = intval($delivInput['quantity'] ?? ($delivInput['qty'] ?? 1));
+
             $oiStmt = null;
-            if ($oldOrderItemId > 0) {
-                $oiStmt = execute_query($pdo, "SELECT * FROM order_items WHERE id = ? AND order_id = ? LIMIT 1", [$oldOrderItemId, $orderId]);
+            if ($deliveredOiId > 0) {
+                $oiStmt = execute_query($pdo, "SELECT oi.*, ppar.name as parent_name, pv.color, pv.size FROM order_items oi LEFT JOIN product_variants pv ON oi.product_id = pv.id LEFT JOIN products ppar ON pv.product_id = ppar.id WHERE oi.id = ? AND oi.order_id = ? LIMIT 1", [$deliveredOiId, $orderId]);
+            } elseif ($deliveredProdId > 0) {
+                $oiStmt = execute_query($pdo, "SELECT oi.*, ppar.name as parent_name, pv.color, pv.size FROM order_items oi LEFT JOIN product_variants pv ON oi.product_id = pv.id LEFT JOIN products ppar ON pv.product_id = ppar.id WHERE oi.product_id = ? AND oi.order_id = ? LIMIT 1", [$deliveredProdId, $orderId]);
             } else {
-                $oiStmt = execute_query($pdo, "SELECT * FROM order_items WHERE product_id = ? AND order_id = ? ORDER BY id ASC LIMIT 1", [$oldProdId, $orderId]);
+                $oiStmt = execute_query($pdo, "SELECT oi.*, ppar.name as parent_name, pv.color, pv.size FROM order_items oi LEFT JOIN product_variants pv ON oi.product_id = pv.id LEFT JOIN products ppar ON pv.product_id = ppar.id WHERE oi.order_id = ? ORDER BY oi.id ASC LIMIT 1", [$orderId]);
             }
             $oiRow = $oiStmt ? $oiStmt->fetch(PDO::FETCH_ASSOC) : null;
             if (!$oiRow) {
                 http_response_code(404);
-                echo json_encode(['success' => false, 'message' => 'المنتج المراد استبداله غير موجود في هذا الطلب']);
+                echo json_encode(['success' => false, 'message' => 'لم يتم العثور على الصنف المسلم في هذا الطلب']);
                 break;
             }
 
-            $currentOiQty = intval($oiRow['quantity']);
-            if ($oldQty > $currentOiQty) {
+            $deliveredPrice = floatval($delivInput['price'] ?? ($oiRow['price_per_unit'] ?? 0));
+            $deliveredTotalValue = $deliveredQty * $deliveredPrice;
+            $deliveredItemName = trim(($oiRow['parent_name'] ?? '') . ' ' . ($oiRow['color'] ?? '') . ' ' . ($oiRow['size'] ?? ''));
+            if ($deliveredItemName === '') $deliveredItemName = 'صنف #' . ($oiRow['product_id'] ?? '');
+
+            // 3. Resolve Returned Item (the piece collected from customer to enter warehouse)
+            $returnedVariantId = intval($retInput['variant_id'] ?? ($retInput['variantId'] ?? ($retInput['product_id'] ?? ($retInput['productId'] ?? 0))));
+            $returnedQty = intval($retInput['quantity'] ?? ($retInput['qty'] ?? 1));
+            if ($returnedQty <= 0) $returnedQty = 1;
+            if ($returnedVariantId <= 0) {
                 http_response_code(400);
-                echo json_encode(['success' => false, 'message' => 'الكمية المراد استبدالها (' . $oldQty . ') أكبر من الكمية الموجودة في الطلب (' . $currentOiQty . ')']);
+                echo json_encode(['success' => false, 'message' => 'يرجى تحديد المنتج المرتجع المستلم من العميل']);
                 break;
             }
 
-            $oldPrice = floatval($oiRow['price_per_unit']);
-            $actualOldProdId = intval($oiRow['product_id']);
-
-            // 3. Fetch New Variant
-            $nvStmt = execute_query($pdo, "SELECT pv.*, p.name as parent_name FROM product_variants pv JOIN products p ON pv.product_id = p.id WHERE pv.id = ? AND COALESCE(pv.is_archived,0) = 0 LIMIT 1", [$newVariantId]);
-            $newVariant = $nvStmt->fetch(PDO::FETCH_ASSOC);
-            if (!$newVariant) {
+            $nvStmt = execute_query($pdo, "SELECT pv.*, p.name as parent_name FROM product_variants pv JOIN products p ON pv.product_id = p.id WHERE pv.id = ? LIMIT 1", [$returnedVariantId]);
+            $returnedVariant = $nvStmt->fetch(PDO::FETCH_ASSOC);
+            if (!$returnedVariant) {
                 http_response_code(404);
-                echo json_encode(['success' => false, 'message' => 'المنتج البديل غير موجود أو مؤرشف']);
+                echo json_encode(['success' => false, 'message' => 'المنتج المرتجع غير موجود بالنظام']);
                 break;
             }
 
-            $newPrice = $newPriceInput !== null ? $newPriceInput : floatval($newVariant['sale_price']);
+            $returnedPrice = isset($retInput['price']) ? floatval($retInput['price']) : floatval($returnedVariant['sale_price'] ?? ($returnedVariant['price'] ?? 0));
+            $returnedTotalValue = $returnedQty * $returnedPrice;
+            $returnedItemName = trim(($returnedVariant['parent_name'] ?? '') . ' ' . ($returnedVariant['color'] ?? '') . ' ' . ($returnedVariant['size'] ?? ''));
 
-            // Prevent no-op exchange (same variant and same price)
-            if ($actualOldProdId === $newVariantId && abs($oldPrice - $newPrice) < 0.001) {
-                http_response_code(400);
-                echo json_encode(['success' => false, 'message' => 'المنتج البديل مطابق تماماً للمنتج الحالي بنفس السعر والمواصفات']);
-                break;
-            }
+            // Financial Calculations
+            $priceDiff = $deliveredTotalValue - $returnedTotalValue;
+            $shippingFees = floatval($orderRow['shipping_fees'] ?? 0);
+            // User Confirmed Rule 2: collected = Shipping + (Price difference if positive)
+            $collectedAmount = ($priceDiff > 0 ? $priceDiff : 0) + $shippingFees;
+
+            // Fetch warehouse name
+            $whStmt = execute_query($pdo, "SELECT name FROM warehouses WHERE id = ? LIMIT 1", [$warehouseId]);
+            $whName = $whStmt->fetchColumn() ?: ('المستودع #' . $warehouseId);
 
             try {
                 $pdo->beginTransaction();
 
-                // 4. Verify Stock Availability for New Variant in Warehouse
-                $stkStmt = execute_query($pdo, "SELECT quantity FROM stock WHERE product_id = ? AND warehouse_id = ? FOR UPDATE", [$newVariantId, $warehouseId]);
-                $availStock = 0;
+                // 4. Restock Returned Item into Warehouse Stock
+                $stkStmt = execute_query($pdo, "SELECT quantity FROM stock WHERE product_id = ? AND warehouse_id = ? FOR UPDATE", [$returnedVariantId, $warehouseId]);
+                $prevStock = 0;
                 if ($srow = $stkStmt->fetch(PDO::FETCH_ASSOC)) {
-                    $availStock = intval($srow['quantity']);
-                }
-
-                if ($availStock < $newQty) {
-                    if ($pdo->inTransaction()) $pdo->rollBack();
-                    http_response_code(400);
-                    echo json_encode(['success' => false, 'message' => 'الكمية المطلوبة من المنتج الجديد غير متوفرة في المستودع المحدد. المتوفر حالياً: ' . $availStock . ' قطعة']);
-                    break;
-                }
-
-                // 5. Restock Old Item (Return to Warehouse)
-                $oldStkStmt = execute_query($pdo, "SELECT quantity FROM stock WHERE product_id = ? AND warehouse_id = ? FOR UPDATE", [$actualOldProdId, $warehouseId]);
-                $prevOldStock = 0;
-                if ($osRow = $oldStkStmt->fetch(PDO::FETCH_ASSOC)) {
-                    $prevOldStock = intval($osRow['quantity']);
-                    $newOldStock = $prevOldStock + $oldQty;
-                    execute_query($pdo, "UPDATE stock SET quantity = ? WHERE product_id = ? AND warehouse_id = ?", [$newOldStock, $actualOldProdId, $warehouseId]);
+                    $prevStock = intval($srow['quantity']);
+                    $newStock = $prevStock + $returnedQty;
+                    execute_query($pdo, "UPDATE stock SET quantity = ? WHERE product_id = ? AND warehouse_id = ?", [$newStock, $returnedVariantId, $warehouseId]);
                 } else {
-                    $newOldStock = $oldQty;
-                    execute_query($pdo, "INSERT INTO stock (product_id, warehouse_id, quantity) VALUES (?, ?, ?)", [$actualOldProdId, $warehouseId, $newOldStock]);
+                    $newStock = $returnedQty;
+                    execute_query($pdo, "INSERT INTO stock (product_id, warehouse_id, quantity) VALUES (?, ?, ?)", [$returnedVariantId, $warehouseId, $newStock]);
                 }
 
-                // Log movement for old item IN
+                // Log movement for returned item IN
                 $mtIn = pick_allowed_enum($pdo, 'product_movements', 'movement_type', 'return_in', ['return_in','adjustment','purchase']);
                 $actingUser = get_current_acting_user($pdo);
                 $userId = $actingUser['id'] ?? null;
-                $mvNotesIn = json_encode(['order_id' => $orderId, 'order_number' => $orderRow['order_number'], 'type' => 'exchange_in', 'notes' => $notes], JSON_UNESCAPED_UNICODE);
+                $mvNotesIn = json_encode([
+                    'order_id' => $orderId,
+                    'order_number' => $orderRow['order_number'],
+                    'type' => 'exchange_return_in',
+                    'returned_item' => $returnedItemName,
+                    'delivered_item' => $deliveredItemName,
+                    'notes' => $notes
+                ], JSON_UNESCAPED_UNICODE);
+
                 execute_query($pdo, "INSERT INTO product_movements (product_id, warehouse_id, movement_type, quantity_change, previous_quantity, new_quantity, reference_id, reference_type, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
-                    $actualOldProdId, $warehouseId, $mtIn, $oldQty, $prevOldStock, $newOldStock, $orderId, 'order_exchange', $mvNotesIn, $userId
+                    $returnedVariantId, $warehouseId, $mtIn, $returnedQty, $prevStock, $newStock, $orderId, 'order_exchange', $mvNotesIn, $userId
                 ]);
 
-                // 6. Deduct New Item (Dispatch from Warehouse)
-                $newStockAfterDeduct = $availStock - $newQty;
-                execute_query($pdo, "UPDATE stock SET quantity = ? WHERE product_id = ? AND warehouse_id = ?", [$newStockAfterDeduct, $newVariantId, $warehouseId]);
-
-                // Log movement for new item OUT
-                $mtOut = pick_allowed_enum($pdo, 'product_movements', 'movement_type', 'sale', ['sale','adjustment','return_out']);
-                $mvNotesOut = json_encode(['order_id' => $orderId, 'order_number' => $orderRow['order_number'], 'type' => 'exchange_out', 'notes' => $notes], JSON_UNESCAPED_UNICODE);
-                execute_query($pdo, "INSERT INTO product_movements (product_id, warehouse_id, movement_type, quantity_change, previous_quantity, new_quantity, reference_id, reference_type, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
-                    $newVariantId, $warehouseId, $mtOut, -1 * $newQty, $availStock, $newStockAfterDeduct, $orderId, 'order_exchange', $mvNotesOut, $userId
-                ]);
-
-                // 7. Update order_items table
-                // A) Update old item line
-                if ($currentOiQty === $oldQty) {
-                    execute_query($pdo, "DELETE FROM order_items WHERE id = ?", [$oiRow['id']]);
-                } else {
-                    execute_query($pdo, "UPDATE order_items SET quantity = quantity - ? WHERE id = ?", [$oldQty, $oiRow['id']]);
+                // 5. Financial Transaction: Credit Rep for returning goods to warehouse
+                if ($repId > 0 && $returnedTotalValue > 0) {
+                    $txType = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_return_credit', ['rep_return_credit','rep_settlement','payment_in','other']);
+                    $relType = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
+                    $txDetails = [
+                        'action' => 'exchange_returned_credit',
+                        'order_id' => $orderId,
+                        'order_number' => $orderRow['order_number'],
+                        'returned_value' => $returnedTotalValue,
+                        'delivered_value' => $deliveredTotalValue,
+                        'price_diff' => $priceDiff,
+                        'shipping_fees' => $shippingFees,
+                        'collected_amount' => $collectedAmount,
+                        'notes' => 'قيمة الصنف المرتجع في عملية الاستبدال للأوردر #' . ($orderRow['order_number'] ?? $orderId)
+                    ];
+                    execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [
+                        $txType, $warehouseId, null, $relType, $repId, $returnedTotalValue, json_encode($txDetails, JSON_UNESCAPED_UNICODE)
+                    ]);
                 }
 
-                // B) Add / update new item line
-                $existingNewOi = execute_query($pdo, "SELECT id, quantity FROM order_items WHERE order_id = ? AND product_id = ? AND ABS(price_per_unit - ?) < 0.001 LIMIT 1", [$orderId, $newVariantId, $newPrice])->fetch(PDO::FETCH_ASSOC);
-                if ($existingNewOi) {
-                    execute_query($pdo, "UPDATE order_items SET quantity = quantity + ? WHERE id = ?", [$newQty, $existingNewOi['id']]);
-                } else {
-                    execute_query($pdo, "INSERT INTO order_items (order_id, product_id, quantity, price_per_unit) VALUES (?, ?, ?, ?)", [$orderId, $newVariantId, $newQty, $newPrice]);
+                // 6. Update orders table
+                $exchangeDetailsData = [
+                    'delivered_item' => [
+                        'order_item_id' => intval($oiRow['id']),
+                        'product_id' => intval($oiRow['product_id']),
+                        'name' => $deliveredItemName,
+                        'color' => $oiRow['color'] ?? '',
+                        'size' => $oiRow['size'] ?? '',
+                        'quantity' => $deliveredQty,
+                        'unit_price' => $deliveredPrice,
+                        'total_price' => $deliveredTotalValue
+                    ],
+                    'returned_item' => [
+                        'variant_id' => $returnedVariantId,
+                        'name' => $returnedItemName,
+                        'color' => $returnedVariant['color'] ?? '',
+                        'size' => $returnedVariant['size'] ?? '',
+                        'quantity' => $returnedQty,
+                        'unit_price' => $returnedPrice,
+                        'total_price' => $returnedTotalValue
+                    ],
+                    'price_diff' => $priceDiff,
+                    'shipping_fees' => $shippingFees,
+                    'collected_amount' => $collectedAmount,
+                    'warehouse_id' => $warehouseId,
+                    'warehouse_name' => $whName,
+                    'notes' => $notes,
+                    'exchanged_at' => date('Y-m-d H:i:s')
+                ];
+
+                $updOrderSql = "UPDATE orders SET status = 'exchange'";
+                $updOrderParams = [];
+                if (column_exists($pdo, 'orders', 'exchange_details')) {
+                    $updOrderSql .= ", exchange_details = ?";
+                    $updOrderParams[] = json_encode($exchangeDetailsData, JSON_UNESCAPED_UNICODE);
                 }
+                if (column_exists($pdo, 'orders', 'updated_at')) {
+                    $updOrderSql .= ", updated_at = NOW()";
+                }
+                $updOrderSql .= " WHERE id = ?";
+                $updOrderParams[] = $orderId;
+                execute_query($pdo, $updOrderSql, $updOrderParams);
 
-                // 8. Financial difference and order total update
-                $oldExchangedValue = $oldQty * $oldPrice;
-                $newExchangedValue = $newQty * $newPrice;
-                $priceDiff = $newExchangedValue - $oldExchangedValue;
+                // 7. Update rep_journal_orders & rep_daily_journal
+                if (table_exists($pdo, 'rep_journal_orders') && $repId > 0) {
+                    $journalNow = date('Y-m-d');
+                    $journalNowTime = date('H:i:s');
+                    $journalEmployee = $_SESSION['user']['name'] ?? null;
 
-                if (abs($priceDiff) > 0.001) {
-                    execute_query($pdo, "UPDATE orders SET total_amount = COALESCE(total_amount, 0) + ? WHERE id = ?", [$priceDiff, $orderId]);
-
-                    // Update rep debt if rep assigned
-                    $repId = intval($orderRow['rep_id'] ?? 0);
-                    if ($repId > 0) {
-                        $txType = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_order_charge', ['rep_order_charge','rep_penalty','payment_in','other']);
-                        $relType = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
-                        // Rep debt: positive diff means rep owes MORE (so amount is negative). Negative diff means rep owes LESS (amount is positive).
-                        $txAmt = -1 * $priceDiff;
-                        $txDetails = [
-                            'action' => 'exchange_price_diff',
-                            'order_id' => $orderId,
-                            'order_number' => $orderRow['order_number'],
-                            'price_diff' => $priceDiff,
-                            'old_product_id' => $actualOldProdId,
-                            'new_product_id' => $newVariantId,
-                            'notes' => 'تسوية فرق سعر استبدال أصناف بالطلب #' . ($orderRow['order_number'] ?? $orderId)
-                        ];
-                        execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [
-                            $txType, $warehouseId, null, $relType, $repId, $txAmt, json_encode($txDetails, JSON_UNESCAPED_UNICODE)
-                        ]);
-
-                        // Also update open daily journal total_orders_value if exists
-                        if (table_exists($pdo, 'rep_daily_journal')) {
-                            $openJrnl = execute_query($pdo, "SELECT id FROM rep_daily_journal WHERE rep_id = ? AND is_closed = 0 ORDER BY id DESC LIMIT 1", [$repId])->fetch(PDO::FETCH_ASSOC);
-                            if ($openJrnl) {
-                                execute_query($pdo, "UPDATE rep_daily_journal SET total_orders_value = COALESCE(total_orders_value, 0) + ? WHERE id = ?", [$priceDiff, $openJrnl['id']]);
-                            }
+                    $targetJournalId = 0;
+                    if (table_exists($pdo, 'rep_daily_journal')) {
+                        $openJournalRow = execute_query($pdo,
+                            "SELECT id FROM rep_daily_journal WHERE rep_id = ? AND is_closed = 0 ORDER BY id DESC LIMIT 1",
+                            [$repId]
+                        )->fetch(PDO::FETCH_ASSOC);
+                        if ($openJournalRow) {
+                            $targetJournalId = intval($openJournalRow['id']);
                         }
+                    }
+
+                    $existingRjo = execute_query($pdo,
+                        "SELECT id, journal_id FROM rep_journal_orders WHERE rep_id = ? AND order_id = ? ORDER BY id DESC LIMIT 1",
+                        [$repId, $orderId]
+                    )->fetch(PDO::FETCH_ASSOC);
+
+                    if (!$targetJournalId && $existingRjo) {
+                        $targetJournalId = intval($existingRjo['journal_id'] ?? 0);
+                    }
+
+                    if ($existingRjo) {
+                        execute_query($pdo,
+                            "UPDATE rep_journal_orders
+                             SET status = 'exchange',
+                                 journal_id = COALESCE(NULLIF(?, 0), journal_id),
+                                 delivered_pieces = ?,
+                                 delivered_value = ?,
+                                 returned_pieces = ?,
+                                 returned_value = ?,
+                                 event_date = ?,
+                                 event_time = ?,
+                                 employee = ?,
+                                 notes = ?
+                             WHERE id = ?",
+                            [
+                                $targetJournalId,
+                                $deliveredQty,
+                                $deliveredTotalValue,
+                                $returnedQty,
+                                $returnedTotalValue,
+                                $journalNow,
+                                $journalNowTime,
+                                $journalEmployee,
+                                $notes,
+                                intval($existingRjo['id'])
+                            ]
+                        );
+                    } else {
+                        execute_query($pdo,
+                            "INSERT INTO rep_journal_orders (journal_id, rep_id, order_id, status, delivered_pieces, delivered_value, returned_pieces, returned_value, event_date, event_time, employee, notes)
+                             VALUES (?, ?, ?, 'exchange', ?, ?, ?, ?, ?, ?, ?, ?)",
+                            [
+                                $targetJournalId > 0 ? $targetJournalId : null,
+                                $repId,
+                                $orderId,
+                                $deliveredQty,
+                                $deliveredTotalValue,
+                                $returnedQty,
+                                $returnedTotalValue,
+                                $journalNow,
+                                $journalNowTime,
+                                $journalEmployee,
+                                $notes
+                            ]
+                        );
+                    }
+
+                    if ($targetJournalId > 0 && table_exists($pdo, 'rep_daily_journal')) {
+                        execute_query($pdo,
+                            "UPDATE rep_daily_journal
+                             SET pieces_delivered = COALESCE(pieces_delivered, 0) + ?,
+                                 pieces_returned = COALESCE(pieces_returned, 0) + ?,
+                                 delivered_value = COALESCE(delivered_value, 0) + ?,
+                                 returned_value = COALESCE(returned_value, 0) + ?
+                             WHERE id = ? AND is_closed = 0",
+                            [$deliveredQty, $returnedQty, $deliveredTotalValue, $returnedTotalValue, $targetJournalId]
+                        );
+                        refresh_rep_daily_journal_status_counts($pdo, $targetJournalId);
                     }
                 }
 
-                // 9. Rebuild orders.items_json
-                if (column_exists($pdo, 'orders', 'items_json')) {
-                    $allOiStmt = execute_query($pdo, "SELECT oi.id, oi.product_id, oi.quantity, oi.price_per_unit, (oi.quantity * oi.price_per_unit) as line_total, ppar.name, pv.name as variant_name, pv.color, pv.size, pv.barcode FROM order_items oi LEFT JOIN product_variants pv ON oi.product_id = pv.id LEFT JOIN products ppar ON pv.product_id = ppar.id WHERE oi.order_id = ?", [$orderId]);
-                    $allOiRows = $allOiStmt->fetchAll(PDO::FETCH_ASSOC);
-                    $newItemsJson = array_map(function($r) {
-                        return [
-                            'productId' => intval($r['product_id']),
-                            'name' => $r['name'] ?: $r['variant_name'],
-                            'color' => $r['color'] ?: '',
-                            'size' => $r['size'] ?: '',
-                            'quantity' => intval($r['quantity']),
-                            'price' => floatval($r['price_per_unit']),
-                            'total' => floatval($r['line_total'])
-                        ];
-                    }, $allOiRows);
-                    execute_query($pdo, "UPDATE orders SET items_json = ? WHERE id = ?", [json_encode($newItemsJson, JSON_UNESCAPED_UNICODE), $orderId]);
-                }
-
-                // 10. Log Order History
+                // 8. Log Order History
                 try {
-                    $oldItemName = $oiRow['name'] ?? ('صنف #' . $actualOldProdId);
-                    $newItemName = ($newVariant['parent_name'] ?? '') . ' ' . ($newVariant['color'] ?? '') . ' ' . ($newVariant['size'] ?? '');
-                    $histDesc = "تم استبدال صنف (" . $oldItemName . " عدد " . $oldQty . ") بالصنف البديل (" . $newItemName . " عدد " . $newQty . ")" . (abs($priceDiff) > 0.001 ? (" — فرق السعر: " . ($priceDiff > 0 ? "+" : "") . $priceDiff . " ج.م") : "");
-                    log_order_history($pdo, $orderId, $orderRow['status'], 'exchange', $histDesc, intval($orderRow['rep_id'] ?? 0));
+                    $histDesc = "تم استبدال الطلب: تسليم ({$deliveredItemName} عدد {$deliveredQty}) واستلام مرتجع ({$returnedItemName} عدد {$returnedQty}) في {$whName} — فرق السعر: " . ($priceDiff > 0 ? "+{$priceDiff}" : "{$priceDiff}") . " ج.م — المحصل: {$collectedAmount} ج.م";
+                    log_order_history($pdo, $orderId, 'exchange', 'exchange', $histDesc, $repId);
                 } catch (Exception $e) {}
 
                 $pdo->commit();
 
-                // Fetch updated order object to send back to client
+                // Fetch updated order object to send back
                 $updOrdStmt = execute_query($pdo, "SELECT o.*, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, COALESCE(NULLIF(o.address, ''), c.address) as address, COALESCE(NULLIF(o.governorate, ''), c.governorate) as governorate FROM orders o LEFT JOIN customers c ON o.customer_id = c.id WHERE o.id = ? LIMIT 1", [$orderId]);
                 $updatedOrder = $updOrdStmt->fetch(PDO::FETCH_ASSOC);
                 if ($updatedOrder) {
                     $itStmt = execute_query($pdo, "SELECT oi.order_id, oi.product_id, oi.quantity, oi.price_per_unit, (oi.quantity * oi.price_per_unit) as line_total, ppar.name, pv.color, pv.size FROM order_items oi LEFT JOIN product_variants pv ON oi.product_id = pv.id LEFT JOIN products ppar ON pv.product_id = ppar.id WHERE oi.order_id = ?", [$orderId]);
                     $itemsRes = $itStmt->fetchAll(PDO::FETCH_ASSOC);
                     $updatedOrder['products'] = array_map(function($it){ return ['productId'=>$it['product_id'],'name'=>$it['name'],'color'=>$it['color'],'size'=>$it['size'],'quantity'=>$it['quantity'],'price'=>$it['price_per_unit'],'total'=>$it['line_total']]; }, $itemsRes);
+                    $updatedOrder['exchange_details'] = $exchangeDetailsData;
                 }
 
                 echo json_encode([
                     'success' => true,
-                    'message' => 'تم استبدال المنتج بنجاح وتحديث المخزون وحساب الأوردر.',
+                    'message' => 'تم استبدال الطلب بنجاح واستلام الصنف المرتجع بالمخزن.',
                     'price_diff' => $priceDiff,
+                    'collected_amount' => $collectedAmount,
                     'order' => $updatedOrder
                 ]);
                 break;
@@ -11730,7 +11951,7 @@ switch ($module) {
         }
         if ($action === 'returnToStock') {
             // Full return of ALL order items back to warehouse stock.
-            // Called by the returns page (SalesUpdateStatus) after updateJournalOrderStatus('full_return').
+            // Called by the returns page to record inventory and rep-credit effects together.
             // Input: { order_id, warehouse_id }
             $orderId     = intval($input['order_id'] ?? 0);
             $warehouseId = intval($input['warehouse_id'] ?? 0);
@@ -11753,7 +11974,53 @@ switch ($module) {
             }
 
             try {
+                assert_order_not_in_closed_journal($pdo, $orderId, intval($input['rep_id'] ?? $orderRow['rep_id'] ?? 0));
+            } catch (Exception $eJourn) {
+                http_response_code(400);
+                if (ob_get_length()) ob_clean();
+                echo json_encode(['success' => false, 'message' => $eJourn->getMessage()]);
+                exit;
+            }
+
+            try {
                 $pdo->beginTransaction();
+                $journalsToRefresh = [];
+
+                $lockedOrderRow = execute_query($pdo,
+                    "SELECT * FROM orders WHERE id = ? FOR UPDATE",
+                    [$orderId]
+                )->fetch(PDO::FETCH_ASSOC);
+                if (!$lockedOrderRow) {
+                    $pdo->rollBack();
+                    http_response_code(404);
+                    echo json_encode(['success' => false, 'message' => 'Order not found']);
+                    exit;
+                }
+                $orderRow = $lockedOrderRow;
+                $repId = intval($input['rep_id'] ?? $orderRow['rep_id'] ?? 0);
+                if (in_array(strtolower((string)($orderRow['status'] ?? '')), ['returned', 'full_return'], true)) {
+                    $pdo->rollBack();
+                    echo json_encode(['success' => true, 'duplicate_prevented' => true, 'returnedValue' => 0, 'returnedPieces' => 0, 'message' => 'تم تسجيل إرجاع هذا الأوردر بالفعل.']);
+                    exit;
+                }
+                if ($repId > 0) {
+                    $repRelatedType = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
+                    $lastReturnAction = execute_query($pdo,
+                        "SELECT JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(details) THEN details ELSE NULL END, '$.action')) AS action
+                         FROM transactions
+                         WHERE related_to_type = ? AND related_to_id = ?
+                           AND JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(details) THEN details ELSE NULL END, '$.order_id')) = ?
+                           AND (JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(details) THEN details ELSE NULL END, '$.action')) = 'returnToStock'
+                                OR JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(details) THEN details ELSE NULL END, '$.subtype')) = 'undo_return')
+                         ORDER BY id DESC LIMIT 1",
+                        [$repRelatedType, $repId, (string)$orderId]
+                    )->fetch(PDO::FETCH_ASSOC);
+                    if (($lastReturnAction['action'] ?? '') === 'returnToStock') {
+                        $pdo->rollBack();
+                        echo json_encode(['success' => true, 'duplicate_prevented' => true, 'returnedValue' => 0, 'returnedPieces' => 0, 'message' => 'تم تسجيل إرجاع هذا الأوردر بالفعل.']);
+                        exit;
+                    }
+                }
 
                 // 1. Get ALL current order items
                 $oiRows = execute_query($pdo,
@@ -11761,9 +12028,19 @@ switch ($module) {
                     [$orderId]
                 )->fetchAll(PDO::FETCH_ASSOC);
 
+                $hasDeliveredItems = false;
+                if (column_exists($pdo, 'order_items', 'delivered_quantity')) {
+                    $deliveredPieces = execute_query($pdo,
+                        "SELECT COALESCE(SUM(delivered_quantity), 0) FROM order_items WHERE order_id = ?",
+                        [$orderId]
+                    )->fetchColumn();
+                    $hasDeliveredItems = intval($deliveredPieces) > 0;
+                }
+                $returnedOrderStatus = $hasDeliveredItems ? 'partial' : 'returned';
+                $returnedJournalStatus = $hasDeliveredItems ? 'partial_return' : 'full_return';
+
                 $totalReturnedValue  = max(0, floatval($orderRow['total_amount'] ?? 0) - floatval($orderRow['shipping_fees'] ?? 0));
                 $totalReturnedPieces = 0;
-                $repId = intval($input['rep_id'] ?? $orderRow['rep_id'] ?? 0);
                 $notes = 'full_return';
                 $mt    = pick_allowed_enum($pdo, 'product_movements', 'movement_type', 'return_in',
                     ['return_in', 'return', 'purchase', 'transfer', 'return_out']);
@@ -11801,13 +12078,13 @@ switch ($module) {
                             "INSERT INTO product_movements (product_id, warehouse_id, movement_type, quantity_change, previous_quantity, new_quantity, reference_id, reference_type, notes, created_by)
                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
                             [$prodId, $warehouseId, $mt, $qty, $prevStock, $newStock, $orderId, $refType,
-                             json_encode(['order_id' => $orderId, 'rep_id' => $repId, 'notes' => $notes])]
+                             json_encode(['order_id' => $orderId, 'rep_id' => $repId, 'notes' => $notes, 'source' => 'returnToStock'])]
                         );
                     }
                 }
 
-                // 2. Update orders.status to 'returned' (keep total_amount for historical statistics)
-                $returnedStatus = pick_allowed_enum($pdo, 'orders', 'status', 'returned',
+                // Preserve a delivered portion in history when only the rep's remaining stock is returned.
+                $returnedStatus = pick_allowed_enum($pdo, 'orders', 'status', $returnedOrderStatus,
                     ['returned', 'partial', 'with_rep', 'pending']);
                 $updFields = "status = '$returnedStatus'";
                 if (column_exists($pdo, 'orders', 'updated_at')) $updFields .= ', updated_at = NOW()';
@@ -11815,20 +12092,16 @@ switch ($module) {
 
                 // 3. Create rep credit transaction (decreases rep debt)
                 if ($totalReturnedValue > 0 && $repId > 0) {
-                    try {
-                        $txType   = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_return_credit',
-                            ['rep_return_credit', 'rep_settlement', 'rep_payment_in', 'payment_in']);
-                        $relType  = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep',
-                            ['rep', 'employee', 'none']);
-                        execute_query($pdo,
+                    $txType   = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_return_credit',
+                        ['rep_return_credit', 'rep_settlement', 'rep_payment_in', 'payment_in']);
+                    $relType  = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep',
+                        ['rep', 'employee', 'none']);
+                    execute_query($pdo,
                             "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details)
-                             VALUES (?, NULL, NULL, ?, ?, ?, NOW(), ?)",
-                            [$txType, $relType, $repId, $totalReturnedValue,
-                             json_encode(['subtype' => 'full_return', 'order_id' => $orderId, 'model' => 'consignment'])]
-                        );
-                    } catch (Exception $txEx) {
-                        error_log('returnToStock transaction record warning: ' . $txEx->getMessage());
-                    }
+                         VALUES (?, NULL, NULL, ?, ?, ?, NOW(), ?)",
+                        [$txType, $relType, $repId, $totalReturnedValue,
+                             json_encode(['subtype' => $returnedJournalStatus, 'action' => 'returnToStock', 'order_id' => $orderId, 'model' => 'consignment'])]
+                    );
                 }
 
                 // 4. Update (or insert) rep_journal_orders returned_pieces / returned_value
@@ -11854,36 +12127,43 @@ switch ($module) {
 
                         if ($journalRow && intval($journalRow['id']) > 0) {
                             execute_query($pdo,
-                                "UPDATE rep_journal_orders SET status = 'full_return', event_date = CURDATE(), event_time = CURTIME(),
+                                "UPDATE rep_journal_orders SET status = ?, event_date = CURDATE(), event_time = CURTIME(),
                                  journal_id = COALESCE(NULLIF(?, 0), journal_id),
                                  returned_pieces = COALESCE(returned_pieces,0) + ?,
                                  returned_value  = COALESCE(returned_value,0)  + ?
                                  WHERE id = ?",
-                                [$targetJid, $totalReturnedPieces, $totalReturnedValue, intval($journalRow['id'])]
+                                [$returnedJournalStatus, $targetJid, $totalReturnedPieces, $totalReturnedValue, intval($journalRow['id'])]
                             );
                             $jid = $targetJid;
                         } else {
                             $jid = $targetJid;
                             execute_query($pdo,
                                 "INSERT INTO rep_journal_orders (journal_id, rep_id, order_id, status, event_date, event_time, returned_pieces, returned_value)
-                                 VALUES (?, ?, ?, 'full_return', CURDATE(), CURTIME(), ?, ?)",
-                                [$jid > 0 ? $jid : null, $repId, $orderId, $totalReturnedPieces, $totalReturnedValue]
+                                 VALUES (?, ?, ?, ?, CURDATE(), CURTIME(), ?, ?)",
+                                [$jid > 0 ? $jid : null, $repId, $orderId, $returnedJournalStatus, $totalReturnedPieces, $totalReturnedValue]
                             );
                         }
 
                         if ($jid > 0 && table_exists($pdo, 'rep_daily_journal')) {
                             execute_query($pdo,
-                                "UPDATE rep_daily_journal SET pieces_returned = COALESCE(pieces_returned,0) + ?, returned_value = COALESCE(returned_value,0) + ? WHERE id = ?",
+                                "UPDATE rep_daily_journal SET pieces_returned = COALESCE(pieces_returned,0) + ?, returned_value = COALESCE(returned_value,0) + ? WHERE id = ? AND is_closed = 0",
                                 [$totalReturnedPieces, $totalReturnedValue, $jid]
                             );
-                            refresh_rep_daily_journal_status_counts($pdo, $jid);
+                            $journalsToRefresh[intval($jid)] = true;
                         }
                     }
                 } catch (Exception $e) { /* non-critical */ }
 
-                try { log_order_history($pdo, $orderId, 'returned', 'full_return', null, $repId); } catch (Exception $e) {}
+                try { log_order_history($pdo, $orderId, $returnedStatus, $returnedJournalStatus, null, $repId); } catch (Exception $e) {}
 
                 $pdo->commit();
+                foreach (array_keys($journalsToRefresh) as $journalId) {
+                    try {
+                        refresh_rep_daily_journal_status_counts($pdo, intval($journalId));
+                    } catch (Exception $refreshError) {
+                        error_log('Failed to refresh rep journal counts after return: ' . $refreshError->getMessage());
+                    }
+                }
                 if (ob_get_length()) ob_clean();
                 echo json_encode(['success' => true, 'returnedValue' => $totalReturnedValue, 'returnedPieces' => $totalReturnedPieces]);
                 exit;
@@ -15405,6 +15685,27 @@ switch ($module) {
                 break;
             }
 
+            $journalId = intval($input['journal_id'] ?? 0);
+            if ($journalId > 0) {
+                try {
+                    assert_rep_daily_is_open($pdo, $journalId);
+                } catch (Exception $eJ) {
+                    http_response_code(400);
+                    echo json_encode(['success' => false, 'message' => $eJ->getMessage()]);
+                    break;
+                }
+            } else {
+                // If rep has NO open journal and latest journal was already closed
+                if (table_exists($pdo, 'rep_daily_journal')) {
+                    $latestJrnl = execute_query($pdo, "SELECT id, is_closed FROM rep_daily_journal WHERE rep_id = ? ORDER BY id DESC LIMIT 1", [$repId])->fetch(PDO::FETCH_ASSOC);
+                    if ($latestJrnl && intval($latestJrnl['is_closed']) === 1) {
+                        http_response_code(400);
+                        echo json_encode(['success' => false, 'message' => 'اليومية لهذا المندوب مغلقة بالفعل ولا يمكن عمل تسوية مالية جديدة عليها.']);
+                        break;
+                    }
+                }
+            }
+
             $idempotencyToken = trim((string)($input['idempotency_token'] ?? $input['client_request_id'] ?? ''));
             if ($idempotencyToken !== '') {
                 $dupSettle = execute_query($pdo,
@@ -15418,12 +15719,12 @@ switch ($module) {
                 }
             }
 
-            // Rapid duplicate check: if a settleDaily transaction for this rep was recorded in the last 4 seconds
+            // Rapid duplicate check: if a settleDaily transaction for this rep was recorded in the last 8 seconds
             $recentDupSettle = execute_query($pdo,
                 "SELECT id FROM transactions 
                  WHERE related_to_id = ? 
                    AND type IN ('rep_payment_in', 'rep_settlement', 'payment_in')
-                   AND transaction_date >= NOW() - INTERVAL 4 SECOND
+                   AND transaction_date >= NOW() - INTERVAL 8 SECOND
                    AND JSON_UNQUOTE(JSON_EXTRACT(details, '$.action')) = 'settleDaily'
                  LIMIT 1",
                 [$repId]
@@ -15824,10 +16125,39 @@ switch ($module) {
                 }
 
                 $selectedJournalIds = !empty($journalIds) ? $journalIds : ($journalId > 0 ? [$journalId] : []);
-                $repairJournalId = 0;
-                if (!empty($selectedJournalIds)) {
-                    $repairJournalId = intval($selectedJournalIds[0]);
+                $openDailyCreatedAt = null;
+
+                if (empty($selectedJournalIds)) {
+                    $openJrnl = execute_query($pdo, "SELECT id, journal_date, created_at FROM rep_daily_journal WHERE rep_id = ? AND is_closed = 0 ORDER BY id DESC LIMIT 1", [$repId])->fetch(PDO::FETCH_ASSOC);
+                    if ($openJrnl && intval($openJrnl['id'] ?? 0) > 0) {
+                        $journalId = intval($openJrnl['id']);
+                        $selectedJournalIds = [$journalId];
+                        $openDailyCreatedAt = $openJrnl['created_at'] ?? null;
+                    } else {
+                        // Rep has no open daily and no journal specified -> return empty immediately
+                        if (ob_get_length()) ob_clean();
+                        echo json_encode([
+                            'success' => true,
+                            'journal_id' => null,
+                            'journal_ids' => [],
+                            'active' => [],
+                            'delivered' => [],
+                            'returned' => [],
+                            'deferred' => [],
+                            'all' => [],
+                            'summary' => ['orders_count' => 0, 'pieces_count' => 0]
+                        ]);
+                        exit;
+                    }
+                } else {
+                    $firstJid = intval($selectedJournalIds[0]);
+                    $jRowCheck = execute_query($pdo, "SELECT created_at, is_closed FROM rep_daily_journal WHERE id = ? LIMIT 1", [$firstJid])->fetch(PDO::FETCH_ASSOC);
+                    if ($jRowCheck && intval($jRowCheck['is_closed'] ?? 0) === 0) {
+                        $openDailyCreatedAt = $jRowCheck['created_at'] ?? null;
+                    }
                 }
+
+                $repairJournalId = !empty($selectedJournalIds) ? intval($selectedJournalIds[0]) : 0;
 
                 if (!empty($selectedJournalIds) && table_exists($pdo, 'rep_daily_journal')) {
                     static $repJournalIndexChecked = false;
@@ -15848,6 +16178,7 @@ switch ($module) {
                     foreach ($repairRows as $repairRow) {
                         $loopJournalId = intval($repairRow['id'] ?? 0);
                         if ($loopJournalId <= 0) continue;
+                        $isOpenDaily = intval($repairRow['is_closed'] ?? 0) === 0;
                         $ordersJsonRaw = trim((string)($repairRow['orders_json'] ?? ''));
                         if ($ordersJsonRaw === '') continue;
                         $decodedOrders = json_decode($ordersJsonRaw, true);
@@ -15858,103 +16189,31 @@ switch ($module) {
                                 $decodedOrderId = intval(is_array($decodedOrder) ? ($decodedOrder['id'] ?? 0) : $decodedOrder);
                                 if ($decodedOrderId <= 0) continue;
 
-                                $orderStateRow = execute_query($pdo,
-                                    "SELECT rep_id, status FROM orders WHERE id = ? LIMIT 1",
-                                    [$decodedOrderId]
-                                )->fetch(PDO::FETCH_ASSOC);
-                                if (!$orderStateRow) continue;
-
-                                $orderStatus = trim(strval($orderStateRow['status'] ?? ''));
-                                $mappedStatus = 'with_rep';
-                                if ($orderStatus === 'returned') {
-                                    $mappedStatus = 'full_return';
-                                } elseif ($orderStatus === 'delivered') {
-                                    $mappedStatus = 'delivered';
-                                }
-
                                 $existingRepairRow = execute_query($pdo,
-                                    "SELECT id, journal_id, status FROM rep_journal_orders WHERE rep_id = ? AND order_id = ? AND (journal_id = ? OR journal_id = 0 OR journal_id IS NULL) ORDER BY id DESC LIMIT 1",
+                                    "SELECT id, journal_id, status FROM rep_journal_orders WHERE rep_id = ? AND order_id = ? AND journal_id = ? LIMIT 1",
                                     [$repId, $decodedOrderId, $loopJournalId]
                                 )->fetch(PDO::FETCH_ASSOC);
 
-                                if ($existingRepairRow) {
-                                    $repairId = intval($existingRepairRow['id'] ?? 0);
-                                    $existingStatus = trim(strval($existingRepairRow['status'] ?? ''));
-                                    
-                                    $finalStatus = $existingStatus;
-                                    if ($existingStatus === '' || $existingStatus === 'with_rep') {
-                                        $finalStatus = $mappedStatus;
-                                    }
-                                    
+                                if (!$existingRepairRow) {
+                                    // If row does not exist for this journal, insert with 'with_rep' status
                                     execute_query($pdo,
-                                        "UPDATE rep_journal_orders
-                                         SET journal_id = ?, status = ?, event_date = COALESCE(event_date, ?)
-                                         WHERE id = ?",
-                                        [$loopJournalId, $finalStatus, ($repairRow['journal_date'] ?? date('Y-m-d')), $repairId]
+                                        "INSERT INTO rep_journal_orders (journal_id, rep_id, order_id, status, returned_pieces, returned_value, delivered_pieces, delivered_value, event_date, event_time, employee)
+                                         VALUES (?, ?, ?, 'with_rep', 0, 0, 0, 0, ?, ?, ?)
+                                         ON DUPLICATE KEY UPDATE journal_id = VALUES(journal_id)",
+                                        [$loopJournalId, $repId, $decodedOrderId, ($repairRow['journal_date'] ?? date('Y-m-d')), date('H:i:s'), $_SESSION['user']['name'] ?? null]
                                     );
-                                } else {
-                                    // If row already exists under another journal or uk_rep_order is still present
-                                    $anyOldRow = execute_query($pdo,
-                                        "SELECT id, journal_id, status FROM rep_journal_orders WHERE rep_id = ? AND order_id = ? ORDER BY id DESC LIMIT 1",
-                                        [$repId, $decodedOrderId]
-                                    )->fetch(PDO::FETCH_ASSOC);
-
-                                    if ($anyOldRow) {
-                                        $oldJid = intval($anyOldRow['journal_id'] ?? 0);
-                                        // NEVER overwrite journal_id if this order already belongs to another journal
-                                        if ($oldJid <= 0 || $oldJid === $loopJournalId) {
-                                            execute_query($pdo,
-                                                "UPDATE rep_journal_orders
-                                                 SET journal_id = ?, status = ?, event_date = COALESCE(event_date, ?)
-                                                 WHERE id = ?",
-                                                [$loopJournalId, $mappedStatus, ($repairRow['journal_date'] ?? date('Y-m-d')), intval($anyOldRow['id'])]
-                                            );
-                                        }
-                                    } else {
-                                        // Only create new row if this is an active/deferred order, NOT an old returned order
-                                        if ($mappedStatus !== 'full_return') {
-                                            execute_query($pdo,
-                                                "INSERT INTO rep_journal_orders (journal_id, rep_id, order_id, status, event_date, event_time, employee)
-                                                 VALUES (?, ?, ?, ?, ?, ?, ?)
-                                                 ON DUPLICATE KEY UPDATE journal_id = VALUES(journal_id), status = VALUES(status)",
-                                                [$loopJournalId, $repId, $decodedOrderId, $mappedStatus, ($repairRow['journal_date'] ?? date('Y-m-d')), date('H:i:s'), $_SESSION['user']['name'] ?? null]
-                                            );
-                                        }
-                                    }
                                 }
                             } catch (Exception $eItem) {
                                 // Individual order error should never crash getJournalOrders
                             }
                         }
-
-                        // We can't safely call undefined functions like refresh_rep_daily_journal_status_counts here, so we skip it.
                     }
                 }
 
-                if (!empty($journalIds)) {
-                    $where[] = 'rjo.journal_id IN (' . implode(',', $journalIds) . ')';
-                } elseif ($journalId > 0) {
-                    $where[] = 'rjo.journal_id = ?';
-                    $params[] = $journalId;
-                } else {
-                    // No journal requested: only query the current open daily journal for this rep
-                    $openJrnl = execute_query($pdo, "SELECT id FROM rep_daily_journal WHERE rep_id = ? AND is_closed = 0 ORDER BY id DESC LIMIT 1", [$repId])->fetch(PDO::FETCH_ASSOC);
-                    if ($openJrnl && intval($openJrnl['id'] ?? 0) > 0) {
-                        $where[] = 'rjo.journal_id = ?';
-                        $params[] = intval($openJrnl['id']);
-                    } else {
-                        // Rep has no open daily -> return empty immediately so old closed history does not show
-                        if (ob_get_length()) ob_clean();
-                        echo json_encode([
-                            'success' => true,
-                            'delivered' => [],
-                            'returned' => [],
-                            'deferred' => [],
-                            'all' => []
-                        ]);
-                        exit;
-                    }
-                }
+                $where[] = 'rjo.journal_id IN (' . implode(',', array_map('intval', $selectedJournalIds)) . ')';
+                $hasExchangeDetailsCol = column_exists($pdo, 'orders', 'exchange_details');
+                $exchangeDetailsSelect = $hasExchangeDetailsCol ? 'o.exchange_details,' : '';
+
                 $rows = execute_query($pdo,
                     "SELECT rjo.id AS jro_id, rjo.journal_id, rjo.rep_id, rjo.order_id,
                             rjo.status AS journal_status, rjo.event_date, rjo.event_time, rjo.employee,
@@ -15963,6 +16222,7 @@ switch ($module) {
                             COALESCE(rjo.delivered_pieces, 0) AS delivered_pieces,
                             COALESCE(rjo.delivered_value, 0) AS delivered_value,
                             o.order_number, o.total_amount, o.shipping_fees, o.status AS order_status,
+                            {$exchangeDetailsSelect}
                             o.notes AS order_notes, o.created_at,
                             c.name AS customer_name, c.phone1, COALESCE(NULLIF(o.address, ''), c.address) AS address, COALESCE(NULLIF(o.governorate, ''), c.governorate) AS governorate
                      FROM rep_journal_orders rjo
@@ -16033,6 +16293,12 @@ switch ($module) {
 
                         try {
                             if (table_exists($pdo, 'product_movements')) {
+                                $pmJournalDateCond = "";
+                                $pmParams = [$oid];
+                                if (!empty($openDailyCreatedAt)) {
+                                    $pmJournalDateCond = " AND pm.created_at >= ? ";
+                                    $pmParams[] = $openDailyCreatedAt;
+                                }
                                 $mvRow = execute_query($pdo,
                                     // Only use 'order_partial_return' movements (from partialReturn API).
                                     // 'partial_return' movements (from completeDaily) record stock quantities
@@ -16042,8 +16308,11 @@ switch ($module) {
                                      FROM product_movements pm
                                      LEFT JOIN order_items oi ON oi.order_id = pm.reference_id AND oi.product_id = pm.product_id
                                      WHERE pm.reference_id = ?
-                                       AND pm.reference_type = 'order_partial_return'",
-                                    [$oid]
+                                       $pmJournalDateCond
+                                       AND (pm.reference_type = 'order_partial_return'
+                                            OR (pm.reference_type = 'partial_return'
+                                                AND JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(pm.notes) THEN pm.notes ELSE NULL END, '$.source')) = 'returnToStock'))",
+                                    $pmParams
                                 )->fetch(PDO::FETCH_ASSOC);
                                 $partialReturnedPiecesFallbackMap[$oid]  = intval($mvRow['pcs'] ?? 0);
                                 $partialReturnedValueFallbackMap[$oid] = floatval($mvRow['val'] ?? 0);
@@ -16077,6 +16346,7 @@ switch ($module) {
                         'delivered_value' => floatval($r['delivered_value'] ?? 0),
                         'returned_pieces_fallback' => intval($partialReturnedPiecesFallbackMap[$oid] ?? 0),
                         'returned_value_fallback' => floatval($partialReturnedValueFallbackMap[$oid] ?? 0),
+                        'exchange_details' => !empty($r['exchange_details']) ? (is_string($r['exchange_details']) ? json_decode($r['exchange_details'], true) : $r['exchange_details']) : null,
                         'customer_name'=> $r['customer_name'],
                         'phone'        => $r['phone1'],
                         'address'      => $r['address'],
@@ -16094,21 +16364,27 @@ switch ($module) {
                     $retPieces = intval($order['returned_pieces'] ?? 0) ?: intval($order['returned_pieces_fallback'] ?? 0);
                     $totalOrderPieces = 0;
                     foreach (($itemsMap[$oid] ?? []) as $it) {
-                        $totalOrderPieces += intval($it['quantity'] ?? 0);
+                        $totalOrderPieces += intval($it['original_quantity'] ?? $it['quantity'] ?? 0);
                     }
+                    $totalOrderPieces += $retPieces;
 
-                    $isFullReturn = ($st === 'full_return' || $st === 'returned' || $ordSt === 'returned' || $ordSt === 'full_return');
-                    if (!$isFullReturn && $totalOrderPieces > 0 && $retPieces >= $totalOrderPieces) {
+                    $isFullReturn = ($st === 'full_return' || $st === 'returned');
+                    if ($st === 'with_rep') {
+                        $isFullReturn = false;
+                    } elseif (!$isFullReturn && ($ordSt === 'returned' || $ordSt === 'full_return')) {
+                        $isFullReturn = true;
+                    }
+                    if (!$isFullReturn && $totalOrderPieces > 0 && $retPieces >= $totalOrderPieces && $st !== 'with_rep') {
                         $isFullReturn = true;
                     }
 
                     // returned_with_rep = تسليم جزئي done, remaining items still with rep → stays in active (العهدة الحالية)
                     // partial_return = partial return registered via SalesUpdateStatus, remaining with rep → stays in active
-                    $isStillWithRep = ($st === 'returned_with_rep' || $ordSt === 'returned_with_rep' || $st === 'partial_return' || $ordSt === 'partial');
+                    $isStillWithRep = ($st === 'returned_with_rep' || $ordSt === 'returned_with_rep' || $st === 'partial_return' || ($st === 'with_rep' && $ordSt === 'partial'));
 
                     // isPartial = some delivered + some returned, CONFIRMED delivery (journal status 'partial' or 'delivered' with retPieces)
                     $isPartial = !$isFullReturn && !$isStillWithRep &&
-                        ($retPieces > 0 || in_array($st, ['partial']) || in_array($ordSt, ['partial']));
+                        ($retPieces > 0 && in_array($st, ['partial', 'delivered']));
 
                     if ($isFullReturn) {
                         if ($from && $to) { $ed = $r['event_date']; if ($ed >= $from && $ed <= $to) $returned[] = $order; }
@@ -16136,14 +16412,27 @@ switch ($module) {
                                 $delivered[] = $order;
                             }
                         }
-                        // If it has returned pieces (e.g. partial return from SalesUpdateStatus), also include in returned list
-                        if ($retPieces > 0) {
+                        // If it has returned pieces recorded in THIS journal, also include in returned list
+                        $directRetPieces = intval($order['returned_pieces'] ?? 0);
+                        if ($directRetPieces > 0) {
                             if ($from && $to) {
                                 $ed = $r['event_date'];
                                 if ($ed >= $from && $ed <= $to) $returned[] = $order;
                             } else {
                                 $returned[] = $order;
                             }
+                        }
+                    } elseif ($st === 'exchange' || $ordSt === 'exchange') {
+                        // Exchange order has delivered pieces (new item) and returned pieces (old item)
+                        if ($from && $to) {
+                            $ed = $r['event_date'];
+                            if ($ed >= $from && $ed <= $to) {
+                                $delivered[] = $order;
+                                $returned[]  = $order;
+                            }
+                        } else {
+                            $delivered[] = $order;
+                            $returned[]  = $order;
                         }
                     } elseif ($st === 'delivered' || $ordSt === 'delivered') {
                         if ($from && $to) { $ed = $r['event_date']; if ($ed >= $from && $ed <= $to) $delivered[] = $order; }
@@ -16267,26 +16556,27 @@ switch ($module) {
                     }
                 }
 
-                // Ensure partial returns from rawActive/rawDeferred are also in $returned list
+                // Ensure partial returns from rawActive/rawDeferred are also in $returned list ONLY for this journal
                 $allCurrent = array_merge($active, $deferred);
                 foreach ($allCurrent as $cOrd) {
                     $cId = intval($cOrd['id'] ?? 0);
-                    $rjoParams = [$cId];
                     $rjoJournalCond = "";
                     if (!empty($selectedJournalIds)) {
                         $rjoJournalCond = " AND journal_id IN (" . implode(',', array_map('intval', $selectedJournalIds)) . ")";
                     } elseif ($journalId > 0) {
                         $rjoJournalCond = " AND journal_id = " . intval($journalId);
+                    } else {
+                        continue;
                     }
                     $rjoRow = execute_query($pdo, 
                         "SELECT journal_id, returned_pieces, returned_value 
                          FROM rep_journal_orders 
-                         WHERE order_id = ? $rjoJournalCond AND (returned_pieces > 0 OR status IN ('returned', 'full_return', 'partial_return'))
+                         WHERE order_id = ? $rjoJournalCond AND returned_pieces > 0
                          LIMIT 1", 
-                        $rjoParams
+                        [$cId]
                     )->fetch(PDO::FETCH_ASSOC);
 
-                    if ($rjoRow) {
+                    if ($rjoRow && intval($rjoRow['returned_pieces'] ?? 0) > 0) {
                         $cOrd['journal_id'] = $rjoRow['journal_id'] ? intval($rjoRow['journal_id']) : ($repairJournalId > 0 ? $repairJournalId : null);
                         $cOrd['returned_pieces'] = intval($rjoRow['returned_pieces'] ?? 0);
                         $cOrd['returned_value'] = floatval($rjoRow['returned_value'] ?? 0);
@@ -16350,12 +16640,19 @@ switch ($module) {
                 $updated  = 0;
                 $retPieces = isset($input['returned_pieces']) ? intval($input['returned_pieces']) : null;
                 $retVal = isset($input['returned_value']) ? floatval($input['returned_value']) : null;
+                $delivPieces = isset($input['delivered_pieces']) ? intval($input['delivered_pieces']) : null;
+                $delivVal = isset($input['delivered_value']) ? floatval($input['delivered_value']) : null;
                 $affectedJournalIds = [];
                 foreach ($orderIds as $oid) {
                     $oid = intval($oid);
                     if ($oid <= 0) continue;
                     
+                    assert_order_not_in_closed_journal($pdo, $oid, $repId);
+
                     $inputJournalId = isset($input['journal_id']) ? intval($input['journal_id']) : 0;
+                    if ($inputJournalId > 0) {
+                        assert_rep_daily_is_open($pdo, $inputJournalId);
+                    }
                     $targetJournalId = $inputJournalId;
                     if ($targetJournalId <= 0 && table_exists($pdo, 'rep_daily_journal')) {
                         $openJrnl = execute_query($pdo,
@@ -16443,6 +16740,20 @@ switch ($module) {
                             $journalId = $targetJournalId;
                         }
                     }
+
+                    if ($delivPieces !== null && $delivVal !== null) {
+                        $deliveryRow = execute_query($pdo,
+                            "SELECT id FROM rep_journal_orders WHERE rep_id = ? AND order_id = ? ORDER BY id DESC LIMIT 1",
+                            [$repId, $oid]
+                        )->fetch(PDO::FETCH_ASSOC);
+                        if ($deliveryRow) {
+                            execute_query($pdo,
+                                "UPDATE rep_journal_orders SET delivered_pieces = ?, delivered_value = ? WHERE id = ?",
+                                [$delivPieces, $delivVal, intval($deliveryRow['id'])]
+                            );
+                        }
+                    }
+
                     // Synchronize orders table status & rep_id
                     $mappedOrderStatus = null;
                     if ($status === 'deferred') {
@@ -16519,6 +16830,11 @@ switch ($module) {
                     exit;
                 }
 
+                assert_order_not_in_closed_journal($pdo, $orderId, $repId);
+                if ($journalId > 0) {
+                    assert_rep_daily_is_open($pdo, $journalId);
+                }
+
                 $pdo->beginTransaction();
 
                 $totalDeliveredPieces = 0;
@@ -16554,9 +16870,14 @@ switch ($module) {
                     $delivQty = max(0, intval($it['delivered_quantity'] ?? 0));
                     $remainQty = max(0, intval($it['remaining_quantity'] ?? 0));
 
-                    // Update order_items: quantity = remaining, delivered_quantity = delivered
-                    execute_query($pdo, "UPDATE order_items SET quantity = ?, delivered_quantity = ? WHERE id = ?",
-                        [$remainQty, $delivQty, intval($targetOi['id'])]);
+                        // Keep line totals aligned with the quantity still in the rep's custody.
+                        if (column_exists($pdo, 'order_items', 'total_price')) {
+                            execute_query($pdo, "UPDATE order_items SET quantity = ?, delivered_quantity = ?, total_price = ? WHERE id = ?",
+                                [$remainQty, $delivQty, $remainQty * $price, intval($targetOi['id'])]);
+                        } else {
+                            execute_query($pdo, "UPDATE order_items SET quantity = ?, delivered_quantity = ? WHERE id = ?",
+                                [$remainQty, $delivQty, intval($targetOi['id'])]);
+                        }
 
                     $totalDeliveredPieces += $delivQty;
                     $totalDeliveredValue += ($delivQty * $price);
@@ -16569,7 +16890,8 @@ switch ($module) {
                 // total_amount = $totalRemainingValue (remaining items with rep to be returned)
                 $orderStatus = 'returned_with_rep';
                 $updSql = "UPDATE orders SET status = ?, total_amount = ?, rep_id = ?";
-                $updParams = [$orderStatus, $totalRemainingValue, $repId];
+                $shippingFees = max(0.0, floatval($orderRow['shipping_fees'] ?? 0));
+                $updParams = [$orderStatus, $totalRemainingValue + $shippingFees, $repId];
                 if (column_exists($pdo, 'orders', 'updated_at')) {
                     $updSql .= ", updated_at = NOW()";
                 }
@@ -16607,20 +16929,18 @@ switch ($module) {
                              employee = ?,
                              notes = ?,
                              delivered_pieces = ?,
-                             delivered_value = ?,
-                             returned_pieces = ?,
-                             returned_value = ?
+                             delivered_value = ?
                          WHERE id = ?",
                         [$targetJournalId, $orderStatus, $now, $nowTime, $employee, $notes,
-                         $totalDeliveredPieces, $totalDeliveredValue, $totalRemainingPieces, $totalRemainingValue, intval($jRow['id'])]
+                         $totalDeliveredPieces, $totalDeliveredValue, intval($jRow['id'])]
                     );
                 } else {
                     execute_query($pdo,
                         "INSERT INTO rep_journal_orders 
-                         (journal_id, rep_id, order_id, status, event_date, event_time, employee, notes, delivered_pieces, delivered_value, returned_pieces, returned_value)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                         (journal_id, rep_id, order_id, status, event_date, event_time, employee, notes, delivered_pieces, delivered_value)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         [$targetJournalId > 0 ? $targetJournalId : null, $repId, $orderId, $orderStatus, $now, $nowTime, $employee, $notes,
-                         $totalDeliveredPieces, $totalDeliveredValue, $totalRemainingPieces, $totalRemainingValue]
+                         $totalDeliveredPieces, $totalDeliveredValue]
                     );
                 }
 
@@ -16663,6 +16983,7 @@ switch ($module) {
             }
             try {
                 ensure_rep_journal_orders_table($pdo);
+                assert_order_not_in_closed_journal($pdo, $orderId, $repId);
                 // حذف سجل اليومية
                 execute_query($pdo, "DELETE FROM rep_journal_orders WHERE rep_id = ? AND order_id = ?", [$repId, $orderId]);
                 // إعادة الأوردر إلى حالة متاح (confirmed) وإزالة ارتباطه بالمندوب
@@ -16683,6 +17004,7 @@ switch ($module) {
 
         if ($action === 'undoDailyCloseOrder') {
             $repId    = intval($input['rep_id']    ?? 0);
+            $undoType = strtolower(trim((string)($input['undo_type'] ?? 'return')));
             $orderIds = [];
             if (!empty($input['order_ids']) && is_array($input['order_ids'])) {
                 $orderIds = array_values(array_filter(array_map('intval', $input['order_ids']), function($id) { return $id > 0; }));
@@ -16690,17 +17012,122 @@ switch ($module) {
                 $orderIds = [intval($input['order_id'])];
             }
 
-            if (!$repId || empty($orderIds)) {
+            if (!$repId || empty($orderIds) || !in_array($undoType, ['delivery', 'return'], true)) {
                 http_response_code(400); echo json_encode(['success' => false, 'message' => 'rep_id and order_id(s) are required.']); exit;
             }
 
             try {
                 $pdo->beginTransaction();
+                $journalsToRefresh = [];
                 
                 foreach ($orderIds as $orderId) {
+                    assert_order_not_in_closed_journal($pdo, $orderId, $repId);
                     $ordStmt = execute_query($pdo, "SELECT * FROM orders WHERE id = ? FOR UPDATE", [$orderId]);
                     $orderRow = $ordStmt->fetch(PDO::FETCH_ASSOC);
                     if (!$orderRow) { continue; }
+                    $restoreOrderStatus = 'with_rep';
+
+                if ($undoType === 'delivery') {
+                    $journalRow = null;
+                    if (table_exists($pdo, 'rep_journal_orders')) {
+                        $journalRow = execute_query($pdo,
+                            "SELECT id, journal_id, status, returned_pieces, returned_value, delivered_pieces, delivered_value
+                             FROM rep_journal_orders WHERE order_id = ? AND rep_id = ? ORDER BY id DESC LIMIT 1",
+                            [$orderId, $repId]
+                        )->fetch(PDO::FETCH_ASSOC);
+                    }
+
+                    $deliveredPieces = 0;
+                    $deliveredValue = 0.0;
+                    $hasDeliveredQuantityRows = false;
+                    if (column_exists($pdo, 'order_items', 'delivered_quantity')) {
+                        $deliveryItems = execute_query($pdo,
+                            "SELECT id, quantity, delivered_quantity, price_per_unit FROM order_items WHERE order_id = ? AND delivered_quantity > 0 FOR UPDATE",
+                            [$orderId]
+                        )->fetchAll(PDO::FETCH_ASSOC);
+                        $hasDeliveredQuantityRows = !empty($deliveryItems);
+                        foreach ($deliveryItems as $item) {
+                            $qty = intval($item['delivered_quantity'] ?? 0);
+                            $restoredQty = intval($item['quantity'] ?? 0) + $qty;
+                            $unitPrice = floatval($item['price_per_unit'] ?? 0);
+                            if (column_exists($pdo, 'order_items', 'total_price')) {
+                                execute_query($pdo,
+                                    "UPDATE order_items SET quantity = ?, delivered_quantity = 0, total_price = ? WHERE id = ?",
+                                    [$restoredQty, $restoredQty * $unitPrice, intval($item['id'])]
+                                );
+                            } else {
+                                execute_query($pdo,
+                                    "UPDATE order_items SET quantity = ?, delivered_quantity = 0 WHERE id = ?",
+                                    [$restoredQty, intval($item['id'])]
+                                );
+                            }
+                            $deliveredPieces += $qty;
+                            $deliveredValue += $qty * $unitPrice;
+                        }
+                    }
+
+                    if ($deliveredPieces === 0 && ($journalRow['status'] ?? '') === 'delivered') {
+                        $deliveredPieces = intval(execute_query($pdo,
+                            "SELECT COALESCE(SUM(quantity), 0) FROM order_items WHERE order_id = ?",
+                            [$orderId]
+                        )->fetchColumn() ?? 0);
+                        $deliveredValue = max(0.0,
+                            floatval($orderRow['total_amount'] ?? 0) - floatval($orderRow['shipping_fees'] ?? 0)
+                        );
+                    }
+
+                    if ($hasDeliveredQuantityRows && $deliveredValue > 0) {
+                        execute_query($pdo,
+                            "UPDATE orders SET total_amount = COALESCE(total_amount, 0) + ? WHERE id = ?",
+                            [$deliveredValue, $orderId]
+                        );
+                    }
+
+                    $returnMovementsCount = intval(execute_query($pdo,
+                        "SELECT COUNT(*) FROM product_movements
+                         WHERE reference_id = ? AND reference_type IN ('order_partial_return', 'partial_return')",
+                        [$orderId]
+                    )->fetchColumn() ?? 0);
+                    $hasActualReturns = $returnMovementsCount > 0 || intval($journalRow['returned_pieces'] ?? 0) > 0;
+                    $restoreJournalStatus = $hasActualReturns ? 'partial_return' : 'with_rep';
+                    $restoreOrderStatus = $hasActualReturns ? 'partial' : 'with_rep';
+
+                    if ($journalRow) {
+                        execute_query($pdo,
+                            "UPDATE rep_journal_orders
+                             SET status = ?, delivered_pieces = 0, delivered_value = 0,
+                                 event_date = CURDATE(), event_time = CURTIME()
+                             WHERE id = ?",
+                            [$restoreJournalStatus, intval($journalRow['id'])]
+                        );
+                        $journalId = intval($journalRow['journal_id'] ?? 0);
+                        if ($journalId <= 0 && table_exists($pdo, 'rep_daily_journal')) {
+                            $openJrnl = execute_query($pdo, "SELECT id FROM rep_daily_journal WHERE rep_id = ? AND is_closed = 0 ORDER BY id DESC LIMIT 1", [$repId])->fetch(PDO::FETCH_ASSOC);
+                            if ($openJrnl) {
+                                $journalId = intval($openJrnl['id']);
+                            }
+                        }
+                        $journalDeliveredPieces = intval($journalRow['delivered_pieces'] ?? 0) ?: $deliveredPieces;
+                        $journalDeliveredValue = floatval($journalRow['delivered_value'] ?? 0) ?: $deliveredValue;
+                        if ($journalId > 0 && table_exists($pdo, 'rep_daily_journal') && ($journalDeliveredPieces > 0 || $journalDeliveredValue > 0)) {
+                            execute_query($pdo,
+                                "UPDATE rep_daily_journal
+                                 SET pieces_delivered = GREATEST(0, COALESCE(pieces_delivered, 0) - ?),
+                                     delivered_value = GREATEST(0, COALESCE(delivered_value, 0) - ?)
+                                 WHERE id = ?",
+                                [$journalDeliveredPieces, $journalDeliveredValue, $journalId]
+                            );
+                        }
+                    }
+
+                    execute_query($pdo,
+                        "UPDATE orders SET status = ?, rep_id = ?" . (column_exists($pdo, 'orders', 'updated_at') ? ", updated_at = NOW()" : "") . " WHERE id = ?",
+                        [$restoreOrderStatus, $repId, $orderId]
+                    );
+                    try { log_order_history($pdo, $orderId, $restoreOrderStatus, 'delivery_undo', 'delivery_only_returned_to_rep', $repId); } catch (Exception $e) {}
+                    if (!empty($journalId)) $journalsToRefresh[intval($journalId)] = true;
+                    continue;
+                }
 
                 // ── 1. Reverse return movements (stock + order_items where applicable) ─────
                 //
@@ -16719,6 +17146,7 @@ switch ($module) {
 
                 $totalPiecesRestored = 0;
                 $totalValueRestored  = 0;
+                $actualReturnedPieces = 0;
 
                 if (count($movements) > 0) {
                     // Group by product, separating the two types
@@ -16731,6 +17159,7 @@ switch ($module) {
                         $q       = intval($mov['quantity_change']);
                         $rType   = $mov['reference_type'];
                         $movId   = intval($mov['id']);
+                        $actualReturnedPieces += abs($q);
                         if (!isset($byProduct[$pId])) {
                             $byProduct[$pId] = ['wid' => $wId, 'stockQty' => 0, 'orderQty' => 0, 'movIds' => []];
                         }
@@ -16769,7 +17198,11 @@ switch ($module) {
                                 [$orderId, $pId])->fetch(PDO::FETCH_ASSOC);
                             if ($oiRow) {
                                 $restoredQty = intval($oiRow['quantity']) + $orderQty;
-                                execute_query($pdo, "UPDATE order_items SET quantity = ? WHERE id = ?", [$restoredQty, $oiRow['id']]);
+                                if (column_exists($pdo, 'order_items', 'total_price')) {
+                                    execute_query($pdo, "UPDATE order_items SET quantity = ?, total_price = ? WHERE id = ?", [$restoredQty, $restoredQty * floatval($oiRow['price_per_unit']), $oiRow['id']]);
+                                } else {
+                                    execute_query($pdo, "UPDATE order_items SET quantity = ? WHERE id = ?", [$restoredQty, $oiRow['id']]);
+                                }
                                 $totalPiecesRestored += $orderQty;
                                 $totalValueRestored  += floatval($oiRow['price_per_unit']) * $orderQty;
                             }
@@ -16784,66 +17217,62 @@ switch ($module) {
                     }
                 }
 
-                // ── Restore order_items and orders total if order had partial delivery (delivered_quantity > 0) ──
-                if (column_exists($pdo, 'order_items', 'delivered_quantity')) {
-                    $oiWithDeliv = execute_query($pdo, "SELECT id, quantity, delivered_quantity, price_per_unit FROM order_items WHERE order_id = ? AND delivered_quantity > 0", [$orderId])->fetchAll(PDO::FETCH_ASSOC);
-                    if (!empty($oiWithDeliv)) {
-                        $restoredDelivVal = 0.0;
-                        foreach ($oiWithDeliv as $delOi) {
-                            $newQ = intval($delOi['quantity']) + intval($delOi['delivered_quantity']);
-                            execute_query($pdo, "UPDATE order_items SET quantity = ?, delivered_quantity = 0 WHERE id = ?", [$newQ, $delOi['id']]);
-                            $restoredDelivVal += floatval($delOi['price_per_unit']) * intval($delOi['delivered_quantity']);
-                        }
-                        if ($restoredDelivVal > 0) {
-                            execute_query($pdo, "UPDATE orders SET total_amount = COALESCE(total_amount,0) + ? WHERE id = ?", [$restoredDelivVal, $orderId]);
-                        }
-                    }
-                }
-
                 if (table_exists($pdo, 'rep_journal_orders')) {
                     $jRow = execute_query($pdo, "SELECT id, journal_id, returned_pieces, returned_value, delivered_pieces, delivered_value, status FROM rep_journal_orders WHERE order_id = ? AND rep_id = ? ORDER BY id DESC LIMIT 1", [$orderId, $repId])->fetch(PDO::FETCH_ASSOC);
                     if ($jRow) {
-                        $jPieces = intval($jRow['returned_pieces'] ?? 0);
-                        $jValue = floatval($jRow['returned_value'] ?? 0);
                         $jId = intval($jRow['id']);
                         $targetJournalId = intval($jRow['journal_id'] ?? 0);
-                        $prevJStatus = $jRow['status'] ?? '';
-
-                        // ── Re-add rep DEBIT (they now owe the returned value again) ──
-                        // This handles both full and partial returns by using the recorded returned_value.
-                        // We use a negative amount because a debit (عليه) reduces the rep's cumulative balance.
-                        if ($jValue > 0) {
-                            try {
-                                $txType  = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_debit', ['rep_debit','rep_charge','rep_payment_out','payment_out','debit']);
-                                $relType = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
-                                execute_query($pdo,
-                                    "INSERT INTO transactions (type, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, NOW(), ?)",
-                                    [$txType, $relType, $repId, -$jValue,
-                                     json_encode(['subtype'=>'undo_return','order_id'=>$orderId,'notes'=>'إلغاء مرتجع - إعادة تحميل المديونية على المندوب'])]);
-                            } catch (Exception $txEx) { /* non-fatal */ }
-                        }
-
-                        // Set journal status back to 'with_rep' so order reappears in active list
-                        execute_query($pdo, "UPDATE rep_journal_orders SET status = 'with_rep', returned_pieces = 0, returned_value = 0, delivered_pieces = 0, delivered_value = 0 WHERE id = ?", [$jId]);
-
-                        // Reverse returned counters on the journal
-                        if ($targetJournalId > 0 && ($jPieces > 0 || $jValue > 0) && table_exists($pdo, 'rep_daily_journal')) {
-                            execute_query($pdo, "UPDATE rep_daily_journal SET pieces_returned = GREATEST(0, COALESCE(pieces_returned,0) - ?), returned_value = GREATEST(0, COALESCE(returned_value,0) - ?) WHERE id = ?", [$jPieces, $jValue, $targetJournalId]);
-                        }
-
-                        // If the order was delivered in the journal, reverse journal delivered counters too
-                        if (in_array($prevJStatus, ['delivered', 'partial_return'], true) && $targetJournalId > 0 && table_exists($pdo, 'rep_daily_journal')) {
-                            $totalPieces = intval(execute_query($pdo, "SELECT COALESCE(SUM(quantity),0) FROM order_items WHERE order_id = ?", [$orderId])->fetchColumn() ?? 0);
-                            $totalValue  = floatval(execute_query($pdo, "SELECT COALESCE(total_amount, 0) FROM orders WHERE id = ?", [$orderId])->fetchColumn() ?? 0);
-                            if ($totalPieces > 0 || $totalValue > 0) {
-                                execute_query($pdo, "UPDATE rep_daily_journal SET pieces_delivered = GREATEST(0, COALESCE(pieces_delivered,0) - ?), delivered_value = GREATEST(0, COALESCE(delivered_value,0) - ?) WHERE id = ?", [$totalPieces, $totalValue, $targetJournalId]);
+                        if ($targetJournalId <= 0 && table_exists($pdo, 'rep_daily_journal')) {
+                            $openJrnl = execute_query($pdo, "SELECT id FROM rep_daily_journal WHERE rep_id = ? AND is_closed = 0 ORDER BY id DESC LIMIT 1", [$repId])->fetch(PDO::FETCH_ASSOC);
+                            if ($openJrnl) {
+                                $targetJournalId = intval($openJrnl['id']);
                             }
                         }
+
+                        // Reverse only actual return credits; returned_value can also hold
+                        // undelivered goods still in the rep's custody.
+                        $repRelatedType = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
+                        $returnCreditStmt = execute_query($pdo,
+                            "SELECT COALESCE(SUM(amount), 0)
+                             FROM transactions
+                             WHERE related_to_type = ? AND related_to_id = ?
+                               AND JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(details) THEN details ELSE NULL END, '$.order_id')) = ?
+                               AND JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(details) THEN details ELSE NULL END, '$.subtype')) IN ('partial_return', 'full_return', 'undo_return')",
+                            [$repRelatedType, $repId, (string)$orderId]
+                        );
+                        $returnCreditToReverse = max(0.0, floatval($returnCreditStmt->fetchColumn() ?? 0));
+                        if ($returnCreditToReverse > 0) {
+                            $txType  = pick_allowed_enum($pdo, 'transactions', 'type', 'rep_debit', ['rep_debit','rep_charge','rep_payment_out','payment_out','debit']);
+                            execute_query($pdo,
+                                "INSERT INTO transactions (type, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, NOW(), ?)",
+                                [$txType, $repRelatedType, $repId, -$returnCreditToReverse,
+                                 json_encode(['subtype'=>'undo_return','order_id'=>$orderId,'notes'=>'إلغاء مرتجع - إعادة تحميل المديونية على المندوب'])]);
+                        }
+
+                        $remainingReturnedPieces = max(0, intval($jRow['returned_pieces'] ?? 0) - $actualReturnedPieces);
+                        $remainingReturnedValue = max(0, floatval($jRow['returned_value'] ?? 0) - $returnCreditToReverse);
+                        $restoreStatus = intval($jRow['delivered_pieces'] ?? 0) > 0 ? 'returned_with_rep' : 'with_rep';
+                        execute_query($pdo,
+                            "UPDATE rep_journal_orders
+                             SET status = ?, returned_pieces = ?, returned_value = ?,
+                                 event_date = CURDATE(), event_time = CURTIME()
+                             WHERE id = ?",
+                            [$restoreStatus, $remainingReturnedPieces, $remainingReturnedValue, $jId]
+                        );
+
+                        // Reverse returned counters on the journal
+                        $returnedValueToReverse = $returnCreditToReverse;
+                        if ($targetJournalId > 0 && ($actualReturnedPieces > 0 || $returnedValueToReverse > 0) && table_exists($pdo, 'rep_daily_journal')) {
+                            execute_query($pdo, "UPDATE rep_daily_journal SET pieces_returned = GREATEST(0, COALESCE(pieces_returned,0) - ?), returned_value = GREATEST(0, COALESCE(returned_value,0) - ?) WHERE id = ? AND is_closed = 0", [$actualReturnedPieces, $returnedValueToReverse, $targetJournalId]);
+                        }
+                        if ($targetJournalId > 0) $journalsToRefresh[$targetJournalId] = true;
+
+                        $restoreOrderStatus = $restoreStatus;
                     }
                 } // end if (table_exists rep_journal_orders)
 
-                $repStatus = pick_allowed_enum($pdo, 'orders', 'status', 'with_rep', ['with_rep', 'assigned', 'pending']);
-                // Always restore rep_id explicitly so the order reappears in the rep's active custody list
+                $repStatus = pick_allowed_enum($pdo, 'orders', 'status', $restoreOrderStatus ?? 'with_rep', ['with_rep', 'returned_with_rep', 'partial', 'assigned', 'pending']);
+                // Restore only physically returned products; previously delivered quantities stay delivered.
                 if (column_exists($pdo, 'orders', 'updated_at')) {
                     execute_query($pdo, "UPDATE orders SET status = ?, rep_id = ?, updated_at = NOW() WHERE id = ?", [$repStatus, $repId, $orderId]);
                 } else {
@@ -16854,6 +17283,13 @@ switch ($module) {
                 } // end foreach ($orderIds)
 
                 $pdo->commit();
+                foreach (array_keys($journalsToRefresh) as $journalId) {
+                    try {
+                        refresh_rep_daily_journal_status_counts($pdo, intval($journalId));
+                    } catch (Exception $refreshError) {
+                        error_log('Failed to refresh rep journal counts after undo: ' . $refreshError->getMessage());
+                    }
+                }
                 if (ob_get_length()) ob_clean();
                 echo json_encode(['success' => true, 'count' => count($orderIds)]);
             } catch (Exception $e) {
@@ -16880,13 +17316,15 @@ switch ($module) {
                 $orders = [];
             }
 
+            ensure_rep_daily_journal_table($pdo);
             $idempotencyToken = trim((string)($input['idempotency_token'] ?? $input['client_request_id'] ?? ''));
             if ($idempotencyToken !== '') {
                 $dupDaily = execute_query($pdo,
                     "SELECT id FROM rep_daily_journal 
-                     WHERE JSON_UNQUOTE(JSON_EXTRACT(orders_json, '$.idempotency_token')) = ?
+                     WHERE idempotency_token = ?
+                        OR JSON_UNQUOTE(JSON_EXTRACT(orders_json, '$.idempotency_token')) = ?
                      LIMIT 1",
-                    [$idempotencyToken]
+                    [$idempotencyToken, $idempotencyToken]
                 )->fetch(PDO::FETCH_ASSOC);
                 if ($dupDaily) {
                     echo json_encode(['success' => true, 'duplicate_prevented' => true, 'message' => 'تم إتمام اليومية بنجاح مسبقاً (تم منع التكرار).']);
@@ -16894,16 +17332,37 @@ switch ($module) {
                 }
             }
 
-            // Rapid duplicate check: if a daily completion for this rep was created within the last 4 seconds
+            // Rapid duplicate check: if a daily completion for this rep was created within the last 6 seconds
             if ($repId > 0) {
                 $recentDaily = execute_query($pdo,
                     "SELECT id FROM rep_daily_journal 
-                     WHERE rep_id = ? AND created_at >= NOW() - INTERVAL 4 SECOND
+                     WHERE rep_id = ? AND created_at >= NOW() - INTERVAL 6 SECOND
                      ORDER BY id DESC LIMIT 1",
                     [$repId]
                 )->fetch(PDO::FETCH_ASSOC);
                 if ($recentDaily) {
                     echo json_encode(['success' => true, 'duplicate_prevented' => true, 'message' => 'تم إتمام اليومية بنجاح مسبقاً (تم منع التكرار).']);
+                    break;
+                }
+            }
+
+            // Prevent assigning orders that are currently in another rep's open journal
+            if (!empty($orders)) {
+                $inOids = implode(',', array_map('intval', $orders));
+                $conflictRows = execute_query($pdo, "
+                    SELECT rjo.order_id, rjo.rep_id, COALESCE(u.name, CONCAT('مندوب #', rjo.rep_id)) as rep_name 
+                    FROM rep_journal_orders rjo
+                    INNER JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                    LEFT JOIN users u ON u.id = rjo.rep_id
+                    WHERE rjo.order_id IN ($inOids) 
+                      AND rjo.rep_id != ? 
+                      AND rdj.is_closed = 0
+                    LIMIT 1
+                ", [$repId])->fetch(PDO::FETCH_ASSOC);
+
+                if ($conflictRows) {
+                    http_response_code(400);
+                    echo json_encode(['success' => false, 'message' => "الأوردر رقم #{$conflictRows['order_id']} مسجل حالياً مع مندوب آخر ({$conflictRows['rep_name']}) في يومية مفتوحة."]);
                     break;
                 }
             }
@@ -16985,6 +17444,8 @@ switch ($module) {
             $maxRetries = 5;
             $retryCount = 0;
             $completedSuccessfully = false;
+            $journalId = 0;
+            $dailyCode = '';
 
             while ($retryCount < $maxRetries && !$completedSuccessfully) {
                 $retryCount++;
@@ -17129,6 +17590,12 @@ switch ($module) {
                         $journalId = intval($pdo->lastInsertId());
                         $dailyCode = 'DLY-' . str_pad($journalId, 5, '0', STR_PAD_LEFT);
                         try { execute_query($pdo, "UPDATE rep_daily_journal SET daily_code = ? WHERE id = ?", [$dailyCode, $journalId]); } catch (Exception $ex) {}
+                    }
+
+                    if ($idempotencyToken !== '' && $journalId > 0) {
+                        try {
+                            execute_query($pdo, "UPDATE rep_daily_journal SET idempotency_token = ? WHERE id = ? AND (idempotency_token IS NULL OR idempotency_token = '')", [$idempotencyToken, $journalId]);
+                        } catch (Exception $exTok) {}
                     }
 
                     // determine reason for this stock movement
@@ -17403,14 +17870,18 @@ switch ($module) {
                             $jOid = intval($jOid);
                             if ($jOid <= 0) continue;
                             $pdo->prepare(
-                                "INSERT INTO rep_journal_orders (journal_id, rep_id, order_id, status, event_date, event_time, employee)
-                                 VALUES (?, ?, ?, 'with_rep', ?, ?, ?)
+                                "INSERT INTO rep_journal_orders (journal_id, rep_id, order_id, status, returned_pieces, returned_value, delivered_pieces, delivered_value, event_date, event_time, employee)
+                                 VALUES (?, ?, ?, 'with_rep', 0, 0, 0, 0, ?, ?, ?)
                                  ON DUPLICATE KEY UPDATE
                                    journal_id = VALUES(journal_id),
-                                   status     = IF(status IN ('delivered','full_return','partial_return'), status, 'with_rep'),
-                                   event_date = IF(status IN ('delivered','full_return','partial_return'), event_date, VALUES(event_date)),
-                                   event_time = IF(status IN ('delivered','full_return','partial_return'), event_time, VALUES(event_time)),
-                                   employee   = IF(status IN ('delivered','full_return','partial_return'), employee,   VALUES(employee))"
+                                   status     = 'with_rep',
+                                   returned_pieces = 0,
+                                   returned_value  = 0,
+                                   delivered_pieces = 0,
+                                   delivered_value  = 0,
+                                   event_date = VALUES(event_date),
+                                   event_time = VALUES(event_time),
+                                   employee   = VALUES(employee)"
                             )->execute([$journalId, $repId, $jOid, $jNow, $jNowTime, $jEmployee]);
                         }
                     } catch (Exception $jEx) {
@@ -18716,25 +19187,26 @@ switch ($module) {
             }
             $statusIn = implode(',', array_map(fn($s) => $pdo->quote($s), $allowedStatuses));
 
-            $dateExpr = "COALESCE(rjo.event_date, rdj.journal_date, DATE(rjo.created_at), DATE(rdj.created_at), DATE(o.created_at))";
+            $dateExpr = "rdj.journal_date";
 
             $extraCond = "";
             $extraParams = [];
             if ($rep_id_filter > 0) {
-                $extraCond .= " AND (o.rep_id = ? OR rjo.rep_id = ?)";
+                $extraCond .= " AND (rdj.rep_id = ? OR rjo.rep_id = ? OR o.rep_id = ?)";
+                $extraParams[] = $rep_id_filter;
                 $extraParams[] = $rep_id_filter;
                 $extraParams[] = $rep_id_filter;
             }
 
+            // Realized sales and accounting from closed daily journals only
             $baseWhere = "
-                (
-                    (rjo.id IS NOT NULL AND {$dateExpr} BETWEEN ? AND ? AND (rjo.status IN ($statusIn) OR o.status IN ($statusIn)))
-                    OR
-                    (rjo.id IS NULL AND o.status IN ($statusIn) AND DATE(o.created_at) BETWEEN ? AND ?)
-                )
+                rjo.id IS NOT NULL 
+                AND rdj.is_closed = 1 
+                AND rdj.journal_date BETWEEN ? AND ? 
+                AND (rjo.status IN ($statusIn) OR (o.status IN ($statusIn) AND rjo.status NOT IN ('returned', 'full_return', 'with_rep', 'postponed')))
                 $extraCond
             ";
-            $baseParams = array_merge([$start, $end, $start, $end], $extraParams);
+            $baseParams = array_merge([$start, $end], $extraParams);
 
             try {
                 $hasPV = table_exists($pdo, 'product_variants');
@@ -18764,7 +19236,7 @@ switch ($module) {
                     ) latest ON rjo1.order_id = latest.order_id AND rjo1.id = latest.max_id
                 ) rjo ON rjo.order_id = o.id";
 
-                // ── Summary KPIs ──
+                // ── Summary KPIs (Closed Dailies Only) ──
                 $sumStmt = execute_query($pdo,
                     "SELECT
                         COUNT(DISTINCT o.id)                                                          AS orders_count,
@@ -18775,7 +19247,7 @@ switch ($module) {
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
                      {$rjoLatestJoin}
-                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                     JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                      {$orderTotJoin}
                      {$variantJoin}
                      WHERE $baseWhere",
@@ -18788,7 +19260,7 @@ switch ($module) {
                     "SELECT COALESCE(SUM(COALESCE(o.discount_amount, 0)), 0) AS total_discounts
                      FROM orders o
                      {$rjoLatestJoin}
-                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                     JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                      WHERE $baseWhere",
                     $baseParams
                 );
@@ -18812,7 +19284,7 @@ switch ($module) {
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
                      {$rjoLatestJoin}
-                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                     JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                      {$orderTotJoin}
                      {$variantJoin}
                      WHERE $baseWhere
@@ -18832,7 +19304,7 @@ switch ($module) {
                 // ── By Rep ──
                 $byRepStmt = execute_query($pdo,
                     "SELECT
-                        COALESCE(u.name, CONCAT('مندوب #', COALESCE(rjo.rep_id, o.rep_id))) AS rep_name,
+                        COALESCE(u.name, CONCAT('مندوب #', COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id))) AS rep_name,
                         COUNT(DISTINCT o.id)                             AS orders_count,
                         COALESCE(SUM({$deliveredQtyExpr}), 0)           AS items_count,
                         COALESCE(SUM({$deliveredQtyExpr} * oi.price_per_unit), 0) AS revenue,
@@ -18841,12 +19313,12 @@ switch ($module) {
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
                      {$rjoLatestJoin}
-                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
-                     LEFT JOIN users u ON u.id = COALESCE(rjo.rep_id, o.rep_id)
+                     JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                     LEFT JOIN users u ON u.id = COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id)
                      {$orderTotJoin}
                      {$variantJoin}
                      WHERE $baseWhere
-                     GROUP BY COALESCE(rjo.rep_id, o.rep_id), u.name
+                     GROUP BY COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id), u.name
                      ORDER BY revenue DESC",
                     $baseParams
                 );
@@ -18869,7 +19341,7 @@ switch ($module) {
                      FROM order_items oi
                      JOIN orders o ON o.id = oi.order_id
                      {$rjoLatestJoin}
-                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                     JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                      {$orderTotJoin}
                      {$variantJoin}
                      WHERE $baseWhere
@@ -18895,9 +19367,9 @@ switch ($module) {
                      FROM orders o
                      JOIN order_items oi ON oi.order_id = o.id
                      {$rjoLatestJoin}
-                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                     JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                      LEFT JOIN customers c ON c.id = o.customer_id
-                     LEFT JOIN users u ON u.id = COALESCE(rjo.rep_id, o.rep_id)
+                     LEFT JOIN users u ON u.id = COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id)
                      {$orderTotJoin}
                      {$variantJoin}
                      WHERE $baseWhere
@@ -18913,13 +19385,13 @@ switch ($module) {
                 }
                 unset($row);
 
-                // ── Returned orders summary ──
+                // ── Returned orders summary (Closed Dailies Only) ──
+                $retStatusIn = "'returned','full_return','partial_return'";
                 $retBaseWhere = "
-                    (
-                        (rjo.id IS NOT NULL AND {$dateExpr} BETWEEN ? AND ? AND (rjo.status IN ('returned','full_return','partial_return') OR o.status IN ('returned','full_return','partial_return')))
-                        OR
-                        (rjo.id IS NULL AND o.status IN ('returned','full_return','partial_return') AND DATE(o.created_at) BETWEEN ? AND ?)
-                    )
+                    rjo.id IS NOT NULL 
+                    AND rdj.is_closed = 1 
+                    AND rdj.journal_date BETWEEN ? AND ? 
+                    AND (rjo.status IN ($retStatusIn) OR o.status IN ('returned', 'full_return'))
                     $extraCond
                 ";
                 $returnedStmt = execute_query($pdo,
@@ -18929,7 +19401,7 @@ switch ($module) {
                      FROM orders o
                      JOIN order_items oi ON oi.order_id = o.id
                      {$rjoLatestJoin}
-                     LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                     JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                      WHERE $retBaseWhere",
                     $baseParams
                 );
@@ -18980,7 +19452,7 @@ switch ($module) {
                        LEFT JOIN products pdir ON pdir.id = oi.product_id"
                     : "LEFT JOIN products pdir ON pdir.id = oi.product_id";
 
-                $dateExpr = "COALESCE(rjo.event_date, rdj.journal_date, DATE(rjo.created_at), DATE(rdj.created_at), DATE(o.created_at))";
+                $dateExpr = "rdj.journal_date";
 
                 $extraCond = "";
                 $extraParams = [];
@@ -18989,7 +19461,8 @@ switch ($module) {
                     $extraParams[] = $customer_id;
                 }
                 if ($rep_id > 0) {
-                    $extraCond .= " AND (o.rep_id = ? OR rjo.rep_id = ?)";
+                    $extraCond .= " AND (rdj.rep_id = ? OR rjo.rep_id = ? OR o.rep_id = ?)";
+                    $extraParams[] = $rep_id;
                     $extraParams[] = $rep_id;
                     $extraParams[] = $rep_id;
                 }
@@ -18999,15 +19472,15 @@ switch ($module) {
                     $extraParams[] = $status;
                 }
 
+                // Closed daily journals only - realized sales
                 $salesWhere = "
-                    (
-                        (rjo.id IS NOT NULL AND {$dateExpr} BETWEEN ? AND ? AND (rjo.status IN ('delivered', 'partial') OR o.status IN ('delivered', 'partial')))
-                        OR
-                        (rjo.id IS NULL AND o.status IN ('delivered', 'partial') AND DATE(o.created_at) BETWEEN ? AND ?)
-                    )
+                    rjo.id IS NOT NULL 
+                    AND rdj.is_closed = 1 
+                    AND rdj.journal_date BETWEEN ? AND ? 
+                    AND (rjo.status IN ('delivered', 'partial') OR (o.status IN ('delivered', 'partial') AND rjo.status NOT IN ('returned', 'full_return', 'with_rep', 'postponed')))
                     $extraCond
                 ";
-                $baseParams = array_merge([$start, $end, $start, $end], $extraParams);
+                $baseParams = array_merge([$start, $end], $extraParams);
 
                 $deliveredQtyExpr = "
                     CASE
@@ -19027,7 +19500,7 @@ switch ($module) {
                     ) latest ON rjo1.order_id = latest.order_id AND rjo1.id = latest.max_id
                 ) rjo ON rjo.order_id = o.id";
 
-                // salesByProduct
+                // salesByProduct (Closed Dailies Only)
                 $salesByProductSql = "
                     SELECT
                         {$parentNameExpr} as name,
@@ -19037,7 +19510,7 @@ switch ($module) {
                     FROM orders o
                     JOIN order_items oi ON oi.order_id = o.id
                     {$rjoLatestJoin}
-                    LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                    JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                     {$orderTotJoin}
                     {$variantJoins}
                     WHERE {$salesWhere}
@@ -19053,7 +19526,7 @@ switch ($module) {
                 }
                 unset($spRow);
 
-                // dailySales
+                // dailySales (Closed Dailies Only)
                 $dailySalesSql = "
                     SELECT
                         {$dateExpr} as date,
@@ -19061,7 +19534,7 @@ switch ($module) {
                     FROM orders o
                     JOIN order_items oi ON oi.order_id = o.id
                     {$rjoLatestJoin}
-                    LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                    JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                     {$orderTotJoin}
                     WHERE {$salesWhere}
                     GROUP BY {$dateExpr}
@@ -19325,24 +19798,33 @@ switch ($module) {
                 $expense_prev = array_fill(1, 12, 0.0);
                 $hasPV = table_exists($pdo, 'product_variants');
 
-                $stmt = execute_query($pdo, "SELECT MONTH(created_at) as m, COALESCE(SUM(total_amount),0) as total FROM orders WHERE YEAR(created_at) = ? AND status IN ('delivered', 'partial') GROUP BY m", [$year]);
+                $costExpr = $hasPV ? "COALESCE(NULLIF(pv.cost_price, 0), NULLIF(pv.purchase_price, 0), 0)" : "0";
+                $variantJoin = $hasPV ? "LEFT JOIN product_variants pv ON pv.id = oi.product_id" : "";
+
+                $salesSql = "SELECT MONTH(rdj.journal_date) as m, COALESCE(SUM(oi.quantity * oi.price_per_unit),0) as total 
+                             FROM order_items oi
+                             JOIN orders o ON o.id = oi.order_id
+                             JOIN rep_journal_orders rjo ON rjo.order_id = o.id
+                             JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                             WHERE YEAR(rdj.journal_date) = ? AND rdj.is_closed = 1 AND (rjo.status IN ('delivered', 'partial') OR o.status IN ('delivered', 'partial'))
+                             GROUP BY m";
+                $stmt = execute_query($pdo, $salesSql, [$year]);
                 foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
                     $sales[intval($row['m'])] = floatval($row['total'] ?? 0);
                 }
-                $stmt = execute_query($pdo, "SELECT MONTH(created_at) as m, COALESCE(SUM(total_amount),0) as total FROM orders WHERE YEAR(created_at) = ? AND status IN ('delivered', 'partial') GROUP BY m", [$prev_year]);
+                $stmt = execute_query($pdo, $salesSql, [$prev_year]);
                 foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
                     $sales_prev[intval($row['m'])] = floatval($row['total'] ?? 0);
                 }
 
-                if ($hasPV) {
-                    $profitSql = "SELECT MONTH(o.created_at) as m, COALESCE(SUM((oi.price_per_unit - COALESCE(pv.cost_price,0)) * oi.quantity),0) as profit
-                                  FROM order_items oi JOIN orders o ON o.id = oi.order_id LEFT JOIN product_variants pv ON pv.id = oi.product_id
-                                  WHERE YEAR(o.created_at) = ? AND o.status IN ('delivered', 'partial') GROUP BY m";
-                } else {
-                    $profitSql = "SELECT MONTH(o.created_at) as m, COALESCE(SUM(oi.quantity * oi.price_per_unit),0) as profit
-                                  FROM order_items oi JOIN orders o ON o.id = oi.order_id
-                                  WHERE YEAR(o.created_at) = ? AND o.status IN ('delivered', 'partial') GROUP BY m";
-                }
+                $profitSql = "SELECT MONTH(rdj.journal_date) as m, COALESCE(SUM(oi.quantity * (oi.price_per_unit - {$costExpr})),0) as profit
+                              FROM order_items oi
+                              JOIN orders o ON o.id = oi.order_id
+                              JOIN rep_journal_orders rjo ON rjo.order_id = o.id
+                              JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                              {$variantJoin}
+                              WHERE YEAR(rdj.journal_date) = ? AND rdj.is_closed = 1 AND (rjo.status IN ('delivered', 'partial') OR o.status IN ('delivered', 'partial'))
+                              GROUP BY m";
                 $stmt = execute_query($pdo, $profitSql, [$year]);
                 foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) { $profit[intval($row['m'])] = floatval($row['profit'] ?? 0); }
                 $stmt = execute_query($pdo, $profitSql, [$prev_year]);
@@ -19452,17 +19934,16 @@ switch ($module) {
                         FROM orders o
                         JOIN order_items oi ON oi.order_id = o.id
                         {$rjoLatestJoin}
-                        LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                        JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                         {$orderTotJoin}
                         {$variantJoins}
-                        WHERE (
-                            (rjo.id IS NOT NULL AND COALESCE(rjo.event_date, rdj.journal_date, DATE(rjo.created_at), DATE(rdj.created_at), DATE(o.created_at)) BETWEEN ? AND ? AND (
-                                rjo.status IN ('delivered', 'partial', 'returned', 'full_return', 'partial_return')
-                                OR o.status IN ('delivered', 'partial', 'returned', 'full_return', 'partial_return')
-                            ))
-                            OR
-                            (rjo.id IS NULL AND o.status IN ('delivered', 'partial', 'returned', 'full_return', 'partial_return') AND DATE(o.created_at) BETWEEN ? AND ?)
-                        )
+                        WHERE rjo.id IS NOT NULL 
+                          AND rdj.is_closed = 1 
+                          AND rdj.journal_date BETWEEN ? AND ? 
+                          AND (
+                              rjo.status IN ('delivered', 'partial', 'returned', 'full_return', 'partial_return')
+                              OR o.status IN ('delivered', 'partial', 'returned', 'full_return', 'partial_return')
+                          )
                         GROUP BY {$productIdExpr}, {$parentNameExpr}
                     ) sub
                     WHERE sub.delivered_qty > 0 OR sub.returned_qty > 0
@@ -19470,7 +19951,7 @@ switch ($module) {
                     LIMIT 500
                 ";
 
-                $stmt = execute_query($pdo, $sql, [$start, $end, $start, $end]);
+                $stmt = execute_query($pdo, $sql, [$start, $end]);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
                 foreach ($rows as &$row) {
@@ -19523,13 +20004,13 @@ switch ($module) {
                     $dayStats = [];
                 }
 
-                $repFilter = $rep_id > 0 ? "AND COALESCE(rjo.rep_id, o.rep_id) = " . intval($rep_id) : "";
+                $repFilter = $rep_id > 0 ? "AND COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id) = " . intval($rep_id) : "";
 
                 $sql = "
                     SELECT 
-                        COALESCE(rjo.event_date, rdj.journal_date, DATE(rjo.created_at), DATE(rdj.created_at), DATE(o.created_at)) AS event_d,
-                        COALESCE(rjo.rep_id, o.rep_id, 0) AS rep_id,
-                        COALESCE(NULLIF(TRIM(u.name), ''), CONCAT('مندوب #', COALESCE(rjo.rep_id, o.rep_id))) AS rep_name,
+                        rdj.journal_date AS event_d,
+                        COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id, 0) AS rep_id,
+                        COALESCE(NULLIF(TRIM(u.name), ''), CONCAT('مندوب #', COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id))) AS rep_name,
                         o.id AS order_id,
                         COALESCE(rjo.status, o.status) AS rjo_status,
                         o.status AS order_status,
@@ -19538,7 +20019,7 @@ switch ($module) {
                         COALESCE(rjo.returned_pieces, 0) AS rjo_returned_pieces,
                         COALESCE(rjo.returned_value, 0) AS rjo_returned_value
                     FROM orders o
-                    LEFT JOIN (
+                    JOIN (
                         SELECT rjo1.*
                         FROM rep_journal_orders rjo1
                         JOIN (
@@ -19547,10 +20028,11 @@ switch ($module) {
                             GROUP BY order_id
                         ) latest ON rjo1.order_id = latest.order_id AND rjo1.id = latest.max_id
                     ) rjo ON rjo.order_id = o.id
-                    LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                    JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                     LEFT JOIN order_items oi ON oi.order_id = o.id
-                    LEFT JOIN users u ON u.id = COALESCE(rjo.rep_id, o.rep_id)
-                    WHERE COALESCE(rjo.event_date, rdj.journal_date, DATE(rjo.created_at), DATE(rdj.created_at), DATE(o.created_at)) BETWEEN ? AND ?
+                    LEFT JOIN users u ON u.id = COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id)
+                    WHERE rdj.is_closed = 1 
+                      AND rdj.journal_date BETWEEN ? AND ?
                       AND (
                           rjo.status IN ('delivered', 'partial', 'returned', 'full_return', 'partial_return')
                           OR o.status IN ('delivered', 'partial', 'returned', 'full_return', 'partial_return')
@@ -19789,19 +20271,32 @@ switch ($module) {
                                 FROM customers LIMIT 0";
                 }
                 
+                $repQuery = "SELECT 
+                                u.id, u.name, 'representative' as role,
+                                COALESCE(t.balance, 0) as balance,
+                                COALESCE(
+                                    t.last_payment_date,
+                                    u.created_at
+                                ) as last_payment_date
+                            FROM users u
+                            INNER JOIN (
+                                SELECT 
+                                    related_to_id, 
+                                    SUM(amount) as balance,
+                                    MAX(transaction_date) as last_payment_date
+                                FROM transactions 
+                                WHERE related_to_type IN ('rep', 'employee')
+                                GROUP BY related_to_id
+                                HAVING ROUND(SUM(amount), 2) != 0
+                            ) t ON u.id = t.related_to_id
+                            WHERE u.role = 'representative'";
+
                 $sql = "SELECT * FROM (
                             $custQuery
                             UNION ALL
-                            SELECT 
-                                id, name, 'representative' as role, balance,
-                                COALESCE(
-                                    (SELECT MAX(transaction_date) FROM transactions WHERE related_to_id = users.id AND related_to_type = 'employee' AND type IN ('payment_in', 'payment_out')),
-                                    users.created_at
-                                ) as last_payment_date
-                            FROM users 
-                            WHERE role = 'representative' AND ROUND(balance, 2) != 0
+                            $repQuery
                         ) t
-                        ORDER BY balance DESC";
+                        ORDER BY ABS(balance) DESC";
                 $stmt = execute_query($pdo, $sql);
                 $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 
@@ -19814,12 +20309,49 @@ switch ($module) {
                     } else {
                         $user['days_since_payment'] = 0;
                     }
-                    if ($user['balance'] > 0) {
+
+                    $isRep = ($user['role'] === 'representative');
+                    $rawBalance = floatval($user['balance']);
+                    
+                    if ($isRep) {
+                        // For representative: negative sum in transactions means cash due to company (debt)
+                        if ($rawBalance < -0.009) {
+                            $user['debt_amount'] = abs($rawBalance);
+                            $user['credit_amount'] = 0;
+                            $user['direction'] = 'on_him'; // عليه
+                        } elseif ($rawBalance > 0.009) {
+                            $user['debt_amount'] = 0;
+                            $user['credit_amount'] = $rawBalance;
+                            $user['direction'] = 'for_him'; // له
+                        } else {
+                            $user['debt_amount'] = 0;
+                            $user['credit_amount'] = 0;
+                            $user['direction'] = 'settled';
+                        }
+                    } else {
+                        // For customer: total_debit > total_credit (balance > 0) means customer owes company
+                        if ($rawBalance > 0.009) {
+                            $user['debt_amount'] = $rawBalance;
+                            $user['credit_amount'] = 0;
+                            $user['direction'] = 'on_him'; // عليه
+                        } elseif ($rawBalance < -0.009) {
+                            $user['debt_amount'] = 0;
+                            $user['credit_amount'] = abs($rawBalance);
+                            $user['direction'] = 'for_him'; // له
+                        } else {
+                            $user['debt_amount'] = 0;
+                            $user['credit_amount'] = 0;
+                            $user['direction'] = 'settled';
+                        }
+                    }
+
+                    // Aging buckets track debts owed to the company
+                    if ($user['debt_amount'] > 0) {
                         $d = $user['days_since_payment'];
-                        if ($d <= 30) $aging['0_30'] += $user['balance'];
-                        elseif ($d <= 60) $aging['31_60'] += $user['balance'];
-                        elseif ($d <= 90) $aging['61_90'] += $user['balance'];
-                        else $aging['over_90'] += $user['balance'];
+                        if ($d <= 30) $aging['0_30'] += $user['debt_amount'];
+                        elseif ($d <= 60) $aging['31_60'] += $user['debt_amount'];
+                        elseif ($d <= 90) $aging['61_90'] += $user['debt_amount'];
+                        else $aging['over_90'] += $user['debt_amount'];
                     }
                 }
                 echo json_encode(['success' => true, 'data' => ['users' => $users, 'aging_summary' => $aging]]);
@@ -19839,29 +20371,27 @@ switch ($module) {
                     ) latest ON rjo1.order_id = latest.order_id AND rjo1.id = latest.max_id
                 ) rjo ON rjo.order_id = o.id";
 
-                $retDateExpr = "COALESCE(rjo.event_date, rdj.journal_date, DATE(rjo.created_at), DATE(rdj.created_at), DATE(o.created_at))";
                 $retWhere = "
-                    (
-                        (rjo.id IS NOT NULL AND {$retDateExpr} BETWEEN ? AND ? AND (rjo.status IN ('returned', 'full_return', 'partial_return') OR o.status IN ('returned', 'full_return', 'partial_return')))
-                        OR
-                        (rjo.id IS NULL AND (rjo.status IN ('returned', 'full_return', 'partial_return') OR o.status IN ('returned', 'full_return', 'partial_return')) AND DATE(o.created_at) BETWEEN ? AND ?)
-                    )
+                    rjo.id IS NOT NULL 
+                    AND rdj.is_closed = 1 
+                    AND rdj.journal_date BETWEEN ? AND ? 
+                    AND (rjo.status IN ('returned', 'full_return', 'partial_return') OR o.status IN ('returned', 'full_return', 'partial_return'))
                 ";
-                $retParams = [$start_date, $end_date, $start_date, $end_date];
+                $retParams = [$start_date, $end_date];
 
                 $repStmt = execute_query($pdo, "
-                    SELECT COALESCE(rjo.rep_id, o.rep_id) AS rep_id,
-                           COALESCE(u.name, CONCAT('مندوب #', COALESCE(rjo.rep_id, o.rep_id))) as rep_name,
+                    SELECT COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id) AS rep_id,
+                           COALESCE(u.name, CONCAT('مندوب #', COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id))) as rep_name,
                            COUNT(DISTINCT o.id) as return_orders,
                            COALESCE(SUM(CASE WHEN rjo.status = 'partial_return' OR o.status = 'partial_return' THEN COALESCE(NULLIF(rjo.returned_pieces, 0), 1) ELSE oi.quantity END), 0) as return_pieces,
                            COALESCE(SUM(CASE WHEN rjo.status = 'partial_return' OR o.status = 'partial_return' THEN COALESCE(NULLIF(rjo.returned_value, 0), oi.quantity * oi.price_per_unit) ELSE oi.quantity * oi.price_per_unit END), 0) as return_value
                     FROM orders o
                     JOIN order_items oi ON o.id = oi.order_id
                     {$rjoLatestJoin}
-                    LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
-                    LEFT JOIN users u ON u.id = COALESCE(rjo.rep_id, o.rep_id)
+                    JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                    LEFT JOIN users u ON u.id = COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id)
                     WHERE {$retWhere}
-                    GROUP BY COALESCE(rjo.rep_id, o.rep_id), u.name
+                    GROUP BY COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id), u.name
                     ORDER BY return_value DESC
                 ", $retParams);
                 
@@ -19873,7 +20403,7 @@ switch ($module) {
                                 FROM orders o
                                 JOIN order_items oi ON o.id = oi.order_id
                                 {$rjoLatestJoin}
-                                LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                                JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                                 LEFT JOIN product_variants pv ON pv.id = oi.product_id
                                 LEFT JOIN products ppar ON ppar.id = pv.product_id
                                 WHERE {$retWhere}
@@ -19886,7 +20416,7 @@ switch ($module) {
                                 FROM orders o
                                 JOIN order_items oi ON o.id = oi.order_id
                                 {$rjoLatestJoin}
-                                LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                                JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                                 LEFT JOIN products p ON p.id = oi.product_id
                                 WHERE {$retWhere}
                                 GROUP BY oi.product_id, p.name
@@ -20090,6 +20620,7 @@ switch ($module) {
                 
                 $list = [];
                 $categoryTotals = [
+                    'materials' => 0.0,
                     'rent' => 0.0,
                     'utilities' => 0.0,
                     'transport' => 0.0,
@@ -20113,7 +20644,9 @@ switch ($module) {
                     } else {
                         $category = 'other'; // default "أخرى"
                         $notesLower = mb_strtolower($notes);
-                        if (mb_strpos($notesLower, 'إعلان') !== false || mb_strpos($notesLower, 'اعلان') !== false || mb_strpos($notesLower, 'اعلانات') !== false || mb_strpos($notesLower, 'تسويق') !== false || mb_strpos($notesLower, 'فيسبوك') !== false || mb_strpos($notesLower, 'تيك توك') !== false || mb_strpos($notesLower, 'سوشيال') !== false || mb_strpos($notesLower, 'حملة') !== false || mb_strpos($notesLower, 'سبونسر') !== false || mb_strpos($notesLower, 'ads') !== false) {
+                        if (mb_strpos($notesLower, 'خام') !== false || mb_strpos($notesLower, 'خامات') !== false || mb_strpos($notesLower, 'قماش') !== false || mb_strpos($notesLower, 'اقمش') !== false || mb_strpos($notesLower, 'أقمش') !== false || mb_strpos($notesLower, 'توب') !== false || mb_strpos($notesLower, 'غزل') !== false || mb_strpos($notesLower, 'نسيج') !== false || mb_strpos($notesLower, 'materials') !== false || mb_strpos($notesLower, 'fabric') !== false) {
+                            $category = 'materials';
+                        } elseif (mb_strpos($notesLower, 'إعلان') !== false || mb_strpos($notesLower, 'اعلان') !== false || mb_strpos($notesLower, 'اعلانات') !== false || mb_strpos($notesLower, 'تسويق') !== false || mb_strpos($notesLower, 'فيسبوك') !== false || mb_strpos($notesLower, 'تيك توك') !== false || mb_strpos($notesLower, 'سوشيال') !== false || mb_strpos($notesLower, 'حملة') !== false || mb_strpos($notesLower, 'سبونسر') !== false || mb_strpos($notesLower, 'ads') !== false) {
                             $category = 'ads';
                         } elseif (mb_strpos($notesLower, 'راتب') !== false || mb_strpos($notesLower, 'مرتب') !== false || mb_strpos($notesLower, 'رواتب') !== false || mb_strpos($notesLower, 'أجر') !== false || mb_strpos($notesLower, 'اجور') !== false || mb_strpos($notesLower, 'سلفة') !== false || mb_strpos($notesLower, 'مرتبات') !== false || mb_strpos($notesLower, 'سلف') !== false) {
                             $category = 'salaries';

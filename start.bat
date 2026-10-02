@@ -4,16 +4,17 @@ title Dragon Pro - Starting System
 color 0A
 
 rem Set script directory
-setlocal enableextensions
+setlocal enableextensions enabledelayedexpansion
 cd /d "%~dp0"
 
 set "LOGFILE=%~dp0startup_log.txt"
 
-rem Initialize startup log
-echo ==================================== > "%LOGFILE%"
+rem Initialize / Append to startup log (keeps history across all startups)
+if exist "%LOGFILE%" echo. >> "%LOGFILE%"
+echo ==================================================== >> "%LOGFILE%"
 echo Dragon Pro - Startup Log >> "%LOGFILE%"
 echo Date: %date% %time% >> "%LOGFILE%"
-echo ==================================== >> "%LOGFILE%"
+echo ==================================================== >> "%LOGFILE%"
 
 cls
 call :Log "===================================="
@@ -61,7 +62,7 @@ echo.
 rem ---------------------------------------------------------
 rem 2. Check Node.js and NPM
 rem ---------------------------------------------------------
-call :Log "[2/4] Checking Node.js & npm..."
+call :Log "[2/4] Checking Node.js and npm..."
 
 where node >nul 2>&1
 if errorlevel 1 (
@@ -81,8 +82,9 @@ if errorlevel 1 (
     )
 )
 
-for /f "tokens=*" %%i in ('node -v') do set "NODE_VER=%%i"
-call :Log "[OK] Node is available: %NODE_VER%"
+set "NODE_VER="
+for /f "tokens=*" %%i in ('node -v 2^>nul') do set "NODE_VER=%%i"
+call :Log "[OK] Node is available: !NODE_VER!"
 
 where npm.cmd >nul 2>&1
 if errorlevel 1 (
@@ -90,8 +92,9 @@ if errorlevel 1 (
     goto :EndError
 )
 
-for /f "tokens=*" %%i in ('call npm.cmd -v') do set "NPM_VER=%%i"
-call :Log "[OK] npm.cmd is available: v%NPM_VER%"
+set "NPM_VER="
+for /f "tokens=*" %%i in ('npm.cmd -v 2^>nul') do set "NPM_VER=%%i"
+call :Log "[OK] npm.cmd is available: v!NPM_VER!"
 
 echo.
 rem ---------------------------------------------------------
@@ -120,38 +123,47 @@ if not exist "node_modules" (
 
 echo.
 rem ---------------------------------------------------------
-rem 4. Start Production Server & Launch Browser
+rem 4. Start Production Server and Launch Browser
 rem ---------------------------------------------------------
 call :Log "[4/4] Starting server and launching application..."
 if not exist "dist" (
     call :Log "[Wait] Building application for the first time..."
     call npm.cmd run build >> "%LOGFILE%" 2>&1
 )
+
 rem Ensure ports 3000 and 3001 are free before starting
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ports = @(3000, 3001); Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object { $ports -contains $_.LocalPort } | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }" >nul 2>&1
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":3000" ^| findstr "LISTENING"') do taskkill /F /T /PID %%a >nul 2>&1
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":3001" ^| findstr "LISTENING"') do taskkill /F /T /PID %%a >nul 2>&1
+ping 127.0.0.1 -n 2 >nul 2>&1
 
-set "retries=0"
-:start_wait_port_3000
-netstat -ano | findstr ":3000" | findstr "LISTENING" >nul 2>&1
-if %ERRORLEVEL% equ 0 (
-    set /a retries+=1
-    for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":3000" ^| findstr "LISTENING"') do taskkill /F /T /PID %%a >nul 2>&1
-    timeout /t 1 /nobreak >nul
-    if %retries% lss 10 goto start_wait_port_3000
+rem Sync version in package.json from version.json
+node -e "try { const v=require('./version.json'); const p=require('./package.json'); if(v.version && p.version !== v.version){ p.version=v.version; require('fs').writeFileSync('./package.json', JSON.stringify(p, null, 2)+'\n'); } } catch(e){}" >nul 2>&1
+
+rem Extract version for window title
+set "APP_VER="
+for /f "tokens=2 delims=:," %%v in ('findstr /i "\"version\"" version.json 2^>nul') do (
+    if not defined APP_VER (
+        set "APP_VER=%%~v"
+        set "APP_VER=!APP_VER: =!"
+        set "APP_VER=!APP_VER:\"=!"
+        set "APP_VER=!APP_VER:^"=!"
+    )
 )
-timeout /t 1 /nobreak >nul
+if defined APP_VER set "APP_VER=!APP_VER:"=!"
+if "!APP_VER!"=="" set "APP_VER=Latest"
 
-start "Dragon Pro Server" cmd /c "cd /d %~dp0 && npm.cmd run preview"
+rem Launch persistent server window
+start "Dragon Pro Server" cmd /k "cd /d %~dp0 && title Dragon Pro Server v!APP_VER! (Port 3000) && echo =================================================== && echo   Dragon Pro Server v!APP_VER! is Running (Port 3000) && echo   DO NOT CLOSE THIS WINDOW && echo =================================================== && npm.cmd run preview || (echo. && echo [ERROR] Server stopped with error! Press any key to retry... && pause && npm.cmd run preview)"
 
-timeout /t 3 /nobreak >nul
+call :Log "Waiting for server to start..."
+ping 127.0.0.1 -n 4 >nul 2>&1
+
 call :Log "Opening browser at http://localhost:3000..."
 start http://localhost:3000
 
 echo.
 call :Log "===================================="
-call :Log "   Dragon Pro is now RUNNING!"
+call :Log "   Dragon Pro Server v!APP_VER! is RUNNING!"
 call :Log "===================================="
 call :Log "URL: http://localhost:3000"
 
@@ -182,7 +194,7 @@ exit /b 1
 :EndSuccess
 echo.
 echo --------------------------------------------------------
-echo Server is running. Close the Dev Server window to stop.
+echo Server is running. Close the Server window to stop.
 echo --------------------------------------------------------
 echo.
 pause
@@ -190,5 +202,5 @@ exit /b 0
 
 :Log
 echo %~1
-echo [%time%] %~1 >> "%LOGFILE%"
+echo [%date% %time%] %~1 >> "%LOGFILE%"
 exit /b

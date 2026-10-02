@@ -49,6 +49,7 @@ const ReportOutstandingBalances: React.FC = () => {
 
   const [sortKey, setSortKey] = useState<string>('balance');
   const [sortAsc, setSortAsc] = useState(false);
+  const [filterRole, setFilterRole] = useState<'all' | 'customer' | 'representative'>('all');
 
   const handleSort = (key: string) => {
     if (sortKey === key) {
@@ -60,10 +61,19 @@ const ReportOutstandingBalances: React.FC = () => {
   };
 
   const usersList: any[] = data.users || [];
-  const sortedUsers = [...usersList].sort((a, b) => {
+  const filteredUsers = usersList.filter(u => {
+    if (filterRole === 'all') return true;
+    return u.role === filterRole;
+  });
+
+  const sortedUsers = [...filteredUsers].sort((a, b) => {
     if (sortKey === 'balance' || sortKey === 'days_since_payment') {
-      const aVal = Number(a[sortKey] || 0);
-      const bVal = Number(b[sortKey] || 0);
+      const aVal = sortKey === 'balance'
+        ? (Number(a.debt_amount) || Math.abs(Number(a.balance || 0)))
+        : Number(a[sortKey] || 0);
+      const bVal = sortKey === 'balance'
+        ? (Number(b.debt_amount) || Math.abs(Number(b.balance || 0)))
+        : Number(b[sortKey] || 0);
       return sortAsc ? aVal - bVal : bVal - aVal;
     }
     const aVal = String(a[sortKey] || '');
@@ -139,7 +149,29 @@ const ReportOutstandingBalances: React.FC = () => {
       </div>
 
       <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-700">
-        <h3 className="font-black text-slate-800 dark:text-slate-100 mb-6">التفاصيل حسب الحساب</h3>
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+          <h3 className="font-black text-slate-800 dark:text-slate-100">التفاصيل حسب الحساب</h3>
+          <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-700/50 p-1 rounded-xl text-xs font-bold">
+            <button
+              onClick={() => setFilterRole('all')}
+              className={`px-3 py-1.5 rounded-lg transition ${filterRole === 'all' ? 'bg-white dark:bg-slate-800 text-blue-600 shadow-sm' : 'text-slate-600 dark:text-slate-300'}`}
+            >
+              الكل ({usersList.length})
+            </button>
+            <button
+              onClick={() => setFilterRole('representative')}
+              className={`px-3 py-1.5 rounded-lg transition ${filterRole === 'representative' ? 'bg-white dark:bg-slate-800 text-blue-600 shadow-sm' : 'text-slate-600 dark:text-slate-300'}`}
+            >
+              مناديب ({usersList.filter(u => u.role === 'representative').length})
+            </button>
+            <button
+              onClick={() => setFilterRole('customer')}
+              className={`px-3 py-1.5 rounded-lg transition ${filterRole === 'customer' ? 'bg-white dark:bg-slate-800 text-blue-600 shadow-sm' : 'text-slate-600 dark:text-slate-300'}`}
+            >
+              عملاء ({usersList.filter(u => u.role === 'customer').length})
+            </button>
+          </div>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-right text-sm">
             <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400">
@@ -147,7 +179,7 @@ const ReportOutstandingBalances: React.FC = () => {
                 <SortHeader col="name" label="الاسم" align="right" />
                 <SortHeader col="role" label="النوع" align="right" />
                 <SortHeader col="balance" label={`الرصيد (${sym})`} align="right" />
-                <SortHeader col="days_since_payment" label="أيام منذ أخر دفعة" align="right" />
+                <SortHeader col="days_since_payment" label="أيام منذ أخر حركة" align="right" />
                 <th className="p-4">الحالة</th>
               </tr>
             </thead>
@@ -155,25 +187,33 @@ const ReportOutstandingBalances: React.FC = () => {
               {sortedUsers.length === 0 ? (
                 <tr><td colSpan={5} className="p-8 text-center text-slate-400">لا توجد أرصدة معلقة</td></tr>
               ) : sortedUsers.map((u: any, i: number) => {
-                const bal = Number(u.balance);
-                const days = u.days_since_payment;
+                const isDebt = u.direction === 'on_him' || Number(u.debt_amount) > 0 || (u.role === 'customer' ? Number(u.balance) > 0 : Number(u.balance) < 0);
+                const amount = Number(u.debt_amount) > 0 ? Number(u.debt_amount) : (Number(u.credit_amount) > 0 ? Number(u.credit_amount) : Math.abs(Number(u.balance || 0)));
+                const days = Number(u.days_since_payment || 0);
                 let statusColor = 'text-slate-500';
                 let statusText: React.ReactNode = '—';
-                if (bal > 0) {
-                  if (days <= 30) { statusColor = 'text-emerald-500'; statusText = 'جيد'; }
-                  else if (days <= 60) { statusColor = 'text-amber-500'; statusText = 'متأخر'; }
-                  else if (days <= 90) { statusColor = 'text-orange-500'; statusText = 'متأخر جداً'; }
-                  else { statusColor = 'text-rose-500 font-black flex items-center gap-1'; statusText = <><AlertCircle size={14}/> خطر</>; }
+                if (isDebt) {
+                  if (days <= 30) { statusColor = 'text-emerald-500 font-bold'; statusText = 'جيد (0-30 يوم)'; }
+                  else if (days <= 60) { statusColor = 'text-amber-500 font-bold'; statusText = 'متأخر (31-60 يوم)'; }
+                  else if (days <= 90) { statusColor = 'text-orange-500 font-bold'; statusText = 'متأخر جداً (61-90 يوم)'; }
+                  else { statusColor = 'text-rose-500 font-black flex items-center gap-1'; statusText = <><AlertCircle size={14}/> خطر (+90 يوم)</>; }
                 } else {
-                  statusText = 'رصيد دائن (لنا)';
+                  statusColor = 'text-blue-500 font-bold';
+                  statusText = 'رصيد دائن (له)';
                 }
 
                 return (
                   <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                     <td className="p-4 font-bold text-slate-800 dark:text-slate-100">{u.name}</td>
-                    <td className="p-4 text-slate-500">{u.role === 'customer' ? 'عميل' : 'مندوب'}</td>
-                    <td className={`p-4 font-black ${bal > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>{fmt(Math.abs(bal))} {bal > 0 ? '(عليه)' : '(له)'}</td>
-                    <td className="p-4 font-mono text-xs">{days === 999 ? 'لم يدفع أبداً' : `${days} يوم`}</td>
+                    <td className="p-4 text-slate-500">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${u.role === 'customer' ? 'bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-300' : 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300'}`}>
+                        {u.role === 'customer' ? 'عميل' : 'مندوب'}
+                      </span>
+                    </td>
+                    <td className={`p-4 font-black ${isDebt ? 'text-rose-600' : 'text-emerald-600'}`}>
+                      {fmt(amount)} {isDebt ? '(عليه)' : '(له)'}
+                    </td>
+                    <td className="p-4 font-mono text-xs">{days === 0 ? 'اليوم' : `${days} يوم`}</td>
                     <td className={`p-4 ${statusColor}`}>{statusText}</td>
                   </tr>
                 );

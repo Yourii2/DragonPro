@@ -1,7 +1,79 @@
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
+import { execSync } from 'child_process';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
+
+function isCloudflareActive(): boolean {
+  try {
+    const sc = execSync('sc query Cloudflared', { stdio: ['pipe', 'pipe', 'ignore'], timeout: 1500 }).toString();
+    if (/STATE\s*:\s*\d+\s+RUNNING/i.test(sc)) return true;
+  } catch (e) {}
+  try {
+    const scWarp = execSync('sc query CloudflareWARP', { stdio: ['pipe', 'pipe', 'ignore'], timeout: 1500 }).toString();
+    if (/STATE\s*:\s*\d+\s+RUNNING/i.test(scWarp)) return true;
+  } catch (e) {}
+  try {
+    const tasks = execSync('tasklist /NH', { stdio: ['pipe', 'pipe', 'ignore'], timeout: 1500 }).toString();
+    if (/cloudflared\.exe/i.test(tasks) || /warp-svc\.exe/i.test(tasks)) return true;
+  } catch (e) {}
+  return false;
+}
+
+function getCloudflareTunnelUrl(projectRoot: string, port: number = 3000): string | null {
+  if (!isCloudflareActive()) {
+    return null;
+  }
+
+  // 1. Check tunnel.json for user override (custom IP or URL)
+  try {
+    const tPath = path.resolve(projectRoot, 'tunnel.json');
+    if (fs.existsSync(tPath)) {
+      const cfg = JSON.parse(fs.readFileSync(tPath, 'utf8'));
+      const val = cfg.cloudflare_ip || cfg.tunnel_ip || cfg.ip || cfg.cloudflare_url || cfg.url;
+      if (val && typeof val === 'string' && val.trim()) {
+        const clean = val.trim();
+        return clean.startsWith('http://') || clean.startsWith('https://')
+          ? clean
+          : `http://${clean}${clean.includes(':') ? '' : `:${port}`}/`;
+      }
+    }
+  } catch (e) {}
+
+  // 2. Check environment variable override
+  if (process.env.CLOUDFLARE_TUNNEL_IP) {
+    const ip = process.env.CLOUDFLARE_TUNNEL_IP.trim();
+    return `http://${ip}:${port}/`;
+  }
+  if (process.env.CLOUDFLARE_TUNNEL_URL) {
+    return process.env.CLOUDFLARE_TUNNEL_URL.trim();
+  }
+
+  // 3. Auto-detect from network interfaces
+  try {
+    const ifaces = os.networkInterfaces();
+
+    // Look for adapter specifically named cloudflare, warp, tailscale, tunnel, or vpn
+    for (const [name, addrs] of Object.entries(ifaces)) {
+      if (/cloud|warp|tailscale|tunnel|vpn/i.test(name)) {
+        const v4 = (addrs || []).find(a => a.family === 'IPv4' && !a.internal);
+        if (v4) return `http://${v4.address}:${port}/`;
+      }
+    }
+
+    // Look for 100.x.x.x CGNAT range (used by Tailscale and Cloudflare WARP)
+    for (const [name, addrs] of Object.entries(ifaces)) {
+      for (const a of addrs || []) {
+        if (a.family === 'IPv4' && !a.internal && a.address.startsWith('100.')) {
+          return `http://${a.address}:${port}/`;
+        }
+      }
+    }
+  } catch (e) {}
+
+  return null;
+}
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '');
@@ -107,7 +179,42 @@ export default defineConfig(({ mode }) => {
         }
       }
     },
-    plugins: [react()],
+    plugins: [
+      react(),
+      {
+        name: 'vite-cloudflare-banner',
+        configureServer(server: any) {
+          const printBanner = () => {
+            setTimeout(() => {
+              const url = getCloudflareTunnelUrl(projectRoot, server.config?.server?.port || 3000);
+              if (url) {
+                console.log(`  \x1b[32m➜\x1b[0m  \x1b[1mCloudflare:\x1b[0m \x1b[36m${url}\x1b[0m`);
+              }
+            }, 100);
+          };
+          if (server.httpServer?.listening) {
+            printBanner();
+          } else {
+            server.httpServer?.once('listening', printBanner);
+          }
+        },
+        configurePreviewServer(server: any) {
+          const printBanner = () => {
+            setTimeout(() => {
+              const url = getCloudflareTunnelUrl(projectRoot, server.config?.preview?.port || 3000);
+              if (url) {
+                console.log(`  \x1b[32m➜\x1b[0m  \x1b[1mCloudflare:\x1b[0m \x1b[36m${url}\x1b[0m`);
+              }
+            }, 100);
+          };
+          if (server.httpServer?.listening) {
+            printBanner();
+          } else {
+            server.httpServer?.once('listening', printBanner);
+          }
+        }
+      }
+    ],
     define: {
       'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)

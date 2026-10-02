@@ -299,6 +299,14 @@ try {
         if (is_array($manifest) && !empty($manifest['version'])) {
             $verObj = ['version' => (string)$manifest['version'], 'buildDate' => (string)($manifest['date'] ?? date('Y-m-d'))];
             file_put_contents($root . '/version.json', json_encode($verObj, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            $pkgPath = $root . '/package.json';
+            if (file_exists($pkgPath)) {
+                $pkgData = json_decode(@file_get_contents($pkgPath), true);
+                if (is_array($pkgData)) {
+                    $pkgData['version'] = (string)$manifest['version'];
+                    @file_put_contents($pkgPath, json_encode($pkgData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+                }
+            }
         }
 
         // If manifest exists in source, copy to root for reference
@@ -367,10 +375,10 @@ try {
     @unlink($lockPath);
 
     // Auto-trigger background rebuild and server restart
-    $restartBat = file_exists($root . '/restart.bat') ? ($root . '/restart.bat') : ($root . '/update_and_restart.bat');
+    $restartBat = file_exists($root . '/update_and_restart.bat') ? ($root . '/update_and_restart.bat') : ($root . '/restart.bat');
     if (file_exists($restartBat)) {
-        log_msg($root, "Triggering automatic background rebuild and preview server restart...");
-        $cmd = 'start "" /B cmd.exe /c "' . $restartBat . ' >nul 2>&1"';
+        log_msg($root, "Triggering automatic background rebuild and preview server restart via " . basename($restartBat) . "...");
+        $cmd = 'start "" cmd.exe /c "' . $restartBat . '"';
         @pclose(@popen($cmd, "r"));
     }
 

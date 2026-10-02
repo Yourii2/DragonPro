@@ -1351,6 +1351,7 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
                       value={expenseData.category || 'other'}
                       onChange={v => setExpenseData({...expenseData, category: v})}
                       options={[
+                        { value: 'materials', label: 'خامات وأقمشة' },
                         { value: 'ads', label: 'إعلانات وتسويق' },
                         { value: 'salaries', label: 'رواتب وأجور' },
                         { value: 'rent', label: 'إيجارات' },

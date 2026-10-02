@@ -13,8 +13,9 @@ cd /d "%~dp0"
 :: إعداد ملف اللوج (سيكون بجانب السكريبت)
 set LOGFILE="%~dp0startup_log.txt"
 
-:: تفريغ/إنشاء ملف اللوج الجديد مع التاريخ
-echo ==================================== > %LOGFILE%
+:: تهيئة/إضافة لملف اللوج مع التاريخ
+if exist %LOGFILE% echo. >> %LOGFILE%
+echo ==================================== >> %LOGFILE%
 echo Dragon Pro - Startup Log >> %LOGFILE%
 echo Date: %date% %time% >> %LOGFILE%
 echo ==================================== >> %LOGFILE%

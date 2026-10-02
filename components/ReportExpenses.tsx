@@ -3,14 +3,14 @@ import { API_BASE_PATH } from '../services/apiConfig';
 import { useTheme } from './ThemeContext';
 import { formatLocalDate, getFirstDayOfMonth, getDaysAgo } from '../services/dateUtils';
 import Swal from 'sweetalert2';
-import { RefreshCw, ArrowDownRight, Printer, Download, Search, Receipt, CreditCard, Landmark, Truck, Settings, Coffee, FileText, Megaphone, Users } from 'lucide-react';
+import { RefreshCw, ArrowDownRight, Printer, Download, Search, Receipt, CreditCard, Landmark, Truck, Settings, Coffee, FileText, Megaphone, Users, Scissors, X } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface ExpenseRow {
   id: number;
   date: string;
   type: string;
-  category: 'rent' | 'utilities' | 'transport' | 'maintenance' | 'hospitality' | 'supplies' | 'ads' | 'salaries' | 'other';
+  category: 'materials' | 'rent' | 'utilities' | 'transport' | 'maintenance' | 'hospitality' | 'supplies' | 'ads' | 'salaries' | 'other' | string;
   notes: string;
   amount: number;
   treasury_name: string;
@@ -20,6 +20,7 @@ const fmt = (n: number) => Number(n || 0).toLocaleString('ar-EG');
 
 const getCategoryLabel = (category: string) => {
   switch (category) {
+    case 'materials': return 'خامات وأقمشة';
     case 'ads': return 'إعلانات وتسويق';
     case 'salaries': return 'رواتب وأجور';
     case 'rent': return 'إيجارات';
@@ -27,7 +28,7 @@ const getCategoryLabel = (category: string) => {
     case 'transport': return 'انتقالات وشحن';
     case 'maintenance': return 'صيانة وإصلاح';
     case 'hospitality': return 'ضيافة وبوفيه';
-    case 'supplies': return 'أدوات مكتبية';
+    case 'supplies': return 'أدوات مكتبية ومطبوعات';
     case 'other': return 'مصروفات متنوعة';
     default: return category;
   }
@@ -35,6 +36,7 @@ const getCategoryLabel = (category: string) => {
 
 const getCategoryIcon = (category: string) => {
   switch (category) {
+    case 'materials': return <Scissors className="text-teal-500" size={18} />;
     case 'ads': return <Megaphone className="text-pink-500" size={18} />;
     case 'salaries': return <Users className="text-indigo-500" size={18} />;
     case 'rent': return <Landmark className="text-blue-500" size={18} />;
@@ -48,7 +50,20 @@ const getCategoryIcon = (category: string) => {
   }
 };
 
-const COLORS = ['#ec4899', '#6366f1', '#3b82f6', '#f97316', '#10b981', '#ef4444', '#f59e0b', '#8b5cf6', '#64748b'];
+const COLORS = ['#0d9488', '#ec4899', '#6366f1', '#3b82f6', '#f97316', '#10b981', '#ef4444', '#f59e0b', '#8b5cf6', '#64748b'];
+
+const categoriesConfig = [
+  { key: 'materials', label: 'خامات وأقمشة', textClass: 'text-teal-600 dark:text-teal-400', activeRing: 'ring-2 ring-teal-500 bg-teal-50/80 dark:bg-teal-950/30 border-teal-300 dark:border-teal-800' },
+  { key: 'ads', label: 'إعلانات وتسويق', textClass: 'text-pink-600 dark:text-pink-400', activeRing: 'ring-2 ring-pink-500 bg-pink-50/80 dark:bg-pink-950/30 border-pink-300 dark:border-pink-800' },
+  { key: 'salaries', label: 'رواتب وأجور', textClass: 'text-indigo-600 dark:text-indigo-400', activeRing: 'ring-2 ring-indigo-500 bg-indigo-50/80 dark:bg-indigo-950/30 border-indigo-300 dark:border-indigo-800' },
+  { key: 'rent', label: 'إيجارات', textClass: 'text-blue-600 dark:text-blue-400', activeRing: 'ring-2 ring-blue-500 bg-blue-50/80 dark:bg-blue-950/30 border-blue-300 dark:border-blue-800' },
+  { key: 'utilities', label: 'مرافق وخدمات', textClass: 'text-orange-600 dark:text-orange-400', activeRing: 'ring-2 ring-orange-500 bg-orange-50/80 dark:bg-orange-950/30 border-orange-300 dark:border-orange-800' },
+  { key: 'transport', label: 'انتقالات وشحن', textClass: 'text-emerald-600 dark:text-emerald-400', activeRing: 'ring-2 ring-emerald-500 bg-emerald-50/80 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800' },
+  { key: 'maintenance', label: 'صيانة وإصلاح', textClass: 'text-red-600 dark:text-red-400', activeRing: 'ring-2 ring-red-500 bg-red-50/80 dark:bg-red-950/30 border-red-300 dark:border-red-800' },
+  { key: 'hospitality', label: 'ضيافة وبوفيه', textClass: 'text-amber-600 dark:text-amber-400', activeRing: 'ring-2 ring-amber-500 bg-amber-50/80 dark:bg-amber-950/30 border-amber-300 dark:border-amber-800' },
+  { key: 'supplies', label: 'أدوات مكتبية', textClass: 'text-violet-600 dark:text-violet-400', activeRing: 'ring-2 ring-violet-500 bg-violet-50/80 dark:bg-violet-950/30 border-violet-300 dark:border-violet-800' },
+  { key: 'other', label: 'مصروفات متنوعة', textClass: 'text-slate-600 dark:text-slate-400', activeRing: 'ring-2 ring-slate-500 bg-slate-100 dark:bg-slate-700/50 border-slate-300 dark:border-slate-600' },
+];
 
 const ReportExpenses: React.FC = () => {
   const { isDark } = useTheme();
@@ -58,10 +73,12 @@ const ReportExpenses: React.FC = () => {
   const [endDate, setEndDate] = useState(formatLocalDate());
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
   
   const [data, setData] = useState({
     list: [] as ExpenseRow[],
     totals: {
+      materials: 0,
       rent: 0,
       utilities: 0,
       transport: 0,
@@ -99,11 +116,18 @@ const ReportExpenses: React.FC = () => {
   const [sortKey, setSortKey] = useState<string>('date');
   const [sortAsc, setSortAsc] = useState(false);
 
-  const filteredList = data.list.filter(item => 
-    (item.notes || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (item.treasury_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-    getCategoryLabel(item.category).toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredList = data.list.filter(item => {
+    if (selectedCategory !== 'all' && item.category !== selectedCategory) {
+      return false;
+    }
+    if (!searchTerm) return true;
+    const term = searchTerm.toLowerCase();
+    return (
+      (item.notes || '').toLowerCase().includes(term) ||
+      (item.treasury_name || '').toLowerCase().includes(term) ||
+      getCategoryLabel(item.category).toLowerCase().includes(term)
+    );
+  });
 
   const handleSort = (key: string) => {
     if (sortKey === key) {
@@ -146,15 +170,16 @@ const ReportExpenses: React.FC = () => {
   );
 
   const chartData = [
-    { name: 'إعلانات وتسويق', value: data.totals.ads },
-    { name: 'رواتب وأجور', value: data.totals.salaries },
-    { name: 'إيجارات', value: data.totals.rent },
-    { name: 'مرافق وخدمات', value: data.totals.utilities },
-    { name: 'انتقالات وشحن', value: data.totals.transport },
-    { name: 'صيانة وإصلاح', value: data.totals.maintenance },
-    { name: 'ضيافة وبوفيه', value: data.totals.hospitality },
-    { name: 'أدوات مكتبية', value: data.totals.supplies },
-    { name: 'مصروفات متنوعة', value: data.totals.other }
+    { name: 'خامات وأقمشة', value: data.totals.materials || 0 },
+    { name: 'إعلانات وتسويق', value: data.totals.ads || 0 },
+    { name: 'رواتب وأجور', value: data.totals.salaries || 0 },
+    { name: 'إيجارات', value: data.totals.rent || 0 },
+    { name: 'مرافق وخدمات', value: data.totals.utilities || 0 },
+    { name: 'انتقالات وشحن', value: data.totals.transport || 0 },
+    { name: 'صيانة وإصلاح', value: data.totals.maintenance || 0 },
+    { name: 'ضيافة وبوفيه', value: data.totals.hospitality || 0 },
+    { name: 'أدوات مكتبية', value: data.totals.supplies || 0 },
+    { name: 'مصروفات متنوعة', value: data.totals.other || 0 }
   ].filter(item => item.value > 0);
 
   const exportCSV = () => {
@@ -219,12 +244,16 @@ const ReportExpenses: React.FC = () => {
       </head>
       <body>
         <h1>تقرير المصروفات العام</h1>
-        <div class="meta">الفترة من: ${startDate} إلى: ${endDate}</div>
+        <div class="meta">الفترة من: ${startDate} إلى: ${endDate} ${selectedCategory !== 'all' ? `| التصنيف: ${getCategoryLabel(selectedCategory)}` : ''}</div>
         
         <div class="summary-cards">
           <div class="card" style="border-top: 4px solid #ef4444; background: #fff5f5; min-width: 180px;">
             <h3>إجمالي المصروفات</h3>
             <p style="color: #ef4444; font-size: 20px;">${data.total_expenses.toLocaleString()} ${sym}</p>
+          </div>
+          <div class="card" style="border-top: 4px solid #0d9488;">
+            <h3>خامات وأقمشة</h3>
+            <p>${(data.totals.materials || 0).toLocaleString()} ${sym}</p>
           </div>
           <div class="card">
             <h3>إعلانات وتسويق</h3>
@@ -284,7 +313,7 @@ const ReportExpenses: React.FC = () => {
     }, 500);
   };
 
-  const kpiClass = "p-5 rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-right shadow-sm flex flex-col justify-between";
+  const kpiClass = "p-4 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-right shadow-sm flex flex-col justify-between";
   const quickRanges = [
     { label: 'اليوم', start: formatLocalDate(), end: formatLocalDate() },
     { label: 'هذا الشهر', start: getFirstDayOfMonth(), end: formatLocalDate() },
@@ -298,7 +327,7 @@ const ReportExpenses: React.FC = () => {
       <div className="bg-gradient-to-r from-rose-600 to-red-700 p-6 rounded-3xl text-white shadow-lg flex flex-col md:flex-row justify-between items-center gap-4">
         <div>
           <h2 className="text-2xl font-black flex items-center gap-2"><Receipt className="ml-1" /> تقرير المصروفات</h2>
-          <p className="text-white/80 mt-1">تتبع وتحليل كافة النفقات والمصروفات العامة التي يتم صرفها في صفحة الإيرادات والمصروفات</p>
+          <p className="text-white/80 mt-1">تتبع وتحليل كافة النفقات مع إمكانية الفلترة السريعة بالنقر على أي نوع مصروف</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex flex-wrap gap-2">
@@ -340,80 +369,52 @@ const ReportExpenses: React.FC = () => {
         </div>
       </div>
 
-      {/* KPI Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9 gap-3">
-        <div className={`${kpiClass} col-span-2 md:col-span-3 lg:col-span-1 xl:col-span-1 bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900`}>
-          <div className="text-slate-500 dark:text-slate-400 text-xs font-bold flex items-center gap-1.5 mb-2">
-            <ArrowDownRight className="text-red-500" /> إجمالي المصروفات
+      {/* KPI Grid - Clickable Category Filters */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-11 gap-2.5">
+        {/* Total Expenses Card (All) */}
+        <div 
+          onClick={() => setSelectedCategory('all')}
+          className={`${kpiClass} cursor-pointer transition-all duration-200 select-none hover:-translate-y-0.5 hover:shadow-md active:scale-95 ${
+            selectedCategory === 'all'
+              ? 'ring-2 ring-red-500 bg-red-50 dark:bg-red-950/40 border-red-300 dark:border-red-800 shadow-sm'
+              : 'hover:border-red-300'
+          }`}
+          title="عرض جميع المصروفات"
+        >
+          <div className="text-slate-500 dark:text-slate-400 text-xs font-bold flex items-center justify-between mb-1.5">
+            <span className="flex items-center gap-1.5"><ArrowDownRight className="text-red-500" size={15} /> الإجمالي</span>
+            {selectedCategory === 'all' && <span className="text-[10px] bg-red-600 text-white px-1.5 py-0.5 rounded-md font-bold">الكل</span>}
           </div>
-          <div className="text-xl font-black text-red-600 dark:text-red-400">
-            {fmt(data.total_expenses)} <span className="text-xs font-normal">{sym}</span>
-          </div>
-        </div>
-        <div className={kpiClass}>
-          <div className="text-slate-500 dark:text-slate-400 text-[11px] font-bold flex items-center gap-1 mb-2">
-            {getCategoryIcon('ads')} إعلانات وتسويق
-          </div>
-          <div className="text-base font-black text-pink-600 dark:text-pink-400">
-            {fmt(data.totals.ads)} <span className="text-[10px] font-normal text-slate-400">{sym}</span>
-          </div>
-        </div>
-        <div className={kpiClass}>
-          <div className="text-slate-500 dark:text-slate-400 text-[11px] font-bold flex items-center gap-1 mb-2">
-            {getCategoryIcon('salaries')} رواتب وأجور
-          </div>
-          <div className="text-base font-black text-indigo-600 dark:text-indigo-400">
-            {fmt(data.totals.salaries)} <span className="text-[10px] font-normal text-slate-400">{sym}</span>
+          <div className="text-lg font-black text-red-600 dark:text-red-400">
+            {fmt(data.total_expenses)} <span className="text-[10px] font-normal">{sym}</span>
           </div>
         </div>
-        <div className={kpiClass}>
-          <div className="text-slate-500 dark:text-slate-400 text-[11px] font-bold flex items-center gap-1 mb-2">
-            {getCategoryIcon('rent')} إيجارات
-          </div>
-          <div className="text-base font-black text-slate-800 dark:text-slate-100">
-            {fmt(data.totals.rent)} <span className="text-[10px] font-normal text-slate-400">{sym}</span>
-          </div>
-        </div>
-        <div className={kpiClass}>
-          <div className="text-slate-500 dark:text-slate-400 text-[11px] font-bold flex items-center gap-1 mb-2">
-            {getCategoryIcon('utilities')} مرافق وخدمات
-          </div>
-          <div className="text-base font-black text-slate-800 dark:text-slate-100">
-            {fmt(data.totals.utilities)} <span className="text-[10px] font-normal text-slate-400">{sym}</span>
-          </div>
-        </div>
-        <div className={kpiClass}>
-          <div className="text-slate-500 dark:text-slate-400 text-[11px] font-bold flex items-center gap-1 mb-2">
-            {getCategoryIcon('transport')} شحن وانتقالات
-          </div>
-          <div className="text-base font-black text-slate-800 dark:text-slate-100">
-            {fmt(data.totals.transport)} <span className="text-[10px] font-normal text-slate-400">{sym}</span>
-          </div>
-        </div>
-        <div className={kpiClass}>
-          <div className="text-slate-500 dark:text-slate-400 text-[11px] font-bold flex items-center gap-1 mb-2">
-            {getCategoryIcon('maintenance')} صيانة وإصلاح
-          </div>
-          <div className="text-base font-black text-slate-800 dark:text-slate-100">
-            {fmt(data.totals.maintenance)} <span className="text-[10px] font-normal text-slate-400">{sym}</span>
-          </div>
-        </div>
-        <div className={kpiClass}>
-          <div className="text-slate-500 dark:text-slate-400 text-[11px] font-bold flex items-center gap-1 mb-2">
-            {getCategoryIcon('hospitality')} ضيافة وبوفيه
-          </div>
-          <div className="text-base font-black text-slate-800 dark:text-slate-100">
-            {fmt(data.totals.hospitality)} <span className="text-[10px] font-normal text-slate-400">{sym}</span>
-          </div>
-        </div>
-        <div className={kpiClass}>
-          <div className="text-slate-500 dark:text-slate-400 text-[11px] font-bold flex items-center gap-1 mb-2">
-            {getCategoryIcon('supplies')} أدوات مكتبية
-          </div>
-          <div className="text-base font-black text-slate-800 dark:text-slate-100">
-            {fmt(data.totals.supplies)} <span className="text-[10px] font-normal text-slate-400">{sym}</span>
-          </div>
-        </div>
+
+        {/* Dynamic Category Cards */}
+        {categoriesConfig.map(cat => {
+          const isSelected = selectedCategory === cat.key;
+          const val = (data.totals as any)[cat.key] || 0;
+          return (
+            <div
+              key={cat.key}
+              onClick={() => setSelectedCategory(prev => prev === cat.key ? 'all' : cat.key)}
+              className={`${kpiClass} cursor-pointer transition-all duration-200 select-none hover:-translate-y-0.5 hover:shadow-md active:scale-95 ${
+                isSelected
+                  ? `${cat.activeRing} shadow-sm font-black`
+                  : 'hover:border-slate-300 dark:hover:border-slate-600'
+              }`}
+              title={`تصفية حسب: ${cat.label} (اضغط للتحديد أو الإلغاء)`}
+            >
+              <div className="text-slate-500 dark:text-slate-400 text-[11px] font-bold flex items-center justify-between gap-1 mb-1.5">
+                <span className="flex items-center gap-1 truncate">{getCategoryIcon(cat.key)} {cat.label}</span>
+                {isSelected && <span className="text-[10px] bg-rose-600 text-white px-1 py-0.5 rounded font-bold">✓</span>}
+              </div>
+              <div className={`text-base font-black ${cat.textClass}`}>
+                {fmt(val)} <span className="text-[10px] font-normal text-slate-400">{sym}</span>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {/* Chart and Table Grid */}
@@ -462,17 +463,34 @@ const ReportExpenses: React.FC = () => {
         {/* Table list */}
         <div className="lg:col-span-2 bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden flex flex-col justify-between h-96">
           <div className="p-4 border-b border-slate-100 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/50 dark:bg-slate-900/10">
-            <div className="flex items-center gap-3 bg-slate-50 dark:bg-slate-900 px-3 py-2 rounded-2xl w-full sm:w-60 border border-slate-200 dark:border-slate-700">
-              <Search className="text-slate-400 w-3.5 h-3.5" />
-              <input 
-                type="text" 
-                placeholder="بحث بالخزينة أو البيان..." 
-                value={searchTerm}
-                onChange={e => setSearchTerm(e.target.value)}
-                className="bg-transparent border-none focus:ring-0 text-xs w-full text-right"
-              />
+            <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+              <div className="flex items-center gap-3 bg-slate-50 dark:bg-slate-900 px-3 py-2 rounded-2xl w-full sm:w-60 border border-slate-200 dark:border-slate-700">
+                <Search className="text-slate-400 w-3.5 h-3.5" />
+                <input 
+                  type="text" 
+                  placeholder="بحث بالخزينة أو البيان..." 
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                  className="bg-transparent border-none focus:ring-0 text-xs w-full text-right"
+                />
+              </div>
+              {selectedCategory !== 'all' && (
+                <div className="flex items-center gap-1.5 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 px-3 py-1.5 rounded-xl text-xs font-bold border border-rose-200 dark:border-rose-800 animate-in fade-in">
+                  <span>تصفية: {getCategoryLabel(selectedCategory)}</span>
+                  <button 
+                    onClick={() => setSelectedCategory('all')} 
+                    className="hover:bg-rose-200 dark:hover:bg-rose-900 p-0.5 rounded-full transition"
+                    title="إلغاء الفلترة وعرض الكل"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              )}
             </div>
-            <div className="flex gap-2 justify-end">
+            <div className="flex items-center gap-2 justify-end">
+              <span className="text-[11px] font-bold text-slate-400 hidden md:inline">
+                {filteredList.length} حركة ({fmt(filteredList.reduce((s, r) => s + Number(r.amount || 0), 0))} {sym})
+              </span>
               <button 
                 onClick={exportCSV} 
                 className="p-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold flex items-center justify-center transition active:scale-95"

@@ -367,14 +367,22 @@ if ($action === 'run') {
                 'version' => (string)$latest['version'],
                 'buildDate' => date('Y-m-d')
             ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            $pkgPath = $root . '/package.json';
+            if (file_exists($pkgPath)) {
+                $pkgData = json_decode(@file_get_contents($pkgPath), true);
+                if (is_array($pkgData)) {
+                    $pkgData['version'] = (string)$latest['version'];
+                    @file_put_contents($pkgPath, json_encode($pkgData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+                }
+            }
         }
 
         @unlink($lockPath);
 
         // Auto-trigger background rebuild and server restart
-        $restartBat = file_exists($root . '/restart.bat') ? ($root . '/restart.bat') : ($root . '/update_and_restart.bat');
+        $restartBat = file_exists($root . '/update_and_restart.bat') ? ($root . '/update_and_restart.bat') : ($root . '/restart.bat');
         if (file_exists($restartBat)) {
-            $cmd = 'start "" /B cmd.exe /c "' . $restartBat . ' >nul 2>&1"';
+            $cmd = 'start "" cmd.exe /c "' . $restartBat . '"';
             @pclose(@popen($cmd, "r"));
         }
 

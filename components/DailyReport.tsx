@@ -78,13 +78,14 @@ const DailyReport: React.FC = () => {
         setOrderStats({ delivered_orders:0, returned_orders:0, delivered_pieces:0, returned_pieces:0, delivered_amount:0, returned_amount:0, pending_orders:0 });
       }
 
-      // ── 3. Rep daily journal (assigned orders/pieces) ────────────────
+      // ── 3. Rep daily journal (assigned orders/pieces - Closed Journals Only) ────
       try {
         const jUrl = `${API_BASE_PATH}/api.php?module=sales&action=getRepDailyJournal&from=${date}&to=${date}`;
         const jj = await fetch(jUrl).then(r => r.json()).catch(() => null);
         if (jj && jj.success && Array.isArray(jj.data)) {
-          const orders = jj.data.reduce((s: number, r: any) => s + Number(r.orders_assigned_count || 0), 0);
-          const pieces = jj.data.reduce((s: number, r: any) => s + Number(r.pieces_assigned_count || 0), 0);
+          const closedOnly = jj.data.filter((r: any) => Number(r.is_closed) === 1);
+          const orders = closedOnly.reduce((s: number, r: any) => s + Number(r.orders_assigned_count || 0), 0);
+          const pieces = closedOnly.reduce((s: number, r: any) => s + Number(r.pieces_assigned_count || 0), 0);
           setAssignedToRepsStats({ orders, pieces });
         } else {
           setAssignedToRepsStats({ orders: 0, pieces: 0 });

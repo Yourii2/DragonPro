@@ -4,7 +4,7 @@ import { API_BASE_PATH } from '../services/apiConfig';
 import CustomSelect from './CustomSelect';
 import { PrintableContent, PrintableOrders, PrintableOrdersSingle } from './PrintTemplates';
 import { cleanBarcode, isOrderMatchingBarcode } from '../services/barcodeUtils';
-import { ArrowLeftRight, Check, AlertCircle, Loader2, RefreshCw, Search, X } from 'lucide-react';
+import { ArrowLeftRight, Check, AlertCircle, Loader2, RefreshCw, Search, X, User } from 'lucide-react';
 
 // --- المكون الرئيسي ---
 
@@ -27,11 +27,12 @@ const SalesUpdateStatus: React.FC = () => {
   const [openPartialOrder, setOpenPartialOrder] = useState<any | null>(null);
   const [partialProducts, setPartialProducts] = useState<any[]>([]);
   const [partialWarehouse, setPartialWarehouse] = useState<number | undefined>(undefined);
-  const [returnItems, setReturnItems] = useState<Array<{ productId: number; name: string; quantity: number; lineId: string; color?: string; size?: string }>>([]);
+  const [returnItems, setReturnItems] = useState<Array<{ productId: number; orderItemId?: number; name: string; quantity: number; lineId: string; color?: string; size?: string }>>([]);
   const [isBarcodeModalOpen, setIsBarcodeModalOpen] = useState(false);
   const [scanInput, setScanInput] = useState('');
   const [scannedBarcodes, setScannedBarcodes] = useState<Array<{ code: string; orderId?: number }>>([]);
-  const [repSearch, setRepSearch] = useState('');
+  const [dailyFilter, setDailyFilter] = useState<'all' | 'open' | 'closed'>('all');
+  const [selectedRepId, setSelectedRepId] = useState<string>('');
 
   // --- حالة الاستبدال (Exchange Order Item) ---
   const [openExchangeOrder, setOpenExchangeOrder] = useState<any | null>(null);
@@ -95,10 +96,19 @@ const SalesUpdateStatus: React.FC = () => {
         // Build initial repsSummary list from users/companies but DO NOT fetch all orders here
         const repsList = Array.from(repIdToNameMap.entries()).map(([id, entry]) => {
           if (isShippingMode) {
-            return { repId: Number(id), name: String(entry || `شركة شحن #${id}`), balance: 0, ordersCount: 0, productsCount: 0 };
+            return { repId: Number(id), name: String(entry || `شركة شحن #${id}`), balance: 0, ordersCount: 0, productsCount: 0, has_open_daily: 0, open_daily_id: null, open_daily_code: null };
           }
           const u = entry as any;
-          return { repId: Number(id), name: (u && (u.name || u.fullname)) || String(u || `مندوب #${id}`), balance: Number(u?.balance || 0), ordersCount: 0, productsCount: 0 };
+          return {
+            repId: Number(id),
+            name: (u && (u.name || u.fullname)) || String(u || `مندوب #${id}`),
+            balance: Number(u?.balance || 0),
+            has_open_daily: Number(u?.has_open_daily || 0),
+            open_daily_id: u?.open_daily_id ? Number(u.open_daily_id) : null,
+            open_daily_code: u?.open_daily_code || null,
+            ordersCount: 0,
+            productsCount: 0
+          };
         });
         setRepsSummary(repsList);
         // populate counts for reps (orders/products) in background so counts show on page open
@@ -153,10 +163,19 @@ const SalesUpdateStatus: React.FC = () => {
 
       const repsList = Array.from(repIdToNameMap.entries()).map(([id, entry]) => {
         if (isShippingMode) {
-          return { repId: Number(id), name: String(entry || `شركة شحن #${id}`), balance: 0, ordersCount: 0, productsCount: 0 };
+          return { repId: Number(id), name: String(entry || `شركة شحن #${id}`), balance: 0, ordersCount: 0, productsCount: 0, has_open_daily: 0, open_daily_id: null, open_daily_code: null };
         }
         const u = entry as any;
-        return { repId: Number(id), name: (u && (u.name || u.fullname)) || String(u || `مندوب #${id}`), balance: Number(u?.balance || 0), ordersCount: 0, productsCount: 0 };
+        return {
+          repId: Number(id),
+          name: (u && (u.name || u.fullname)) || String(u || `مندوب #${id}`),
+          balance: Number(u?.balance || 0),
+          has_open_daily: Number(u?.has_open_daily || 0),
+          open_daily_id: u?.open_daily_id ? Number(u.open_daily_id) : null,
+          open_daily_code: u?.open_daily_code || null,
+          ordersCount: 0,
+          productsCount: 0
+        };
       });
       setRepsSummary(repsList);
       // Kick off background population of ordersCount/productsCount without blocking UI
@@ -186,7 +205,8 @@ const SalesUpdateStatus: React.FC = () => {
       'partial': 'تسليم جزئي',
       'partial_return': 'تسليم جزئي',
       'new': 'جديد',
-      'returned_with_rep': 'مرتجع جزئي مع المندوب'
+      'returned_with_rep': 'مرتجع جزئي مع المندوب',
+      'exchange': 'استبدال'
     };
     return map[st] || s;
   };
@@ -223,8 +243,8 @@ const SalesUpdateStatus: React.FC = () => {
       })
       .filter((o: any) => {
         const status = String(o?.status || '').toLowerCase();
-        // استبعاد الطلبات التي تم إرجاعها بالكامل فقط أو التي لا تحتوي على قطع متبقية
-        if (status === 'returned' || status === 'full_return') return false;
+        // Exclude orders already finalized as delivered or fully returned.
+        if (status === 'delivered' || status === 'returned' || status === 'full_return') return false;
         if (Number(o?.remainingPieces || 0) <= 0) return false;
         // الطلبات التي تم إرجاعها جزئيًا أو التي لا تزال تحتوي على قطع متبقية أو بحالة مرتجع مع المندوب يجب أن تظهر
         if (status === 'partial_return' || status === 'partial' || status === 'returned_with_rep') return true;
@@ -285,7 +305,6 @@ const SalesUpdateStatus: React.FC = () => {
       const repIdLocal = openRepOrders?.repId ?? null;
       let totalReturned = 0;
       let totalPartialReturned = 0;
-      let totalPartialDelivered = 0;
 
       for (const id of ids) {
         const ord = (openRepOrders?.orders || []).find((o: any) => o.id === id);
@@ -301,35 +320,26 @@ const SalesUpdateStatus: React.FC = () => {
         const isFullReturn = !hasPartialItems;
 
         if (isFullReturn) {
-          // إرسال طلب تحديث الحالة فقط
-          await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ rep_id: Number(orderRepId), order_ids: [id], status: 'full_return' })
-          });
-          // إعادة الكميات للمخزن
-          await fetch(`${API_BASE_PATH}/api.php?module=orders&action=returnToStock`, {
+          // returnToStock records the return, updates its journal row, and credits the rep atomically.
+          const returnResponse = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=returnToStock`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ order_id: id, warehouse_id: warehouseId, rep_id: Number(orderRepId) })
           });
-          totalReturned += computeOrderSubtotal(ord);
+          const returnResult = await returnResponse.json();
+          if (!returnResult?.success) throw new Error(returnResult?.message || 'فشل تسجيل المرتجع في المخزن.');
+          totalReturned += Number(returnResult.returnedValue || 0);
         } else {
           // مرتجع جزئي: قسم المنتجات المرتجعة عن المسلمة
           const returnedProducts = prods.filter((p: any) => Number(p.returnQuantity || 0) > 0);
-          const deliveredProducts = prods.filter((p: any) => !p.returnQuantity || Number(p.returnQuantity) < Number(p.quantity || p.qty || 0));
           // إرسال المرتجع للمخزن
           if (returnedProducts.length > 0) {
-            await fetch(`${API_BASE_PATH}/api.php?module=orders&action=partialReturn`, {
+            const returnResponse = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=partialReturn`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ order_id: id, rep_id: orderRepId, items: returnedProducts.map((p: any) => ({ productId: p.productId || p.product_id, quantity: Number(p.returnQuantity) })), warehouse_id: warehouseId, notes: '' })
+              body: JSON.stringify({ order_id: id, rep_id: orderRepId, items: returnedProducts.map((p: any) => ({ orderItemId: p.order_item_id || p.id, productId: p.productId || p.product_id, quantity: Number(p.returnQuantity) })), warehouse_id: warehouseId, notes: '' })
             });
-            totalPartialReturned += returnedProducts.reduce((s: number, p: any) => s + (Number(p.returnQuantity) * Number(p.price || p.sale_price || 0)), 0);
-          }
-          if (deliveredProducts.length > 0) {
-            await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ rep_id: Number(orderRepId), order_ids: [id], status: 'partial_return' })
-            });
-            totalPartialDelivered += deliveredProducts.reduce((s: number, p: any) => s + (Number(p.quantity || p.qty || 0) * Number(p.price || p.sale_price || 0)), 0);
+            const returnResult = await returnResponse.json();
+            if (!returnResult?.success) throw new Error(returnResult?.message || 'فشل تسجيل المرتجع الجزئي.');
+            totalPartialReturned += Number(returnResult.returnedValue || 0);
           }
         }
       }
@@ -349,7 +359,7 @@ const SalesUpdateStatus: React.FC = () => {
           if (String(r.repId) !== String(repIdLocal2)) return r;
           return {
             ...r,
-            balance: Number(r.balance || 0) - totalDeduction,
+            balance: Number(r.balance || 0) + totalDeduction,
             ordersCount: Math.max(0, (r.ordersCount || 0) - ids.length)
           };
         }));
@@ -370,7 +380,10 @@ const SalesUpdateStatus: React.FC = () => {
           setOpenRepOrders((prev: any) => prev ? ({ ...prev, orders: freshOrders }) : prev);
         }
       } catch (e) { }
-    } catch (e) { console.error(e); Swal.fire('خطأ', 'فشل في العملية.', 'error'); }
+    } catch (e: any) {
+      console.error(e);
+      Swal.fire('خطأ', e?.message || 'فشل في العملية.', 'error');
+    }
   };
 
   // تفعيل الطباعة عند تغيير state
@@ -389,6 +402,7 @@ const SalesUpdateStatus: React.FC = () => {
   };
 
   const openOrdersForRep = (rep: any) => {
+    setSelectedRepId(String(rep.repId));
     // Lazy-load orders for the selected rep/company to avoid fetching all orders on page load
     (async () => {
       try {
@@ -406,6 +420,15 @@ const SalesUpdateStatus: React.FC = () => {
         setSelectedOrderIds([]);
       }
     })();
+  };
+
+  const handleSelectRep = (repIdVal: string) => {
+    setSelectedRepId(repIdVal);
+    if (!repIdVal) return;
+    const foundRep = repsSummary.find((r: any) => String(r.repId) === String(repIdVal));
+    if (foundRep) {
+      openOrdersForRep(foundRep);
+    }
   };
 
   const fetchOrdersForRep = async (repId: number) => {
@@ -464,6 +487,7 @@ const SalesUpdateStatus: React.FC = () => {
     const prods = (order.products || []).map((p: any, idx: number) => ({
       // lineId distinguishes duplicate product lines even if productId matches
       lineId: p.line_id ?? p.lineId ?? `${order.id}-${idx}`,
+      orderItemId: Number(p.order_item_id || p.id || 0) || undefined,
       productId: p.productId || p.product_id || p.id || 0,
       name: p.name || '',
       // color / size extracted from common fields
@@ -530,7 +554,7 @@ const SalesUpdateStatus: React.FC = () => {
     const savedOrderRepId = (openPartialOrder as any).rep_id ?? (openPartialOrder as any).repId ?? openRepOrders?.repId ?? null;
     try {
       // Build payload compatible with server partialReturn handler
-      const itemsPayload = (returnItems || []).map(r => ({ lineId: r.lineId, productId: r.productId, quantity: Number(r.quantity || 0) }));
+      const itemsPayload = (returnItems || []).map(r => ({ orderItemId: r.orderItemId, lineId: r.lineId, productId: r.productId, quantity: Number(r.quantity || 0) }));
       const payload: any = { order_id: savedOrderId, rep_id: savedOrderRepId, items: itemsPayload, warehouse_id: partialWarehouse, notes: '' };
       const res = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=partialReturn`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const j = await res.json();
@@ -581,21 +605,11 @@ const SalesUpdateStatus: React.FC = () => {
           const repIdLocal = openRepOrders.repId;
           setRepsSummary(prev => prev.map(r => {
             if (String(r.repId) !== String(repIdLocal)) return r;
-            const newBal = Number((r.balance || 0)) - rv;
+            const newBal = Number((r.balance || 0)) + rv;
             return { ...r, balance: newBal };
           }));
-          setOpenRepOrders((prev: any) => prev ? ({ ...prev, balance: Number((prev.balance || 0)) - rv }) : prev);
+          setOpenRepOrders((prev: any) => prev ? ({ ...prev, balance: Number((prev.balance || 0)) + rv }) : prev);
         }
-
-        // تحديث rep_journal_orders قبل إغلاق النافذة
-        try {
-          if (savedOrderRepId && savedOrderId) {
-            await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ rep_id: savedOrderRepId, order_ids: [savedOrderId], status: 'partial_return' })
-            });
-          }
-        } catch (jErr) { console.warn('updateJournalOrderStatus partial_return failed (non-critical)', jErr); }
 
         // إعادة تحميل طلبات المندوب لضمان تحديث الحسابات والقيم
         try {
@@ -738,27 +752,33 @@ const SalesUpdateStatus: React.FC = () => {
     return Number(exchangeOldItem.exchangeQty || 0) * exchangeNewUnitPrice;
   }, [exchangeOldItem, selectedNewVariant, exchangeNewUnitPrice]);
 
+  const exchangeDeliveredTotal = exchangeOldTotal;
+  const exchangeReturnedTotal = exchangeNewTotal;
+
   const exchangePriceDiff = useMemo(() => {
-    return exchangeNewTotal - exchangeOldTotal;
-  }, [exchangeNewTotal, exchangeOldTotal]);
+    return exchangeDeliveredTotal - exchangeReturnedTotal;
+  }, [exchangeDeliveredTotal, exchangeReturnedTotal]);
+
+  const exchangeShippingFees = useMemo(() => {
+    return Number(openExchangeOrder?.shipping || openExchangeOrder?.shipping_fees || openExchangeOrder?.shippingCost || 0);
+  }, [openExchangeOrder]);
+
+  const exchangeCollectedTotal = useMemo(() => {
+    return (exchangePriceDiff > 0 ? exchangePriceDiff : 0) + exchangeShippingFees;
+  }, [exchangePriceDiff, exchangeShippingFees]);
 
   const submitExchangeOrderItem = async () => {
     if (!openExchangeOrder) return;
     if (!exchangeWarehouse) {
-      Swal.fire('مطلوب', 'يرجى تحديد المستودع لإتمام الاستبدال.', 'warning');
+      Swal.fire('مطلوب', 'يرجى تحديد مستودع استلام الصنف المرتجع.', 'warning');
       return;
     }
     if (!exchangeOldItem) {
-      Swal.fire('مطلوب', 'يرجى اختيار المنتج المراد استبداله من الطلب.', 'warning');
+      Swal.fire('مطلوب', 'يرجى اختيار الصنف المسلَّم للعميل من الطلب.', 'warning');
       return;
     }
     if (!selectedNewVariant) {
-      Swal.fire('مطلوب', 'يرجى اختيار المنتج البديل (اللون والمقاس).', 'warning');
-      return;
-    }
-    const availStock = Number(selectedNewVariant.total_stock || selectedNewVariant.stock || 0);
-    if (availStock < exchangeOldItem.exchangeQty) {
-      Swal.fire('رصيد غير كافٍ', `الكمية المتوفرة في المستودع للمنتج البديل هي ${availStock} قطعة فقط، ولا تكفي لاستبدال ${exchangeOldItem.exchangeQty} قطعة.`, 'error');
+      Swal.fire('مطلوب', 'يرجى اختيار الصنف المرتجع المستلم من العميل.', 'warning');
       return;
     }
 
@@ -767,17 +787,22 @@ const SalesUpdateStatus: React.FC = () => {
       const payload = {
         order_id: openExchangeOrder.id,
         warehouse_id: exchangeWarehouse,
-        old_item: {
+        delivered_item: {
           order_item_id: exchangeOldItem.orderItemId,
           product_id: exchangeOldItem.productId,
           quantity: exchangeOldItem.exchangeQty,
           price: exchangeOldItem.price
         },
-        new_item: {
+        returned_item: {
           variant_id: selectedNewVariant.id,
           quantity: exchangeOldItem.exchangeQty,
-          price: exchangeNewUnitPrice
+          price: exchangeNewUnitPrice,
+          name: selectedNewVariant.parent_name || selectedNewVariant.name,
+          color: selectedNewVariant.color,
+          size: selectedNewVariant.size
         },
+        price_diff: exchangePriceDiff,
+        collected_amount: exchangeCollectedTotal,
         notes: exchangeNotes
       };
 
@@ -797,7 +822,7 @@ const SalesUpdateStatus: React.FC = () => {
           if (!prev) return prev;
           return {
             ...prev,
-            orders: (prev.orders || []).map((o: any) => (o.id === updated.id ? { ...o, ...updated } : o))
+            orders: (prev.orders || []).map((o: any) => (o.id === updated.id ? { ...o, ...updated, status: 'exchange' } : o))
           };
         });
       }
@@ -818,17 +843,25 @@ const SalesUpdateStatus: React.FC = () => {
       setExchangeOldItem(null);
       setExchangeTargetVariantId(null);
 
-      let diffMsg = '';
-      if (Math.abs(data.price_diff) > 0.001) {
-        diffMsg = data.price_diff > 0
-          ? `<br><span style="color:#059669; font-weight:bold;">زيادة مطلوبة: +${data.price_diff} ج.م تم إضافتها لإجمالي الأوردر وزيادة المطلوب من المندوب.</span>`
-          : `<br><span style="color:#2563eb; font-weight:bold;">تخفيض للعميل: ${data.price_diff} ج.م تم خصمها من إجمالي الأوردر وتخفيض المطلوب من المندوب.</span>`;
-      }
+      const diffText = exchangePriceDiff > 0 
+        ? `+${exchangePriceDiff.toLocaleString()} ج.م (لصالح الشركة)`
+        : exchangePriceDiff < 0
+          ? `${exchangePriceDiff.toLocaleString()} ج.م (تخفيض للعميل)`
+          : `0 ج.م (متكافئ)`;
 
       Swal.fire({
-        title: 'تم الاستبدال بنجاح',
-        html: `تم استبدال المنتج بنجاح وتحديث حركة المخزون في المستودع.${diffMsg}`,
-        icon: 'success'
+        title: 'تم تسجيل الاستبدال واستلام المرتجع بالمخزن',
+        html: `<div style="text-align: right; direction: rtl; font-size: 13px; line-height: 1.8;">
+          <div><b>المسلَّم للعميل (الصنف الجديد):</b> ${exchangeOldItem.name} (${exchangeOldItem.exchangeQty} قطعة - ${exchangeDeliveredTotal.toLocaleString()} ج.م)</div>
+          <div><b>المرتجع للمخزن (الصنف القديم):</b> ${selectedNewVariant.parent_name || selectedNewVariant.name} (${selectedNewVariant.color || ''} ${selectedNewVariant.size || ''}) - ${exchangeReturnedTotal.toLocaleString()} ج.م</div>
+          <div><b>فرق السعر:</b> <span style="font-weight:bold; color:${exchangePriceDiff >= 0 ? '#059669' : '#2563eb'}">${diffText}</span></div>
+          <div><b>مصاريف الشحن:</b> ${exchangeShippingFees.toLocaleString()} ج.م</div>
+          <div style="margin-top: 8px; padding: 8px; background: #ecfdf5; color: #065f46; border-radius: 8px; font-weight: bold; border: 1px solid #a7f3d0;">
+            إجمالي المطلوب تحصيله بواسطة المندوب: ${exchangeCollectedTotal.toLocaleString()} ج.م
+          </div>
+        </div>`,
+        icon: 'success',
+        confirmButtonText: 'حسناً'
       });
     } catch (e: any) {
       console.error('Exchange failed', e);
@@ -1383,11 +1416,68 @@ const SalesUpdateStatus: React.FC = () => {
     setScanInput('');
   };
 
-  const displayedReps = repsSummary.filter((r: any) => {
-    if (!repSearch.trim()) return true;
-    const q = repSearch.trim().toLowerCase();
-    return (r.name && String(r.name).toLowerCase().includes(q)) || String(r.repId).includes(q);
-  });
+  // Counts for daily status tabs
+  const repCounts = useMemo(() => {
+    let openCount = 0;
+    let closedCount = 0;
+    repsSummary.forEach((r: any) => {
+      if (Number(r.has_open_daily) === 1) openCount++;
+      else closedCount++;
+    });
+    return { all: repsSummary.length, open: openCount, closed: closedCount };
+  }, [repsSummary]);
+
+  // Filtered reps based on dailyFilter
+  const filteredReps = useMemo(() => {
+    return repsSummary.filter((r: any) => {
+      if (isShippingMode) return true;
+      const isOpen = Number(r.has_open_daily) === 1;
+      if (dailyFilter === 'open' && !isOpen) return false;
+      if (dailyFilter === 'closed' && isOpen) return false;
+      return true;
+    });
+  }, [repsSummary, dailyFilter, isShippingMode]);
+
+  const repSelectOptions = useMemo(() => {
+    return filteredReps.map((r: any) => {
+      const isOpen = Number(r.has_open_daily) === 1;
+      return {
+        value: String(r.repId),
+        searchLabel: `${r.name || ''} ${r.repId} ${r.open_daily_code || ''}`,
+        label: (
+          <div className="flex items-center justify-between gap-2 w-full py-0.5">
+            <div className="flex items-center gap-2 min-w-0">
+              {!isShippingMode && (
+                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${isOpen ? 'bg-emerald-500 ring-2 ring-emerald-300 dark:ring-emerald-900 animate-pulse' : 'bg-slate-300 dark:bg-slate-600'}`} />
+              )}
+              <span className="font-bold truncate text-slate-800 dark:text-slate-200">{r.name || ((isShippingMode ? 'شركة شحن #' : 'مندوب #') + r.repId)}</span>
+              <span className="text-[10px] text-slate-400 font-mono">#{r.repId}</span>
+            </div>
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              {!isShippingMode && (
+                isOpen ? (
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                    {r.open_daily_code || 'مفتوحة'}
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 border border-slate-200 dark:border-slate-700">
+                    مغلقة
+                  </span>
+                )
+              )}
+              {r.ordersCount > 0 && (
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                  {r.ordersCount} أوردر
+                </span>
+              )}
+            </div>
+          </div>
+        )
+      };
+    });
+  }, [filteredReps, isShippingMode]);
+
+  const displayedReps = filteredReps;
 
   return (
     <div className="p-4 rounded-2xl border border-card dir-rtl card" style={{ backgroundColor: 'var(--card-bg)', color: 'var(--text)' }}>
@@ -1395,19 +1485,87 @@ const SalesUpdateStatus: React.FC = () => {
       {/* Hidden Print Container for print output. Choose single-per-page for shipping labels. */}
       {ordersToPrint && (printSinglePerPage ? <PrintableOrdersSingle orders={ordersToPrint} /> : <PrintableOrders orders={ordersToPrint} />)}
 
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-        <h2 className="font-black text-lg">تسجيل المرتجعات</h2>
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            value={repSearch}
-            onChange={e => setRepSearch(e.target.value)}
-            placeholder={isShippingMode ? 'بحث عن شركة شحن...' : 'بحث عن مندوب بالاسم أو الرقم...'}
-            className="px-3 py-1.5 border rounded-lg text-sm bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 w-64"
-          />
-          {repSearch && (
-            <button onClick={() => setRepSearch('')} className="px-2 py-1 text-xs bg-slate-200 rounded hover:bg-slate-300">مسح</button>
-          )}
+      {/* Page Title & Main Filter/Selector Panel */}
+      <div className="mb-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="font-black text-lg text-slate-800 dark:text-slate-100">تسجيل المرتجعات</h2>
+        </div>
+
+        {/* Rep & Daily Filter Panel */}
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 shadow-sm space-y-3">
+          {/* Top row: Header & Daily status tabs */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
+            <div className="flex items-center gap-2">
+              <User className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+              <span className="text-xs font-black text-slate-800 dark:text-slate-200">
+                {isShippingMode ? 'تصفية واختيار شركة الشحن' : 'تصفية واختيار المندوب'}
+              </span>
+            </div>
+
+            {/* Daily status filter tabs: الكل / يومية مفتوحة / يومية مغلقة */}
+            {!isShippingMode && (
+              <div className="inline-flex rounded-xl bg-slate-100 dark:bg-slate-800/90 p-1 border border-slate-200/70 dark:border-slate-700/70">
+                <button
+                  type="button"
+                  onClick={() => setDailyFilter('all')}
+                  className={`px-3 py-1 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 ${
+                    dailyFilter === 'all'
+                      ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  <span>الكل</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${dailyFilter === 'all' ? 'bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300' : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'}`}>
+                    {repCounts.all}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDailyFilter('open')}
+                  className={`px-3 py-1 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 ${
+                    dailyFilter === 'open'
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400'
+                  }`}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>يومية مفتوحة</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${dailyFilter === 'open' ? 'bg-emerald-700 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'}`}>
+                    {repCounts.open}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDailyFilter('closed')}
+                  className={`px-3 py-1 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 ${
+                    dailyFilter === 'closed'
+                      ? 'bg-slate-800 text-white dark:bg-slate-600 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  <span>يومية مغلقة</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${dailyFilter === 'closed' ? 'bg-slate-900 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'}`}>
+                    {repCounts.closed}
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Middle row: CustomSelect only */}
+          <div className="pt-1">
+            <CustomSelect
+              value={selectedRepId}
+              onChange={handleSelectRep}
+              options={repSelectOptions}
+              placeholder={
+                filteredReps.length === 0
+                  ? (dailyFilter === 'open' ? '— لا يوجد مناديب بيومية مفتوحة —' : '— لا توجد نتائج مطابقة —')
+                  : `— اختر ${isShippingMode ? 'شركة الشحن' : 'المندوب'} (${filteredReps.length} متاح) —`
+              }
+              disabled={loading}
+            />
+          </div>
         </div>
       </div>
 
@@ -1425,19 +1583,35 @@ const SalesUpdateStatus: React.FC = () => {
           ) : (
             <div className="space-y-3">
               {displayedReps.map((rep: any) => (
-                <div key={rep.repId} className="p-3 border rounded-lg flex justify-between items-center bg-slate-50">
+                <div key={rep.repId} className={`p-3 border rounded-xl flex justify-between items-center transition-all ${selectedRepId === String(rep.repId) ? 'border-indigo-500 bg-indigo-50/50 dark:bg-indigo-950/20 shadow-sm ring-1 ring-indigo-500' : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700'}`}>
                   <div>
-                    <div className="font-bold">{rep.name || ((isShippingMode ? 'شركة شحن #' : 'مندوب #') + rep.repId)}</div>
-                    <div className="text-sm text-slate-500">عدد الاوردرات: <span className="font-black">{rep.ordersCount}</span> — عدد المنتجات: <span className="font-black">{rep.productsCount}</span></div>
+                    <div className="flex items-center gap-2">
+                      {!isShippingMode && (
+                        <span className={`w-2 h-2 rounded-full ${Number(rep.has_open_daily) === 1 ? 'bg-emerald-500 ring-2 ring-emerald-300 dark:ring-emerald-900 animate-pulse' : 'bg-slate-400'}`} />
+                      )}
+                      <span className="font-bold text-slate-800 dark:text-slate-100">{rep.name || ((isShippingMode ? 'شركة شحن #' : 'مندوب #') + rep.repId)}</span>
+                      {!isShippingMode && (
+                        Number(rep.has_open_daily) === 1 ? (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                            {rep.open_daily_code || 'يومية مفتوحة'}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 border border-slate-200 dark:border-slate-700">
+                            مغلقة
+                          </span>
+                        )
+                      )}
+                    </div>
+                    <div className="text-xs text-slate-500 mt-1">عدد الاوردرات: <span className="font-black text-slate-800 dark:text-slate-200">{rep.ordersCount}</span> — عدد المنتجات: <span className="font-black text-slate-800 dark:text-slate-200">{rep.productsCount}</span></div>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
                     {/* rep balance hidden by request */}
-                    <button onClick={() => openOrdersForRep(rep)} className="bg-blue-600 text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-blue-700">عرض الاوردرات</button>
+                    <button onClick={() => openOrdersForRep(rep)} className="bg-indigo-600 text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-indigo-700 transition-colors shadow-sm">عرض الاوردرات</button>
                     {SHOW_ACTION_BUTTONS && (
                       <>
-                        <button onClick={() => { (async () => { const ords = await fetchOrdersForRep(rep.repId); printDailyDocument(ords); })(); }} className="bg-amber-500 text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-amber-600">عرض اليومية</button>
-                        <button onClick={() => { (async () => { const ords = await fetchOrdersForRep(rep.repId); printDeliveryNote(ords); })(); }} className="bg-emerald-600 text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-emerald-700">أذن التسليم</button>
-                        <button onClick={() => { (async () => { const ords = await fetchOrdersForRep(rep.repId); printShippingLabelsNew(ords); })(); }} className="bg-sky-600 text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-sky-700">طباعة بوالص الشحن فقط</button>
+                        <button onClick={() => { (async () => { const ords = await fetchOrdersForRep(rep.repId); printDailyDocument(ords); })(); }} className="bg-amber-500 text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-amber-600 transition-colors">عرض اليومية</button>
+                        <button onClick={() => { (async () => { const ords = await fetchOrdersForRep(rep.repId); printDeliveryNote(ords); })(); }} className="bg-emerald-600 text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-emerald-700 transition-colors">أذن التسليم</button>
+                        <button onClick={() => { (async () => { const ords = await fetchOrdersForRep(rep.repId); printShippingLabelsNew(ords); })(); }} className="bg-sky-600 text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-sky-700 transition-colors">طباعة بوالص الشحن فقط</button>
                       </>
                     )}
                   </div>
@@ -1477,6 +1651,11 @@ const SalesUpdateStatus: React.FC = () => {
                             {String(o.status || '').toLowerCase() === 'returned_with_rep' && (
                               <span className="text-[10px] font-bold bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full border border-orange-200">
                                 مرتجع جزئي مع المندوب
+                              </span>
+                            )}
+                            {String(o.status || '').toLowerCase() === 'exchange' && (
+                              <span className="text-[10px] font-bold bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full border border-purple-200">
+                                استبدال
                               </span>
                             )}
                           </div>
@@ -1649,7 +1828,7 @@ const SalesUpdateStatus: React.FC = () => {
                                   setReturnItems(prev => {
                                     // each product line is distinct — use lineId to identify
                                     const foundIdx = prev.findIndex(x => String(x.lineId) === String(p.lineId));
-                                    if (foundIdx === -1) return [{ lineId: p.lineId, productId: Number(p.productId), name: p.name || '', color: p.color || '', size: p.size || '', quantity: 1 }, ...prev];
+                                    if (foundIdx === -1) return [{ lineId: p.lineId, orderItemId: p.orderItemId, productId: Number(p.productId), name: p.name || '', color: p.color || '', size: p.size || '', quantity: 1 }, ...prev];
                                     return prev.map((x, i) => i === foundIdx ? { ...x, quantity: Math.min(maxQty, Number(x.quantity || 0) + 1) } : x);
                                   });
                                 }} className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700">ارتجاع قطعة</button>
@@ -1700,7 +1879,7 @@ const SalesUpdateStatus: React.FC = () => {
                   {/* Warehouse Selector Banner */}
                   <div className="py-2.5 px-3 bg-amber-50/70 dark:bg-amber-950/20 border-b border-amber-200 dark:border-amber-900/40 flex flex-wrap items-center justify-between gap-3 text-xs">
                     <div className="flex items-center gap-2 flex-1 min-w-[260px]">
-                      <span className="font-bold text-amber-900 dark:text-amber-200 whitespace-nowrap">مستودع الاستبدال (مطلوب):</span>
+                      <span className="font-bold text-amber-900 dark:text-amber-200 whitespace-nowrap">مستودع استلام الصنف المرتجع (مطلوب):</span>
                       <div className="w-64">
                         <CustomSelect
                           value={exchangeWarehouse ? String(exchangeWarehouse) : ''}
@@ -1714,23 +1893,23 @@ const SalesUpdateStatus: React.FC = () => {
                       </div>
                     </div>
                     <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                      * يدخل المنتج القديم لهذا المستودع، ويخرج المنتج البديل منه.
+                      * يدخل المنتج المرتجع من العميل إلى هذا المستودع وتُسجل حركته تلقائياً.
                     </div>
                   </div>
 
                   {/* Modal Body - 2 Columns */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-1 overflow-y-auto flex-1 custom-scrollbar my-3">
                     
-                    {/* Column 1: Old Item Selection */}
+                    {/* Column 1: Delivered Item Selection */}
                     <div className="border border-slate-200 dark:border-slate-800 rounded-xl p-3 flex flex-col bg-slate-50/50 dark:bg-slate-900/30">
                       <div className="flex justify-between items-center mb-2.5">
                         <span className="font-black text-xs text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                           <span className="w-5 h-5 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-[11px]">1</span>
-                          <span>المنتج المطلوب استبداله من الطلب:</span>
+                          <span>المنتج المُسلَّم للعميل (المطلوب في هذا الطلب):</span>
                         </span>
                         {exchangeOldItem && (
                           <span className="text-[11px] font-bold text-amber-600 bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 rounded-full">
-                            محدد للاستبدال
+                            محدد للتسليم
                           </span>
                         )}
                       </div>
@@ -1755,7 +1934,7 @@ const SalesUpdateStatus: React.FC = () => {
                                   size: (p.size ?? p.variant_size ?? p.measure ?? p.sizeName) || '',
                                   price: Number(p.price || p.sale_price || p.price_per_unit || 0),
                                   maxQty,
-                                  exchangeQty: isSelected ? exchangeOldItem.exchangeQty : 1
+                                  exchangeQty: isSelected ? (exchangeOldItem?.exchangeQty ?? 1) : 1
                                 });
                                 setExchangeTargetVariantId(null);
                               }}
@@ -1782,12 +1961,12 @@ const SalesUpdateStatus: React.FC = () => {
                                 <span className="text-[11px] text-slate-500">الكمية بالطلب: <b>{maxQty}</b> قطعة</span>
                                 {isSelected ? (
                                   <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
-                                    <span className="text-[11px] font-bold text-amber-700 dark:text-amber-300">الكمية المستبدلة:</span>
+                                    <span className="text-[11px] font-bold text-amber-700 dark:text-amber-300">الكمية:</span>
                                     <input
                                       type="number"
                                       min={1}
                                       max={maxQty}
-                                      value={exchangeOldItem.exchangeQty}
+                                      value={exchangeOldItem?.exchangeQty ?? 1}
                                       onChange={e => {
                                         const v = Math.max(1, Math.min(maxQty, Number(e.target.value || 1)));
                                         setExchangeOldItem(prev => prev ? { ...prev, exchangeQty: v } : null);
@@ -1805,12 +1984,12 @@ const SalesUpdateStatus: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Column 2: New Item Selection */}
+                    {/* Column 2: Returned Item Selection */}
                     <div className="border border-slate-200 dark:border-slate-800 rounded-xl p-3 flex flex-col bg-slate-50/50 dark:bg-slate-900/30">
                       <div className="flex justify-between items-center mb-2.5">
                         <span className="font-black text-xs text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                           <span className="w-5 h-5 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-[11px]">2</span>
-                          <span>المنتج البديل الجديد:</span>
+                          <span>المنتج المرتجع المستلم من العميل (يدخل المخزن):</span>
                         </span>
                       </div>
 
@@ -1829,7 +2008,7 @@ const SalesUpdateStatus: React.FC = () => {
                               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
                           }`}
                         >
-                          🔄 استبدال بنفس المنتج
+                          🔄 نفس نوع المنتج
                         </button>
                         <button
                           type="button"
@@ -1844,7 +2023,7 @@ const SalesUpdateStatus: React.FC = () => {
                               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
                           }`}
                         >
-                          ✨ استبدال بمنتج آخر
+                          ✨ منتج آخر مختلف
                         </button>
                       </div>
 
@@ -1853,12 +2032,12 @@ const SalesUpdateStatus: React.FC = () => {
                         {exchangeLoadingCatalog ? (
                           <div className="flex items-center justify-center py-10 gap-2 text-slate-400 text-xs">
                             <Loader2 className="animate-spin" size={16} />
-                            <span>جاري فحص أرصدة المخزن...</span>
+                            <span>جاري التحميل...</span>
                           </div>
                         ) : exchangeMode === 'same_product' ? (
                           <div>
                             <div className="text-xs text-slate-600 dark:text-slate-400 mb-2 font-bold flex items-center justify-between">
-                              <span>المقاسات والألوان المتاحة لنفس المنتج:</span>
+                              <span>المقاسات والألوان للصنف المرتجع:</span>
                               <span className="text-[11px] text-amber-600 font-normal">
                                 {currentParentProduct?.name || exchangeOldItem?.name || ''}
                               </span>
@@ -1871,26 +2050,20 @@ const SalesUpdateStatus: React.FC = () => {
                             ) : (
                               <div className="grid grid-cols-2 gap-2">
                                 {currentAvailableVariants.map((v: any) => {
-                                  const isCurrentOld = Number(v.id) === Number(exchangeOldItem?.productId);
                                   const isSelected = Number(v.id) === Number(exchangeTargetVariantId);
                                   const stock = Number(v.total_stock ?? v.stock ?? 0);
-                                  const isOutOfStock = stock < (exchangeOldItem?.exchangeQty || 1);
 
                                   return (
                                     <div
                                       key={v.id}
                                       onClick={() => {
-                                        if (!isOutOfStock) {
-                                          setExchangeTargetVariantId(Number(v.id));
-                                          setExchangeCustomPrice(String(Number(v.sale_price ?? v.price ?? 0)));
-                                        }
+                                        setExchangeTargetVariantId(Number(v.id));
+                                        setExchangeCustomPrice(String(Number(v.sale_price ?? v.price ?? 0)));
                                       }}
-                                      className={`p-2.5 rounded-xl border text-xs transition-all relative ${
-                                        isOutOfStock 
-                                          ? 'border-slate-200 dark:border-slate-800 bg-slate-100/60 dark:bg-slate-900/20 opacity-60 cursor-not-allowed'
-                                          : isSelected
-                                            ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 shadow-sm cursor-pointer'
-                                            : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-amber-300 cursor-pointer'
+                                      className={`p-2.5 rounded-xl border text-xs transition-all relative cursor-pointer ${
+                                        isSelected
+                                          ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 shadow-sm'
+                                          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-amber-300'
                                       }`}
                                     >
                                       <div className="flex justify-between items-start mb-1">
@@ -1908,20 +2081,10 @@ const SalesUpdateStatus: React.FC = () => {
                                         <span className="font-black text-slate-700 dark:text-slate-300">
                                           {Number(v.sale_price || v.price || 0).toLocaleString()} ج.م
                                         </span>
-                                        <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold ${
-                                          stock > 0 
-                                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' 
-                                            : 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
-                                        }`}>
-                                          المتوفر: {stock}
+                                        <span className="text-[10px] text-slate-400">
+                                          (مخزون: {stock})
                                         </span>
                                       </div>
-
-                                      {isCurrentOld && (
-                                        <div className="text-[9px] text-amber-600 font-semibold mt-1">
-                                          (الصنف الحالي المطلوب استبداله)
-                                        </div>
-                                      )}
                                     </div>
                                   );
                                 })}
@@ -1932,7 +2095,7 @@ const SalesUpdateStatus: React.FC = () => {
                           <div>
                             <div className="mb-2">
                               <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
-                                ابحث واختر المنتج البديل:
+                                ابحث واختر الصنف المرتجع من العميل:
                               </label>
                               <div className="relative mb-2">
                                 <Search size={14} className="absolute right-2.5 top-2.5 text-slate-400" />
@@ -1986,23 +2149,18 @@ const SalesUpdateStatus: React.FC = () => {
                                   {(selectedOtherParentProduct.variants || []).map((v: any) => {
                                     const isSelected = Number(v.id) === Number(exchangeTargetVariantId);
                                     const stock = Number(v.total_stock ?? v.stock ?? 0);
-                                    const isOutOfStock = stock < (exchangeOldItem?.exchangeQty || 1);
 
                                     return (
                                       <div
                                         key={v.id}
                                         onClick={() => {
-                                          if (!isOutOfStock) {
-                                            setExchangeTargetVariantId(Number(v.id));
-                                            setExchangeCustomPrice(String(Number(v.sale_price ?? v.price ?? 0)));
-                                          }
+                                          setExchangeTargetVariantId(Number(v.id));
+                                          setExchangeCustomPrice(String(Number(v.sale_price ?? v.price ?? 0)));
                                         }}
-                                        className={`p-2.5 rounded-xl border text-xs transition-all relative ${
-                                          isOutOfStock 
-                                            ? 'border-slate-200 dark:border-slate-800 bg-slate-100/60 dark:bg-slate-900/20 opacity-60 cursor-not-allowed'
-                                            : isSelected
-                                              ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 shadow-sm cursor-pointer'
-                                              : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-amber-300 cursor-pointer'
+                                        className={`p-2.5 rounded-xl border text-xs transition-all relative cursor-pointer ${
+                                          isSelected
+                                            ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 shadow-sm'
+                                            : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-amber-300'
                                         }`}
                                       >
                                         <div className="flex justify-between items-start mb-1">
@@ -2020,12 +2178,8 @@ const SalesUpdateStatus: React.FC = () => {
                                           <span className="font-black text-slate-700 dark:text-slate-300">
                                             {Number(v.sale_price || v.price || 0).toLocaleString()} ج.م
                                           </span>
-                                          <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold ${
-                                            stock > 0 
-                                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' 
-                                              : 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
-                                          }`}>
-                                            المتوفر: {stock}
+                                          <span className="text-[10px] text-slate-400">
+                                            (مخزون: {stock})
                                           </span>
                                         </div>
                                       </div>
@@ -2045,13 +2199,8 @@ const SalesUpdateStatus: React.FC = () => {
                             <div className="flex-1">
                               <div className="flex items-center gap-2">
                                 <span className="text-xs font-black text-amber-900 dark:text-amber-200">
-                                  سعر بيع القطعة للمنتج البديل:
+                                  سعر تقييم الصنف المرتجع:
                                 </span>
-                                {Number(selectedNewVariant.sale_price ?? selectedNewVariant.price ?? 0) === 0 && (
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-200 dark:bg-amber-900 text-amber-800 dark:text-amber-200 font-bold">
-                                    مسجل 0 ج.م
-                                  </span>
-                                )}
                               </div>
                               <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-1">
                                 <span>السعر المسجل بالنظام:</span>
@@ -2092,24 +2241,24 @@ const SalesUpdateStatus: React.FC = () => {
 
                   {/* Summary & Price Difference Footer */}
                   <div className="pt-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 rounded-xl p-3">
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs mb-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs mb-3">
                       <div className="p-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
-                        <span className="text-[11px] text-slate-500 block">إجمالي القديم المستبدل:</span>
+                        <span className="text-[10px] text-slate-500 block">المسلَّم للعميل (الجديد):</span>
                         <span className="font-black text-sm text-slate-800 dark:text-white">
-                          {exchangeOldTotal.toLocaleString()} ج.م
+                          {exchangeDeliveredTotal.toLocaleString()} ج.م
                         </span>
-                        <span className="text-[10px] text-slate-400 block mt-0.5">
-                          ({exchangeOldItem?.exchangeQty || 0} قطعة × {Number(exchangeOldItem?.price || 0).toLocaleString()} ج.م)
+                        <span className="text-[9px] text-slate-400 block mt-0.5">
+                          ({exchangeOldItem?.exchangeQty || 0} قطعة)
                         </span>
                       </div>
 
                       <div className="p-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
-                        <span className="text-[11px] text-slate-500 block">إجمالي البديل الجديد:</span>
-                        <span className="font-black text-sm text-emerald-600 dark:text-emerald-400">
-                          {selectedNewVariant ? `${exchangeNewTotal.toLocaleString()} ج.م` : '—'}
+                        <span className="text-[10px] text-slate-500 block">المرتجع للمخزن (القديم):</span>
+                        <span className="font-black text-sm text-rose-600 dark:text-rose-400">
+                          {selectedNewVariant ? `${exchangeReturnedTotal.toLocaleString()} ج.م` : '—'}
                         </span>
-                        <span className="text-[10px] text-slate-400 block mt-0.5">
-                          {selectedNewVariant ? `(${exchangeOldItem?.exchangeQty || 0} قطعة × ${exchangeNewUnitPrice.toLocaleString()} ج.م)` : 'لم يتم اختيار البديل'}
+                        <span className="text-[9px] text-slate-400 block mt-0.5">
+                          {selectedNewVariant ? `(${exchangeOldItem?.exchangeQty || 0} قطعة)` : 'لم يتم التحديد'}
                         </span>
                       </div>
 
@@ -2120,24 +2269,34 @@ const SalesUpdateStatus: React.FC = () => {
                             ? 'bg-blue-50 border-blue-200 text-blue-900 dark:bg-blue-950/40 dark:border-blue-800 dark:text-blue-200' 
                             : 'bg-white border-slate-200 dark:bg-slate-800 dark:border-slate-700'
                       }`}>
-                        <span className="text-[11px] block">فرق السعر الناتج:</span>
+                        <span className="text-[10px] block">فرق السعر:</span>
                         <span className="font-black text-sm">
                           {selectedNewVariant ? (
                             exchangePriceDiff === 0 
-                              ? '0 ج.م (متكافئ)' 
+                              ? '0 ج.م' 
                               : exchangePriceDiff > 0 
-                                ? `+ ${exchangePriceDiff.toLocaleString()} ج.م (زيادة مطلوبة)` 
-                                : `- ${Math.abs(exchangePriceDiff).toLocaleString()} ج.م (تخفيض للعميل)`
+                                ? `+${exchangePriceDiff.toLocaleString()} ج.م` 
+                                : `${exchangePriceDiff.toLocaleString()} ج.م`
                           ) : '—'}
                         </span>
-                        <span className="text-[10px] block mt-0.5 opacity-80">
+                        <span className="text-[9px] block mt-0.5 opacity-80">
                           {selectedNewVariant ? (
                             exchangePriceDiff > 0 
-                              ? 'يُضاف لمديونية المندوب والأوردر' 
+                              ? 'لصالح الشركة' 
                               : exchangePriceDiff < 0 
-                                ? 'يُخصم من مديونية المندوب والأوردر' 
-                                : 'لا يوجد تأثير مالي'
+                                ? 'تخفيض للعميل' 
+                                : 'متكافئ'
                           ) : ''}
+                        </span>
+                      </div>
+
+                      <div className="p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-200">
+                        <span className="text-[10px] block font-bold">المحصل بواسطة المندوب:</span>
+                        <span className="font-black text-sm text-emerald-700 dark:text-emerald-300">
+                          {selectedNewVariant ? `${exchangeCollectedTotal.toLocaleString()} ج.م` : '—'}
+                        </span>
+                        <span className="text-[9px] block mt-0.5 text-emerald-600 dark:text-emerald-400">
+                          (فرق السعر + {exchangeShippingFees.toLocaleString()} شحن)
                         </span>
                       </div>
                     </div>
@@ -2168,13 +2327,12 @@ const SalesUpdateStatus: React.FC = () => {
                             !exchangeWarehouse || 
                             !exchangeOldItem || 
                             !selectedNewVariant || 
-                            Number(selectedNewVariant.total_stock || selectedNewVariant.stock || 0) < (exchangeOldItem?.exchangeQty || 1) ||
                             exchangeSubmitting
                           }
                           className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-black rounded-xl shadow-md transition-all flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           {exchangeSubmitting ? <Loader2 size={14} className="animate-spin" /> : <ArrowLeftRight size={14} />}
-                          <span>{exchangeSubmitting ? 'جاري الاستبدال...' : 'تأكيد وإتمام الاستبدال'}</span>
+                          <span>{exchangeSubmitting ? 'جاري الاستبدال...' : 'تأكيد الاستبدال واستلام المرتجع'}</span>
                         </button>
                       </div>
                     </div>

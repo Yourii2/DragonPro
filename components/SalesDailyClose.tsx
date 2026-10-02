@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
-import { User, Wallet, PackageCheck, PackageX, CheckCircle2, RefreshCw, Eye, LayoutGrid, List, ArrowUp, ArrowDown, Loader2, Receipt, Plus, Trash2, Banknote } from 'lucide-react';
+import { User, Wallet, PackageCheck, PackageX, CheckCircle2, RefreshCw, Eye, LayoutGrid, List, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Loader2, Receipt, Plus, Trash2, Banknote, Search, X, Filter } from 'lucide-react';
 import CustomSelect from './CustomSelect';
 import { formatLocalDate } from '../services/dateUtils';
 
@@ -33,15 +33,22 @@ const balanceClass = (bal: number) => (bal > 0 ? 'text-emerald-600' : bal < 0 ? 
 // --- Order Computation Helpers ---
 const getRealOrderId = (o: any) => String(o?.order_id ?? o?.id ?? '');
 
+const isExchangeOrder = (order: any) => {
+  const status = String(order?.status || order?.order_status || order?.journal_status || '').toLowerCase();
+  return status === 'exchange';
+};
+
 const computePieces = (order: any) => {
   const status = String(order?.status || order?.order_status || '').toLowerCase();
   if (status === 'returned' || status === 'full_return') return 0;
+  if (status === 'exchange') return toNum(order?.delivered_pieces) || 1;
   const items = order.products || order.order_items || order.items || [];
   if (Array.isArray(items) && items.length > 0) return items.reduce((s: number, p: any) => s + toNum(p.quantity ?? p.qty ?? 0), 0);
   return toNum(order.pieces_count) || toNum(order.total_pieces) || 0;
 };
 
 const canPartialDeliver = (order: any) => {
+  if (isExchangeOrder(order)) return false;
   const items = order?.products || order?.order_items || order?.items || [];
   if (Array.isArray(items) && items.length > 0) {
     if (items.length > 1) return true;
@@ -76,14 +83,18 @@ const computeOrderValueWithoutShipping = (order: any) => {
 
 const computeReturnedPieces = (order: any) => {
   const status = String(order?.status || order?.order_status || order?.journal_status || '').toLowerCase();
+  if (status === 'with_rep') {
+    return toNum(order?.returned_pieces) || 0;
+  }
+  if (status === 'exchange') {
+    return toNum(order?.returned_pieces) || 1;
+  }
   if (status === 'returned_with_rep') {
-    const rp = toNum(order?.returned_pieces);
-    if (rp > 0) return rp;
-    const items = order.products || order.order_items || order.items || [];
-    if (Array.isArray(items) && items.length > 0) {
-      return items.reduce((s: number, p: any) => s + toNum(p.quantity ?? p.qty ?? 0), 0);
-    }
-    return 0;
+    return toNum(order?.returned_pieces_fallback);
+  }
+  const returnedPiecesFromMovements = toNum(order?.returned_pieces_fallback);
+  if ((status === 'partial' || status === 'partial_return') && returnedPiecesFromMovements > 0) {
+    return returnedPiecesFromMovements;
   }
   const directVal = toNum(order?.returned_pieces) || toNum(order?.returned_pieces_fallback);
   if (directVal > 0) return directVal;
@@ -104,10 +115,26 @@ const computeReturnedPieces = (order: any) => {
 
 const computeReturnedOrderValue = (order: any) => {
   const status = String(order?.status || order?.order_status || order?.journal_status || '').toLowerCase();
-  if (status === 'returned_with_rep') {
+  if (status === 'with_rep') {
+    return toNum(order?.returned_value) || 0;
+  }
+  if (status === 'exchange') {
     const rv = toNum(order?.returned_value);
     if (rv > 0) return rv;
-    return computeOrderValueWithoutShipping(order);
+    if (order?.exchange_details) {
+      try {
+        const ed = typeof order.exchange_details === 'string' ? JSON.parse(order.exchange_details) : order.exchange_details;
+        return toNum(ed?.returned_total_value || ed?.returned_price || 0);
+      } catch (e) {}
+    }
+    return 0;
+  }
+  if (status === 'returned_with_rep') {
+    return toNum(order?.returned_value_fallback);
+  }
+  const returnedValueFromMovements = toNum(order?.returned_value_fallback);
+  if ((status === 'partial' || status === 'partial_return') && returnedValueFromMovements > 0) {
+    return returnedValueFromMovements;
   }
   
   // If explicitly a partial return status, try to sum returned items first
@@ -140,7 +167,14 @@ const computeReturnedOrderValue = (order: any) => {
 const computeDeliveredNetPieces = (order: any) => {
   const status = String(order?.status || order?.order_status || order?.journal_status || '').toLowerCase();
   const jStatus = String(order?.journal_status || '').toLowerCase();
+  if (status === 'exchange' || jStatus === 'exchange') {
+    return toNum(order?.delivered_pieces) || 1;
+  }
   if (status === 'returned' || status === 'full_return' || jStatus === 'returned' || jStatus === 'full_return') return 0;
+  if (status === 'delivered' || jStatus === 'delivered') {
+    const deliveredPieces = toNum(order?.delivered_pieces);
+    if (deliveredPieces > 0) return deliveredPieces;
+  }
   if (status === 'returned_with_rep' || jStatus === 'returned_with_rep') {
     const dp = toNum(order?.delivered_pieces);
     if (dp > 0) return dp;
@@ -172,7 +206,22 @@ const computeDeliveredNetPieces = (order: any) => {
 const computeDeliveredNetValue = (order: any) => {
   const status = String(order?.status || order?.order_status || order?.journal_status || '').toLowerCase();
   const jStatus = String(order?.journal_status || '').toLowerCase();
+  if (status === 'exchange' || jStatus === 'exchange') {
+    const dv = toNum(order?.delivered_value);
+    if (dv > 0) return dv;
+    if (order?.exchange_details) {
+      try {
+        const ed = typeof order.exchange_details === 'string' ? JSON.parse(order.exchange_details) : order.exchange_details;
+        return toNum(ed?.delivered_total_value || ed?.delivered_price || 0);
+      } catch (e) {}
+    }
+    return computeOrderValueWithoutShipping(order);
+  }
   if (status === 'returned' || status === 'full_return' || jStatus === 'returned' || jStatus === 'full_return') return 0;
+  if (status === 'delivered' || jStatus === 'delivered') {
+    const deliveredValue = toNum(order?.delivered_value);
+    if (deliveredValue > 0) return deliveredValue;
+  }
   if (status === 'returned_with_rep' || jStatus === 'returned_with_rep') {
     const dv = toNum(order?.delivered_value);
     if (dv > 0) return dv;
@@ -208,19 +257,11 @@ const computeOriginalOrderValue = (order: any) => {
 };
 
 const computeActiveOrderDisplayValue = (order: any) => {
-  const st = String(order?.status || order?.order_status || order?.journal_status || '').toLowerCase();
-  // returned_with_rep: returned_value = remaining items value stored in journal by confirmPartialDelivery
-  if (st === 'returned_with_rep') {
-    const rv = toNum(order?.returned_value || order?.returned_value_fallback || 0);
-    if (rv > 0) return rv;
-    return computeOrderValueWithoutShipping(order);
-  }
-  // partial_return or partial: partialReturn API already reduced total_amount and order_items quantities
-  // so computeOrderValueWithoutShipping gives the correct remaining value
   return computeOrderValueWithoutShipping(order);
 };
 
 const isOrderPartialReturnInReturnedList = (order: any) => {
+  if (isExchangeOrder(order)) return false;
   const st = String(order?.status || order?.order_status || order?.journal_status || '').toLowerCase();
   if (st === 'partial_return' || st === 'partial' || st === 'returned_with_rep') return true;
   if (computeDeliveredNetPieces(order) > 0) return true;
@@ -229,17 +270,27 @@ const isOrderPartialReturnInReturnedList = (order: any) => {
   return false;
 };
 
+const isPartialDeliveryOrder = (order: any) => {
+  if (isExchangeOrder(order)) return false;
+  const status = String(order?.status || order?.order_status || order?.journal_status || '').toLowerCase();
+  return computeDeliveredNetPieces(order) > 0 && (
+    computeReturnedPieces(order) > 0 || (status === 'returned_with_rep' && computePieces(order) > 0)
+  );
+};
+
 const isPartialReturn = (order: any) => {
+  if (isExchangeOrder(order)) return false;
   const status = String(order?.status || order?.order_status || order?.journal_status || '').toLowerCase();
   return (status === 'partial' || status === 'partial_return' || status === 'returned_with_rep') || (computeDeliveredNetPieces(order) > 0 && computeReturnedPieces(order) > 0);
 };
 
 const isFullReturnOrder = (order: any) => {
+  if (isExchangeOrder(order)) return false;
   const status = String(order?.status || order?.order_status || '').toLowerCase();
   return ((status === 'returned' || status === 'full_return') && computePieces(order) === 0) || (computeReturnedPieces(order) > 0 && computeDeliveredNetPieces(order) === 0 && computePieces(order) === 0);
 };
 
-const isFullDeliveryOrder = (order: any) => computeDeliveredNetPieces(order) > 0 && computeReturnedPieces(order) === 0;
+const isFullDeliveryOrder = (order: any) => !isExchangeOrder(order) && computeDeliveredNetPieces(order) > 0 && !isPartialDeliveryOrder(order);
 
 const uniqOrdersById = (arr: any[]) => {
   const seen = new Set<string>();
@@ -267,7 +318,8 @@ const SalesDailyClose: React.FC = () => {
   const [reps, setReps] = useState<any[]>([]);
   const [treasuries, setTreasuries] = useState<any[]>([]);
   const [userDefaults, setUserDefaults] = useState<any>(null);
-  // Selections
+  // Selections & Filters
+  const [dailyFilter, setDailyFilter] = useState<'all' | 'open' | 'closed'>('all');
   const [selectedRepId, setSelectedRepId] = useState<string>('');
   const [selectedTreasuryId, setSelectedTreasuryId] = useState<string>('');
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'electronic'>('cash');
@@ -333,7 +385,7 @@ const SalesDailyClose: React.FC = () => {
 
   // UI State
   const [viewModal, setViewModal] = useState<'delivered' | 'returned' | 'deferred' | null>(null);
-  const [modalFilter, setModalFilter] = useState<'all' | 'full' | 'partial'>('all');
+  const [modalFilter, setModalFilter] = useState<'all' | 'full' | 'partial' | 'exchange'>('all');
   const [activeOrdersViewMode, setActiveOrdersViewMode] = useState<'list' | 'card'>('card');
   const [activeOrdersSortOrder, setActiveOrdersSortOrder] = useState<'asc' | 'desc'>('desc');
   const [deferredOrdersViewMode, setDeferredOrdersViewMode] = useState<'list' | 'card'>('card');
@@ -383,28 +435,24 @@ const SalesDailyClose: React.FC = () => {
 
   const finalReturnedList = useMemo(() => {
     const deferredIds = new Set(deferredOrders.map(getRealOrderId));
-    const fromDeliv = deliveredOrders.filter(o => computeReturnedPieces(o) > 0);
-    // Include active orders that have returned_pieces > 0 (e.g. partial_return from SalesUpdateStatus)
-    const fromActive = activeOrders.filter(o => {
-      const st = String(o.status || o.order_status || o.journal_status || '').toLowerCase();
-      if (st === 'returned_with_rep') return false;
-      return computeReturnedPieces(o) > 0;
-    });
-    return uniqOrdersById([...returnedOrders, ...fromDeliv, ...fromActive]).filter(o => {
+    return uniqOrdersById(returnedOrders).filter(o => {
       const id = getRealOrderId(o);
       const st = String(o.status || o.order_status || o.journal_status || '').toLowerCase();
       if (st === 'returned_with_rep') return false;
+      if (st === 'with_rep' && toNum(o.returned_pieces) <= 0) return false;
       if (deferredIds.has(id)) return false;
       return computeReturnedPieces(o) > 0;
     });
-  }, [deliveredOrders, returnedOrders, activeOrders, deferredOrders]);
+  }, [returnedOrders, deferredOrders]);
 
-  // Sub-breakdowns: Full vs Partial
-  const delivFullList = useMemo(() => finalDeliveredList.filter(o => computeDeliveredNetPieces(o) > 0 && computeReturnedPieces(o) === 0), [finalDeliveredList]);
-  const delivPartialList = useMemo(() => finalDeliveredList.filter(o => computeDeliveredNetPieces(o) > 0 && computeReturnedPieces(o) > 0), [finalDeliveredList]);
+  // Sub-breakdowns: Full vs Partial vs Exchange
+  const delivExchangeList = useMemo(() => finalDeliveredList.filter(isExchangeOrder), [finalDeliveredList]);
+  const delivFullList = useMemo(() => finalDeliveredList.filter(o => !isExchangeOrder(o) && computeDeliveredNetPieces(o) > 0 && !isPartialDeliveryOrder(o)), [finalDeliveredList]);
+  const delivPartialList = useMemo(() => finalDeliveredList.filter(o => !isExchangeOrder(o) && isPartialDeliveryOrder(o)), [finalDeliveredList]);
 
-  const returnFullList = useMemo(() => finalReturnedList.filter(o => computeReturnedPieces(o) > 0 && !isOrderPartialReturnInReturnedList(o)), [finalReturnedList]);
-  const returnPartialList = useMemo(() => finalReturnedList.filter(o => computeReturnedPieces(o) > 0 && isOrderPartialReturnInReturnedList(o)), [finalReturnedList]);
+  const returnExchangeList = useMemo(() => finalReturnedList.filter(isExchangeOrder), [finalReturnedList]);
+  const returnFullList = useMemo(() => finalReturnedList.filter(o => !isExchangeOrder(o) && computeReturnedPieces(o) > 0 && !isOrderPartialReturnInReturnedList(o)), [finalReturnedList]);
+  const returnPartialList = useMemo(() => finalReturnedList.filter(o => !isExchangeOrder(o) && computeReturnedPieces(o) > 0 && isOrderPartialReturnInReturnedList(o)), [finalReturnedList]);
 
   const delivFullPieces = useMemo(() => delivFullList.reduce((sum, o) => sum + computeDeliveredNetPieces(o), 0), [delivFullList]);
   const delivFullAmount = useMemo(() => delivFullList.reduce((sum, o) => sum + computeDeliveredNetValue(o), 0), [delivFullList]);
@@ -412,11 +460,17 @@ const SalesDailyClose: React.FC = () => {
   const delivPartialPieces = useMemo(() => delivPartialList.reduce((sum, o) => sum + computeDeliveredNetPieces(o), 0), [delivPartialList]);
   const delivPartialAmount = useMemo(() => delivPartialList.reduce((sum, o) => sum + computeDeliveredNetValue(o), 0), [delivPartialList]);
 
+  const delivExchangePieces = useMemo(() => delivExchangeList.reduce((sum, o) => sum + computeDeliveredNetPieces(o), 0), [delivExchangeList]);
+  const delivExchangeAmount = useMemo(() => delivExchangeList.reduce((sum, o) => sum + computeDeliveredNetValue(o), 0), [delivExchangeList]);
+
   const returnFullPieces = useMemo(() => returnFullList.reduce((sum, o) => sum + computeReturnedPieces(o), 0), [returnFullList]);
   const returnFullAmount = useMemo(() => returnFullList.reduce((sum, o) => sum + computeReturnedOrderValue(o), 0), [returnFullList]);
 
   const returnPartialPieces = useMemo(() => returnPartialList.reduce((sum, o) => sum + computeReturnedPieces(o), 0), [returnPartialList]);
   const returnPartialAmount = useMemo(() => returnPartialList.reduce((sum, o) => sum + computeReturnedOrderValue(o), 0), [returnPartialList]);
+
+  const returnExchangePieces = useMemo(() => returnExchangeList.reduce((sum, o) => sum + computeReturnedPieces(o), 0), [returnExchangeList]);
+  const returnExchangeAmount = useMemo(() => returnExchangeList.reduce((sum, o) => sum + computeReturnedOrderValue(o), 0), [returnExchangeList]);
 
   // Derived Stats
   const deliveredPieces = useMemo(() => finalDeliveredList.reduce((sum, o) => sum + computeDeliveredNetPieces(o), 0), [finalDeliveredList]);
@@ -433,6 +487,63 @@ const SalesDailyClose: React.FC = () => {
   const selectedRep = useMemo(() => reps.find(r => String(r.id) === String(selectedRepId)) || null, [reps, selectedRepId]);
   const selectedTreasuryName = useMemo(() => treasuries.find(t => String(t.id) === String(selectedTreasuryId))?.name || '', [treasuries, selectedTreasuryId]);
   const canChangeTreasury = useMemo(() => !userDefaults?.default_treasury_id || userDefaults.can_change_treasury !== false, [userDefaults]);
+
+  // Counts for daily status tabs
+  const repCounts = useMemo(() => {
+    let openCount = 0;
+    let closedCount = 0;
+    reps.forEach(r => {
+      if (Number(r.has_open_daily) === 1) openCount++;
+      else closedCount++;
+    });
+    return { all: reps.length, open: openCount, closed: closedCount };
+  }, [reps]);
+
+  // Filtered reps based on dailyFilter
+  const filteredReps = useMemo(() => {
+    return reps.filter(r => {
+      const isOpen = Number(r.has_open_daily) === 1;
+      if (dailyFilter === 'open' && !isOpen) return false;
+      if (dailyFilter === 'closed' && isOpen) return false;
+      return true;
+    });
+  }, [reps, dailyFilter]);
+
+  const repSelectOptions = useMemo(() => {
+    return filteredReps.map(r => {
+      const isOpen = Number(r.has_open_daily) === 1;
+      const bal = toNum(r.balance ?? 0);
+      return {
+        value: String(r.id),
+        searchLabel: `${r.name} ${r.id} ${r.open_daily_code || ''}`,
+        label: (
+          <div className="flex items-center justify-between gap-2 w-full py-0.5">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className={`w-2 h-2 rounded-full flex-shrink-0 ${isOpen ? 'bg-emerald-500 ring-2 ring-emerald-300 dark:ring-emerald-900 animate-pulse' : 'bg-slate-300 dark:bg-slate-600'}`} />
+              <span className="font-bold truncate text-slate-800 dark:text-slate-200">{r.name}</span>
+              <span className="text-[10px] text-slate-400 font-mono">#{r.id}</span>
+            </div>
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              {isOpen ? (
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                  {r.open_daily_code || 'مفتوحة'}
+                </span>
+              ) : (
+                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 border border-slate-200 dark:border-slate-700">
+                  مغلقة
+                </span>
+              )}
+              {bal !== 0 && (
+                <span className={`text-[10px] font-bold ${bal > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                  ({money(Math.abs(bal))} {bal > 0 ? 'له' : 'عليه'})
+                </span>
+              )}
+            </div>
+          </div>
+        )
+      };
+    });
+  }, [filteredReps]);
 
   // --- Initial Load ---
   const loadInitialData = async () => {
@@ -496,6 +607,7 @@ const SalesDailyClose: React.FC = () => {
       const odResp = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=getRepOpenDaily&rep_id=${repId}`).then(r => r.json()).catch(() => null);
       if (odResp?.success && odResp.data) {
         setOpenDailyInfo({ daily_code: odResp.data.daily_code || '', id: Number(odResp.data.id) });
+        setReps(prev => prev.map(r => String(r.id) === String(repId) ? { ...r, has_open_daily: 1, open_daily_id: Number(odResp.data.id), open_daily_code: odResp.data.daily_code } : r));
         openJournalId = String(odResp.data.id);
         setInterimPaymentAmount(toNum(odResp.data.interim_payment_amount || 0));
         try {
@@ -507,6 +619,7 @@ const SalesDailyClose: React.FC = () => {
         }
       } else {
         setOpenDailyInfo(null);
+        setReps(prev => prev.map(r => String(r.id) === String(repId) ? { ...r, has_open_daily: 0, open_daily_id: null, open_daily_code: null } : r));
         setInterimPaymentAmount(0);
         setInterimPaymentsList([]);
         setActiveOrders([]);
@@ -552,8 +665,13 @@ const SalesDailyClose: React.FC = () => {
 
         // Keep in jDelivered only if it has delivered_pieces > 0 (exclude returned_with_rep & partial_return)
         jDelivered = uniqOrdersById(rawDelivered.filter((o: any) => (!isRetWithRep(o) && !isPartialReturnOrd(o)) || toNum(o.delivered_pieces) > 0));
-        // Keep in jReturned if returned_pieces > 0 (including partial_return)
-        jReturned  = uniqOrdersById(rawReturned.filter((o: any) => !isRetWithRep(o) || toNum(o.returned_pieces) > 0));
+        // Keep in jReturned if returned_pieces > 0 (including partial_return) and not with_rep with 0 returned pieces
+        jReturned  = uniqOrdersById(rawReturned.filter((o: any) => {
+          if (isRetWithRep(o)) return toNum(o.returned_pieces) > 0;
+          const st = String(o.status || o.order_status || o.journal_status || '').toLowerCase();
+          if (st === 'with_rep' && toNum(o.returned_pieces) <= 0) return false;
+          return true;
+        }));
         jDeferred  = uniqOrdersById(rawDeferred);
         jActive    = uniqOrdersById([...rawActive, ...extraActive]);
       }
@@ -610,6 +728,7 @@ const SalesDailyClose: React.FC = () => {
 
         if (finalReturnedIds.has(id)) return false;
         if (finalDeliveredIds.has(id)) return false;
+        if (status === 'exchange' || orderStatus === 'exchange' || journalStatus === 'exchange') return false;
         if (status === 'delivered' || orderStatus === 'delivered' || journalStatus === 'delivered') return false;
         if (status === 'returned' || orderStatus === 'returned' || status === 'full_return' || orderStatus === 'full_return' || journalStatus === 'full_return' || journalStatus === 'returned') return false;
         if (journalStatus === 'deferred') return false;
@@ -646,10 +765,10 @@ const SalesDailyClose: React.FC = () => {
     try {
       setLoading(true);
       const moved = activeOrders.filter(o => selectedOrderIds.includes(getRealOrderId(o)));
-      const partialIds: string[] = [];
+      const partialOrders: any[] = [];
       const fullIds: string[] = [];
       moved.forEach(o => {
-        if (computeReturnedPieces(o) > 0) partialIds.push(getRealOrderId(o)); else fullIds.push(getRealOrderId(o));
+        if (computeReturnedPieces(o) > 0) partialOrders.push(o); else fullIds.push(getRealOrderId(o));
       });
 
       // Update full deliveries in orders table
@@ -668,17 +787,33 @@ const SalesDailyClose: React.FC = () => {
           body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: fullIds.map(Number), status: 'delivered', journal_id: targetJournalId })
         }).catch(() => null);
       }
-      if (partialIds.length > 0) {
-        await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: partialIds.map(Number), status: 'partial_return', journal_id: targetJournalId })
-        }).catch(() => null);
+      if (partialOrders.length > 0) {
+        await Promise.all(partialOrders.map(async order => {
+          const orderId = Number(getRealOrderId(order));
+          const deliveredPieces = toNum(order.delivered_pieces) + computePieces(order);
+          const deliveredValue = toNum(order.delivered_value) + computeOrderValueWithoutShipping(order);
 
-        // Mark remaining portion as partial in orders table
-        await Promise.all(partialIds.map(id => fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: Number(id), status: 'partial', rep_id: Number(selectedRepId), repId: Number(selectedRepId) })
-        }).catch(() => null)));
+          const orderResponse = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: orderId, status: 'delivered', rep_id: Number(selectedRepId), repId: Number(selectedRepId) })
+          });
+          const orderResult = await orderResponse.json();
+          if (!orderResult?.success) throw new Error(orderResult?.message || `فشل تحديث الأوردر #${orderId}.`);
+
+          const journalResponse = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              rep_id: Number(selectedRepId),
+              order_ids: [orderId],
+              status: 'delivered',
+              journal_id: targetJournalId,
+              delivered_pieces: deliveredPieces,
+              delivered_value: deliveredValue
+            })
+          });
+          const journalResult = await journalResponse.json();
+          if (!journalResult?.success) throw new Error(journalResult?.message || `فشل حفظ تسليم الأوردر #${orderId}.`);
+        }));
       }
 
       await loadRepData(selectedRepId);
@@ -691,10 +826,12 @@ const SalesDailyClose: React.FC = () => {
     }
   };
 
-  const handleUndoOrder = async (orderId: string | number) => {
+  const handleUndoOrder = async (orderId: string | number, undoType: 'delivery' | 'return') => {
     const res = await Swal.fire({
-      title: 'إرجاع للعهدة؟',
-      text: 'سيتم استرجاع هذا الأوردر إلى عهدة المندوب وإلغاء تسجيله כمسلم/مرتجع. إذا كان به تسليم جزئي سيتم عكسه واسترجاع القطع من وإلى المخزن. هل أنت متأكد؟',
+      title: undoType === 'delivery' ? 'إلغاء التسليم؟' : 'إلغاء المرتجع؟',
+      text: undoType === 'delivery'
+        ? 'ستعود القطع المسلمة إلى عهدة المندوب، مع الحفاظ على المنتجات المرتجعة كما هي.'
+        : 'ستعود المنتجات المرتجعة إلى عهدة المندوب ويتم إلغاء أثر المرتجع.',
       icon: 'warning',
       showCancelButton: true,
       confirmButtonText: 'نعم، إرجاع',
@@ -707,12 +844,12 @@ const SalesDailyClose: React.FC = () => {
       const req = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=undoDailyCloseOrder`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rep_id: selectedRepId, order_id: orderId })
+        body: JSON.stringify({ rep_id: selectedRepId, order_id: orderId, undo_type: undoType })
       });
       const data = await req.json();
       if (!data.success) throw new Error(data.message || 'خطأ في الاسترجاع');
       
-      Swal.fire('نجاح', 'تم استرجاع الأوردر لعهدة المندوب بنجاح.', 'success');
+      Swal.fire('نجاح', undoType === 'delivery' ? 'تم إلغاء التسليم وإعادة القطع المسلمة إلى عهدة المندوب.' : 'تم إلغاء المرتجع وإعادة المنتجات إلى عهدة المندوب.', 'success');
       
       if (selectedRepId) {
         await loadRepData(selectedRepId);
@@ -855,13 +992,10 @@ const SalesDailyClose: React.FC = () => {
     const initQtys: Record<number, number> = {};
     const isRetWithRep = String(order.status || order.order_status || order.journal_status || '').toLowerCase() === 'returned_with_rep';
     products.forEach((p: any, idx: number) => {
-      const originalQty = toNum(p.quantity ?? p.qty ?? 0) + toNum(p.delivered_quantity ?? 0);
       if (p.delivered_quantity !== undefined && toNum(p.delivered_quantity) > 0) {
         initQtys[idx] = toNum(p.delivered_quantity);
-      } else if (isRetWithRep) {
-        initQtys[idx] = toNum(p.delivered_quantity ?? 0);
       } else {
-        initQtys[idx] = originalQty;
+        initQtys[idx] = 0;
       }
     });
     setPartialDeliveryQtys(initQtys);
@@ -944,7 +1078,7 @@ const SalesDailyClose: React.FC = () => {
     }
   };
 
-  const handleUndoAllOrders = async (ordersList: any[], label: string) => {
+  const handleUndoAllOrders = async (ordersList: any[], label: string, undoType: 'delivery' | 'return') => {
     if (!ordersList || ordersList.length === 0) {
       Swal.fire('تنبيه', 'لا توجد أوردرات لإرجاعها في هذه القائمة.', 'info');
       return;
@@ -966,7 +1100,7 @@ const SalesDailyClose: React.FC = () => {
       const req = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=undoDailyCloseOrder`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rep_id: selectedRepId, order_ids: orderIds })
+        body: JSON.stringify({ rep_id: selectedRepId, order_ids: orderIds, undo_type: undoType })
       });
       const data = await req.json();
       if (!data.success) throw new Error(data.message || 'خطأ في استرجاع الأوردرات');
@@ -1286,6 +1420,7 @@ const SalesDailyClose: React.FC = () => {
       } else if (settlementDirection === 'collect') {
         const payload: any = {
           repId: Number(selectedRepId),
+          journal_id: openDailyInfo ? Number(openDailyInfo.id) : 0,
           idempotency_token: idempotencyToken,
           created_by: currentUserId,
           employee: currentEmpName,
@@ -1308,6 +1443,7 @@ const SalesDailyClose: React.FC = () => {
           notes: 'تحصيل من المندوب فى اغلاق اليوميه',
           reason: 'تحصيل من المندوب فى اغلاق اليوميه',
           rep_id: Number(selectedRepId),
+          journal_id: openDailyInfo ? Number(openDailyInfo.id) : 0,
           created_by: currentUserId,
           created_by_name: currentEmpName,
           employee_name: currentEmpName,
@@ -1323,6 +1459,7 @@ const SalesDailyClose: React.FC = () => {
           type: 'rep_payment_out',
           related_to_type: 'rep',
           related_to_id: Number(selectedRepId),
+          journal_id: openDailyInfo ? Number(openDailyInfo.id) : 0,
           amount: amount,
           treasuryId: Number(selectedTreasuryId || cashTreasuryId),
           direction: 'out',
@@ -1449,9 +1586,11 @@ const SalesDailyClose: React.FC = () => {
     
     // Generate Rows for Delivered
     const delivHTML = finalDeliveredList.map(o => {
-      const isPartial = computeReturnedPieces(o) > 0 && computeDeliveredNetPieces(o) > 0;
+      const isEx = isExchangeOrder(o);
+      const isPartial = isPartialDeliveryOrder(o);
+      const badgeText = isEx ? '<span style="font-size:10px;color:#7e22ce;font-weight:bold;">(استبدال)</span>' : isPartial ? '<span style="font-size:10px;color:#d97706;">(جزئي)</span>' : '';
       return `<tr>
-        <td style="padding:4px;border:1px solid #ccc;text-align:right;">#${o.orderNumber || o.order_number} ${isPartial ? '<span style="font-size:10px;color:#d97706;">(جزئي)</span>' : ''}</td>
+        <td style="padding:4px;border:1px solid #ccc;text-align:right;">#${o.orderNumber || o.order_number} ${badgeText}</td>
         <td style="padding:4px;border:1px solid #ccc;text-align:right;">${o.customerName || o.customer_name || o.name || ''}</td>
         <td style="padding:4px;border:1px solid #ccc;text-align:center;">${computeDeliveredNetPieces(o)}</td>
         <td style="padding:4px;border:1px solid #ccc;text-align:center;">${money(computeDeliveredNetValue(o))}</td>
@@ -1459,9 +1598,11 @@ const SalesDailyClose: React.FC = () => {
     }).join('');
 
     const retHTML = finalReturnedList.map(o => {
+      const isEx = isExchangeOrder(o);
       const isPartial = isOrderPartialReturnInReturnedList(o);
+      const badgeText = isEx ? '<span style="font-size:10px;color:#7e22ce;font-weight:bold;">(استبدال)</span>' : isPartial ? '<span style="font-size:10px;color:#d97706;">(جزئي)</span>' : '';
       return `<tr>
-        <td style="padding:4px;border:1px solid #ccc;text-align:right;">#${o.orderNumber || o.order_number} ${isPartial ? '<span style="font-size:10px;color:#d97706;">(جزئي)</span>' : ''}</td>
+        <td style="padding:4px;border:1px solid #ccc;text-align:right;">#${o.orderNumber || o.order_number} ${badgeText}</td>
         <td style="padding:4px;border:1px solid #ccc;text-align:right;">${o.customerName || o.customer_name || o.name || ''}</td>
         <td style="padding:4px;border:1px solid #ccc;text-align:center;">${computeReturnedPieces(o)}</td>
         <td style="padding:4px;border:1px solid #ccc;text-align:center;">${money(computeReturnedOrderValue(o))}</td>
@@ -1519,8 +1660,8 @@ const SalesDailyClose: React.FC = () => {
     const totalRequiredBeforePayments = repBalance < 0 ? (Math.abs(repBalance) + interimPaymentAmount) : repBalance;
     const totalCollectedToday = interimPaymentAmount + pAmount;
 
-    const delivFullList = finalDeliveredList.filter(o => computeDeliveredNetPieces(o) > 0 && computeReturnedPieces(o) === 0);
-    const delivPartialList = finalDeliveredList.filter(o => computeDeliveredNetPieces(o) > 0 && computeReturnedPieces(o) > 0);
+    const delivFullList = finalDeliveredList.filter(o => computeDeliveredNetPieces(o) > 0 && !isPartialDeliveryOrder(o));
+    const delivPartialList = finalDeliveredList.filter(isPartialDeliveryOrder);
 
     const returnFullList = finalReturnedList.filter(o => computeReturnedPieces(o) > 0 && !isOrderPartialReturnInReturnedList(o));
     const returnPartialList = finalReturnedList.filter(o => computeReturnedPieces(o) > 0 && isOrderPartialReturnInReturnedList(o));
@@ -1814,59 +1955,141 @@ const SalesDailyClose: React.FC = () => {
         </div>
       </div>
 
-      {/* Selectors */}
-      <div className="mb-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-        <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
-          <div className="text-xs text-slate-500 mb-2">اختر المندوب</div>
-          <CustomSelect
-            value={selectedRepId}
-            onChange={v => setSelectedRepId(v)}
-            options={reps.map(r => ({ value: String(r.id), label: r.name }))}
-            placeholder="— اختر —"
-            disabled={loading}
-          />
+      {/* Selectors & Filters */}
+      <div className="mb-4 grid grid-cols-1 lg:grid-cols-12 gap-3">
+        {/* Main Rep & Daily Filter Panel (7 cols on lg) */}
+        <div className="lg:col-span-7 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 shadow-sm space-y-3">
+          {/* Top row: Header & Daily status tabs */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
+            <div className="flex items-center gap-2">
+              <User className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+              <span className="text-xs font-black text-slate-800 dark:text-slate-200">تصفية واختيار المندوب</span>
+            </div>
+
+            {/* Daily status filter tabs: الكل / يومية مفتوحة / يومية مغلقة */}
+            <div className="inline-flex rounded-xl bg-slate-100 dark:bg-slate-800/90 p-1 border border-slate-200/70 dark:border-slate-700/70">
+              <button
+                type="button"
+                onClick={() => setDailyFilter('all')}
+                className={`px-3 py-1 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 ${
+                  dailyFilter === 'all'
+                    ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                <span>الكل</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${dailyFilter === 'all' ? 'bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300' : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'}`}>
+                  {repCounts.all}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setDailyFilter('open')}
+                className={`px-3 py-1 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 ${
+                  dailyFilter === 'open'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400'
+                }`}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span>يومية مفتوحة</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${dailyFilter === 'open' ? 'bg-emerald-700 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'}`}>
+                  {repCounts.open}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setDailyFilter('closed')}
+                className={`px-3 py-1 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 ${
+                  dailyFilter === 'closed'
+                    ? 'bg-slate-800 text-white dark:bg-slate-600 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                <span>يومية مغلقة</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${dailyFilter === 'closed' ? 'bg-slate-900 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'}`}>
+                  {repCounts.closed}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          {/* Middle row: CustomSelect only */}
+          <div className="pt-1">
+            <CustomSelect
+              value={selectedRepId}
+              onChange={v => setSelectedRepId(v)}
+              options={repSelectOptions}
+              placeholder={
+                filteredReps.length === 0
+                  ? (dailyFilter === 'open' ? '— لا يوجد مناديب بيومية مفتوحة —' : '— لا توجد نتائج مطابقة —')
+                  : `— اختر المندوب (${filteredReps.length} متاح) —`
+              }
+              disabled={loading}
+            />
+          </div>
+
+          {/* Bottom row: Active badges & Info */}
           {selectedRepId && (
-            <div className="mt-2 flex flex-wrap gap-2">
-              {openDailyInfo ? (
-                <span className="inline-flex items-center gap-1.5 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 px-3 py-1 rounded-full text-[10px] font-bold border border-green-200 dark:border-green-800">
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block" />
-                  يومية مفتوحة: {openDailyInfo.daily_code}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
+              <div className="flex items-center gap-2">
+                {openDailyInfo ? (
+                  <span className="inline-flex items-center gap-1.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-300 px-3 py-1 rounded-full text-xs font-black border border-emerald-200 dark:border-emerald-800">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block" />
+                    يومية مفتوحة: {openDailyInfo.daily_code}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 px-3 py-1 rounded-full text-xs font-bold border border-slate-200 dark:border-slate-700">
+                    <span className="w-2 h-2 rounded-full bg-slate-400 inline-block" />
+                    اليومية مغلقة / لا توجد يومية مفتوحة
+                  </span>
+                )}
+              </div>
+
+              <div className="text-xs font-bold">
+                <span className="text-slate-500">رصيد المندوب: </span>
+                <span className={`${balanceClass(repBalance)} font-black`}>
+                  {money(Math.abs(repBalance))} ج.م {balanceLabel(repBalance)}
                 </span>
-              ) : (
-                <span className="inline-flex items-center gap-1.5 bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 px-3 py-1 rounded-full text-[10px] border border-rose-200 dark:border-rose-800">
-                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 inline-block" /> لا يوجد يومية مفتوحة
-                </span>
-              )}
+              </div>
             </div>
           )}
         </div>
 
-        <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
-          <div className="text-xs text-slate-500 mb-2">طريقة الدفع للخزينة</div>
-          <div className="flex gap-2 mb-3">
-            <button
-              onClick={() => { setPaymentMethod('cash'); if (userDefaults?.default_treasury_id) setSelectedTreasuryId(String(userDefaults.default_treasury_id)); }}
-              className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-all ${paymentMethod === 'cash' ? 'bg-blue-600 text-white shadow-md' : 'bg-white dark:bg-slate-800 text-slate-600 border border-slate-200 dark:border-slate-700'}`}
-            >كاش</button>
-            <button
-              onClick={handleElectronicTreasury}
-              className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-all ${paymentMethod === 'electronic' ? 'bg-blue-600 text-white shadow-md' : 'bg-white dark:bg-slate-800 text-slate-600 border border-slate-200 dark:border-slate-700'}`}
-            >مدفوعات إليكترونية</button>
-          </div>
-          {paymentMethod === 'cash' ? (
-            <>
-              <div className="text-xs text-slate-500 mb-2">اختر الخزينة</div>
-              <CustomSelect
-                value={selectedTreasuryId} onChange={v => setSelectedTreasuryId(v)}
-                options={treasuries.map(t => ({ value: String(t.id), label: t.name }))}
-                placeholder="— اختر —" disabled={loading || !canChangeTreasury}
-              />
-            </>
-          ) : (
-            <div className="text-xs font-bold text-blue-600 bg-blue-50 dark:bg-blue-900/20 p-2 rounded-lg border border-blue-100 dark:border-blue-800/50">
-              تم اختيار خزينة "مدفوعات إليكترونية" تلقائياً
+        {/* Payment Method Panel (5 cols on lg) */}
+        <div className="lg:col-span-5 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 shadow-sm flex flex-col justify-between">
+          <div>
+            <div className="text-xs text-slate-500 mb-2 font-bold">طريقة الدفع للخزينة</div>
+            <div className="flex gap-2 mb-3">
+              <button
+                type="button"
+                onClick={() => { setPaymentMethod('cash'); if (userDefaults?.default_treasury_id) setSelectedTreasuryId(String(userDefaults.default_treasury_id)); }}
+                className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${paymentMethod === 'cash' ? 'bg-blue-600 text-white shadow-md' : 'bg-white dark:bg-slate-800 text-slate-600 border border-slate-200 dark:border-slate-700'}`}
+              >كاش</button>
+              <button
+                type="button"
+                onClick={handleElectronicTreasury}
+                className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${paymentMethod === 'electronic' ? 'bg-blue-600 text-white shadow-md' : 'bg-white dark:bg-slate-800 text-slate-600 border border-slate-200 dark:border-slate-700'}`}
+              >مدفوعات إليكترونية</button>
             </div>
-          )}
+          </div>
+          <div>
+            {paymentMethod === 'cash' ? (
+              <>
+                <div className="text-xs text-slate-500 mb-2 font-bold">اختر الخزينة</div>
+                <CustomSelect
+                  value={selectedTreasuryId} onChange={v => setSelectedTreasuryId(v)}
+                  options={treasuries.map(t => ({ value: String(t.id), label: t.name }))}
+                  placeholder="— اختر الخزينة —" disabled={loading || !canChangeTreasury}
+                />
+              </>
+            ) : (
+              <div className="text-xs font-bold text-blue-600 bg-blue-50 dark:bg-blue-900/20 p-2.5 rounded-xl border border-blue-100 dark:border-blue-800/50 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                <span>تم اختيار خزينة "مدفوعات إليكترونية" تلقائياً</span>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1923,6 +2146,12 @@ const SalesDailyClose: React.FC = () => {
                   <div className="font-bold text-amber-700 dark:text-amber-300">تسليم جزئي: {statsLoading ? '—' : delivPartialList.length}</div>
                   <div className="text-slate-500 dark:text-slate-400">{statsLoading ? '—' : `${delivPartialPieces} ق • ${money(delivPartialAmount)}`}</div>
                 </div>
+                {delivExchangeList.length > 0 && (
+                  <div className="col-span-2 bg-purple-50/60 dark:bg-purple-950/20 p-1.5 rounded-lg border border-purple-100 dark:border-purple-900/30">
+                    <div className="font-bold text-purple-700 dark:text-purple-300">استبدال (مُسلَّم): {statsLoading ? '—' : delivExchangeList.length}</div>
+                    <div className="text-slate-500 dark:text-slate-400">{statsLoading ? '—' : `${delivExchangePieces} ق • ${money(delivExchangeAmount)}`}</div>
+                  </div>
+                )}
               </div>
             </div>
             <button onClick={() => { setViewModal('delivered'); setModalFilter('all'); }} className="mt-3 flex items-center justify-center gap-1 text-xs bg-slate-50 dark:bg-slate-800 hover:bg-emerald-50 text-slate-600 hover:text-emerald-600 py-1.5 px-3 rounded-xl border border-slate-100 dark:border-slate-700 transition-colors"><Eye className="w-3.5 h-3.5" /> التفاصيل</button>
@@ -1970,6 +2199,12 @@ const SalesDailyClose: React.FC = () => {
                   <div className="font-bold text-amber-700 dark:text-amber-300">ارتجاع جزئي: {statsLoading ? '—' : returnPartialList.length}</div>
                   <div className="text-slate-500 dark:text-slate-400">{statsLoading ? '—' : `${returnPartialPieces} ق • ${money(returnPartialAmount)}`}</div>
                 </div>
+                {returnExchangeList.length > 0 && (
+                  <div className="col-span-2 bg-purple-50/60 dark:bg-purple-950/20 p-1.5 rounded-lg border border-purple-100 dark:border-purple-900/30">
+                    <div className="font-bold text-purple-700 dark:text-purple-300">استبدال (مستلم بالمخزن): {statsLoading ? '—' : returnExchangeList.length}</div>
+                    <div className="text-slate-500 dark:text-slate-400">{statsLoading ? '—' : `${returnExchangePieces} ق • ${money(returnExchangeAmount)}`}</div>
+                  </div>
+                )}
               </div>
             </div>
             <button onClick={() => { setViewModal('returned'); setModalFilter('all'); }} className="mt-3 flex items-center justify-center gap-1 text-xs bg-slate-50 dark:bg-slate-800 hover:bg-rose-50 text-slate-600 hover:text-rose-600 py-1.5 px-3 rounded-xl border border-slate-100 dark:border-slate-700 transition-colors"><Eye className="w-3.5 h-3.5" /> التفاصيل</button>
@@ -2240,7 +2475,9 @@ const SalesDailyClose: React.FC = () => {
                         <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate max-w-[120px]">
                           #{o.orderNumber || o.order_number} {o.customerName || o.customer_name || o.name}
                         </span>
-                        {(o.status === 'returned_with_rep' || o.order_status === 'returned_with_rep') ? (
+                        {isExchangeOrder(o) ? (
+                          <span className="text-[9px] font-bold bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded border border-purple-200 dark:bg-purple-900/40 dark:border-purple-800">استبدال</span>
+                        ) : (o.status === 'returned_with_rep' || o.order_status === 'returned_with_rep') ? (
                           <span className="text-[9px] font-bold bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded border border-orange-200 dark:bg-orange-900/40 dark:border-orange-800">مرتجع جزئي مع المندوب</span>
                         ) : (o.status === 'partial_return' || o.order_status === 'partial_return' || o.status === 'partial' || o.order_status === 'partial') ? (
                           <span className="text-[9px] font-bold bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded border border-rose-200 dark:bg-rose-900/40 dark:border-rose-800">مرتجع جزئي</span>
@@ -2261,7 +2498,9 @@ const SalesDailyClose: React.FC = () => {
                           <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
                             #{o.orderNumber || o.order_number} — {o.customerName || o.customer_name || o.name}
                           </span>
-                          {(o.status === 'returned_with_rep' || o.order_status === 'returned_with_rep') ? (
+                          {isExchangeOrder(o) ? (
+                            <span className="text-[9px] font-bold bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded border border-purple-200 dark:bg-purple-900/40 dark:border-purple-800">استبدال</span>
+                          ) : (o.status === 'returned_with_rep' || o.order_status === 'returned_with_rep') ? (
                             <span className="text-[9px] font-bold bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded border border-orange-200 dark:bg-orange-900/40 dark:border-orange-800">مرتجع جزئي مع المندوب</span>
                           ) : (o.status === 'partial_return' || o.order_status === 'partial_return' || o.status === 'partial' || o.order_status === 'partial') ? (
                             <span className="text-[9px] font-bold bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded border border-rose-200 dark:bg-rose-900/40 dark:border-rose-800">مرتجع جزئي</span>
@@ -2356,11 +2595,11 @@ const SalesDailyClose: React.FC = () => {
                     if (viewModal === 'deferred') {
                       moveAllDeferredBack();
                     } else if (viewModal === 'delivered') {
-                      const curList = modalFilter === 'full' ? delivFullList : modalFilter === 'partial' ? delivPartialList : finalDeliveredList;
-                      handleUndoAllOrders(curList, 'المسلمة');
+                      const curList = modalFilter === 'full' ? delivFullList : modalFilter === 'partial' ? delivPartialList : modalFilter === 'exchange' ? delivExchangeList : finalDeliveredList;
+                      handleUndoAllOrders(curList, 'المسلمة', 'delivery');
                     } else if (viewModal === 'returned') {
-                      const curList = modalFilter === 'full' ? returnFullList : modalFilter === 'partial' ? returnPartialList : finalReturnedList;
-                      handleUndoAllOrders(curList, 'المرتجعة');
+                      const curList = modalFilter === 'full' ? returnFullList : modalFilter === 'partial' ? returnPartialList : modalFilter === 'exchange' ? returnExchangeList : finalReturnedList;
+                      handleUndoAllOrders(curList, 'المرتجعة', 'return');
                     }
                   }}
                   disabled={
@@ -2380,7 +2619,7 @@ const SalesDailyClose: React.FC = () => {
 
             {/* Filter Tabs for Delivered / Returned */}
             {viewModal !== 'deferred' && (
-              <div className="px-5 py-2 border-b border-slate-100 dark:border-slate-800 flex items-center gap-2 bg-slate-50/50 dark:bg-slate-800/30">
+              <div className="px-5 py-2 border-b border-slate-100 dark:border-slate-800 flex items-center gap-2 bg-slate-50/50 dark:bg-slate-800/30 overflow-x-auto">
                 <button
                   onClick={() => setModalFilter('all')}
                   className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${modalFilter === 'all' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100'}`}
@@ -2399,15 +2638,31 @@ const SalesDailyClose: React.FC = () => {
                 >
                   {viewModal === 'delivered' ? `تسليم جزئي (${delivPartialList.length})` : `ارتجاع جزئي (${returnPartialList.length})`}
                 </button>
+                {viewModal === 'delivered' && delivExchangeList.length > 0 && (
+                  <button
+                    onClick={() => setModalFilter('exchange')}
+                    className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${modalFilter === 'exchange' ? 'bg-purple-600 text-white' : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100'}`}
+                  >
+                    استبدال ({delivExchangeList.length})
+                  </button>
+                )}
+                {viewModal === 'returned' && returnExchangeList.length > 0 && (
+                  <button
+                    onClick={() => setModalFilter('exchange')}
+                    className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${modalFilter === 'exchange' ? 'bg-purple-600 text-white' : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100'}`}
+                  >
+                    استبدال ({returnExchangeList.length})
+                  </button>
+                )}
               </div>
             )}
 
             <div className="p-5 overflow-y-auto flex-1 custom-scrollbar">
               {(() => {
                 const list = viewModal === 'delivered'
-                  ? (modalFilter === 'full' ? delivFullList : modalFilter === 'partial' ? delivPartialList : finalDeliveredList)
+                  ? (modalFilter === 'full' ? delivFullList : modalFilter === 'partial' ? delivPartialList : modalFilter === 'exchange' ? delivExchangeList : finalDeliveredList)
                   : viewModal === 'returned'
-                  ? (modalFilter === 'full' ? returnFullList : modalFilter === 'partial' ? returnPartialList : finalReturnedList)
+                  ? (modalFilter === 'full' ? returnFullList : modalFilter === 'partial' ? returnPartialList : modalFilter === 'exchange' ? returnExchangeList : finalReturnedList)
                   : deferredOrders;
                 if (list.length === 0) return <div className="text-center text-slate-500 py-12">لا توجد اوردرات في هذه القائمة.</div>;
                 return (
@@ -2423,10 +2678,13 @@ const SalesDailyClose: React.FC = () => {
                     </thead>
                     <tbody>
                       {list.map(o => {
+                        const isEx = isExchangeOrder(o);
                         const isPartial = isOrderPartialReturnInReturnedList(o);
                         let badge = null;
-                        if (viewModal === 'delivered') {
-                          const isDelivPartial = computeReturnedPieces(o) > 0 && computeDeliveredNetPieces(o) > 0;
+                        if (isEx) {
+                          badge = <span className="mr-2 px-2 py-0.5 rounded text-[10px] font-bold inline-block border bg-purple-100 text-purple-700 border-purple-200 dark:bg-purple-900/30 dark:border-purple-800 dark:text-purple-300">استبدال</span>;
+                        } else if (viewModal === 'delivered') {
+                          const isDelivPartial = isPartialDeliveryOrder(o);
                           badge = <span className={`mr-2 px-2 py-0.5 rounded text-[10px] font-bold inline-block border ${isDelivPartial ? 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:border-amber-800 dark:text-amber-400' : 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:border-emerald-800 dark:text-emerald-400'}`}>{isDelivPartial ? 'تسليم جزئي' : 'تسليم كامل'}</span>;
                         } else if (viewModal === 'returned') {
                           badge = <span className={`mr-2 px-2 py-0.5 rounded text-[10px] font-bold inline-block border ${isPartial ? 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:border-amber-800 dark:text-amber-400' : 'bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-900/30 dark:border-rose-800 dark:text-rose-400'}`}>{isPartial ? 'ارتجاع جزئي' : 'ارتجاع كامل'}</span>;
@@ -2457,7 +2715,7 @@ const SalesDailyClose: React.FC = () => {
                                 </button>
                               ) : (
                                 <button
-                                  onClick={() => handleUndoOrder(getRealOrderId(o))}
+                                  onClick={() => handleUndoOrder(getRealOrderId(o), viewModal === 'delivered' ? 'delivery' : 'return')}
                                   disabled={loading}
                                   className="px-2 py-1 flex items-center justify-center gap-1 mx-auto bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:hover:bg-rose-900/50 dark:text-rose-400 font-bold text-[10px] rounded border border-rose-200 dark:border-rose-800/50 transition-colors disabled:opacity-50"
                                   title="إرجاع الأوردر إلى العهدة الحالية"
@@ -2503,46 +2761,100 @@ const SalesDailyClose: React.FC = () => {
                 <span className="text-emerald-600 dark:text-emerald-400">مسلمة: <strong>{totalDeliveredQty}</strong></span>
                 <span className="text-rose-600 dark:text-rose-400">ستبقى مع المندوب: <strong>{totalRemainingQty}</strong></span>
               </div>
-              <div className="p-5 space-y-3 max-h-[50vh] overflow-y-auto">
-                <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">أدخل الكمية <strong>المسلمة فعلاً</strong> لكل منتج. المتبقي ستبقى في عهدة المندوب.</p>
-                {products.map((p: any, idx: number) => {
-                  const maxQty = toNum(p.quantity ?? p.qty ?? 0) + toNum(p.delivered_quantity ?? 0);
-                  const delivQty = Math.min(toNum(partialDeliveryQtys[idx] ?? 0), maxQty);
-                  const remainQty = maxQty - delivQty;
-                  const unitPrice = parseNumeric(p.price ?? p.price_per_unit ?? p.sale_price ?? p.unit_price ?? 0);
-                  return (
-                    <div key={idx} className="border border-slate-200 dark:border-slate-700 rounded-xl p-3 bg-slate-50 dark:bg-slate-800/50">
-                      <div className="flex items-start justify-between mb-2">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">{p.name || p.product_name || `منتج ${idx + 1}`}</p>
-                          {unitPrice > 0 && <p className="text-[10px] text-slate-400 mt-0.5">سعر الوحدة: {money(unitPrice)} {currencySymbol}</p>}
-                        </div>
-                        <span className="text-[10px] bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded-full mr-2 shrink-0">الكل: {maxQty}</span>
-                      </div>
-                      <div className="grid grid-cols-3 gap-2 items-center">
-                        <div>
-                          <label className="text-[10px] text-slate-500 block mb-1">كمية مسلمة</label>
-                          <input
-                            type="number" min={0} max={maxQty} value={delivQty}
-                            onChange={e => {
-                              const val = Math.max(0, Math.min(maxQty, toNum(e.target.value)));
-                              setPartialDeliveryQtys(prev => ({ ...prev, [idx]: val }));
-                            }}
-                            className="w-full border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-slate-900 rounded-lg px-2 py-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-400 text-center focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                          />
-                        </div>
-                        <div className="text-center">
-                          <label className="text-[10px] text-slate-500 block mb-1">يبقى مع المندوب</label>
-                          <span className={`block text-sm font-black ${remainQty > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400'}`}>{remainQty}</span>
-                        </div>
-                        <div className="text-center">
-                          <label className="text-[10px] text-slate-500 block mb-1">قيمة المسلم</label>
-                          <span className="block text-xs font-bold text-emerald-600">{money(Math.min(delivQty, maxQty) * unitPrice)} {currencySymbol}</span>
-                        </div>
-                      </div>
+              <div className="p-5 max-h-[60vh] overflow-y-auto">
+                <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 text-center">انقر على المنتج لنقله بين الصناديق. ما يوجد في صندوق "ما تم تسليمه" سيتم تسليمه للعميل، والمتبقي سيظل في عهدة المندوب.</p>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* صندوق: باقي في عهدة المندوب */}
+                  <div className="bg-rose-50/50 dark:bg-rose-900/10 p-3 rounded-2xl border border-rose-100 dark:border-rose-900/30 flex flex-col">
+                    <h4 className="font-bold text-rose-700 dark:text-rose-400 text-xs mb-3 text-center sticky top-0 bg-rose-50/90 dark:bg-rose-900/90 backdrop-blur-sm py-2 rounded-lg shadow-sm border border-rose-100 dark:border-rose-800 z-10">
+                      باقي في عهدة المندوب (المتبقي)
+                      <div className="text-[10px] font-normal text-rose-500 dark:text-rose-300 mt-0.5">انقر على القطع لتسليمها</div>
+                    </h4>
+                    <div className="space-y-2 flex-1">
+                      {products.map((p: any, idx: number) => {
+                        const maxQty = toNum(p.quantity ?? p.qty ?? 0) + toNum(p.delivered_quantity ?? 0);
+                        const delivQty = Math.min(toNum(partialDeliveryQtys[idx] ?? 0), maxQty);
+                        const remainQty = maxQty - delivQty;
+                        const unitPrice = parseNumeric(p.price ?? p.price_per_unit ?? p.sale_price ?? p.unit_price ?? 0);
+                        if (remainQty <= 0) return null;
+                        
+                        return (
+                          <div 
+                            key={`rem-${idx}`}
+                            onClick={() => setPartialDeliveryQtys(prev => ({ ...prev, [idx]: delivQty + 1 }))}
+                            className="cursor-pointer bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-rose-200 dark:border-rose-800 shadow-sm hover:border-emerald-400 hover:shadow-md transition-all flex items-center justify-between group"
+                          >
+                            <div className="flex-1 min-w-0 pr-2 border-r-[3px] border-rose-400 dark:border-rose-600">
+                              <p className="text-[11px] font-bold text-slate-800 dark:text-slate-200 truncate">{p.name || p.product_name || `منتج ${idx + 1}`}</p>
+                              <div className="flex items-center gap-2 mt-1">
+                                {(p.color || p.size) && <p className="text-[9px] text-slate-500 dark:text-slate-400">{p.color} {p.size ? `- ${p.size}` : ''}</p>}
+                                {unitPrice > 0 && <p className="text-[9px] text-slate-400 font-bold">{money(unitPrice)} ج.م</p>}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2.5 mr-2">
+                              <span className="text-xs font-black text-rose-700 dark:text-rose-300 bg-rose-100 dark:bg-rose-900/60 px-2 py-0.5 rounded-md min-w-[24px] text-center">{remainQty}</span>
+                              <div className="w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-slate-400 group-hover:bg-emerald-100 group-hover:text-emerald-600 transition-colors shrink-0">
+                                <ArrowLeft size={14} />
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {products.every((p: any, idx: number) => {
+                         const maxQty = toNum(p.quantity ?? p.qty ?? 0) + toNum(p.delivered_quantity ?? 0);
+                         const delivQty = Math.min(toNum(partialDeliveryQtys[idx] ?? 0), maxQty);
+                         return maxQty - delivQty <= 0;
+                      }) && (
+                        <div className="text-center p-4 text-xs text-rose-300 dark:text-rose-800/40 font-bold border-2 border-dashed border-rose-100 dark:border-rose-900/50 rounded-xl">لا توجد قطع متبقية</div>
+                      )}
                     </div>
-                  );
-                })}
+                  </div>
+
+                  {/* صندوق: ما تم تسليمه */}
+                  <div className="bg-emerald-50/50 dark:bg-emerald-900/10 p-3 rounded-2xl border border-emerald-100 dark:border-emerald-900/30 flex flex-col">
+                    <h4 className="font-bold text-emerald-700 dark:text-emerald-400 text-xs mb-3 text-center sticky top-0 bg-emerald-50/90 dark:bg-emerald-900/90 backdrop-blur-sm py-2 rounded-lg shadow-sm border border-emerald-100 dark:border-emerald-800 z-10">
+                      ما تم تسليمه (للعميل)
+                      <div className="text-[10px] font-normal text-emerald-500 dark:text-emerald-300 mt-0.5">انقر على القطع لإرجاعها</div>
+                    </h4>
+                    <div className="space-y-2 flex-1">
+                      {products.map((p: any, idx: number) => {
+                        const maxQty = toNum(p.quantity ?? p.qty ?? 0) + toNum(p.delivered_quantity ?? 0);
+                        const delivQty = Math.min(toNum(partialDeliveryQtys[idx] ?? 0), maxQty);
+                        const unitPrice = parseNumeric(p.price ?? p.price_per_unit ?? p.sale_price ?? p.unit_price ?? 0);
+                        if (delivQty <= 0) return null;
+                        
+                        return (
+                          <div 
+                            key={`deliv-${idx}`}
+                            onClick={() => setPartialDeliveryQtys(prev => ({ ...prev, [idx]: delivQty - 1 }))}
+                            className="cursor-pointer bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-emerald-200 dark:border-emerald-800 shadow-sm hover:border-rose-400 hover:shadow-md transition-all flex items-center justify-between group"
+                          >
+                            <div className="flex items-center gap-2.5 ml-2">
+                              <div className="w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-slate-400 group-hover:bg-rose-100 group-hover:text-rose-600 transition-colors shrink-0">
+                                <ArrowRight size={14} />
+                              </div>
+                              <span className="text-xs font-black text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/60 px-2 py-0.5 rounded-md min-w-[24px] text-center">{delivQty}</span>
+                            </div>
+                            <div className="flex-1 min-w-0 text-left pl-2 border-l-[3px] border-emerald-400 dark:border-emerald-600">
+                              <p className="text-[11px] font-bold text-slate-800 dark:text-slate-200 truncate">{p.name || p.product_name || `منتج ${idx + 1}`}</p>
+                              <div className="flex items-center justify-end gap-2 mt-1">
+                                {unitPrice > 0 && <p className="text-[9px] text-slate-400 font-bold">{money(unitPrice)} ج.م</p>}
+                                {(p.color || p.size) && <p className="text-[9px] text-slate-500 dark:text-slate-400">{p.color} {p.size ? `- ${p.size}` : ''}</p>}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {products.every((p: any, idx: number) => {
+                         const maxQty = toNum(p.quantity ?? p.qty ?? 0) + toNum(p.delivered_quantity ?? 0);
+                         return Math.min(toNum(partialDeliveryQtys[idx] ?? 0), maxQty) <= 0;
+                      }) && (
+                        <div className="text-center p-4 text-xs text-emerald-300 dark:text-emerald-800/40 font-bold border-2 border-dashed border-emerald-100 dark:border-emerald-900/50 rounded-xl">لم يتم تحديد أي قطع للتسليم</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
               <div className="px-5 py-3 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-700">
                 <p className="text-[10px] text-slate-500 mb-3">سيتم تحويل حالة الأوردر إلى "مرتجع جزئي مع المندوب" وسيظل في العهدة الحالية حتى يتم استلام المنتجات المرتجعة في صفحة تسجيل المرتجعات.</p>
