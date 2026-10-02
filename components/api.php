@@ -9641,7 +9641,7 @@ switch ($module) {
             try {
                 $topRepsStmt = execute_query($pdo,
                     "SELECT COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id) AS id,
-                            COALESCE(NULLIF(TRIM(rep.name), ''), NULLIF(TRIM(rep_user.name), ''), CONCAT('مندوب #', COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id))) AS name,
+                            COALESCE(NULLIF(TRIM(rep.name), ''), CONCAT('مندوب #', COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id))) AS name,
                             COUNT(DISTINCT o.id) AS orders_count,
                             COALESCE(SUM({$deliveredQtyExpr} * oi.price_per_unit), 0) AS total_sales
                      FROM order_items oi
@@ -9649,8 +9649,7 @@ switch ($module) {
                      {$rjoSubquery}
                      {$orderTotJoin}
                      JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
-                     LEFT JOIN representatives rep ON rep.id = COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id)
-                     LEFT JOIN users rep_user ON rep_user.id = COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id)
+                     LEFT JOIN users rep ON rep.id = COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id)
                      WHERE {$baseWhere} AND COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id) > 0
                      GROUP BY id, name
                      ORDER BY total_sales DESC, orders_count DESC
@@ -9669,7 +9668,7 @@ switch ($module) {
                 if (empty($topReps)) {
                     $fallbackRepsStmt = execute_query($pdo,
                         "SELECT COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id) AS id,
-                                COALESCE(NULLIF(TRIM(rep.name), ''), NULLIF(TRIM(rep_user.name), ''), CONCAT('مندوب #', COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id))) AS name,
+                                COALESCE(NULLIF(TRIM(rep.name), ''), CONCAT('مندوب #', COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id))) AS name,
                                 COUNT(DISTINCT o.id) AS orders_count,
                                 COALESCE(SUM({$deliveredQtyExpr} * oi.price_per_unit), 0) AS total_sales
                          FROM order_items oi
@@ -9677,8 +9676,7 @@ switch ($module) {
                          {$rjoSubquery}
                          {$orderTotJoin}
                          JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
-                         LEFT JOIN representatives rep ON rep.id = COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id)
-                         LEFT JOIN users rep_user ON rep_user.id = COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id)
+                         LEFT JOIN users rep ON rep.id = COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id)
                          WHERE rdj.is_closed = 1 AND DATE(COALESCE(rdj.closed_at, rdj.journal_date)) BETWEEN ? AND ?
                            AND (rjo.status IN ('delivered', 'partial') OR o.status IN ('delivered', 'partial'))
                            AND COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id) > 0
