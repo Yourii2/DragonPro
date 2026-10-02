@@ -31,6 +31,8 @@ scratch/
 
 # Local DB config (keep a template in config.example.php)
 config.php
+servers-config.json
+servers.json
 tmp_*
 
 # License files (customer-specific)

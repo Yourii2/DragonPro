@@ -1,8 +1,8 @@
 <?php
-$version = '2.0.6';
+$version = '2.0.8';
 $root = realpath(__DIR__ . '/..');
 
-echo "=== Packaging DragonPro v{$version} Release (Full Source + Compiled) ===\n";
+echo "=== Packaging DragonPro v{$version} Release (Full Source + Compiled Bundle) ===\n";
 
 // 1. Build frontend via npm run build
 echo "Step 1: Running npm run build to ensure dist is 100% up-to-date...\n";
