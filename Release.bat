@@ -60,10 +60,8 @@ rem - index.html + assets/ at project root (Apache serves root)
 rem - components/ for PHP APIs
 
 xcopy /e /i /y "components" "%STAGE%\components" >nul
-rem Remove files not needed in production (source, debug, temp)
-for /r "%STAGE%\components" %%f in (*.tsx *.ts *.log *.tmp *.bak) do del /f /q "%%f" >nul 2>nul
-if exist "%STAGE%\components\test.php" del /f /q "%STAGE%\components\test.php" >nul 2>nul
-if exist "%STAGE%\components\test_db.php" del /f /q "%STAGE%\components\test_db.php" >nul 2>nul
+rem Remove only temporary and log files
+for /r "%STAGE%\components" %%f in (*.log *.tmp *.bak) do del /f /q "%%f" >nul 2>nul
 
 if exist "migrations" (
   xcopy /e /i /y "migrations" "%STAGE%\migrations" >nul
@@ -73,9 +71,27 @@ if exist "tools" (
   xcopy /e /i /y "tools" "%STAGE%\tools" >nul
 )
 
+if exist "scripts" (
+  xcopy /e /i /y "scripts" "%STAGE%\scripts" >nul
+)
+
+if exist "types" (
+  xcopy /e /i /y "types" "%STAGE%\types" >nul
+)
+
+if exist "public" (
+  xcopy /e /i /y "public" "%STAGE%\public" >nul
+)
+
+if exist "services" (
+  xcopy /e /i /y "services" "%STAGE%\services" >nul
+)
+
 if exist "dist\assets" (
   if not exist "%STAGE%\assets" mkdir "%STAGE%\assets" >nul
   xcopy /e /i /y "dist\assets\*" "%STAGE%\assets\" >nul
+  if not exist "%STAGE%\dist\assets" mkdir "%STAGE%\dist\assets" >nul
+  xcopy /e /i /y "dist\assets\*" "%STAGE%\dist\assets\" >nul
 ) else (
   echo Missing dist\assets. Did build succeed?
   exit /b 1
@@ -83,9 +99,15 @@ if exist "dist\assets" (
 
 if exist "dist\index.html" (
   copy /y "dist\index.html" "%STAGE%\index.html" >nul
+  if not exist "%STAGE%\dist" mkdir "%STAGE%\dist" >nul
+  copy /y "dist\index.html" "%STAGE%\dist\index.html" >nul
 ) else (
   echo Missing dist\index.html. Did build succeed?
   exit /b 1
+)
+
+if exist "dist\.version" (
+  copy /y "dist\.version" "%STAGE%\dist\.version" >nul
 )
 
 if exist "dist\assets" (
@@ -98,18 +120,16 @@ if exist "dist\index.html" copy /y "dist\index.html" "index.html" >nul
 rem Immediately restore workspace index.html to source mode for future builds
 call node scripts/prepare-html.cjs
 
-if exist "Dragon.png" copy /y "Dragon.png" "%STAGE%\Dragon.png" >nul
-if exist "metadata.json" copy /y "metadata.json" "%STAGE%\metadata.json" >nul
-if exist "update-config.json" copy /y "update-config.json" "%STAGE%\update-config.json" >nul
-if exist "version.json" copy /y "version.json" "%STAGE%\version.json" >nul
-
-rem DO NOT ship batch files (.bat) - start.bat is locked while running during updates
-for /r "%STAGE%" %%b in (*.bat) do del /f /q "%%b" >nul 2>nul
+rem Copy root source and config files
+for %%f in (App.tsx index.tsx constants.tsx types.ts index.css package.json package-lock.json tsconfig.json tailwind.config.js postcss.config.js vite.config.ts sw.js Dragon.png icon-192.png icon-512.png icon-maskable.png manifest.json metadata.json update-config.json version.json start.bat start_new.bat restart.bat update_and_restart.bat CHANGELOG.md) do (
+  if exist "%%f" copy /y "%%f" "%STAGE%\%%f" >nul
+)
 
 rem DO NOT ship customer-specific files
 if exist "%STAGE%\config.php" del /f /q "%STAGE%\config.php" >nul 2>nul
 if exist "%STAGE%\Dragon.lic" del /f /q "%STAGE%\Dragon.lic" >nul 2>nul
 if exist "%STAGE%\nexus.lic" del /f /q "%STAGE%\nexus.lic" >nul 2>nul
+if exist "%STAGE%\servers-config.json" del /f /q "%STAGE%\servers-config.json" >nul 2>nul
 
 echo [4/5] Creating zip...
 set "OUTDIR=%cd%\releases"
@@ -129,6 +149,8 @@ if not exist "%ZIP%" (
   echo Failed to create zip.
   exit /b 1
 )
+
+copy /y "%ZIP%" "%cd%\DragonPro_v%VERSION%.zip" >nul 2>nul
 
 echo [5/5] Done.
 echo Output: %ZIP%

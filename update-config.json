@@ -1,24 +1,24 @@
 {
-  "github": {
-    "owner": "Yourii2",
-    "repo": "DragonPro",
-    "version": "2.0.8",
-    "buildDate": "2026-10-02",
-    "assetName": "DragonPro_v2.0.8.zip"
-  },
-  "preserve": [
-    "config.php",
-    "Dragon.lic",
-    "nexus.lic",
-    "uploads/",
-    "logs/",
-    "backups/",
-    ".env.local",
-    "Dragon.png"
-  ],
-  "allowedHosts": [
-    "github.com",
-    "objects.githubusercontent.com",
-    "raw.githubusercontent.com"
-  ]
+    "github": {
+        "owner": "Yourii2",
+        "repo": "DragonPro",
+        "version": "2.0.9",
+        "buildDate": "2026-10-02",
+        "assetName": "DragonPro_v2.0.9.zip"
+    },
+    "preserve": [
+        "config.php",
+        "Dragon.lic",
+        "nexus.lic",
+        "uploads/",
+        "logs/",
+        "backups/",
+        ".env.local",
+        "Dragon.png"
+    ],
+    "allowedHosts": [
+        "github.com",
+        "objects.githubusercontent.com",
+        "raw.githubusercontent.com"
+    ]
 }
