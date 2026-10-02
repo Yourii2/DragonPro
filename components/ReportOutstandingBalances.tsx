@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { useTheme } from './ThemeContext';
 import Swal from 'sweetalert2';
-import { Clock, RefreshCw, Download, AlertCircle } from 'lucide-react';
+import { Clock, RefreshCw, AlertCircle, ArrowDownLeft, ArrowUpRight, Scale } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 const fmt = (n: number) => Number(n || 0).toLocaleString('ar-EG', { maximumFractionDigits: 2 });
@@ -10,7 +10,7 @@ const fmt = (n: number) => Number(n || 0).toLocaleString('ar-EG', { maximumFract
 const ReportOutstandingBalances: React.FC = () => {
   const { isDark } = useTheme();
   const sym = localStorage.getItem('Dragon_currency') || 'ج.م';
-  const [data, setData] = useState<any>({ users: [], aging_summary: {} });
+  const [data, setData] = useState<any>({ users: [], aging_summary: {}, total_receivable: 0, total_payable: 0, net_balance: 0 });
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
@@ -28,24 +28,6 @@ const ReportOutstandingBalances: React.FC = () => {
   }, []);
 
   useEffect(() => { load(); }, [load]);
-
-  const aging = data.aging_summary || {};
-  const chartData = [
-    { name: '0-30 يوم', value: Number(aging['0_30'] || 0), fill: '#10b981' },
-    { name: '31-60 يوم', value: Number(aging['31_60'] || 0), fill: '#f59e0b' },
-    { name: '61-90 يوم', value: Number(aging['61_90'] || 0), fill: '#f97316' },
-    { name: 'أكثر من 90', value: Number(aging['over_90'] || 0), fill: '#ef4444' }
-  ];
-
-  const totalDebt = chartData.reduce((sum, item) => sum + item.value, 0);
-
-  const tooltipStyle = {
-    borderRadius: '14px', border: 'none',
-    boxShadow: '0 10px 20px rgba(0,0,0,.15)',
-    background: isDark ? '#0f172a' : '#fff',
-    color: isDark ? '#f1f5f9' : '#0f172a',
-    padding: '10px 14px', textAlign: 'right' as const
-  };
 
   const [sortKey, setSortKey] = useState<string>('balance');
   const [sortAsc, setSortAsc] = useState(false);
@@ -65,6 +47,40 @@ const ReportOutstandingBalances: React.FC = () => {
     if (filterRole === 'all') return true;
     return u.role === filterRole;
   });
+
+  // Calculate totals based on filtered users (or overall data)
+  const totalReceivable = filteredUsers.reduce((sum, u) => sum + (Number(u.debt_amount) || 0), 0);
+  const totalPayable = filteredUsers.reduce((sum, u) => sum + (Number(u.credit_amount) || 0), 0);
+  const netBalance = totalReceivable - totalPayable;
+
+  // Calculate dynamic aging breakdown based on filtered users
+  const agingBuckets = { '0_30': 0, '31_60': 0, '61_90': 0, 'over_90': 0 };
+  filteredUsers.forEach(u => {
+    if (Number(u.debt_amount) > 0) {
+      const d = Number(u.days_since_payment || 0);
+      if (d <= 30) agingBuckets['0_30'] += Number(u.debt_amount);
+      else if (d <= 60) agingBuckets['31_60'] += Number(u.debt_amount);
+      else if (d <= 90) agingBuckets['61_90'] += Number(u.debt_amount);
+      else agingBuckets['over_90'] += Number(u.debt_amount);
+    }
+  });
+
+  const chartData = [
+    { name: '0-30 يوم', value: Number(agingBuckets['0_30'] || 0), fill: '#10b981' },
+    { name: '31-60 يوم', value: Number(agingBuckets['31_60'] || 0), fill: '#f59e0b' },
+    { name: '61-90 يوم', value: Number(agingBuckets['61_90'] || 0), fill: '#f97316' },
+    { name: 'أكثر من 90', value: Number(agingBuckets['over_90'] || 0), fill: '#ef4444' }
+  ];
+
+  const totalDebtInBuckets = chartData.reduce((sum, item) => sum + item.value, 0);
+
+  const tooltipStyle = {
+    borderRadius: '14px', border: 'none',
+    boxShadow: '0 10px 20px rgba(0,0,0,.15)',
+    background: isDark ? '#0f172a' : '#fff',
+    color: isDark ? '#f1f5f9' : '#0f172a',
+    padding: '10px 14px', textAlign: 'right' as const
+  };
 
   const sortedUsers = [...filteredUsers].sort((a, b) => {
     if (sortKey === 'balance' || sortKey === 'days_since_payment') {
@@ -98,20 +114,80 @@ const ReportOutstandingBalances: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      {/* Header Banner */}
       <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-6 rounded-3xl text-white shadow-lg flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
         <div>
           <h2 className="text-2xl font-black flex items-center gap-2"><Clock className="ml-1" /> تقرير أعمار الديون</h2>
-          <p className="text-white/80 mt-1">يعرض الأرصدة المستحقة على العملاء والمناديب والمدة الزمنية المنقضية</p>
+          <p className="text-white/80 mt-1">يعرض الأرصدة المستحقة على العملاء والمناديب والأرصدة الدائنة مع فترات التقادم الزمني</p>
         </div>
         <button onClick={load} disabled={loading} className="bg-white text-indigo-700 p-2.5 rounded-xl hover:bg-indigo-50 transition active:scale-95 shadow-sm">
           <RefreshCw className={loading ? 'animate-spin' : ''} size={18} />
         </button>
       </div>
 
+      {/* 3 Main KPI Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        {/* إجمالي المستحق لنا */}
+        <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 relative overflow-hidden group hover:shadow-md transition-shadow">
+          <div className="absolute top-0 right-0 left-0 h-1.5 bg-gradient-to-r from-rose-500 to-amber-500" />
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-sm font-bold text-slate-600 dark:text-slate-300">إجمالي المستحق لنا</span>
+            <div className="w-10 h-10 rounded-2xl bg-rose-50 dark:bg-rose-900/30 flex items-center justify-center text-rose-600 dark:text-rose-400">
+              <ArrowDownLeft size={20} />
+            </div>
+          </div>
+          <div className="text-3xl font-black text-rose-600 dark:text-rose-400 tracking-tight">
+            {fmt(totalReceivable)} <span className="text-sm font-bold text-slate-400">{sym}</span>
+          </div>
+          <div className="text-xs text-slate-400 dark:text-slate-500 mt-2 font-medium">
+            ديون مستحقة للشركة (عليهم)
+          </div>
+        </div>
+
+        {/* إجمالي المستحق علينا */}
+        <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 relative overflow-hidden group hover:shadow-md transition-shadow">
+          <div className="absolute top-0 right-0 left-0 h-1.5 bg-gradient-to-r from-emerald-500 to-teal-500" />
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-sm font-bold text-slate-600 dark:text-slate-300">إجمالي المستحق علينا</span>
+            <div className="w-10 h-10 rounded-2xl bg-emerald-50 dark:bg-emerald-900/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+              <ArrowUpRight size={20} />
+            </div>
+          </div>
+          <div className="text-3xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight">
+            {fmt(totalPayable)} <span className="text-sm font-bold text-slate-400">{sym}</span>
+          </div>
+          <div className="text-xs text-slate-400 dark:text-slate-500 mt-2 font-medium">
+            أرصدة دائنة لصالح العملاء أو المناديب (لهم)
+          </div>
+        </div>
+
+        {/* صافي أعمار الديون */}
+        <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 relative overflow-hidden group hover:shadow-md transition-shadow">
+          <div className={`absolute top-0 right-0 left-0 h-1.5 bg-gradient-to-r ${netBalance >= 0 ? 'from-blue-600 to-indigo-600' : 'from-purple-600 to-pink-600'}`} />
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-sm font-bold text-slate-600 dark:text-slate-300">صافي أعمار الديون</span>
+            <div className={`w-10 h-10 rounded-2xl ${netBalance >= 0 ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400' : 'bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400'} flex items-center justify-center`}>
+              <Scale size={20} />
+            </div>
+          </div>
+          <div className={`text-3xl font-black tracking-tight flex items-baseline gap-2 ${netBalance >= 0 ? 'text-blue-600 dark:text-blue-400' : 'text-purple-600 dark:text-purple-400'}`}>
+            <span>{fmt(Math.abs(netBalance))}</span>
+            <span className="text-sm font-bold text-slate-400">{sym}</span>
+            <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${netBalance >= 0 ? 'bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-300' : 'bg-purple-50 dark:bg-purple-900/40 text-purple-600 dark:text-purple-300'}`}>
+              {netBalance >= 0 ? 'صافي لنا' : 'صافي علينا'}
+            </span>
+          </div>
+          <div className="text-xs text-slate-400 dark:text-slate-500 mt-2 font-medium">
+            الفارق (المستحق لنا - المستحق علينا)
+          </div>
+        </div>
+      </div>
+
+      {/* Aging Breakdown & Chart */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700">
-          <h3 className="font-black text-slate-800 dark:text-slate-100 mb-2">إجمالي الديون (المستحقات لنا)</h3>
-          <div className="text-4xl font-black text-blue-600 dark:text-blue-400 mb-6">{fmt(totalDebt)} <span className="text-lg text-slate-400">{sym}</span></div>
+          <h3 className="font-black text-slate-800 dark:text-slate-100 mb-2">شرائح تقادم الديون (المستحق لنا)</h3>
+          <div className="text-2xl font-black text-slate-700 dark:text-slate-200 mb-6">{fmt(totalDebtInBuckets)} <span className="text-sm text-slate-400">{sym}</span></div>
           
           <div className="space-y-4">
             {chartData.map((item, i) => (
@@ -121,7 +197,7 @@ const ReportOutstandingBalances: React.FC = () => {
                   <span className="font-black" style={{ color: item.fill }}>{fmt(item.value)} {sym}</span>
                 </div>
                 <div className="h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
-                  <div className="h-full rounded-full" style={{ width: `${totalDebt > 0 ? (item.value / totalDebt * 100) : 0}%`, backgroundColor: item.fill }} />
+                  <div className="h-full rounded-full" style={{ width: `${totalDebtInBuckets > 0 ? (item.value / totalDebtInBuckets * 100) : 0}%`, backgroundColor: item.fill }} />
                 </div>
               </div>
             ))}
@@ -148,6 +224,7 @@ const ReportOutstandingBalances: React.FC = () => {
         </div>
       </div>
 
+      {/* Account Details Table */}
       <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-700">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
           <h3 className="font-black text-slate-800 dark:text-slate-100">التفاصيل حسب الحساب</h3>

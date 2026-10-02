@@ -20354,7 +20354,25 @@ switch ($module) {
                         else $aging['over_90'] += $user['debt_amount'];
                     }
                 }
-                echo json_encode(['success' => true, 'data' => ['users' => $users, 'aging_summary' => $aging]]);
+
+                $total_receivable = 0;
+                $total_payable = 0;
+                foreach ($users as $u) {
+                    $total_receivable += floatval($u['debt_amount'] ?? 0);
+                    $total_payable += floatval($u['credit_amount'] ?? 0);
+                }
+                $net_balance = $total_receivable - $total_payable;
+
+                echo json_encode([
+                    'success' => true, 
+                    'data' => [
+                        'users' => $users, 
+                        'aging_summary' => $aging,
+                        'total_receivable' => round($total_receivable, 2),
+                        'total_payable' => round($total_payable, 2),
+                        'net_balance' => round($net_balance, 2)
+                    ]
+                ]);
             } catch (Exception $e) {
                 // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => $e->getMessage()]);
