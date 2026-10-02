@@ -378,8 +378,8 @@ try {
     $restartBat = file_exists($root . '/update_and_restart.bat') ? ($root . '/update_and_restart.bat') : ($root . '/restart.bat');
     if (file_exists($restartBat)) {
         log_msg($root, "Triggering automatic background rebuild and preview server restart via " . basename($restartBat) . "...");
-        $cmd = 'start "" cmd.exe /c "' . $restartBat . '"';
-        @pclose(@popen($cmd, "r"));
+        $psCmd = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath \'' . str_replace('\\', '/', $restartBat) . '\' -WindowStyle Minimized"';
+        @pclose(@popen($psCmd, "r"));
     }
 
     if (ob_get_length()) ob_clean();

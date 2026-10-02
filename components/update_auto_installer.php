@@ -382,8 +382,8 @@ if ($action === 'run') {
         // Auto-trigger background rebuild and server restart
         $restartBat = file_exists($root . '/update_and_restart.bat') ? ($root . '/update_and_restart.bat') : ($root . '/restart.bat');
         if (file_exists($restartBat)) {
-            $cmd = 'start "" cmd.exe /c "' . $restartBat . '"';
-            @pclose(@popen($cmd, "r"));
+            $psCmd = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath \'' . str_replace('\\', '/', $restartBat) . '\' -WindowStyle Minimized"';
+            @pclose(@popen($psCmd, "r"));
         }
 
         echo json_encode(['success' => true, 'message' => 'تم تثبيت الإصدارات المحددة بنجاح، ويجري الآن إعادة بناء وتحديث السيرفر تلقائياً في الخلفية.', 'installed' => $installed]);

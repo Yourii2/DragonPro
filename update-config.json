@@ -2,9 +2,9 @@
   "github": {
     "owner": "Yourii2",
     "repo": "DragonPro",
-    "version": "2.0.5",
+    "version": "2.0.6",
     "buildDate": "2026-10-02",
-    "assetName": "DragonPro_v2.0.5.zip"
+    "assetName": "DragonPro_v2.0.6.zip"
   },
   "preserve": [
     "config.php",
@@ -14,13 +14,7 @@
     "logs/",
     "backups/",
     ".env.local",
-    "Dragon.png",
-    "start.bat",
-    "restart.bat",
-    "stop.bat",
-    "install.bat",
-    "recreate_license.bat",
-    "update_and_restart.bat"
+    "Dragon.png"
   ],
   "allowedHosts": [
     "github.com",

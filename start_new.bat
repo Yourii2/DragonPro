@@ -142,23 +142,55 @@ echo.
 :: ---------------------------------------------------------
 call :Log "[4/4] Starting production server..."
 echo Starting production server...
-if not exist "dist" (
-    call :Log "[Wait] Building application for the first time..."
-    call npm.cmd run build >> %LOGFILE% 2>&1
+
+rem Check if application build is needed:
+rem 1. dist folder doesn't exist
+rem 2. dist/index.html doesn't exist
+rem 3. dist/.version doesn't match version.json
+rem 4. Any source file is newer than dist/index.html
+rem 5. User passed --build or -b argument
+set "NEED_BUILD=0"
+if not exist "dist" set "NEED_BUILD=1"
+if not exist "dist\index.html" set "NEED_BUILD=1"
+if not exist "dist\.version" set "NEED_BUILD=1"
+if "%~1"=="--build" set "NEED_BUILD=1"
+if "%~1"=="-b" set "NEED_BUILD=1"
+
+if "!NEED_BUILD!"=="0" (
+    node -e "try { const fs=require('fs'); const curV=require('./version.json').version; const builtV=fs.readFileSync('dist/.version','utf8').trim(); if(curV!==builtV){ process.exit(1); } const distM=fs.statSync('dist/index.html').mtimeMs; const checks=['App.tsx','index.html','index.tsx','components','constants.tsx','types.ts']; for(const p of checks){ if(fs.existsSync(p)){ if(fs.statSync(p).mtimeMs>distM){ process.exit(1); } } } process.exit(0); } catch(e){ process.exit(1); }" >nul 2>&1
+    if errorlevel 1 set "NEED_BUILD=1"
 )
+
+if "!NEED_BUILD!"=="1" (
+    call :Log "[Wait] Detected updates or missing build. Building application (npm run build)..."
+    call :Log "       >> Please wait, this takes a few seconds..."
+    call npm.cmd run build >> %LOGFILE% 2>&1
+    if errorlevel 1 (
+        call :Log "[!] Build had warnings or errors, check startup_log.txt"
+    ) else (
+        call :Log "[OK] Application built successfully."
+        node -e "try { const fs=require('fs'); const v=require('./version.json').version; fs.writeFileSync('dist/.version', v); } catch(e){}" >nul 2>&1
+    )
+) else (
+    call :Log "[OK] Application build is up to date."
+)
+
 rem Ensure ports 3000 and 3001 are free before starting
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ports = @(3000, 3001); Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object { $ports -contains $_.LocalPort } | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }" >nul 2>&1
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":3000" ^| findstr "LISTENING"') do (
     taskkill /F /T /PID %%a >nul 2>&1
 )
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":3001" ^| findstr "LISTENING"') do (
     taskkill /F /T /PID %%a >nul 2>&1
 )
-timeout /t 1 /nobreak >nul
+ping 127.0.0.1 -n 2 >nul 2>&1
 
-start "Dragon Pro Server" cmd /k "cd /d %~dp0 && npm.cmd run preview"
+set "PROJ_DIR=%~dp0"
+if "%PROJ_DIR:~-1%"=="\" set "PROJ_DIR=%PROJ_DIR:~0,-1%"
+start "Dragon Pro Server" /D "%PROJ_DIR%" cmd /k "title Dragon Pro Server (Port 3000) && npm.cmd run preview"
 
 call :Log "Waiting for server to start..."
-timeout /t 3 /nobreak >nul
+ping 127.0.0.1 -n 4 >nul 2>&1
 
 call :Log "Opening browser..."
 start http://localhost:3000
