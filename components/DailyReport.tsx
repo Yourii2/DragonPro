@@ -80,7 +80,7 @@ const DailyReport: React.FC = () => {
 
       // ── 3. Rep daily journal (assigned orders/pieces - Closed Journals Only) ────
       try {
-        const jUrl = `${API_BASE_PATH}/api.php?module=sales&action=getRepDailyJournal&from=${date}&to=${date}`;
+        const jUrl = `${API_BASE_PATH}/api.php?module=sales&action=getRepDailyJournal&from=${date}&to=${date}&closed_only=1`;
         const jj = await fetch(jUrl).then(r => r.json()).catch(() => null);
         if (jj && jj.success && Array.isArray(jj.data)) {
           const closedOnly = jj.data.filter((r: any) => Number(r.is_closed) === 1);

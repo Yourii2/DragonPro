@@ -2555,6 +2555,7 @@ function ensure_rep_daily_journal_table($pdo) {
         if (!column_exists($pdo, 'rep_daily_journal', 'idempotency_token'))      execute_query($pdo, "ALTER TABLE rep_daily_journal ADD COLUMN idempotency_token VARCHAR(64) NULL");
         try { execute_query($pdo, "ALTER TABLE rep_daily_journal ADD INDEX idx_rep_open_journal (rep_id, is_closed)"); } catch (Exception $idxEx) {}
         try { execute_query($pdo, "ALTER TABLE rep_daily_journal ADD INDEX idx_rdj_token (idempotency_token)"); } catch (Exception $tIdxEx) {}
+        try { execute_query($pdo, "ALTER TABLE rep_daily_journal ADD INDEX idx_rdj_closed_at (is_closed, closed_at)"); } catch (Exception $idxEx) {}
         $checked = true;
     }
     if (!column_exists($pdo, 'rep_daily_journal', 'idempotency_token')) {
@@ -9232,14 +9233,14 @@ switch ($module) {
             $prevStart = $prevStartObj->format('Y-m-d');
             $prevEnd = $prevEndObj->format('Y-m-d');
 
-            // Closed daily journals only - realized sales and accounting
+            // Closed daily journals only - realized sales and accounting (based on closing date)
             $statusIn = "'delivered','partial'";
 
             $baseWhere = "
                 (
                     rjo.id IS NOT NULL 
                     AND rdj.is_closed = 1 
-                    AND rdj.journal_date BETWEEN ? AND ?
+                    AND DATE(COALESCE(rdj.closed_at, rdj.journal_date)) BETWEEN ? AND ?
                     AND (rjo.status IN ($statusIn) OR (o.status IN ($statusIn) AND rjo.status NOT IN ('returned', 'full_return', 'with_rep', 'postponed')))
                 )
             ";
@@ -9249,7 +9250,7 @@ switch ($module) {
                 (
                     rjo.id IS NOT NULL 
                     AND rdj.is_closed = 1 
-                    AND rdj.journal_date BETWEEN ? AND ?
+                    AND DATE(COALESCE(rdj.closed_at, rdj.journal_date)) BETWEEN ? AND ?
                     AND (rjo.status IN ($statusIn) OR (o.status IN ($statusIn) AND rjo.status NOT IN ('returned', 'full_return', 'with_rep', 'postponed')))
                 )
             ";
@@ -9367,7 +9368,7 @@ switch ($module) {
                 (
                     rjo.id IS NOT NULL 
                     AND rdj.is_closed = 1 
-                    AND rdj.journal_date BETWEEN ? AND ?
+                    AND DATE(COALESCE(rdj.closed_at, rdj.journal_date)) BETWEEN ? AND ?
                     AND (rjo.status IN ('returned', 'full_return', 'partial_return') OR o.status IN ('returned', 'full_return'))
                 )
             ";
@@ -9386,7 +9387,7 @@ switch ($module) {
                 "SELECT COUNT(DISTINCT rjo.order_id)
                  FROM rep_journal_orders rjo
                  JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
-                 WHERE rdj.is_closed = 1 AND rdj.journal_date BETWEEN ? AND ?",
+                 WHERE rdj.is_closed = 1 AND DATE(COALESCE(rdj.closed_at, rdj.journal_date)) BETWEEN ? AND ?",
                 [$rangeStart, $rangeEnd]
             );
             $ordersRange = intval($ordersRangeStmt->fetchColumn() ?: 0);
@@ -9433,7 +9434,7 @@ switch ($module) {
                         FROM order_items
                         GROUP BY order_id
                     ) oi_summary ON oi_summary.order_id = o.id
-                    WHERE rdj.is_closed = 1 AND rdj.journal_date BETWEEN ? AND ?
+                    WHERE rdj.is_closed = 1 AND DATE(COALESCE(rdj.closed_at, rdj.journal_date)) BETWEEN ? AND ?
                 ";
                 $perfStmt = execute_query($pdo, $perfSql, $baseParams);
                 $perfRows = $perfStmt->fetchAll(PDO::FETCH_ASSOC);
@@ -9520,8 +9521,8 @@ switch ($module) {
                 $lowStockDetails = [];
             }
 
-            // 5. Daily Trend (Sales & Profit) - Closed Dailies Only:
-            $dateExpr = "rdj.journal_date";
+            // 5. Daily Trend (Sales & Profit) - Closed Dailies Only (based on closing date):
+            $dateExpr = "DATE(COALESCE(rdj.closed_at, rdj.journal_date))";
             $salesByDate = [];
             $profitByDate = [];
             try {
@@ -9678,7 +9679,7 @@ switch ($module) {
                          JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                          LEFT JOIN representatives rep ON rep.id = COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id)
                          LEFT JOIN users rep_user ON rep_user.id = COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id)
-                         WHERE rdj.is_closed = 1 AND rdj.journal_date BETWEEN ? AND ?
+                         WHERE rdj.is_closed = 1 AND DATE(COALESCE(rdj.closed_at, rdj.journal_date)) BETWEEN ? AND ?
                            AND (rjo.status IN ('delivered', 'partial') OR o.status IN ('delivered', 'partial'))
                            AND COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id) > 0
                          GROUP BY id, name
@@ -9736,7 +9737,7 @@ switch ($module) {
                          {$rjoSubquery}
                          {$orderTotJoin}
                          JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
-                         WHERE rdj.is_closed = 1 AND rdj.journal_date BETWEEN ? AND ?
+                         WHERE rdj.is_closed = 1 AND DATE(COALESCE(rdj.closed_at, rdj.journal_date)) BETWEEN ? AND ?
                            AND (rjo.status IN ('delivered', 'partial') OR o.status IN ('delivered', 'partial'))
                          GROUP BY COALESCE(NULLIF(TRIM(o.page), ''), NULLIF(TRIM(so.name), ''), 'مباشر')
                          ORDER BY total_sales DESC, orders_count DESC
@@ -9820,7 +9821,7 @@ switch ($module) {
                      JOIN rep_journal_orders rjo ON rjo.order_id = o.id
                      JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                      LEFT JOIN order_items oi ON oi.order_id = o.id
-                     WHERE rdj.is_closed = 1 AND rdj.journal_date BETWEEN ? AND ?
+                     WHERE rdj.is_closed = 1 AND DATE(COALESCE(rdj.closed_at, rdj.journal_date)) BETWEEN ? AND ?
                      GROUP BY COALESCE(rjo.status, o.status)
                      ORDER BY cnt DESC",
                     [$rangeStart, $rangeEnd]
@@ -14705,6 +14706,7 @@ switch ($module) {
                 $repId = isset($_GET['rep_id']) && is_numeric($_GET['rep_id']) ? intval($_GET['rep_id']) : null;
                 $reqFrom = isset($_GET['from']) ? trim((string)$_GET['from']) : null;
                 $reqTo = isset($_GET['to']) ? trim((string)$_GET['to']) : null;
+                $closedOnly = !empty($_GET['closed_only']);
 
                 $where = [];
                 $params = [];
@@ -14712,18 +14714,24 @@ switch ($module) {
                     $where[] = 'rep_id = ?';
                     $params[] = $repId;
                 }
+                if ($closedOnly) {
+                    $where[] = 'is_closed = 1';
+                }
+
+                $dateCol = $closedOnly ? 'DATE(COALESCE(closed_at, journal_date, created_at))' : 'DATE(COALESCE(journal_date, created_at))';
+
                 if ($reqFrom && preg_match('/^\d{4}-\d{2}-\d{2}$/', $reqFrom)) {
-                    $where[] = 'DATE(COALESCE(journal_date, created_at)) >= ?';
+                    $where[] = "$dateCol >= ?";
                     $params[] = $reqFrom;
                 }
                 if ($reqTo && preg_match('/^\d{4}-\d{2}-\d{2}$/', $reqTo)) {
-                    $where[] = 'DATE(COALESCE(journal_date, created_at)) <= ?';
+                    $where[] = "$dateCol <= ?";
                     $params[] = $reqTo;
                 }
 
                 $sql = 'SELECT * FROM rep_daily_journal';
                 if (count($where) > 0) $sql .= ' WHERE ' . implode(' AND ', $where);
-                $sql .= ' ORDER BY DATE(journal_date) ASC, rep_id ASC';
+                $sql .= ' ORDER BY ' . $dateCol . ' ASC, rep_id ASC';
 
                 $stmt = execute_query($pdo, $sql, $params);
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -19187,7 +19195,7 @@ switch ($module) {
             }
             $statusIn = implode(',', array_map(fn($s) => $pdo->quote($s), $allowedStatuses));
 
-            $dateExpr = "rdj.journal_date";
+            $dateExpr = "DATE(COALESCE(rdj.closed_at, rdj.journal_date))";
 
             $extraCond = "";
             $extraParams = [];
@@ -19198,11 +19206,11 @@ switch ($module) {
                 $extraParams[] = $rep_id_filter;
             }
 
-            // Realized sales and accounting from closed daily journals only
+            // Realized sales and accounting from closed daily journals only (based on closing date)
             $baseWhere = "
                 rjo.id IS NOT NULL 
                 AND rdj.is_closed = 1 
-                AND rdj.journal_date BETWEEN ? AND ? 
+                AND DATE(COALESCE(rdj.closed_at, rdj.journal_date)) BETWEEN ? AND ? 
                 AND (rjo.status IN ($statusIn) OR (o.status IN ($statusIn) AND rjo.status NOT IN ('returned', 'full_return', 'with_rep', 'postponed')))
                 $extraCond
             ";
@@ -19385,12 +19393,12 @@ switch ($module) {
                 }
                 unset($row);
 
-                // ── Returned orders summary (Closed Dailies Only) ──
+                // ── Returned orders summary (Closed Dailies Only based on closing date) ──
                 $retStatusIn = "'returned','full_return','partial_return'";
                 $retBaseWhere = "
                     rjo.id IS NOT NULL 
                     AND rdj.is_closed = 1 
-                    AND rdj.journal_date BETWEEN ? AND ? 
+                    AND DATE(COALESCE(rdj.closed_at, rdj.journal_date)) BETWEEN ? AND ? 
                     AND (rjo.status IN ($retStatusIn) OR o.status IN ('returned', 'full_return'))
                     $extraCond
                 ";
@@ -19452,7 +19460,7 @@ switch ($module) {
                        LEFT JOIN products pdir ON pdir.id = oi.product_id"
                     : "LEFT JOIN products pdir ON pdir.id = oi.product_id";
 
-                $dateExpr = "rdj.journal_date";
+                $dateExpr = "DATE(COALESCE(rdj.closed_at, rdj.journal_date))";
 
                 $extraCond = "";
                 $extraParams = [];
@@ -19472,11 +19480,11 @@ switch ($module) {
                     $extraParams[] = $status;
                 }
 
-                // Closed daily journals only - realized sales
+                // Closed daily journals only - realized sales based on closing date
                 $salesWhere = "
                     rjo.id IS NOT NULL 
                     AND rdj.is_closed = 1 
-                    AND rdj.journal_date BETWEEN ? AND ? 
+                    AND DATE(COALESCE(rdj.closed_at, rdj.journal_date)) BETWEEN ? AND ? 
                     AND (rjo.status IN ('delivered', 'partial') OR (o.status IN ('delivered', 'partial') AND rjo.status NOT IN ('returned', 'full_return', 'with_rep', 'postponed')))
                     $extraCond
                 ";
@@ -19801,12 +19809,12 @@ switch ($module) {
                 $costExpr = $hasPV ? "COALESCE(NULLIF(pv.cost_price, 0), NULLIF(pv.purchase_price, 0), 0)" : "0";
                 $variantJoin = $hasPV ? "LEFT JOIN product_variants pv ON pv.id = oi.product_id" : "";
 
-                $salesSql = "SELECT MONTH(rdj.journal_date) as m, COALESCE(SUM(oi.quantity * oi.price_per_unit),0) as total 
+                $salesSql = "SELECT MONTH(COALESCE(rdj.closed_at, rdj.journal_date)) as m, COALESCE(SUM(oi.quantity * oi.price_per_unit),0) as total 
                              FROM order_items oi
                              JOIN orders o ON o.id = oi.order_id
                              JOIN rep_journal_orders rjo ON rjo.order_id = o.id
                              JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
-                             WHERE YEAR(rdj.journal_date) = ? AND rdj.is_closed = 1 AND (rjo.status IN ('delivered', 'partial') OR o.status IN ('delivered', 'partial'))
+                             WHERE YEAR(COALESCE(rdj.closed_at, rdj.journal_date)) = ? AND rdj.is_closed = 1 AND (rjo.status IN ('delivered', 'partial') OR o.status IN ('delivered', 'partial'))
                              GROUP BY m";
                 $stmt = execute_query($pdo, $salesSql, [$year]);
                 foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
@@ -19817,13 +19825,13 @@ switch ($module) {
                     $sales_prev[intval($row['m'])] = floatval($row['total'] ?? 0);
                 }
 
-                $profitSql = "SELECT MONTH(rdj.journal_date) as m, COALESCE(SUM(oi.quantity * (oi.price_per_unit - {$costExpr})),0) as profit
+                $profitSql = "SELECT MONTH(COALESCE(rdj.closed_at, rdj.journal_date)) as m, COALESCE(SUM(oi.quantity * (oi.price_per_unit - {$costExpr})),0) as profit
                               FROM order_items oi
                               JOIN orders o ON o.id = oi.order_id
                               JOIN rep_journal_orders rjo ON rjo.order_id = o.id
                               JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
                               {$variantJoin}
-                              WHERE YEAR(rdj.journal_date) = ? AND rdj.is_closed = 1 AND (rjo.status IN ('delivered', 'partial') OR o.status IN ('delivered', 'partial'))
+                              WHERE YEAR(COALESCE(rdj.closed_at, rdj.journal_date)) = ? AND rdj.is_closed = 1 AND (rjo.status IN ('delivered', 'partial') OR o.status IN ('delivered', 'partial'))
                               GROUP BY m";
                 $stmt = execute_query($pdo, $profitSql, [$year]);
                 foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) { $profit[intval($row['m'])] = floatval($row['profit'] ?? 0); }
@@ -19939,7 +19947,7 @@ switch ($module) {
                         {$variantJoins}
                         WHERE rjo.id IS NOT NULL 
                           AND rdj.is_closed = 1 
-                          AND rdj.journal_date BETWEEN ? AND ? 
+                          AND DATE(COALESCE(rdj.closed_at, rdj.journal_date)) BETWEEN ? AND ? 
                           AND (
                               rjo.status IN ('delivered', 'partial', 'returned', 'full_return', 'partial_return')
                               OR o.status IN ('delivered', 'partial', 'returned', 'full_return', 'partial_return')
@@ -20008,7 +20016,7 @@ switch ($module) {
 
                 $sql = "
                     SELECT 
-                        rdj.journal_date AS event_d,
+                        DATE(COALESCE(rdj.closed_at, rdj.journal_date)) AS event_d,
                         COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id, 0) AS rep_id,
                         COALESCE(NULLIF(TRIM(u.name), ''), CONCAT('مندوب #', COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id))) AS rep_name,
                         o.id AS order_id,
@@ -20032,7 +20040,7 @@ switch ($module) {
                     LEFT JOIN order_items oi ON oi.order_id = o.id
                     LEFT JOIN users u ON u.id = COALESCE(rjo.rep_id, rdj.rep_id, o.rep_id)
                     WHERE rdj.is_closed = 1 
-                      AND rdj.journal_date BETWEEN ? AND ?
+                      AND DATE(COALESCE(rdj.closed_at, rdj.journal_date)) BETWEEN ? AND ?
                       AND (
                           rjo.status IN ('delivered', 'partial', 'returned', 'full_return', 'partial_return')
                           OR o.status IN ('delivered', 'partial', 'returned', 'full_return', 'partial_return')
@@ -20392,7 +20400,7 @@ switch ($module) {
                 $retWhere = "
                     rjo.id IS NOT NULL 
                     AND rdj.is_closed = 1 
-                    AND rdj.journal_date BETWEEN ? AND ? 
+                    AND DATE(COALESCE(rdj.closed_at, rdj.journal_date)) BETWEEN ? AND ? 
                     AND (rjo.status IN ('returned', 'full_return', 'partial_return') OR o.status IN ('returned', 'full_return', 'partial_return'))
                 ";
                 $retParams = [$start_date, $end_date];

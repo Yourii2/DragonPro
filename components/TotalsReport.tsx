@@ -87,13 +87,13 @@ const TotalsReport: React.FC = () => {
 
       // ── 3. Rep assigned journal (Closed journals only) ─────────────
       try {
-        const repUrl = `${API_BASE_PATH}/api.php?module=sales&action=getRepDailyJournal&from=${startDate}&to=${endDate}`;
+        const repUrl = `${API_BASE_PATH}/api.php?module=sales&action=getRepDailyJournal&from=${startDate}&to=${endDate}&closed_only=1`;
         const repRes = await fetch(repUrl).then(r => r.json()).catch(() => null);
         if (repRes && repRes.success && Array.isArray(repRes.data)) {
           const grouped: Record<string, any> = {};
           repRes.data.forEach((row: any) => {
             if (Number(row.is_closed) !== 1) return; // closed journals only
-            const d = String(row.journal_date || row.created_at || '').slice(0, 10);
+            const d = String(row.closed_at ? row.closed_at.slice(0, 10) : (row.journal_date || row.created_at || '')).slice(0, 10);
             if (!d) return;
             if (!grouped[d]) grouped[d] = { date: d, orders: 0, pieces: 0 };
             grouped[d].orders += Number(row.orders_assigned_count || 0);
