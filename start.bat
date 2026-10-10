@@ -159,10 +159,9 @@ if "!NEED_BUILD!"=="1" (
     call :Log "[OK] Application build is up to date."
 )
 
-rem Ensure ports 3000 and 3001 are free before starting
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ports = @(3000, 3001); Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object { $ports -contains $_.LocalPort } | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }" >nul 2>&1
+rem Ensure port 3000 is free before starting
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ports = @(3000); Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object { $ports -contains $_.LocalPort } | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }" >nul 2>&1
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":3000" ^| findstr "LISTENING"') do taskkill /F /T /PID %%a >nul 2>&1
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":3001" ^| findstr "LISTENING"') do taskkill /F /T /PID %%a >nul 2>&1
 ping 127.0.0.1 -n 2 >nul 2>&1
 
 rem Sync version in package.json from version.json

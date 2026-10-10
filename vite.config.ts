@@ -9,15 +9,15 @@ function isCloudflareActive(): boolean {
   try {
     const sc = execSync('sc query Cloudflared', { stdio: ['pipe', 'pipe', 'ignore'], timeout: 1500 }).toString();
     if (/STATE\s*:\s*\d+\s+RUNNING/i.test(sc)) return true;
-  } catch (e) {}
+  } catch (e) { }
   try {
     const scWarp = execSync('sc query CloudflareWARP', { stdio: ['pipe', 'pipe', 'ignore'], timeout: 1500 }).toString();
     if (/STATE\s*:\s*\d+\s+RUNNING/i.test(scWarp)) return true;
-  } catch (e) {}
+  } catch (e) { }
   try {
     const tasks = execSync('tasklist /NH', { stdio: ['pipe', 'pipe', 'ignore'], timeout: 1500 }).toString();
     if (/cloudflared\.exe/i.test(tasks) || /warp-svc\.exe/i.test(tasks)) return true;
-  } catch (e) {}
+  } catch (e) { }
   return false;
 }
 
@@ -39,7 +39,7 @@ function getCloudflareTunnelUrl(projectRoot: string, port: number = 3000): strin
           : `http://${clean}${clean.includes(':') ? '' : `:${port}`}/`;
       }
     }
-  } catch (e) {}
+  } catch (e) { }
 
   // 2. Check environment variable override
   if (process.env.CLOUDFLARE_TUNNEL_IP) {
@@ -70,7 +70,7 @@ function getCloudflareTunnelUrl(projectRoot: string, port: number = 3000): strin
         }
       }
     }
-  } catch (e) {}
+  } catch (e) { }
 
   return null;
 }

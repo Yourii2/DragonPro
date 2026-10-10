@@ -38,6 +38,12 @@ const isExchangeOrder = (order: any) => {
   return status === 'exchange';
 };
 
+const isVisualExchangeOrder = (order: any) => {
+  if (isExchangeOrder(order)) return true;
+  const status = String(order?.status || order?.order_status || order?.journal_status || '').toLowerCase();
+  return status === 'with_rep' && order?.notes && String(order.notes).includes('استبدال');
+};
+
 const computePieces = (order: any) => {
   const status = String(order?.status || order?.order_status || '').toLowerCase();
   if (status === 'returned' || status === 'full_return') return 0;
@@ -57,6 +63,24 @@ const canPartialDeliver = (order: any) => {
   }
   const pieces = toNum(order?.pieces_count) || toNum(order?.total_pieces) || 0;
   return pieces > 1;
+};
+
+const renderOrderBadges = (o: any) => {
+  if (isExchangeOrder(o)) {
+    return <span className="text-[9px] font-bold bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded border border-purple-200 dark:bg-purple-900/40 dark:border-purple-800">استبدال</span>;
+  }
+  const hasPartialDelivery = computeDeliveredNetPieces(o) > 0;
+  const isRetWithRep = o.status === 'returned_with_rep' || o.order_status === 'returned_with_rep';
+  const isPartialReturn = o.status === 'partial_return' || o.order_status === 'partial_return' || o.status === 'partial' || o.order_status === 'partial';
+
+  if (hasPartialDelivery) {
+    return <span className="text-[9px] font-bold bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded border border-indigo-200 dark:bg-indigo-900/40 dark:border-indigo-800">مسلم جزئي</span>;
+  }
+  if (isRetWithRep || isPartialReturn) {
+    return <span className="text-[9px] font-bold bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded border border-orange-200 dark:bg-orange-900/40 dark:border-orange-800">مرتجع جزئي</span>;
+  }
+
+  return null;
 };
 
 const computeOrderValueWithoutShipping = (order: any) => {
@@ -125,7 +149,7 @@ const computeReturnedOrderValue = (order: any) => {
       try {
         const ed = typeof order.exchange_details === 'string' ? JSON.parse(order.exchange_details) : order.exchange_details;
         return toNum(ed?.returned_total_value || ed?.returned_price || 0);
-      } catch (e) {}
+      } catch (e) { }
     }
     return 0;
   }
@@ -136,10 +160,10 @@ const computeReturnedOrderValue = (order: any) => {
   if ((status === 'partial' || status === 'partial_return') && returnedValueFromMovements > 0) {
     return returnedValueFromMovements;
   }
-  
+
   // If explicitly a partial return status, try to sum returned items first
   const isPartialStatus = (status === 'partial' || status === 'partial_return');
-  
+
   const items = order.products || order.order_items || order.items || [];
   if (Array.isArray(items) && items.length > 0) {
     let returnedVal = 0;
@@ -153,13 +177,13 @@ const computeReturnedOrderValue = (order: any) => {
     // If we have specific item-level return data, use it
     if (foundAnyRq && returnedVal > 0) return returnedVal;
   }
-  
+
   // If it's a full return, it should be the total value of items still in the list 
   // (In full returns, we keep the original quantities in the DB)
   if (status === 'returned' || status === 'full_return') {
     return computeOrderValueWithoutShipping(order);
   }
-  
+
   // Fallback to the dedicated returned_value field passed by the API (which is correct for partials)
   return Math.max(toNum(order?.returned_value), toNum(order?.returned_value_fallback), 0);
 };
@@ -196,7 +220,7 @@ const computeDeliveredNetPieces = (order: any) => {
     }
     return 0;
   }
-  if (status === 'with_rep' || status === 'pending' || jStatus === 'with_rep') {
+  if (['with_rep', 'pending', 'deferred', 'postponed'].includes(status) || ['with_rep', 'deferred', 'postponed'].includes(jStatus)) {
     const dp = toNum(order?.delivered_pieces);
     return dp > 0 ? dp : 0;
   }
@@ -213,7 +237,7 @@ const computeDeliveredNetValue = (order: any) => {
       try {
         const ed = typeof order.exchange_details === 'string' ? JSON.parse(order.exchange_details) : order.exchange_details;
         return toNum(ed?.delivered_total_value || ed?.delivered_price || 0);
-      } catch (e) {}
+      } catch (e) { }
     }
     return computeOrderValueWithoutShipping(order);
   }
@@ -241,7 +265,7 @@ const computeDeliveredNetValue = (order: any) => {
     }
     return 0;
   }
-  if (status === 'with_rep' || status === 'pending' || jStatus === 'with_rep') {
+  if (['with_rep', 'pending', 'deferred', 'postponed'].includes(status) || ['with_rep', 'deferred', 'postponed'].includes(jStatus)) {
     const dv = toNum(order?.delivered_value);
     return dv > 0 ? dv : 0;
   }
@@ -274,14 +298,14 @@ const isPartialDeliveryOrder = (order: any) => {
   if (isExchangeOrder(order)) return false;
   const status = String(order?.status || order?.order_status || order?.journal_status || '').toLowerCase();
   return computeDeliveredNetPieces(order) > 0 && (
-    computeReturnedPieces(order) > 0 || (status === 'returned_with_rep' && computePieces(order) > 0)
+    computeReturnedPieces(order) > 0 || (['returned_with_rep', 'partial', 'partial_return', 'deferred', 'postponed', 'with_rep'].includes(status) && computePieces(order) > 0)
   );
 };
 
 const isPartialReturn = (order: any) => {
   if (isExchangeOrder(order)) return false;
   const status = String(order?.status || order?.order_status || order?.journal_status || '').toLowerCase();
-  return (status === 'partial' || status === 'partial_return' || status === 'returned_with_rep') || (computeDeliveredNetPieces(order) > 0 && computeReturnedPieces(order) > 0);
+  return (['partial', 'partial_return', 'returned_with_rep'].includes(status)) || (computeDeliveredNetPieces(order) > 0 && computeReturnedPieces(order) > 0) || (['deferred', 'postponed', 'with_rep'].includes(status) && computeReturnedPieces(order) > 0 && computePieces(order) > 0);
 };
 
 const isFullReturnOrder = (order: any) => {
@@ -349,7 +373,7 @@ const SalesDailyClose: React.FC = () => {
   // Split Payment Auto Treasury Lock Effect
   useEffect(() => {
     if (!isSplitPayment || treasuries.length === 0) return;
-    const electronicTreasury = treasuries.find(t => 
+    const electronicTreasury = treasuries.find(t =>
       normalizeText(t.name).includes('الكترونى') ||
       normalizeText(t.name).includes('الكترونية') ||
       normalizeText(t.name).includes('فودافون') ||
@@ -414,36 +438,27 @@ const SalesDailyClose: React.FC = () => {
 
   // Derived Unified Lists (To solve partial return overlap where an order is both delivered and returned)
   const finalDeliveredList = useMemo(() => {
-    const activeIds = new Set(activeOrders.map(getRealOrderId));
-    const deferredIds = new Set(deferredOrders.map(getRealOrderId));
     const fromRet = returnedOrders.filter(o => computeDeliveredNetPieces(o) > 0);
-    // Active orders that have partial delivery (delivered_pieces > 0)
-    const fromActive = activeOrders.filter(o => {
+    const fromActive = activeOrders.filter(o => computeDeliveredNetPieces(o) > 0);
+    const fromDeferred = deferredOrders.filter(o => computeDeliveredNetPieces(o) > 0);
+
+    return uniqOrdersById([...deliveredOrders, ...fromRet, ...fromActive, ...fromDeferred]).filter(o => {
       const st = String(o.status || o.order_status || o.journal_status || '').toLowerCase();
-      return (st === 'returned_with_rep' || st === 'partial' || st === 'partial_return') && computeDeliveredNetPieces(o) > 0;
-    });
-    return uniqOrdersById([...deliveredOrders, ...fromRet, ...fromActive]).filter(o => {
-      const id = getRealOrderId(o);
-      const st = String(o.status || o.order_status || o.journal_status || '').toLowerCase();
-      if (deferredIds.has(id)) return false;
-      if (st === 'returned_with_rep' || st === 'partial' || st === 'partial_return') {
-        return computeDeliveredNetPieces(o) > 0;
-      }
-      return !activeIds.has(id) && computeDeliveredNetPieces(o) > 0;
+      if (st === 'exchange') return false;
+      return computeDeliveredNetPieces(o) > 0;
     });
   }, [deliveredOrders, returnedOrders, activeOrders, deferredOrders]);
 
   const finalReturnedList = useMemo(() => {
-    const deferredIds = new Set(deferredOrders.map(getRealOrderId));
-    return uniqOrdersById(returnedOrders).filter(o => {
-      const id = getRealOrderId(o);
+    const fromActive = activeOrders.filter(o => computeReturnedPieces(o) > 0);
+    const fromDeferred = deferredOrders.filter(o => computeReturnedPieces(o) > 0);
+
+    return uniqOrdersById([...returnedOrders, ...fromActive, ...fromDeferred]).filter(o => {
       const st = String(o.status || o.order_status || o.journal_status || '').toLowerCase();
-      if (st === 'returned_with_rep') return false;
-      if (st === 'with_rep' && toNum(o.returned_pieces) <= 0) return false;
-      if (deferredIds.has(id)) return false;
+      if (st === 'exchange') return false;
       return computeReturnedPieces(o) > 0;
     });
-  }, [returnedOrders, deferredOrders]);
+  }, [returnedOrders, activeOrders, deferredOrders]);
 
   // Sub-breakdowns: Full vs Partial vs Exchange
   const delivExchangeList = useMemo(() => finalDeliveredList.filter(isExchangeOrder), [finalDeliveredList]);
@@ -666,14 +681,14 @@ const SalesDailyClose: React.FC = () => {
         // Keep in jDelivered only if it has delivered_pieces > 0 (exclude returned_with_rep & partial_return)
         jDelivered = uniqOrdersById(rawDelivered.filter((o: any) => (!isRetWithRep(o) && !isPartialReturnOrd(o)) || toNum(o.delivered_pieces) > 0));
         // Keep in jReturned if returned_pieces > 0 (including partial_return) and not with_rep with 0 returned pieces
-        jReturned  = uniqOrdersById(rawReturned.filter((o: any) => {
+        jReturned = uniqOrdersById(rawReturned.filter((o: any) => {
           if (isRetWithRep(o)) return toNum(o.returned_pieces) > 0;
           const st = String(o.status || o.order_status || o.journal_status || '').toLowerCase();
           if (st === 'with_rep' && toNum(o.returned_pieces) <= 0) return false;
           return true;
         }));
-        jDeferred  = uniqOrdersById(rawDeferred);
-        jActive    = uniqOrdersById([...rawActive, ...extraActive]);
+        jDeferred = uniqOrdersById(rawDeferred);
+        jActive = uniqOrdersById([...rawActive, ...extraActive]);
       }
 
       // Merge all active orders in rep's custody (including "نزول" / postponed / with_rep)
@@ -841,16 +856,25 @@ const SalesDailyClose: React.FC = () => {
 
     try {
       setLoading(true);
-      const req = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=undoDailyCloseOrder`, {
+      // Determine if this is a partial order currently in activeOrders (not yet closed in a journal)
+      // Partial orders in activeOrders use undoPartialOrder action to avoid DDL-inside-transaction issues
+      const orderIdStr = String(orderId);
+      const isActivePartial = activeOrders.some(o => {
+        const st = String(o.status || o.order_status || o.journal_status || '').toLowerCase();
+        return getRealOrderId(o) === orderIdStr && (st === 'partial' || st === 'partial_return');
+      });
+      const actionName = isActivePartial ? 'undoPartialOrder' : 'undoDailyCloseOrder';
+
+      const req = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=${actionName}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rep_id: selectedRepId, order_id: orderId, undo_type: undoType })
       });
       const data = await req.json();
       if (!data.success) throw new Error(data.message || 'خطأ في الاسترجاع');
-      
+
       Swal.fire('نجاح', undoType === 'delivery' ? 'تم إلغاء التسليم وإعادة القطع المسلمة إلى عهدة المندوب.' : 'تم إلغاء المرتجع وإعادة المنتجات إلى عهدة المندوب.', 'success');
-      
+
       if (selectedRepId) {
         await loadRepData(selectedRepId);
       }
@@ -872,10 +896,6 @@ const SalesDailyClose: React.FC = () => {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: movedIds, status: 'deferred', journal_id: targetJournalId })
       });
-      await Promise.all(movedIds.map(id => fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, status: 'with_rep', rep_id: Number(selectedRepId), repId: Number(selectedRepId) })
-      }).catch(() => null)));
       await loadRepData(selectedRepId);
       Swal.fire('تم', 'تم نقل الاوردرات المحددة إلى النزول (في عهدة المندوب).', 'success');
     } catch (e) {
@@ -895,10 +915,6 @@ const SalesDailyClose: React.FC = () => {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: [oid], status: 'deferred', journal_id: targetJournalId })
       });
-      await fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: oid, status: 'with_rep', rep_id: Number(selectedRepId), repId: Number(selectedRepId) })
-      }).catch(() => null);
       await loadRepData(selectedRepId);
     } catch (e) {
       console.error(e);
@@ -913,17 +929,13 @@ const SalesDailyClose: React.FC = () => {
       setLoading(true);
       const oid = Number(getRealOrderId(order));
       const targetJournalId = openDailyInfo?.id ? Number(openDailyInfo.id) : undefined;
+      const targetStatus = computeDeliveredNetPieces(order) > 0 ? 'returned_with_rep' : 'with_rep';
       const res = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: [oid], status: 'with_rep', journal_id: targetJournalId })
+        body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: [oid], status: targetStatus, journal_id: targetJournalId })
       });
       const data = await res.json();
       if (!data?.success) throw new Error(data?.message || 'فشل استرجاع الاوردر.');
-
-      await fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: oid, status: 'with_rep', rep_id: Number(selectedRepId), repId: Number(selectedRepId) })
-      });
       await loadRepData(selectedRepId);
       Swal.fire({
         toast: true,
@@ -956,22 +968,29 @@ const SalesDailyClose: React.FC = () => {
 
     try {
       setLoading(true);
-      const movedIds = deferredOrders.map(o => Number(getRealOrderId(o))).filter(id => id > 0);
-      if (movedIds.length === 0) return;
-      const targetJournalId = openDailyInfo?.id ? Number(openDailyInfo.id) : undefined;
-      const res = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: movedIds, status: 'with_rep', journal_id: targetJournalId })
-      });
-      const data = await res.json();
-      if (!data?.success) throw new Error(data?.message || 'فشل إرجاع الأوردرات.');
+      const withRepIds = deferredOrders.filter(o => computeDeliveredNetPieces(o) <= 0).map(o => Number(getRealOrderId(o))).filter(id => id > 0);
+      const retWithRepIds = deferredOrders.filter(o => computeDeliveredNetPieces(o) > 0).map(o => Number(getRealOrderId(o))).filter(id => id > 0);
 
-      await Promise.all(movedIds.map(id => fetch(`${API_BASE_PATH}/api.php?module=orders&action=update`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, status: 'with_rep', rep_id: Number(selectedRepId), repId: Number(selectedRepId) })
-      }).catch(() => null)));
+      const targetJournalId = openDailyInfo?.id ? Number(openDailyInfo.id) : undefined;
+      const promises = [];
+
+      if (withRepIds.length > 0) {
+        promises.push(fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: withRepIds, status: 'with_rep', journal_id: targetJournalId })
+        }).then(r => r.json()).then(d => { if (!d?.success) throw new Error(d?.message) }));
+      }
+
+      if (retWithRepIds.length > 0) {
+        promises.push(fetch(`${API_BASE_PATH}/api.php?module=sales&action=updateJournalOrderStatus`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rep_id: Number(selectedRepId), order_ids: retWithRepIds, status: 'returned_with_rep', journal_id: targetJournalId })
+        }).then(r => r.json()).then(d => { if (!d?.success) throw new Error(d?.message) }));
+      }
+
+      await Promise.all(promises);
       await loadRepData(selectedRepId);
-      Swal.fire('تم', `تم إرجاع جميع الأوردرات (${movedIds.length}) إلى العهدة الحالية بنجاح.`, 'success');
+      Swal.fire('تم', `تم إرجاع جميع الأوردرات (${deferredOrders.length}) إلى العهدة الحالية بنجاح.`, 'success');
       setViewModal(null);
     } catch (e: any) {
       console.error(e);
@@ -1079,14 +1098,17 @@ const SalesDailyClose: React.FC = () => {
   };
 
   const handleUndoAllOrders = async (ordersList: any[], label: string, undoType: 'delivery' | 'return') => {
-    if (!ordersList || ordersList.length === 0) {
-      Swal.fire('تنبيه', 'لا توجد أوردرات لإرجاعها في هذه القائمة.', 'info');
+    // Exclude exchange orders from mass undo because they are handled differently and shouldn't be undone via this button
+    const validOrders = (ordersList || []).filter(o => !isExchangeOrder(o));
+
+    if (validOrders.length === 0) {
+      Swal.fire('تنبيه', 'لا توجد أوردرات قابلة للإرجاع في هذه القائمة (لا يمكن التراجع عن أوامر الاستبدال).', 'info');
       return;
     }
-    const count = ordersList.length;
+    const count = validOrders.length;
     const res = await Swal.fire({
-      title: `إرجاع جميع أوردرات ${label}؟`,
-      text: `سيتم استرجاع جميع الأوردرات (${count} أوردر) وإلغاء تسجيلها في اليومية وإعادتها لعهدة المندوب الحالية. هل أنت متأكد؟`,
+      title: `إرجاع ${count} أوردر من أصل ${ordersList.length}؟`,
+      text: `سيتم استرجاع الأوردرات (${count} أوردر) وإلغاء تسجيلها في اليومية وإعادتها لعهدة المندوب الحالية. هل أنت متأكد؟ (ملاحظة: لا يمكن التراجع عن الاستبدال)`,
       icon: 'warning',
       showCancelButton: true,
       confirmButtonText: 'نعم، إرجاع الكل',
@@ -1096,7 +1118,7 @@ const SalesDailyClose: React.FC = () => {
 
     try {
       setLoading(true);
-      const orderIds = ordersList.map(o => Number(getRealOrderId(o))).filter(id => id > 0);
+      const orderIds = validOrders.map(o => Number(getRealOrderId(o))).filter(id => id > 0);
       const req = await fetch(`${API_BASE_PATH}/api.php?module=sales&action=undoDailyCloseOrder`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1186,7 +1208,7 @@ const SalesDailyClose: React.FC = () => {
         try {
           const u = JSON.parse(localStorage.getItem('Dragon_user') || '{}');
           currentEmpName = u.name || u.username || '';
-        } catch (e) {}
+        } catch (e) { }
       }
       const currentUserId = userDefaults?.user_id || userDefaults?.id || null;
 
@@ -1323,7 +1345,7 @@ const SalesDailyClose: React.FC = () => {
     }
 
     const repName = selectedRep?.name || '';
-    const treasuryDisplay = isSplitPayment 
+    const treasuryDisplay = isSplitPayment
       ? `مزدوج (كاش: ${money(cashAmt)} ج.م + إلكتروني: ${money(elecAmt)} ج.م)`
       : (selectedTreasuryName || selectedTreasuryId || '—');
 
@@ -1411,7 +1433,7 @@ const SalesDailyClose: React.FC = () => {
         try {
           const u = JSON.parse(localStorage.getItem('Dragon_user') || '{}');
           currentEmpName = u.name || u.username || '';
-        } catch (e) {}
+        } catch (e) { }
       }
       const currentUserId = userDefaults?.user_id || userDefaults?.id || null;
 
@@ -1579,14 +1601,14 @@ const SalesDailyClose: React.FC = () => {
     const pTime = new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
     const pRepName = selectedRep?.name || '';
     const pTotal = repBalance;
-    const pTreasury = isSplitPayment 
+    const pTreasury = isSplitPayment
       ? `مزدوج (كاش: ${money(cashPaidAmount)} ج.م + إلكتروني: ${money(electronicPaidAmount)} ج.م)`
       : (selectedTreasuryName || 'مدفوعات إليكترونية');
     const pAmount = isSplitPayment ? (cashPaidAmount + electronicPaidAmount) : paidAmount;
-    
+
     // Generate Rows for Delivered
     const delivHTML = finalDeliveredList.map(o => {
-      const isEx = isExchangeOrder(o);
+      const isEx = isVisualExchangeOrder(o);
       const isPartial = isPartialDeliveryOrder(o);
       const badgeText = isEx ? '<span style="font-size:10px;color:#7e22ce;font-weight:bold;">(استبدال)</span>' : isPartial ? '<span style="font-size:10px;color:#d97706;">(جزئي)</span>' : '';
       return `<tr>
@@ -1598,7 +1620,7 @@ const SalesDailyClose: React.FC = () => {
     }).join('');
 
     const retHTML = finalReturnedList.map(o => {
-      const isEx = isExchangeOrder(o);
+      const isEx = isVisualExchangeOrder(o);
       const isPartial = isOrderPartialReturnInReturnedList(o);
       const badgeText = isEx ? '<span style="font-size:10px;color:#7e22ce;font-weight:bold;">(استبدال)</span>' : isPartial ? '<span style="font-size:10px;color:#d97706;">(جزئي)</span>' : '';
       return `<tr>
@@ -1911,12 +1933,12 @@ const SalesDailyClose: React.FC = () => {
     const iframe = document.createElement('iframe');
     iframe.style.display = 'none';
     document.body.appendChild(iframe);
-    
+
     // Firefox fallback
     iframe.contentDocument?.open();
     iframe.contentDocument?.write(html);
     iframe.contentDocument?.close();
-    
+
     iframe.onload = () => {
       setTimeout(() => {
         iframe.contentWindow?.focus();
@@ -1971,11 +1993,10 @@ const SalesDailyClose: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setDailyFilter('all')}
-                className={`px-3 py-1 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 ${
-                  dailyFilter === 'all'
+                className={`px-3 py-1 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 ${dailyFilter === 'all'
                     ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-sm'
                     : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                }`}
+                  }`}
               >
                 <span>الكل</span>
                 <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${dailyFilter === 'all' ? 'bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300' : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'}`}>
@@ -1985,11 +2006,10 @@ const SalesDailyClose: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setDailyFilter('open')}
-                className={`px-3 py-1 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 ${
-                  dailyFilter === 'open'
+                className={`px-3 py-1 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 ${dailyFilter === 'open'
                     ? 'bg-emerald-600 text-white shadow-sm'
                     : 'text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400'
-                }`}
+                  }`}
               >
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                 <span>يومية مفتوحة</span>
@@ -2000,11 +2020,10 @@ const SalesDailyClose: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setDailyFilter('closed')}
-                className={`px-3 py-1 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 ${
-                  dailyFilter === 'closed'
+                className={`px-3 py-1 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 ${dailyFilter === 'closed'
                     ? 'bg-slate-800 text-white dark:bg-slate-600 shadow-sm'
                     : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                }`}
+                  }`}
               >
                 <span>يومية مغلقة</span>
                 <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${dailyFilter === 'closed' ? 'bg-slate-900 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'}`}>
@@ -2257,7 +2276,7 @@ const SalesDailyClose: React.FC = () => {
                 </span>
               </div>
               <div className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">
-                {interimPaymentsList.length > 0 
+                {interimPaymentsList.length > 0
                   ? `تم تسجيل ${interimPaymentsList.length} دفعة تحت الحساب وخُصمت فوراً من حساب المندوب.`
                   : 'لم يتم سداد أي دفعات مسبقة أثناء هذه اليومية.'}
               </div>
@@ -2470,18 +2489,16 @@ const SalesDailyClose: React.FC = () => {
                 {activeOrders.length === 0 ? <div className="text-xs text-slate-400 text-center py-6">لا توجد اوردرات.</div> : activeOrdersSorted.map(o => (
                   activeOrdersViewMode === 'list' ? (
                     <div key={o.id} className="flex items-center justify-between py-2 px-1 hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                      <div className="flex items-center gap-2">
-                        <input type="checkbox" checked={selectedOrderIds.includes(getRealOrderId(o))} onChange={() => toggleSelectOrder(getRealOrderId(o))} className="w-3.5 h-3.5 rounded text-indigo-600 cursor-pointer" />
-                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate max-w-[120px]">
-                          #{o.orderNumber || o.order_number} {o.customerName || o.customer_name || o.name}
-                        </span>
-                        {isExchangeOrder(o) ? (
-                          <span className="text-[9px] font-bold bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded border border-purple-200 dark:bg-purple-900/40 dark:border-purple-800">استبدال</span>
-                        ) : (o.status === 'returned_with_rep' || o.order_status === 'returned_with_rep') ? (
-                          <span className="text-[9px] font-bold bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded border border-orange-200 dark:bg-orange-900/40 dark:border-orange-800">مرتجع جزئي مع المندوب</span>
-                        ) : (o.status === 'partial_return' || o.order_status === 'partial_return' || o.status === 'partial' || o.order_status === 'partial') ? (
-                          <span className="text-[9px] font-bold bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded border border-rose-200 dark:bg-rose-900/40 dark:border-rose-800">مرتجع جزئي</span>
-                        ) : null}
+                      <div className="flex flex-col">
+                        <div className="flex items-center gap-2">
+                          <input type="checkbox" checked={selectedOrderIds.includes(getRealOrderId(o))} onChange={() => toggleSelectOrder(getRealOrderId(o))} className="w-3.5 h-3.5 rounded text-indigo-600 cursor-pointer" />
+                          <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate max-w-[120px]">
+                            #{o.orderNumber || o.order_number} {o.customerName || o.customer_name || o.name}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1 mt-1 ml-5">
+                          {renderOrderBadges(o)}
+                        </div>
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="text-[11px] font-black text-emerald-600">{money(computeActiveOrderDisplayValue(o))}</span>
@@ -2493,18 +2510,16 @@ const SalesDailyClose: React.FC = () => {
                   ) : (
                     <div key={o.id} className="border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 bg-white dark:bg-slate-900">
                       <div className="flex items-start justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <input type="checkbox" checked={selectedOrderIds.includes(getRealOrderId(o))} onChange={() => toggleSelectOrder(getRealOrderId(o))} className="w-3.5 h-3.5 rounded text-indigo-600 cursor-pointer mt-0.5" />
-                          <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                            #{o.orderNumber || o.order_number} — {o.customerName || o.customer_name || o.name}
-                          </span>
-                          {isExchangeOrder(o) ? (
-                            <span className="text-[9px] font-bold bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded border border-purple-200 dark:bg-purple-900/40 dark:border-purple-800">استبدال</span>
-                          ) : (o.status === 'returned_with_rep' || o.order_status === 'returned_with_rep') ? (
-                            <span className="text-[9px] font-bold bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded border border-orange-200 dark:bg-orange-900/40 dark:border-orange-800">مرتجع جزئي مع المندوب</span>
-                          ) : (o.status === 'partial_return' || o.order_status === 'partial_return' || o.status === 'partial' || o.order_status === 'partial') ? (
-                            <span className="text-[9px] font-bold bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded border border-rose-200 dark:bg-rose-900/40 dark:border-rose-800">مرتجع جزئي</span>
-                          ) : null}
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2">
+                            <input type="checkbox" checked={selectedOrderIds.includes(getRealOrderId(o))} onChange={() => toggleSelectOrder(getRealOrderId(o))} className="w-3.5 h-3.5 rounded text-indigo-600 cursor-pointer mt-0.5" />
+                            <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                              #{o.orderNumber || o.order_number} — {o.customerName || o.customer_name || o.name}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-1 ml-5">
+                            {renderOrderBadges(o)}
+                          </div>
                         </div>
                         {canPartialDeliver(o) && (
                           <div className="flex items-center gap-1">
@@ -2550,7 +2565,12 @@ const SalesDailyClose: React.FC = () => {
                 {deferredOrders.length === 0 ? <div className="text-xs text-slate-400 text-center py-6">لا توجد اوردرات.</div> : deferredOrdersSorted.map(o => (
                   deferredOrdersViewMode === 'list' ? (
                     <div key={o.id} className="flex items-center justify-between py-2 px-1 hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                      <div className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate max-w-[120px]">#{o.orderNumber || o.order_number} {o.customerName || o.customer_name || o.name}</div>
+                      <div className="flex flex-col">
+                        <div className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate max-w-[120px]">#{o.orderNumber || o.order_number} {o.customerName || o.customer_name || o.name}</div>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {renderOrderBadges(o)}
+                        </div>
+                      </div>
                       <div className="flex items-center gap-2">
                         <span className="text-[11px] font-black text-emerald-600">{money(computeActiveOrderDisplayValue(o))}</span>
                         <button onClick={() => moveDeferredBack(o)} className="px-2 py-0.5 text-[10px] bg-slate-100 text-slate-700 rounded dark:bg-slate-800 dark:text-slate-300">ارجاع</button>
@@ -2559,7 +2579,12 @@ const SalesDailyClose: React.FC = () => {
                   ) : (
                     <div key={o.id} className="border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 bg-white dark:bg-slate-900">
                       <div className="flex items-start justify-between mb-2">
-                        <div className="text-xs font-bold text-slate-800 dark:text-slate-200">#{o.orderNumber || o.order_number} — {o.customerName || o.customer_name || o.name}</div>
+                        <div className="flex flex-col gap-1">
+                          <span className="text-xs font-bold text-slate-800 dark:text-slate-200">#{o.orderNumber || o.order_number} — {o.customerName || o.customer_name || o.name}</span>
+                          <div className="flex flex-wrap gap-1">
+                            {renderOrderBadges(o)}
+                          </div>
+                        </div>
                         <button onClick={() => moveDeferredBack(o)} className="px-2 py-0.5 text-[10px] bg-slate-100 text-slate-700 rounded dark:bg-slate-800 dark:text-slate-300 font-bold">ارجاع</button>
                       </div>
                       <div className="bg-slate-50 dark:bg-slate-800/50 rounded-md p-1.5 mb-1.5">
@@ -2630,13 +2655,13 @@ const SalesDailyClose: React.FC = () => {
                   onClick={() => setModalFilter('full')}
                   className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${modalFilter === 'full' ? (viewModal === 'delivered' ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white') : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100'}`}
                 >
-                  {viewModal === 'delivered' ? `تسليم كامل (${delivFullList.length})` : `ارتجاع كامل (${returnFullList.length})`}
+                  {viewModal === 'delivered' ? `تسليم كامل (${delivFullList.length})` : `مرتجع كامل (${returnFullList.length})`}
                 </button>
                 <button
                   onClick={() => setModalFilter('partial')}
                   className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${modalFilter === 'partial' ? 'bg-amber-600 text-white' : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100'}`}
                 >
-                  {viewModal === 'delivered' ? `تسليم جزئي (${delivPartialList.length})` : `ارتجاع جزئي (${returnPartialList.length})`}
+                  {viewModal === 'delivered' ? `تسليم جزئي (${delivPartialList.length})` : `مرتجع جزئي (${returnPartialList.length})`}
                 </button>
                 {viewModal === 'delivered' && delivExchangeList.length > 0 && (
                   <button
@@ -2662,8 +2687,8 @@ const SalesDailyClose: React.FC = () => {
                 const list = viewModal === 'delivered'
                   ? (modalFilter === 'full' ? delivFullList : modalFilter === 'partial' ? delivPartialList : modalFilter === 'exchange' ? delivExchangeList : finalDeliveredList)
                   : viewModal === 'returned'
-                  ? (modalFilter === 'full' ? returnFullList : modalFilter === 'partial' ? returnPartialList : modalFilter === 'exchange' ? returnExchangeList : finalReturnedList)
-                  : deferredOrders;
+                    ? (modalFilter === 'full' ? returnFullList : modalFilter === 'partial' ? returnPartialList : modalFilter === 'exchange' ? returnExchangeList : finalReturnedList)
+                    : deferredOrders;
                 if (list.length === 0) return <div className="text-center text-slate-500 py-12">لا توجد اوردرات في هذه القائمة.</div>;
                 return (
                   <table className="w-full text-sm text-right">
@@ -2678,7 +2703,7 @@ const SalesDailyClose: React.FC = () => {
                     </thead>
                     <tbody>
                       {list.map(o => {
-                        const isEx = isExchangeOrder(o);
+                        const isEx = isVisualExchangeOrder(o);
                         const isPartial = isOrderPartialReturnInReturnedList(o);
                         let badge = null;
                         if (isEx) {
@@ -2687,7 +2712,7 @@ const SalesDailyClose: React.FC = () => {
                           const isDelivPartial = isPartialDeliveryOrder(o);
                           badge = <span className={`mr-2 px-2 py-0.5 rounded text-[10px] font-bold inline-block border ${isDelivPartial ? 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:border-amber-800 dark:text-amber-400' : 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:border-emerald-800 dark:text-emerald-400'}`}>{isDelivPartial ? 'تسليم جزئي' : 'تسليم كامل'}</span>;
                         } else if (viewModal === 'returned') {
-                          badge = <span className={`mr-2 px-2 py-0.5 rounded text-[10px] font-bold inline-block border ${isPartial ? 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:border-amber-800 dark:text-amber-400' : 'bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-900/30 dark:border-rose-800 dark:text-rose-400'}`}>{isPartial ? 'ارتجاع جزئي' : 'ارتجاع كامل'}</span>;
+                          badge = <span className={`mr-2 px-2 py-0.5 rounded text-[10px] font-bold inline-block border ${isPartial ? 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:border-amber-800 dark:text-amber-400' : 'bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-900/30 dark:border-rose-800 dark:text-rose-400'}`}>{isPartial ? 'مرتجع جزئي' : 'مرتجع كامل'}</span>;
                         }
 
                         return (
@@ -2713,7 +2738,7 @@ const SalesDailyClose: React.FC = () => {
                                 >
                                   إرجاع ↩️
                                 </button>
-                              ) : (
+                              ) : isExchangeOrder(o) ? null : (
                                 <button
                                   onClick={() => handleUndoOrder(getRealOrderId(o), viewModal === 'delivered' ? 'delivery' : 'return')}
                                   disabled={loading}
@@ -2763,7 +2788,7 @@ const SalesDailyClose: React.FC = () => {
               </div>
               <div className="p-5 max-h-[60vh] overflow-y-auto">
                 <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 text-center">انقر على المنتج لنقله بين الصناديق. ما يوجد في صندوق "ما تم تسليمه" سيتم تسليمه للعميل، والمتبقي سيظل في عهدة المندوب.</p>
-                
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {/* صندوق: باقي في عهدة المندوب */}
                   <div className="bg-rose-50/50 dark:bg-rose-900/10 p-3 rounded-2xl border border-rose-100 dark:border-rose-900/30 flex flex-col">
@@ -2778,9 +2803,9 @@ const SalesDailyClose: React.FC = () => {
                         const remainQty = maxQty - delivQty;
                         const unitPrice = parseNumeric(p.price ?? p.price_per_unit ?? p.sale_price ?? p.unit_price ?? 0);
                         if (remainQty <= 0) return null;
-                        
+
                         return (
-                          <div 
+                          <div
                             key={`rem-${idx}`}
                             onClick={() => setPartialDeliveryQtys(prev => ({ ...prev, [idx]: delivQty + 1 }))}
                             className="cursor-pointer bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-rose-200 dark:border-rose-800 shadow-sm hover:border-emerald-400 hover:shadow-md transition-all flex items-center justify-between group"
@@ -2802,12 +2827,12 @@ const SalesDailyClose: React.FC = () => {
                         );
                       })}
                       {products.every((p: any, idx: number) => {
-                         const maxQty = toNum(p.quantity ?? p.qty ?? 0) + toNum(p.delivered_quantity ?? 0);
-                         const delivQty = Math.min(toNum(partialDeliveryQtys[idx] ?? 0), maxQty);
-                         return maxQty - delivQty <= 0;
+                        const maxQty = toNum(p.quantity ?? p.qty ?? 0) + toNum(p.delivered_quantity ?? 0);
+                        const delivQty = Math.min(toNum(partialDeliveryQtys[idx] ?? 0), maxQty);
+                        return maxQty - delivQty <= 0;
                       }) && (
-                        <div className="text-center p-4 text-xs text-rose-300 dark:text-rose-800/40 font-bold border-2 border-dashed border-rose-100 dark:border-rose-900/50 rounded-xl">لا توجد قطع متبقية</div>
-                      )}
+                          <div className="text-center p-4 text-xs text-rose-300 dark:text-rose-800/40 font-bold border-2 border-dashed border-rose-100 dark:border-rose-900/50 rounded-xl">لا توجد قطع متبقية</div>
+                        )}
                     </div>
                   </div>
 
@@ -2823,9 +2848,9 @@ const SalesDailyClose: React.FC = () => {
                         const delivQty = Math.min(toNum(partialDeliveryQtys[idx] ?? 0), maxQty);
                         const unitPrice = parseNumeric(p.price ?? p.price_per_unit ?? p.sale_price ?? p.unit_price ?? 0);
                         if (delivQty <= 0) return null;
-                        
+
                         return (
-                          <div 
+                          <div
                             key={`deliv-${idx}`}
                             onClick={() => setPartialDeliveryQtys(prev => ({ ...prev, [idx]: delivQty - 1 }))}
                             className="cursor-pointer bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-emerald-200 dark:border-emerald-800 shadow-sm hover:border-rose-400 hover:shadow-md transition-all flex items-center justify-between group"
@@ -2847,11 +2872,11 @@ const SalesDailyClose: React.FC = () => {
                         );
                       })}
                       {products.every((p: any, idx: number) => {
-                         const maxQty = toNum(p.quantity ?? p.qty ?? 0) + toNum(p.delivered_quantity ?? 0);
-                         return Math.min(toNum(partialDeliveryQtys[idx] ?? 0), maxQty) <= 0;
+                        const maxQty = toNum(p.quantity ?? p.qty ?? 0) + toNum(p.delivered_quantity ?? 0);
+                        return Math.min(toNum(partialDeliveryQtys[idx] ?? 0), maxQty) <= 0;
                       }) && (
-                        <div className="text-center p-4 text-xs text-emerald-300 dark:text-emerald-800/40 font-bold border-2 border-dashed border-emerald-100 dark:border-emerald-900/50 rounded-xl">لم يتم تحديد أي قطع للتسليم</div>
-                      )}
+                          <div className="text-center p-4 text-xs text-emerald-300 dark:text-emerald-800/40 font-bold border-2 border-dashed border-emerald-100 dark:border-emerald-900/50 rounded-xl">لم يتم تحديد أي قطع للتسليم</div>
+                        )}
                     </div>
                   </div>
                 </div>
@@ -2869,7 +2894,7 @@ const SalesDailyClose: React.FC = () => {
                     className="flex-1 px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-sm font-black transition-colors flex items-center justify-center gap-2"
                   >
                     {loading ? <Loader2 className="animate-spin" size={16} /> : null}
-                    تأكيد (مرتجع جزئي مع المندوب)
+                    تأكيد (تسليم جزئي مع المندوب)
                   </button>
                 </div>
               </div>

@@ -20,7 +20,7 @@ if "%VERSION%"=="" (
 
 for /f %%i in ('powershell -NoProfile -Command "(Get-Date).ToString('yyyy-MM-dd')"') do set "BUILD_DATE=%%i"
 
-echo [1/5] Writing version.json and updating package.json...
+echo [1/5] Writing version.json and updating package metadata...
 (
   echo {
   echo   "version": "%VERSION%",
@@ -30,7 +30,8 @@ echo [1/5] Writing version.json and updating package.json...
 
 rem Update version in package.json and update-config.json via Node (avoids BOM/encoding issues)
 node -e "const fs=require('fs');const f='package.json';const p=JSON.parse(fs.readFileSync(f,'utf8'));p.version='%VERSION%';fs.writeFileSync(f,JSON.stringify(p,null,2)+'\n','utf8');"
-node -e "const fs=require('fs');const f='update-config.json';if(fs.existsSync(f)){const p=JSON.parse(fs.readFileSync(f,'utf8'));if(p.github){p.github.version='%VERSION%';p.github.assetName='DragonPro_v%VERSION%.zip';fs.writeFileSync(f,JSON.stringify(p,null,2)+'\n','utf8');}}"
+node -e "const fs=require('fs');const f='package-lock.json';if(fs.existsSync(f)){const p=JSON.parse(fs.readFileSync(f,'utf8'));p.version='%VERSION%';if(p.packages&&p.packages[''])p.packages[''].version='%VERSION%';fs.writeFileSync(f,JSON.stringify(p,null,2)+'\n','utf8');}"
+node -e "const fs=require('fs');const f='update-config.json';if(fs.existsSync(f)){const p=JSON.parse(fs.readFileSync(f,'utf8'));if(p.github){p.github.version='%VERSION%';p.github.buildDate='%BUILD_DATE%';p.github.assetName='DragonPro_v%VERSION%.zip';fs.writeFileSync(f,JSON.stringify(p,null,2)+'\n','utf8');}}"
 
 echo [2/5] Building frontend (vite build)...
 if not exist "node_modules" (
@@ -87,6 +88,10 @@ if exist "services" (
   xcopy /e /i /y "services" "%STAGE%\services" >nul
 )
 
+rem Keep developer-only test scripts out of the customer package.
+if exist "%STAGE%\scripts" del /f /q "%STAGE%\scripts\test_*" >nul 2>nul
+if exist "%STAGE%\tools" del /f /q "%STAGE%\tools\test_*" >nul 2>nul
+
 if exist "dist\assets" (
   if not exist "%STAGE%\assets" mkdir "%STAGE%\assets" >nul
   xcopy /e /i /y "dist\assets\*" "%STAGE%\assets\" >nul
@@ -121,7 +126,7 @@ rem Immediately restore workspace index.html to source mode for future builds
 call node scripts/prepare-html.cjs
 
 rem Copy root source and config files
-for %%f in (App.tsx index.tsx constants.tsx types.ts index.css package.json package-lock.json tsconfig.json tailwind.config.js postcss.config.js vite.config.ts sw.js Dragon.png icon-192.png icon-512.png icon-maskable.png manifest.json metadata.json update-config.json version.json start.bat start_new.bat restart.bat update_and_restart.bat CHANGELOG.md) do (
+for %%f in (App.tsx index.tsx constants.tsx types.ts index.css package.json package-lock.json tsconfig.json tailwind.config.js postcss.config.js vite.config.ts sw.js Dragon.png icon-192.png icon-512.png icon-maskable.png manifest.json metadata.json update-config.json version.json start.bat start_3001.bat start_new.bat restart.bat update_and_restart.bat CHANGELOG.md) do (
   if exist "%%f" copy /y "%%f" "%STAGE%\%%f" >nul
 )
 

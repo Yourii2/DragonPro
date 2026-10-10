@@ -184,9 +184,11 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
 
   const isRepPaymentTx = (tx: any, details?: any): boolean => {
     const d = details || getTxDetailsObj(tx);
+    const txType = String(tx?.type || '').trim();
+    if (txType === 'expense' || String(d?.subtype) === 'expense') return false;
+    
     const repTypes = ['rep_payment_in', 'rep_payment_out', 'rep_settlement'];
     const repRelTypes = ['rep', 'employee'];
-    const txType = String(tx?.type || '').trim();
     const relType = String(tx?.related_to_type || '').trim();
     const action = String(d?.action || '').trim();
     const context = String(d?.context || '').trim();
@@ -753,28 +755,38 @@ const FinanceModule: React.FC<FinanceModuleProps> = ({ initialView = 'treasuries
 
   const getTxDisplayLabel = (tx: any) => {
     if (!tx) return '-';
-    const repLabel = getRepTransactionExactLabel(tx);
-    if (repLabel) return repLabel;
+    const typeLabel = getTransactionTypeLabel(tx.type, tx.details);
+    if (typeLabel) return typeLabel;
+    
     if (tx.title && String(tx.title).trim()) return tx.title;
     if (tx.memo && String(tx.memo).trim()) return tx.memo;
-    return getTransactionTypeLabel(tx.type, tx.details);
+    return tx.type || '—';
   };
 
   const getTxDisplayNotes = (tx: any) => {
     if (!tx) return '—';
     const repLabel = getRepTransactionExactLabel(tx);
     const d = getTxDetailsObj(tx);
-    const explicitNote = tx.memo || d.notes || d.reason || d.note || tx.title;
+    const parts: string[] = [];
+
+    // Add exact rep label (e.g. "تحصيل من المندوب فى بدء اليوميه")
+    if (repLabel) {
+      parts.push(repLabel);
+    } else if (tx.title && String(tx.title).trim() && tx.title !== 'تسوية يومية' && tx.title !== 'اغلاق اليوميه تلقائيا') {
+      parts.push(String(tx.title).trim());
+    }
+
+    // Add explicit user notes (e.g. "سلفه هبه")
+    const explicitNote = tx.memo || d.notes || d.reason || d.note;
     if (explicitNote && String(explicitNote).trim()) {
       const s = String(explicitNote).trim();
-      if (!s.includes('اغلاق اليوميه تلقائيا') && !s.includes('تسوية يومية')) {
-        return s;
+      if (!s.includes('اغلاق اليوميه تلقائيا') && !s.includes('تسوية يومية') && s !== repLabel && s !== tx.title) {
+        parts.push(s);
       }
     }
-    if (repLabel) return repLabel;
-    if (tx.memo && String(tx.memo).trim()) return tx.memo;
-    if (tx.title && String(tx.title).trim()) return tx.title;
-    return getTransactionNotes(tx.details);
+
+    if (parts.length > 0) return parts.join(' - ');
+    return getTransactionNotes(tx.details) || '—';
   };
 
   const uniqueEmployees = useMemo(() => {

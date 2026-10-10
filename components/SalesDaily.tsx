@@ -168,6 +168,7 @@ const SalesDaily: React.FC = () => {
   const deliveryMethod = (localStorage.getItem('Dragon_delivery_method') || 'reps').toString();
   const isShippingMode = deliveryMethod === 'shipping';
 
+  const [dailyFilter, setDailyFilter] = useState<'all' | 'open' | 'closed'>('all');
   const [reps, setReps] = useState<any[]>([]);
   const [shippingCompanies, setShippingCompanies] = useState<any[]>([]);
 
@@ -287,9 +288,24 @@ const SalesDaily: React.FC = () => {
           const jr = await r.json();
           if (jr && jr.success) setShippingCompanies(jr.data || []);
         } else {
-          const r = await fetch(`${API_BASE_PATH}/api.php?module=users&action=getAllWithBalance&related_to_type=rep`);
-          const jr = await r.json();
-          if (jr && jr.success) setReps((jr.data || []).filter((u: any) => u.role === 'representative'));
+          const [usersReq, countsReq] = await Promise.all([
+            fetch(`${API_BASE_PATH}/api.php?module=users&action=getAllWithBalance&related_to_type=rep`).then(r => r.json()),
+            fetch(`${API_BASE_PATH}/api.php?module=sales&action=getActiveCountsByRep`).then(r => r.json()).catch(() => null)
+          ]);
+          
+          if (usersReq && usersReq.success) {
+            const rawReps = (usersReq.data || []).filter((u: any) => u.role === 'representative');
+            const countsMap = (countsReq?.data || []).reduce((acc: any, curr: any) => {
+              acc[curr.rep_id] = curr;
+              return acc;
+            }, {});
+            
+            const repsWithCounts = rawReps.map((r: any) => {
+              const c = countsMap[r.id] || {};
+              return { ...r, has_open_daily: c.has_open_daily || 0, open_daily_code: c.open_daily_code || '' };
+            });
+            setReps(repsWithCounts);
+          }
         }
         // تحميل التريجرز والمخازن وuserDefaults دفعة واحدة
         const [tr, wr, ud] = await Promise.all([
@@ -427,6 +443,10 @@ const SalesDaily: React.FC = () => {
     }
     if (!selectedTreasuryId) {
       Swal.fire('حدد الخزينة', 'الرجاء اختيار الخزينة أولاً.', 'warning');
+      return;
+    }
+    if (openDailyInfo) {
+      Swal.fire('يومية مفتوحة', 'لا يمكن بدء يومية جديدة لأن هذا المندوب لديه يومية مفتوحة بالفعل.', 'warning');
       return;
     }
     try {
@@ -2048,14 +2068,114 @@ const SalesDaily: React.FC = () => {
   // Toggle for showing the pending orders box (hidden by default)
   const showPendingOrdersBox = false;
 
+  const repCounts = useMemo(() => {
+    let openCount = 0;
+    let closedCount = 0;
+    reps.forEach((r: any) => {
+      if (Number(r.has_open_daily) === 1) openCount++;
+      else closedCount++;
+    });
+    return { all: reps.length, open: openCount, closed: closedCount };
+  }, [reps]);
+
+  const filteredReps = useMemo(() => {
+    return reps.filter((r: any) => {
+      if (isShippingMode) return true;
+      const isOpen = Number(r.has_open_daily) === 1;
+      if (dailyFilter === 'open' && !isOpen) return false;
+      if (dailyFilter === 'closed' && isOpen) return false;
+      return true;
+    });
+  }, [reps, dailyFilter, isShippingMode]);
+
+  const repSelectOptions = useMemo(() => {
+    return (isShippingMode ? shippingCompanies : filteredReps).map((r: any) => {
+      const isOpen = Number(r.has_open_daily) === 1;
+      return {
+        value: String(r.id),
+        searchLabel: `${r.name || ''} ${r.id} ${r.open_daily_code || ''}`,
+        label: (
+          <div className="flex items-center justify-between gap-2 w-full py-0.5">
+            <div className="flex items-center gap-2 min-w-0">
+              {!isShippingMode && (
+                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${isOpen ? 'bg-emerald-500 ring-2 ring-emerald-300 dark:ring-emerald-900 animate-pulse' : 'bg-slate-300 dark:bg-slate-600'}`} />
+              )}
+              <span className="font-bold truncate text-slate-800 dark:text-slate-200">{r.name || ((isShippingMode ? 'شركة شحن #' : 'مندوب #') + r.id)}</span>
+              <span className="text-[10px] text-slate-400 font-mono">#{r.id}</span>
+            </div>
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              {!isShippingMode && (
+                isOpen ? (
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                    {r.open_daily_code || 'مفتوحة'}
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 border border-slate-200 dark:border-slate-700">
+                    مغلقة
+                  </span>
+                )
+              )}
+            </div>
+          </div>
+        )
+      };
+    });
+  }, [filteredReps, shippingCompanies, isShippingMode]);
+
   return (
     <div className="p-6 space-y-6">
       <div className="bg-white dark:bg-slate-800 rounded-3xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="flex items-center gap-3">
-            <User className="text-blue-600" />
+          <div className="flex flex-col border border-slate-200 dark:border-slate-700 rounded-2xl p-4 bg-slate-50 dark:bg-slate-900/30">
+            {!isShippingMode && (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200/60 dark:border-slate-800 pb-3 mb-3">
+                <div className="flex items-center gap-2">
+                  <User className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                  <span className="text-xs font-black text-slate-800 dark:text-slate-200">تصفية واختيار المندوب</span>
+                </div>
+                <div className="inline-flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1 border border-slate-200/70 dark:border-slate-700/70">
+                  <button
+                    type="button"
+                    onClick={() => setDailyFilter('all')}
+                    className={`px-3 py-1 rounded-lg text-[10px] font-black transition-all flex items-center gap-1.5 ${
+                      dailyFilter === 'all'
+                        ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-300 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    <span>الكل</span>
+                    <span className={`px-1.5 py-0.5 rounded-full ${dailyFilter === 'all' ? 'bg-blue-50 dark:bg-blue-900/40 text-blue-700' : 'bg-slate-200 dark:bg-slate-700 text-slate-600'}`}>{repCounts.all}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDailyFilter('open')}
+                    className={`px-3 py-1 rounded-lg text-[10px] font-black transition-all flex items-center gap-1.5 ${
+                      dailyFilter === 'open'
+                        ? 'bg-emerald-600 text-white shadow-sm'
+                        : 'text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400'
+                    }`}
+                  >
+                    <span>يومية مفتوحة</span>
+                    <span className={`px-1.5 py-0.5 rounded-full ${dailyFilter === 'open' ? 'bg-emerald-700 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-600'}`}>{repCounts.open}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDailyFilter('closed')}
+                    className={`px-3 py-1 rounded-lg text-[10px] font-black transition-all flex items-center gap-1.5 ${
+                      dailyFilter === 'closed'
+                        ? 'bg-slate-800 text-white dark:bg-slate-600 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    <span>يومية مغلقة</span>
+                    <span className={`px-1.5 py-0.5 rounded-full ${dailyFilter === 'closed' ? 'bg-slate-900 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-600'}`}>{repCounts.closed}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+            
             <div className="w-full">
-              <div className="text-xs text-slate-500">{isShippingMode ? 'شركة الشحن المختارة' : 'المندوب المختار'}</div>
+              {isShippingMode && <div className="text-xs text-slate-500 mb-2">شركة الشحن المختارة</div>}
               <CustomSelect
                 value={(isShippingMode ? String(selectedShippingCompanyId || '') : String(selectedRepId || ''))}
                 onChange={v => {
@@ -2063,7 +2183,12 @@ const SalesDaily: React.FC = () => {
                   if (isShippingMode) onSelectShippingCompany(num as any);
                   else onSelectRep(num as any);
                 }}
-                options={[{ value: '', label: isShippingMode ? 'اختر شركة الشحن' : 'اختر المندوب' }, ...((isShippingMode ? shippingCompanies : reps).map((r: any) => ({ value: String(r.id), label: r.name })))]}
+                options={isShippingMode ? [{ value: '', label: 'اختر شركة الشحن' }, ...repSelectOptions] : repSelectOptions}
+                placeholder={
+                  filteredReps.length === 0
+                    ? (dailyFilter === 'open' ? '— لا يوجد مناديب بيومية مفتوحة —' : '— لا توجد نتائج مطابقة —')
+                    : `— اختر المندوب (${filteredReps.length} متاح) —`
+                }
                 className="w-full"
               />
             </div>

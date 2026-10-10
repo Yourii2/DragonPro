@@ -846,6 +846,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       case 'in_delivery': return <span className="bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-400 px-2 py-1 rounded-lg text-[10px] font-bold">قيد التسليم</span>;
       case 'delivered': return <span className="bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 px-2 py-1 rounded-lg text-[10px] font-bold">تم التسليم</span>;
       case 'partial': return <span className="bg-teal-100 text-teal-700 dark:bg-teal-950/60 dark:text-teal-400 px-2 py-1 rounded-lg text-[10px] font-bold">تسليم جزئي</span>;
+      case 'exchange': return <span className="bg-sky-100 text-sky-700 dark:bg-sky-950/60 dark:text-sky-400 px-2 py-1 rounded-lg text-[10px] font-bold">استبدال</span>;
       case 'returned': return <span className="bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400 px-2 py-1 rounded-lg text-[10px] font-bold">مرتجع</span>;
       case 'postponed': return <span className="bg-purple-100 text-purple-700 dark:bg-purple-950/60 dark:text-purple-400 px-2 py-1 rounded-lg text-[10px] font-bold">مؤجل</span>;
       case 'no_answer': return <span className="bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 px-2 py-1 rounded-lg text-[10px] font-bold">لا يرد</span>;
@@ -2223,6 +2224,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                         { value: 'in_delivery', label: 'قيد التسليم' },
                         { value: 'delivered', label: 'تم التسليم' },
                         { value: 'partial', label: 'تسليم جزئي' },
+                        { value: 'exchange', label: 'استبدال' },
                         { value: 'returned', label: 'مرتجع' },
                         { value: 'postponed', label: 'مؤجل' },
                         { value: 'no_answer', label: 'لم يتم الرد (لا يرد)' },
@@ -2357,6 +2359,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                     { value: 'in_delivery', label: 'قيد التسليم' },
                     { value: 'delivered', label: 'تم التسليم' },
                     { value: 'partial', label: 'تسليم جزئي' },
+                    { value: 'exchange', label: 'استبدال' },
                     { value: 'returned', label: 'مرتجع' },
                     { value: 'postponed', label: 'مؤجل' },
                     { value: 'no_answer', label: 'لم يتم الرد (لا يرد)' },
@@ -2936,6 +2939,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                   { value: 'in_delivery', label: 'قيد التسليم' },
                   { value: 'delivered', label: 'تم التسليم' },
                   { value: 'partial', label: 'تسليم جزئي' },
+                  { value: 'exchange', label: 'استبدال' },
                   { value: 'returned', label: 'مرتجع' },
                   { value: 'postponed', label: 'مؤجل' },
                   { value: 'no_answer', label: 'لا يرد' },

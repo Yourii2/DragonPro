@@ -5,6 +5,7 @@ import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
 import Login from './components/Login';
 import SetupWizard from './components/SetupWizard';
+import ErrorBoundary from './components/ErrorBoundary';
 import CRMModule from './components/CRMModule';
 import SRMModule from './components/SRMModule';
 import InventoryModule from './components/InventoryModule';
@@ -421,7 +422,9 @@ const App: React.FC = () => {
       setActiveView={setActiveView}
       onLogout={handleLogout}
     >
-      {renderContent()}
+      <ErrorBoundary>
+        {renderContent()}
+      </ErrorBoundary>
     </Layout>
   );
 };

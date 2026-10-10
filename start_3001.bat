@@ -1,0 +1,224 @@
+@echo off
+chcp 65001 >nul
+title Dragon Pro - Starting System (Port 3001)
+color 0B
+
+rem Set script directory
+setlocal enableextensions enabledelayedexpansion
+cd /d "%~dp0"
+
+set "LOGFILE=%~dp0startup_3001_log.txt"
+
+rem Initialize / Append to startup log (keeps history across all startups)
+if exist "%LOGFILE%" echo. >> "%LOGFILE%"
+echo ==================================================== >> "%LOGFILE%"
+echo Dragon Pro - Startup Log (Port 3001) >> "%LOGFILE%"
+echo Date: %date% %time% >> "%LOGFILE%"
+echo ==================================================== >> "%LOGFILE%"
+
+cls
+call :Log "===================================="
+call :Log "   Dragon Pro - Starting Port 3001"
+call :Log "===================================="
+echo.
+
+rem ---------------------------------------------------------
+rem 1. Check XAMPP & Apache / MySQL
+rem ---------------------------------------------------------
+call :Log "[1/4] Checking XAMPP services..."
+
+rem Check Apache
+tasklist /FI "IMAGENAME eq httpd.exe" 2>nul | find /I "httpd.exe" >nul
+if errorlevel 1 (
+    call :Log "[!] Apache is not running. Attempting to start..."
+    if exist "C:\xampp\apache_start.bat" (
+        start "" "C:\xampp\apache_start.bat"
+        timeout /t 2 /nobreak >nul
+    ) else if exist "C:\xampp\xampp-control.exe" (
+        start "" "C:\xampp\xampp-control.exe"
+        timeout /t 3 /nobreak >nul
+    ) else (
+        call :Log "[Warning] XAMPP not found at C:\xampp. Please start Apache manually."
+    )
+) else (
+    call :Log "[OK] Apache is already running."
+)
+
+rem Check MySQL
+tasklist /FI "IMAGENAME eq mysqld.exe" 2>nul | find /I "mysqld.exe" >nul
+if errorlevel 1 (
+    call :Log "[!] MySQL is not running. Attempting to start..."
+    if exist "C:\xampp\mysql_start.bat" (
+        start "" "C:\xampp\mysql_start.bat"
+        timeout /t 2 /nobreak >nul
+    ) else (
+        call :Log "[Warning] Please ensure MySQL is started via XAMPP."
+    )
+) else (
+    call :Log "[OK] MySQL is already running."
+)
+
+echo.
+rem ---------------------------------------------------------
+rem 2. Check Node.js and NPM
+rem ---------------------------------------------------------
+call :Log "[2/4] Checking Node.js and npm..."
+
+where node >nul 2>&1
+if errorlevel 1 (
+    call :Log "[!] Node.js not detected in system PATH."
+    call :Log "[>] Attempting automatic Node.js LTS setup..."
+    powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol = 3072; (New-Object Net.WebClient).DownloadFile('https://nodejs.org/dist/v20.18.0/node-v20.18.0-x64.msi', 'nodejs_installer.msi')"
+    if exist "nodejs_installer.msi" (
+        call :Log "[>] Installing Node.js LTS..."
+        msiexec /i nodejs_installer.msi /passive /norestart
+        del /f /q nodejs_installer.msi >nul 2>&1
+        call :Log "[OK] Node.js installed. Please restart start_3001.bat."
+        pause
+        exit /b 0
+    ) else (
+        call :Log "[FATAL ERROR] Node.js not found. Please run install.bat or install from https://nodejs.org/"
+        goto :EndError
+    )
+)
+
+set "NODE_VER="
+for /f "tokens=*" %%i in ('node -v 2^>nul') do set "NODE_VER=%%i"
+call :Log "[OK] Node is available: !NODE_VER!"
+
+where npm.cmd >nul 2>&1
+if errorlevel 1 (
+    call :Log "[FATAL ERROR] npm.cmd not found in PATH."
+    goto :EndError
+)
+
+set "NPM_VER="
+for /f "tokens=*" %%i in ('npm.cmd -v 2^>nul') do set "NPM_VER=%%i"
+call :Log "[OK] npm.cmd is available: v!NPM_VER!"
+
+echo.
+rem ---------------------------------------------------------
+rem 3. Check Packages (node_modules)
+rem ---------------------------------------------------------
+call :Log "[3/4] Checking dependencies..."
+if not exist "node_modules" (
+    call :Log "[Wait] Installing project packages (this may take a few minutes)..."
+    call :Log "       >> Please wait, do not close the window..."
+    
+    call npm.cmd install >> "%LOGFILE%" 2>&1
+    if errorlevel 1 (
+        call :Log "[!] Standard npm install had warnings, retrying with --legacy-peer-deps..."
+        call npm.cmd install --legacy-peer-deps >> "%LOGFILE%" 2>&1
+    )
+    
+    if errorlevel 1 (
+        call :Log "[FATAL ERROR] npm install failed. Check startup_3001_log.txt"
+        goto :EndError
+    ) else (
+        call :Log "[OK] Packages installed successfully."
+    )
+) else (
+    call :Log "[OK] Packages are already installed."
+)
+
+echo.
+rem ---------------------------------------------------------
+rem 4. Start Production Server on Port 3001 and Launch Browser
+rem ---------------------------------------------------------
+call :Log "[4/4] Starting server on Port 3001..."
+
+rem Check if application build is needed:
+set "NEED_BUILD=0"
+if not exist "dist" set "NEED_BUILD=1"
+if not exist "dist\index.html" set "NEED_BUILD=1"
+if not exist "dist\.version" set "NEED_BUILD=1"
+if "%~1"=="--build" set "NEED_BUILD=1"
+if "%~1"=="-b" set "NEED_BUILD=1"
+
+if "!NEED_BUILD!"=="0" (
+    node -e "try { const fs=require('fs'); const curV=require('./version.json').version; const builtV=fs.readFileSync('dist/.version','utf8').trim(); if(curV!==builtV){ process.exit(1); } const distM=fs.statSync('dist/index.html').mtimeMs; const checks=['App.tsx','index.html','index.tsx','components','constants.tsx','types.ts']; for(const p of checks){ if(fs.existsSync(p)){ if(fs.statSync(p).mtimeMs>distM){ process.exit(1); } } } process.exit(0); } catch(e){ process.exit(1); }" >nul 2>&1
+    if errorlevel 1 set "NEED_BUILD=1"
+)
+
+if "!NEED_BUILD!"=="1" (
+    call :Log "[Wait] Detected updates or missing build. Building application (npm run build)..."
+    call :Log "       >> Please wait, this takes a few seconds..."
+    call npm.cmd run build >> "%LOGFILE%" 2>&1
+    if errorlevel 1 (
+        call :Log "[!] Build had warnings or errors, check startup_3001_log.txt"
+    ) else (
+        call :Log "[OK] Application built successfully."
+        node -e "try { const fs=require('fs'); const v=require('./version.json').version; fs.writeFileSync('dist/.version', v); } catch(e){}" >nul 2>&1
+    )
+) else (
+    call :Log "[OK] Application build is up to date."
+)
+
+rem Ensure ONLY port 3001 is free before starting (leaves port 3000 untouched!)
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ports = @(3001); Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object { $ports -contains $_.LocalPort } | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }" >nul 2>&1
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":3001" ^| findstr "LISTENING"') do taskkill /F /T /PID %%a >nul 2>&1
+ping 127.0.0.1 -n 2 >nul 2>&1
+
+rem Sync version in package.json from version.json
+node -e "try { const v=require('./version.json'); const p=require('./package.json'); if(v.version && p.version !== v.version){ p.version=v.version; require('fs').writeFileSync('./package.json', JSON.stringify(p, null, 2)+'\n'); } } catch(e){}" >nul 2>&1
+
+rem Extract version for window title
+set "APP_VER="
+for /f "tokens=2 delims=:," %%v in ('findstr /i "\"version\"" version.json 2^>nul') do (
+    if not defined APP_VER (
+        set "APP_VER=%%~v"
+        set "APP_VER=!APP_VER: =!"
+        set "APP_VER=!APP_VER:\"=!"
+        set "APP_VER=!APP_VER:"=!"
+    )
+)
+if defined APP_VER set "APP_VER=!APP_VER:"=!"
+if "!APP_VER!"=="" set "APP_VER=Latest"
+
+rem Launch persistent server window on Port 3001
+set "PROJ_DIR=%~dp0"
+if "%PROJ_DIR:~-1%"=="\" set "PROJ_DIR=%PROJ_DIR:~0,-1%"
+start "Dragon Pro Server (3001)" /D "%PROJ_DIR%" cmd /k "title Dragon Pro Server v!APP_VER! (Port 3001) && echo Dragon Pro Server v!APP_VER! is Running on Port 3001 && npm.cmd run preview:3001"
+
+call :Log "Waiting for server to start..."
+ping 127.0.0.1 -n 4 >nul 2>&1
+
+call :Log "Opening browser at http://localhost:3001..."
+start http://localhost:3001
+
+echo.
+call :Log "===================================="
+call :Log "   Dragon Pro Server v!APP_VER! is RUNNING on Port 3001!"
+call :Log "===================================="
+call :Log "URL: http://localhost:3001"
+
+goto :EndSuccess
+
+rem ---------------------------------------------------------
+rem Subroutines
+rem ---------------------------------------------------------
+
+:EndError
+echo.
+echo ========================================================
+color 0C
+echo  [!] The startup stopped due to an error.
+echo  [!] Please check 'startup_3001_log.txt' for details.
+echo ========================================================
+echo.
+pause
+exit /b 1
+
+:EndSuccess
+echo.
+echo --------------------------------------------------------
+echo Server is running on Port 3001. Close the Server window to stop.
+echo --------------------------------------------------------
+echo.
+pause
+exit /b 0
+
+:Log
+echo %~1
+echo [%date% %time%] %~1 >> "%LOGFILE%"
+exit /b

@@ -382,7 +382,7 @@ if ($action === 'run') {
         // Auto-trigger background rebuild and server restart
         $restartBat = file_exists($root . '/update_and_restart.bat') ? ($root . '/update_and_restart.bat') : ($root . '/restart.bat');
         if (file_exists($restartBat)) {
-            $psCmd = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath \'' . str_replace('\\', '/', $restartBat) . '\' -WindowStyle Minimized"';
+            $psCmd = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath \'' . str_replace('\\', '/', $restartBat) . '\' -WindowStyle Normal"';
             @pclose(@popen($psCmd, "r"));
         }
 

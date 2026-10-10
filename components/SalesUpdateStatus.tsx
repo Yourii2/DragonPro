@@ -7,6 +7,7 @@ import { cleanBarcode, isOrderMatchingBarcode } from '../services/barcodeUtils';
 import { ArrowLeftRight, Check, AlertCircle, Loader2, RefreshCw, Search, X, User } from 'lucide-react';
 
 // --- المكون الرئيسي ---
+const getRealOrderId = (o: any) => String(o?.order_id ?? o?.id ?? '');
 
 const SalesUpdateStatus: React.FC = () => {
   const deliveryMethod = (localStorage.getItem('Dragon_delivery_method') || 'reps').toString();
@@ -192,9 +193,15 @@ const SalesUpdateStatus: React.FC = () => {
   };
 
   // Translate status codes to Arabic for display
-  const translateStatus = (s: any) => {
+  const translateStatus = (s: any, order?: any) => {
     if (!s && s !== 0) return '';
     const st = String(s).toLowerCase();
+    
+    // Check if it's visually an exchange order based on notes
+    if (st === 'with_rep' && order?.notes && String(order.notes).includes('استبدال')) {
+      return 'استبدال';
+    }
+
     const map: Record<string, string> = {
       'with_rep': 'مع المندوب',
       'delivered': 'تم التسليم',
@@ -347,7 +354,10 @@ const SalesUpdateStatus: React.FC = () => {
       // 1. إزالة الأوردرات المرتجعة فوراً من الواجهة المحلية لعدم تكرارها أو بقائها في الشاشة
       setOpenRepOrders((prev: any) => {
         if (!prev) return prev;
-        const remainingOrders = (prev.orders || []).filter((o: any) => !ids.includes(o.id));
+        const stringIds = ids.map(String);
+        const remainingOrders = (prev.orders || []).filter((o: any) => 
+          !stringIds.includes(String(getRealOrderId(o))) && !stringIds.includes(String(o?.id ?? ''))
+        );
         return { ...prev, orders: remainingOrders };
       });
 
@@ -372,12 +382,22 @@ const SalesUpdateStatus: React.FC = () => {
       setScannedBarcodes([]);
 
       Swal.fire('تم', 'تم تسجيل المرتجع بنجاح.', 'success');
-      // تحديث الواجهة: إعادة تحميل الأوردرات
+      // تحديث الواجهة: إعادة تحميل الأوردرات وتحديث الإحصائيات
       try {
         const repIdLocalForRefresh = openRepOrders?.repId ?? null;
         if (repIdLocalForRefresh) {
           const freshOrders = await fetchOrdersForRep(Number(repIdLocalForRefresh));
           setOpenRepOrders((prev: any) => prev ? ({ ...prev, orders: freshOrders }) : prev);
+          setRepsSummary(prev => prev.map(r => {
+            if (String(r.repId) !== String(repIdLocalForRefresh)) return r;
+            const newOrdersCount = (freshOrders || []).length;
+            const newProductsCount = (freshOrders || []).reduce((s: number, o: any) => s + ((o.products || []).reduce((ss: number, p: any) => ss + Number(p.quantity || p.qty || 0), 0)), 0);
+            return {
+              ...r,
+              ordersCount: newOrdersCount,
+              productsCount: newProductsCount
+            };
+          }));
         }
       } catch (e) { }
     } catch (e: any) {
@@ -456,28 +476,20 @@ const SalesUpdateStatus: React.FC = () => {
   // Populate ordersCount and productsCount for a list of reps (runs concurrently)
   const populateRepCounts = async (list: any[]) => {
     try {
-      const concurrency = 3;
-      let idx = 0;
-      const arr = list.slice();
-      const workers: Promise<void>[] = [];
-      const runNext = async () => {
-        while (idx < arr.length) {
-          const i = idx++;
-          const r = arr[i];
-          try {
-            const ords = await fetchOrdersForRep(r.repId);
-            const ordersCount = (ords || []).length;
-            const productsCount = (ords || []).reduce((s: number, o: any) => s + ((o.products || []).reduce((ss: number, p: any) => ss + Number(p.quantity || p.qty || 0), 0)), 0);
-            setRepsSummary(prev => prev.map(x => String(x.repId) === String(r.repId) ? { ...x, ordersCount, productsCount } : x));
-          } catch (e) {
-            // ignore per-rep errors
-          }
-        }
-      };
-      for (let w = 0; w < concurrency; w++) workers.push(runNext());
-      await Promise.all(workers);
-      setRepsSummary(prev => [...prev].sort((a, b) => (b.ordersCount || 0) - (a.ordersCount || 0)));
+      const res = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getActiveCountsByRep`, { credentials: 'include' });
+      const json = await res.json();
+      if (json && json.success && json.data) {
+        const countsMap = json.data;
+        setRepsSummary(prev => {
+          const updated = prev.map(r => {
+            const counts = countsMap[r.repId];
+            return counts ? { ...r, ordersCount: counts.ordersCount, productsCount: counts.productsCount } : r;
+          });
+          return updated.sort((a, b) => (b.ordersCount || 0) - (a.ordersCount || 0));
+        });
+      }
     } catch (e) {
+
       // non-fatal
     }
   };
@@ -822,7 +834,7 @@ const SalesUpdateStatus: React.FC = () => {
           if (!prev) return prev;
           return {
             ...prev,
-            orders: (prev.orders || []).map((o: any) => (o.id === updated.id ? { ...o, ...updated, status: 'exchange' } : o))
+            orders: (prev.orders || []).filter((o: any) => String(o.id) !== String(updated.id))
           };
         });
       }
@@ -855,10 +867,6 @@ const SalesUpdateStatus: React.FC = () => {
           <div><b>المسلَّم للعميل (الصنف الجديد):</b> ${exchangeOldItem.name} (${exchangeOldItem.exchangeQty} قطعة - ${exchangeDeliveredTotal.toLocaleString()} ج.م)</div>
           <div><b>المرتجع للمخزن (الصنف القديم):</b> ${selectedNewVariant.parent_name || selectedNewVariant.name} (${selectedNewVariant.color || ''} ${selectedNewVariant.size || ''}) - ${exchangeReturnedTotal.toLocaleString()} ج.م</div>
           <div><b>فرق السعر:</b> <span style="font-weight:bold; color:${exchangePriceDiff >= 0 ? '#059669' : '#2563eb'}">${diffText}</span></div>
-          <div><b>مصاريف الشحن:</b> ${exchangeShippingFees.toLocaleString()} ج.م</div>
-          <div style="margin-top: 8px; padding: 8px; background: #ecfdf5; color: #065f46; border-radius: 8px; font-weight: bold; border: 1px solid #a7f3d0;">
-            إجمالي المطلوب تحصيله بواسطة المندوب: ${exchangeCollectedTotal.toLocaleString()} ج.م
-          </div>
         </div>`,
         icon: 'success',
         confirmButtonText: 'حسناً'
@@ -1638,7 +1646,12 @@ const SalesUpdateStatus: React.FC = () => {
 
             {/* Summary removed from orders modal per user request; kept in printable report only */}
             <div className="flex-1 overflow-y-auto mb-4 space-y-2 pr-2">
-              {(openRepOrders.orders || []).map((o: any) => {
+              {(openRepOrders.orders || []).length === 0 ? (
+                <div className="text-center py-12 text-slate-500 font-bold">
+                  لا توجد اوردرات متبقية في عهدة المندوب.
+                </div>
+              ) : (
+                (openRepOrders.orders || []).map((o: any) => {
                 const piecesCount = (o.products || []).reduce((s: number, p: any) => s + Number(p.quantity || p.qty || 0), 0);
                 return (
                   <div key={o.id} className={`flex items-center justify-between p-3 border rounded-xl hover:bg-slate-50 transition-colors ${selectedOrderIds.includes(o.id) ? 'border-blue-500 bg-blue-50/30' : 'border-slate-200'}`}>
@@ -1665,7 +1678,7 @@ const SalesUpdateStatus: React.FC = () => {
                           <span>عدد القطع المتبقية: {(o.products || []).reduce((s: number, p: any) => s + Number(p.quantity || p.qty || 0), 0)}</span>
                           <span>المتبقي: {Number(o.remainingPieces || 0)}</span>
                           <span>المحافظة: {o.governorate}</span>
-                          <span>الحالة: {translateStatus(o.status)}</span>
+                          <span>الحالة: {translateStatus(o.status, o)}</span>
                         </div>
                       </div>
                     </label>
@@ -1687,7 +1700,7 @@ const SalesUpdateStatus: React.FC = () => {
                     </div>
                   </div>
                 )
-              })}
+              }))}
             </div>
 
             <div className="pt-4 border-t flex flex-wrap gap-2 justify-end">
@@ -1813,33 +1826,32 @@ const SalesUpdateStatus: React.FC = () => {
                       <h5 className="font-bold mb-2">الاوردر — #{openPartialOrder.orderNumber || openPartialOrder.order_number}</h5>
                       <div className="text-sm text-slate-500 mb-2">العميل: {openPartialOrder.customerName || openPartialOrder.customer_name}</div>
                       <div className="space-y-2">
-                        {partialProducts.map((p: any, idx: number) => {
-                          const existing = returnItems.find(r => String(r.lineId) === String(p.lineId));
-                          const maxQty = Number(p.qtyOriginal || 0);
-                          return (
+                        {partialProducts
+                          .map((p: any, idx: number) => {
+                            const existing = returnItems.find(r => String(r.lineId) === String(p.lineId));
+                            const maxQty = Number(p.qtyOriginal || 0);
+                            const remainingQty = maxQty - (existing ? existing.quantity : 0);
+                            return { p, idx, existing, maxQty, remainingQty };
+                          })
+                          .filter(item => item.remainingQty > 0)
+                          .map(({ p, idx, existing, maxQty, remainingQty }) => (
                             <div key={p.productId + '-' + idx} className="flex items-center justify-between gap-3 border-b py-2">
                               <div className="flex-1 text-right">
                                 <div className="font-bold">{p.name}</div>
                                 <div className="text-xs text-slate-500">{p.color ? `اللون: ${p.color}` : ''} {p.size ? ` — المقاس: ${p.size}` : ''}</div>
-                                <div className="text-xs text-slate-500">الكمية المتاحة: {maxQty} — السعر: {p.price}</div>
+                                <div className="text-xs text-slate-500">الكمية المتاحة: {remainingQty} — السعر: {p.price}</div>
                               </div>
                               <div className="flex items-center gap-2">
-                                <button disabled={existing && existing.quantity >= maxQty} onClick={() => {
+                                <button onClick={() => {
                                   setReturnItems(prev => {
-                                    // each product line is distinct — use lineId to identify
                                     const foundIdx = prev.findIndex(x => String(x.lineId) === String(p.lineId));
                                     if (foundIdx === -1) return [{ lineId: p.lineId, orderItemId: p.orderItemId, productId: Number(p.productId), name: p.name || '', color: p.color || '', size: p.size || '', quantity: 1 }, ...prev];
                                     return prev.map((x, i) => i === foundIdx ? { ...x, quantity: Math.min(maxQty, Number(x.quantity || 0) + 1) } : x);
                                   });
                                 }} className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700">ارتجاع قطعة</button>
-                                <button onClick={() => {
-                                  // remove from return items if exists
-                                  setReturnItems(prev => prev.filter(x => Number(x.productId) !== Number(p.productId)));
-                                }} className="px-2 py-1 text-xs bg-slate-100 rounded">إلغاء</button>
                               </div>
                             </div>
-                          );
-                        })}
+                          ))}
                       </div>
                     </div>
                   </div>
@@ -2289,17 +2301,7 @@ const SalesUpdateStatus: React.FC = () => {
                           ) : ''}
                         </span>
                       </div>
-
-                      <div className="p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-200">
-                        <span className="text-[10px] block font-bold">المحصل بواسطة المندوب:</span>
-                        <span className="font-black text-sm text-emerald-700 dark:text-emerald-300">
-                          {selectedNewVariant ? `${exchangeCollectedTotal.toLocaleString()} ج.م` : '—'}
-                        </span>
-                        <span className="text-[9px] block mt-0.5 text-emerald-600 dark:text-emerald-400">
-                          (فرق السعر + {exchangeShippingFees.toLocaleString()} شحن)
-                        </span>
                       </div>
-                    </div>
 
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="flex-1 min-w-[200px]">
