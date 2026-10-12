@@ -2871,9 +2871,8 @@ function confirmation_clear_old_assignments(PDO $pdo): void {
     ensure_order_confirmation_assignments_table($pdo);
     execute_query(
         $pdo,
-        "DELETE FROM order_confirmation_assignments 
-         WHERE status <> 'assigned' 
-           AND DATE(assigned_at) < CURDATE() 
+        "DELETE FROM order_confirmation_assignments
+         WHERE DATE(assigned_at) < CURDATE()
            AND DATE(updated_at) < CURDATE()"
     );
 }
