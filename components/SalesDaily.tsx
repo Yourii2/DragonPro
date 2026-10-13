@@ -288,23 +288,12 @@ const SalesDaily: React.FC = () => {
           const jr = await r.json();
           if (jr && jr.success) setShippingCompanies(jr.data || []);
         } else {
-          const [usersReq, countsReq] = await Promise.all([
-            fetch(`${API_BASE_PATH}/api.php?module=users&action=getAllWithBalance&related_to_type=rep`).then(r => r.json()),
-            fetch(`${API_BASE_PATH}/api.php?module=sales&action=getActiveCountsByRep`).then(r => r.json()).catch(() => null)
-          ]);
+          const usersReq = await fetch(`${API_BASE_PATH}/api.php?module=users&action=getAllWithBalance&related_to_type=rep`)
+            .then(r => r.json());
           
           if (usersReq && usersReq.success) {
             const rawReps = (usersReq.data || []).filter((u: any) => u.role === 'representative');
-            const countsMap = (countsReq?.data || []).reduce((acc: any, curr: any) => {
-              acc[curr.rep_id] = curr;
-              return acc;
-            }, {});
-            
-            const repsWithCounts = rawReps.map((r: any) => {
-              const c = countsMap[r.id] || {};
-              return { ...r, has_open_daily: c.has_open_daily || 0, open_daily_code: c.open_daily_code || '' };
-            });
-            setReps(repsWithCounts);
+            setReps(rawReps);
           }
         }
         // تحميل التريجرز والمخازن وuserDefaults دفعة واحدة
