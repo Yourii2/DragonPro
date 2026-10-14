@@ -109,8 +109,9 @@ const getOrderStatusLabelAr = (statusRaw: any) => {
     case 'canceled':
       return 'ملغي';
     case 'postponed':
-    case 'deferred':
       return 'مؤجل';
+    case 'deferred':
+      return 'نزول';
     case 'with_rep':
       return 'مع المندوب';
     case 'returned_with_rep':
@@ -288,22 +289,15 @@ const SalesDaily: React.FC = () => {
           const jr = await r.json();
           if (jr && jr.success) setShippingCompanies(jr.data || []);
         } else {
-          const [usersReq, countsReq] = await Promise.all([
-            fetch(`${API_BASE_PATH}/api.php?module=users&action=getAllWithBalance&related_to_type=rep`).then(r => r.json()),
-            fetch(`${API_BASE_PATH}/api.php?module=sales&action=getActiveCountsByRep`).then(r => r.json()).catch(() => null)
-          ]);
-          
-          if (usersReq && usersReq.success) {
-            const rawReps = (usersReq.data || []).filter((u: any) => u.role === 'representative');
-            const countsMap = (countsReq?.data || []).reduce((acc: any, curr: any) => {
-              acc[curr.rep_id] = curr;
-              return acc;
-            }, {});
-            
-            const repsWithCounts = rawReps.map((r: any) => {
-              const c = countsMap[r.id] || {};
-              return { ...r, has_open_daily: c.has_open_daily || 0, open_daily_code: c.open_daily_code || '' };
-            });
+          const r = await fetch(`${API_BASE_PATH}/api.php?module=users&action=getAllWithBalance&related_to_type=rep`);
+          const jr = await r.json();
+          if (jr && jr.success) {
+            const rawReps = (jr.data || []).filter((u: any) => u.role === 'representative');
+            const repsWithCounts = rawReps.map((r: any) => ({
+              ...r,
+              has_open_daily: Number(r.has_open_daily) || 0,
+              open_daily_code: r.open_daily_code || ''
+            }));
             setReps(repsWithCounts);
           }
         }
@@ -2892,7 +2886,12 @@ const SalesDaily: React.FC = () => {
                     return (
                       <div key={o.id} className="flex items-center justify-between py-3 px-2 rounded-xl hover:bg-slate-50 dark:hover:bg-rose-900/10 transition-colors">
                         <div>
-                          <div className="font-bold">#{o.orderNumber ?? o.order_number ?? o.id} - {o.customerName ?? o.customer_name ?? ''}</div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold">#{o.orderNumber ?? o.order_number ?? o.id} - {o.customerName ?? o.customer_name ?? ''}</span>
+                            <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                              {getOrderStatusLabelAr(o.status || o.order_status)}
+                            </span>
+                          </div>
                           <div className="text-xs text-slate-500 mt-1">{o.governorate || ''} • {o.phone || o.phone1 || ''}</div>
                           <div className="text-xs text-slate-400 mt-1">{orderPieces(o).toLocaleString()} قطع</div>
                         </div>

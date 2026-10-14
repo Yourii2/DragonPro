@@ -374,18 +374,10 @@ try {
 
     @unlink($lockPath);
 
-    // Auto-trigger background rebuild and server restart
-    $restartBat = file_exists($root . '/update_and_restart.bat') ? ($root . '/update_and_restart.bat') : ($root . '/restart.bat');
-    if (file_exists($restartBat)) {
-        log_msg($root, "Triggering automatic background rebuild and preview server restart via " . basename($restartBat) . "...");
-        $psCmd = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath \'' . str_replace('\\', '/', $restartBat) . '\' -WindowStyle Normal"';
-        @pclose(@popen($psCmd, "r"));
-    }
-
     if (ob_get_length()) ob_clean();
     echo json_encode([
         'success' => true,
-        'message' => 'تم تثبيت التحديث بنجاح، ويجري الآن إعادة بناء وتحديث السيرفر تلقائياً في الخلفية.',
+        'message' => 'تم تثبيت التحديث بنجاح. يمكنك إعادة تشغيل السيرفر يدوياً إذا لزم الأمر.',
         'preserved' => $exclude,
         'backup_zips' => $backupZips
     ]);

@@ -966,9 +966,7 @@ const OrderConfirmations: React.FC = () => {
 
     // Check if order exists in the representative's assigned orders list (active or other tabs)
     const match = selectedRepOrders.find(
-      (item) => isOrderMatchingBarcode(item.order, barcode) || 
-                String(item.order_id) === barcode || 
-                String(item.order?.id) === barcode
+      (item) => isOrderMatchingBarcode(item.order, barcode)
     );
 
     const payload: any = {

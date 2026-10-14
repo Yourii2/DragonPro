@@ -213,7 +213,9 @@ const SalesUpdateStatus: React.FC = () => {
       'partial_return': 'تسليم جزئي',
       'new': 'جديد',
       'returned_with_rep': 'مرتجع جزئي مع المندوب',
-      'exchange': 'استبدال'
+      'exchange': 'استبدال',
+      'deferred': 'نزول',
+      'postponed': 'مؤجل'
     };
     return map[st] || s;
   };
@@ -242,20 +244,23 @@ const SalesUpdateStatus: React.FC = () => {
     const list = Array.isArray(orders) ? orders : [];
     return list
       .map((o: any) => {
-        const products = Array.isArray(o?.products)
-          ? o.products.filter((p: any) => Number(p?.quantity || p?.qty || 0) > 0)
-          : [];
-        const remainingPieces = products.reduce((s: number, p: any) => s + Number(p?.quantity || p?.qty || 0), 0);
+        const rawProds = Array.isArray(o?.products) && o.products.length > 0
+          ? o.products
+          : (Array.isArray(o?.order_items) && o.order_items.length > 0 ? o.order_items : (Array.isArray(o?.items) ? o.items : []));
+        const products = rawProds.map((p: any) => ({
+          ...p,
+          quantity: Number(p?.quantity ?? p?.qty ?? 0)
+        }));
+        const calcPieces = products.reduce((s: number, p: any) => s + Number(p?.quantity || 0), 0);
+        const remainingPieces = calcPieces > 0 ? calcPieces : (Number(o?.total_pieces || o?.pieces_count || o?.pieces || 1));
         return { ...o, products, remainingPieces };
       })
       .filter((o: any) => {
         const status = String(o?.status || '').toLowerCase();
-        // Exclude orders already finalized as delivered or fully returned.
-        if (status === 'delivered' || status === 'returned' || status === 'full_return') return false;
-        if (Number(o?.remainingPieces || 0) <= 0) return false;
-        // الطلبات التي تم إرجاعها جزئيًا أو التي لا تزال تحتوي على قطع متبقية أو بحالة مرتجع مع المندوب يجب أن تظهر
-        if (status === 'partial_return' || status === 'partial' || status === 'returned_with_rep') return true;
-        return Number(o?.remainingPieces || 0) > 0;
+        // Exclude orders already finalized as delivered, returned, or cancelled.
+        if (status === 'delivered' || status === 'returned' || status === 'full_return' || status === 'cancelled' || status === 'canceled') return false;
+        // All active custody orders are visible and returnable
+        return true;
       });
   };
 
@@ -312,10 +317,18 @@ const SalesUpdateStatus: React.FC = () => {
       const repIdLocal = openRepOrders?.repId ?? null;
       let totalReturned = 0;
       let totalPartialReturned = 0;
+      const successfullyReturnedIds: Array<number | string> = [];
 
       for (const id of ids) {
-        const ord = (openRepOrders?.orders || []).find((o: any) => o.id === id);
-        if (!ord) continue;
+        // Use string comparison to handle number/string type mismatch from API responses
+        const ord = (openRepOrders?.orders || []).find((o: any) =>
+          String(o.id) === String(id) || String(o.order_id) === String(id)
+        );
+        if (!ord) {
+          console.warn('[handleReturnSelected] Order not found for id:', id,
+            '| available ids:', (openRepOrders?.orders || []).map((o: any) => o.id));
+          continue;
+        }
         const orderRepId = ord?.rep_id ?? ord?.repId ?? repIdLocal;
         const prods = Array.isArray(ord?.products) ? ord.products : [];
         // تحقق هل كل المنتجات سيتم إرجاعها (مرتجع كامل) أم بعضها (مرتجع جزئي)
@@ -335,6 +348,7 @@ const SalesUpdateStatus: React.FC = () => {
           const returnResult = await returnResponse.json();
           if (!returnResult?.success) throw new Error(returnResult?.message || 'فشل تسجيل المرتجع في المخزن.');
           totalReturned += Number(returnResult.returnedValue || 0);
+          successfullyReturnedIds.push(id);
         } else {
           // مرتجع جزئي: قسم المنتجات المرتجعة عن المسلمة
           const returnedProducts = prods.filter((p: any) => Number(p.returnQuantity || 0) > 0);
@@ -347,16 +361,24 @@ const SalesUpdateStatus: React.FC = () => {
             const returnResult = await returnResponse.json();
             if (!returnResult?.success) throw new Error(returnResult?.message || 'فشل تسجيل المرتجع الجزئي.');
             totalPartialReturned += Number(returnResult.returnedValue || 0);
+            successfullyReturnedIds.push(id);
           }
         }
       }
 
+      // إذا لم يُعالج أي أوردر - تحذير بدلاً من رسالة نجاح زائفة
+      if (successfullyReturnedIds.length === 0) {
+        Swal.fire('تحذير', 'لم يتم العثور على الأوردرات المحددة. يرجى إغلاق القائمة وفتحها مجدداً والمحاولة مرة أخرى.', 'warning');
+        return;
+      }
+
+      const returnedStringIds = successfullyReturnedIds.map(String);
+
       // 1. إزالة الأوردرات المرتجعة فوراً من الواجهة المحلية لعدم تكرارها أو بقائها في الشاشة
       setOpenRepOrders((prev: any) => {
         if (!prev) return prev;
-        const stringIds = ids.map(String);
-        const remainingOrders = (prev.orders || []).filter((o: any) => 
-          !stringIds.includes(String(getRealOrderId(o))) && !stringIds.includes(String(o?.id ?? ''))
+        const remainingOrders = (prev.orders || []).filter((o: any) =>
+          !returnedStringIds.includes(String(getRealOrderId(o))) && !returnedStringIds.includes(String(o?.id ?? ''))
         );
         return { ...prev, orders: remainingOrders };
       });
@@ -370,7 +392,7 @@ const SalesUpdateStatus: React.FC = () => {
           return {
             ...r,
             balance: Number(r.balance || 0) + totalDeduction,
-            ordersCount: Math.max(0, (r.ordersCount || 0) - ids.length)
+            ordersCount: Math.max(0, (r.ordersCount || 0) - successfullyReturnedIds.length)
           };
         }));
       }
@@ -381,17 +403,21 @@ const SalesUpdateStatus: React.FC = () => {
       setScanInput('');
       setScannedBarcodes([]);
 
-      Swal.fire('تم', 'تم تسجيل المرتجع بنجاح.', 'success');
+      Swal.fire('تم', `تم تسجيل مرتجع ${successfullyReturnedIds.length} أوردر بنجاح.`, 'success');
       // تحديث الواجهة: إعادة تحميل الأوردرات وتحديث الإحصائيات
       try {
         const repIdLocalForRefresh = openRepOrders?.repId ?? null;
         if (repIdLocalForRefresh) {
           const freshOrders = await fetchOrdersForRep(Number(repIdLocalForRefresh));
-          setOpenRepOrders((prev: any) => prev ? ({ ...prev, orders: freshOrders }) : prev);
+          // فلترة الأوردرات المرتجعة من القائمة الجديدة أيضاً لمنع ظهورها مجدداً
+          const filteredFreshOrders = (freshOrders || []).filter((o: any) =>
+            !returnedStringIds.includes(String(getRealOrderId(o))) && !returnedStringIds.includes(String(o?.id ?? ''))
+          );
+          setOpenRepOrders((prev: any) => prev ? ({ ...prev, orders: filteredFreshOrders }) : prev);
           setRepsSummary(prev => prev.map(r => {
             if (String(r.repId) !== String(repIdLocalForRefresh)) return r;
-            const newOrdersCount = (freshOrders || []).length;
-            const newProductsCount = (freshOrders || []).reduce((s: number, o: any) => s + ((o.products || []).reduce((ss: number, p: any) => ss + Number(p.quantity || p.qty || 0), 0)), 0);
+            const newOrdersCount = (filteredFreshOrders || []).length;
+            const newProductsCount = (filteredFreshOrders || []).reduce((s: number, o: any) => s + ((o.products || []).reduce((ss: number, p: any) => ss + Number(p.quantity || p.qty || 0), 0)), 0);
             return {
               ...r,
               ordersCount: newOrdersCount,
@@ -401,7 +427,7 @@ const SalesUpdateStatus: React.FC = () => {
         }
       } catch (e) { }
     } catch (e: any) {
-      console.error(e);
+      console.error('[handleReturnSelected] Error:', e);
       Swal.fire('خطأ', e?.message || 'فشل في العملية.', 'error');
     }
   };
@@ -1362,6 +1388,31 @@ const SalesUpdateStatus: React.FC = () => {
           setScanInput('');
           return;
         } else {
+          const rawSt = String(sysOrder.status || '').toLowerCase();
+          const isCustodySt = ['with_rep', 'in_delivery', 'partial', 'returned_with_rep', 'deferred', 'postponed'].includes(rawSt);
+          if (isCustodySt && Number(orderRepId) === Number(currentRepId)) {
+            // It belongs to this rep: add to openRepOrders and select it immediately
+            const normalizedSysOrder = normalizeOrdersForReturnsView([sysOrder])[0] || sysOrder;
+            setOpenRepOrders((prev: any) => {
+              if (!prev) return prev;
+              const exists = (prev.orders || []).some((o: any) => String(getRealOrderId(o)) === String(sysOrder.id));
+              return exists ? prev : { ...prev, orders: [normalizedSysOrder, ...(prev.orders || [])] };
+            });
+            setSelectedOrderIds(prev => Array.from(new Set([...prev, Number(sysOrder.id)])));
+            setScannedBarcodes(prev => [{ code: raw, orderId: Number(sysOrder.id) }, ...prev]);
+            Swal.fire({
+              toast: true,
+              position: 'top-end',
+              icon: 'success',
+              title: 'تم تحديد الأوردر',
+              text: `أوردر #${sysOrder.order_number || sysOrder.id} - ${sysOrder.customer_name || ''}`,
+              timer: 1500,
+              showConfirmButton: false
+            });
+            setScanInput('');
+            return;
+          }
+
           // Status is not with current rep (e.g. pending, delivered, etc.)
           const statusMap: Record<string, string> = {
             pending: 'قيد الانتظار',
@@ -1371,7 +1422,10 @@ const SalesUpdateStatus: React.FC = () => {
             cancelled: 'ملغي',
             canceled: 'ملغي',
             postponed: 'مؤجل',
-            no_answer: 'لم يرد'
+            no_answer: 'لم يرد',
+            deferred: 'نزول',
+            returned_with_rep: 'مرتجع جزئي مع المندوب',
+            partial: 'تسليم جزئي'
           };
           const statusLabel = statusMap[sysOrder.status] || sysOrder.status;
           Swal.fire({

@@ -13,7 +13,11 @@ rem Give PHP time to flush the HTTP response when triggered via API
 echo Delaying for 3 seconds to allow HTTP response to complete...
 timeout /T 3 /NOBREAK >nul
 
-echo [1/3] Freeing ports 3000 and 3001
+echo [1/3] Freeing ports 3000 and 3001...
+rem 1. Stop via PowerShell Get-NetTCPConnection
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ports = @(3000, 3001); Get-NetTCPConnection -ErrorAction SilentlyContinue | Where-Object { $ports -contains $_.LocalPort } | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }" >nul 2>&1
+
+rem 2. Stop via netstat PID search
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":3000" ^| findstr "LISTENING"') do (
     taskkill /F /T /PID %%a >nul 2>&1
 )
@@ -21,8 +25,9 @@ for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":3001" ^| findstr "LISTENING
     taskkill /F /T /PID %%a >nul 2>&1
 )
 
-echo [2/3] Stopping Node.js processes...
+echo [2/3] Stopping Node.js and CMD wrapper processes...
 taskkill /F /T /IM node.exe >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*preview*' -or $_.CommandLine -like '*vite*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>&1
 
 echo.
 echo Server stopped and ports 3000 and 3001 are now free.

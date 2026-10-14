@@ -379,14 +379,7 @@ if ($action === 'run') {
 
         @unlink($lockPath);
 
-        // Auto-trigger background rebuild and server restart
-        $restartBat = file_exists($root . '/update_and_restart.bat') ? ($root . '/update_and_restart.bat') : ($root . '/restart.bat');
-        if (file_exists($restartBat)) {
-            $psCmd = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath \'' . str_replace('\\', '/', $restartBat) . '\' -WindowStyle Normal"';
-            @pclose(@popen($psCmd, "r"));
-        }
-
-        echo json_encode(['success' => true, 'message' => 'تم تثبيت الإصدارات المحددة بنجاح، ويجري الآن إعادة بناء وتحديث السيرفر تلقائياً في الخلفية.', 'installed' => $installed]);
+        echo json_encode(['success' => true, 'message' => 'تم تثبيت الإصدارات المحددة بنجاح. يمكنك إعادة تشغيل السيرفر يدوياً إذا لزم الأمر.', 'installed' => $installed]);
     } catch (Exception $e) {
         @unlink($lockPath);
         http_response_code(500);

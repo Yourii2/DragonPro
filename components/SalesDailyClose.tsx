@@ -79,6 +79,10 @@ const renderOrderBadges = (o: any) => {
   if (isRetWithRep || isPartialReturn) {
     return <span className="text-[9px] font-bold bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded border border-orange-200 dark:bg-orange-900/40 dark:border-orange-800">مرتجع جزئي</span>;
   }
+  const isDeferred = o.status === 'deferred' || o.order_status === 'deferred' || o.journal_status === 'deferred';
+  if (isDeferred) {
+    return <span className="text-[9px] font-bold bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded border border-amber-200 dark:bg-amber-900/40 dark:border-amber-800">نزول</span>;
+  }
 
   return null;
 };
@@ -687,8 +691,15 @@ const SalesDailyClose: React.FC = () => {
           if (st === 'with_rep' && toNum(o.returned_pieces) <= 0) return false;
           return true;
         }));
-        jDeferred = uniqOrdersById(rawDeferred);
-        jActive = uniqOrdersById([...rawActive, ...extraActive]);
+        // Filter out orders from rawDeferred that have been returned back to active custody
+        // (i.e., their journal_status is now 'with_rep' or 'returned_with_rep', not 'deferred')
+        const isReturnedFromDeferred = (o: any) => {
+          const js = String(o.journal_status || o.status || '').toLowerCase();
+          return js === 'with_rep' || js === 'returned_with_rep';
+        };
+        const deferredReturnedBackToActive = rawDeferred.filter(isReturnedFromDeferred);
+        jDeferred = uniqOrdersById(rawDeferred.filter((o: any) => !isReturnedFromDeferred(o)));
+        jActive = uniqOrdersById([...rawActive, ...extraActive, ...deferredReturnedBackToActive]);
       }
 
       // Merge all active orders in rep's custody (including "نزول" / postponed / with_rep)
@@ -2713,6 +2724,8 @@ const SalesDailyClose: React.FC = () => {
                           badge = <span className={`mr-2 px-2 py-0.5 rounded text-[10px] font-bold inline-block border ${isDelivPartial ? 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:border-amber-800 dark:text-amber-400' : 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:border-emerald-800 dark:text-emerald-400'}`}>{isDelivPartial ? 'تسليم جزئي' : 'تسليم كامل'}</span>;
                         } else if (viewModal === 'returned') {
                           badge = <span className={`mr-2 px-2 py-0.5 rounded text-[10px] font-bold inline-block border ${isPartial ? 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:border-amber-800 dark:text-amber-400' : 'bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-900/30 dark:border-rose-800 dark:text-rose-400'}`}>{isPartial ? 'مرتجع جزئي' : 'مرتجع كامل'}</span>;
+                        } else if (viewModal === 'deferred') {
+                          badge = <span className="mr-2 px-2 py-0.5 rounded text-[10px] font-bold inline-block border bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:border-amber-800 dark:text-amber-300">نزول مع المندوب</span>;
                         }
 
                         return (

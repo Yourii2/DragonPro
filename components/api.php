@@ -2644,15 +2644,14 @@ function assert_order_not_in_closed_journal($pdo, $orderId, $repId = null) {
     $currentRepId = intval($repId ?: ($ordRow['rep_id'] ?? 0));
     $currentStatus = strtolower(trim((string)($ordRow['status'] ?? '')));
 
-    $isCustodyStatus = in_array($currentStatus, ['with_rep', 'partial', 'postponed', 'deferred', 'partial_return', 'in_delivery'], true);
+    $isCustodyStatus = in_array($currentStatus, ['with_rep', 'partial', 'postponed', 'deferred', 'partial_return', 'in_delivery', 'returned_with_rep'], true);
 
-    // 2. إذا كان الأوردر في عهدة المندوب الحالية، تحقق أولاً إذا كان للمندوب يومية جديدة مفتوحة
-    if ($currentRepId > 0 && $isCustodyStatus) {
-        $openDaily = sync_rep_custody_orders_to_open_journal($pdo, $currentRepId);
-        if ($openDaily && intval($openDaily['is_closed'] ?? 0) === 0) {
-            // المندوب لديه يومية مفتوحة حالياً والأوردر في عهدته -> يُسمح بالعملية دون أي مانع
-            return true;
+    // 2. إذا كان الأوردر في عهدة المندوب (أوردر نشط أو نزول أو مرتجع جزئي)، فهو ليس حركة مغلقة نهائياً ويُسمح بالعمليات عليه
+    if ($isCustodyStatus) {
+        if ($currentRepId > 0) {
+            try { sync_rep_custody_orders_to_open_journal($pdo, $currentRepId); } catch (Exception $eSync) {}
         }
+        return true;
     }
 
     // 3. فحص آخر يومية مسجل بها الأوردر في rep_journal_orders
@@ -2871,9 +2870,8 @@ function confirmation_clear_old_assignments(PDO $pdo): void {
     ensure_order_confirmation_assignments_table($pdo);
     execute_query(
         $pdo,
-        "DELETE FROM order_confirmation_assignments 
-         WHERE status <> 'assigned' 
-           AND DATE(assigned_at) < CURDATE() 
+        "DELETE FROM order_confirmation_assignments
+         WHERE DATE(assigned_at) < CURDATE()
            AND DATE(updated_at) < CURDATE()"
     );
 }
@@ -10859,7 +10857,7 @@ switch ($module) {
             $where = [];
             if ($statusFilter) {
                 if ($statusFilter === 'active') {
-                    $where[] = "(o.status = 'with_rep' OR o.status = 'partial' OR o.status = 'in_delivery' OR o.status = 'postponed')";
+                    $where[] = "(o.status = 'with_rep' OR o.status = 'partial' OR o.status = 'in_delivery' OR o.status = 'postponed' OR o.status = 'returned_with_rep' OR o.status = 'deferred')";
                 } else {
                     $where[] = "o.status = '" . str_replace("'", "\'", $statusFilter) . "'";
                 }
@@ -11243,7 +11241,7 @@ switch ($module) {
                     COALESCE(SUM( (SELECT SUM(oi.quantity) FROM order_items oi WHERE oi.order_id = o.id) ), 0) as productsCount
                 FROM orders o
                 WHERE o.rep_id IS NOT NULL 
-                  AND o.status IN ('with_rep', 'partial', 'in_delivery', 'postponed', 'returned_with_rep')
+                  AND o.status IN ('with_rep', 'partial', 'in_delivery', 'postponed', 'returned_with_rep', 'deferred')
             ";
             if (table_exists($pdo, 'rep_journal_orders')) {
                 $sql .= " AND NOT EXISTS (
@@ -11364,7 +11362,7 @@ switch ($module) {
             $params = [$repId];
             if ($statusFilter !== '') {
                 if ($statusFilter === 'active') {
-                    $where[] = "(o.status = 'with_rep' OR o.status = 'partial' OR o.status = 'in_delivery' OR o.status = 'postponed' OR o.status = 'returned_with_rep')";
+                    $where[] = "(o.status = 'with_rep' OR o.status = 'partial' OR o.status = 'in_delivery' OR o.status = 'postponed' OR o.status = 'returned_with_rep' OR o.status = 'deferred')";
                     if (table_exists($pdo, 'rep_journal_orders')) {
                         $where[] = "NOT EXISTS (
                             SELECT 1 FROM rep_journal_orders current_rjo
@@ -11495,13 +11493,6 @@ switch ($module) {
                 http_response_code(400); echo json_encode(['success'=>false,'message'=>'rep_id does not match order.rep_id']); break;
             }
 
-            try {
-                assert_order_not_in_closed_journal($pdo, $orderId, $repId ?: ($orderRow['rep_id'] ?? null));
-            } catch (Exception $eJourn) {
-                http_response_code(400);
-                echo json_encode(['success' => false, 'message' => $eJourn->getMessage()]);
-                break;
-            }
 
             try {
                 $pdo->beginTransaction();
@@ -11637,9 +11628,10 @@ switch ($module) {
 
                 // After commit: determine if full or partial return using the BEFORE state
                 try {
-                    // isFullReturn: if return count >= total pieces that WERE in the order
-                    $isFullReturn = ($returnedPieces >= $totalOrderPiecesBefore);
-
+                    // Check if there are any remaining items left in order_items for this order
+                    $remainStmt = execute_query($pdo, "SELECT COALESCE(SUM(quantity), 0) FROM order_items WHERE order_id = ?", [$orderId]);
+                    $remainingPiecesAfter = intval($remainStmt->fetchColumn());
+                    $isFullReturn = ($remainingPiecesAfter <= 0) || ($returnedPieces >= $totalOrderPiecesBefore);
 
                     $targetStatus = $isFullReturn ? 'returned' : 'partial';
                     $returnedStatusVal = pick_allowed_enum($pdo, 'orders', 'status', $targetStatus, ['returned','partial','with_rep','pending']);
@@ -11940,15 +11932,6 @@ switch ($module) {
             }
 
             try {
-                assert_order_not_in_closed_journal($pdo, $orderId, intval($input['rep_id'] ?? $orderRow['rep_id'] ?? 0));
-            } catch (Exception $eJourn) {
-                http_response_code(400);
-                if (ob_get_length()) ob_clean();
-                echo json_encode(['success' => false, 'message' => $eJourn->getMessage()]);
-                exit;
-            }
-
-            try {
                 $pdo->beginTransaction();
                 $journalsToRefresh = [];
 
@@ -11969,41 +11952,12 @@ switch ($module) {
                     echo json_encode(['success' => true, 'duplicate_prevented' => true, 'returnedValue' => 0, 'returnedPieces' => 0, 'message' => 'تم تسجيل إرجاع هذا الأوردر بالفعل.']);
                     exit;
                 }
-                if ($repId > 0) {
-                    $repRelatedType = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
-                    $lastReturnAction = execute_query($pdo,
-                        "SELECT JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(details) THEN details ELSE NULL END, '$.action')) AS action
-                         FROM transactions
-                         WHERE related_to_type = ? AND related_to_id = ?
-                           AND JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(details) THEN details ELSE NULL END, '$.order_id')) = ?
-                           AND (JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(details) THEN details ELSE NULL END, '$.action')) = 'returnToStock'
-                                OR JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(details) THEN details ELSE NULL END, '$.subtype')) = 'undo_return')
-                         ORDER BY id DESC LIMIT 1",
-                        [$repRelatedType, $repId, (string)$orderId]
-                    )->fetch(PDO::FETCH_ASSOC);
-                    if (($lastReturnAction['action'] ?? '') === 'returnToStock') {
-                        $pdo->rollBack();
-                        echo json_encode(['success' => true, 'duplicate_prevented' => true, 'returnedValue' => 0, 'returnedPieces' => 0, 'message' => 'تم تسجيل إرجاع هذا الأوردر بالفعل.']);
-                        exit;
-                    }
-                }
 
                 // 1. Get ALL current order items
                 $oiRows = execute_query($pdo,
                     "SELECT id, product_id, quantity, price_per_unit FROM order_items WHERE order_id = ?",
                     [$orderId]
                 )->fetchAll(PDO::FETCH_ASSOC);
-
-                $hasDeliveredItems = false;
-                if (column_exists($pdo, 'order_items', 'delivered_quantity')) {
-                    $deliveredPieces = execute_query($pdo,
-                        "SELECT COALESCE(SUM(delivered_quantity), 0) FROM order_items WHERE order_id = ?",
-                        [$orderId]
-                    )->fetchColumn();
-                    $hasDeliveredItems = intval($deliveredPieces) > 0;
-                }
-                $returnedOrderStatus = $hasDeliveredItems ? 'partial' : 'returned';
-                $returnedJournalStatus = $hasDeliveredItems ? 'partial_return' : 'full_return';
 
                 $totalReturnedValue  = max(0, floatval($orderRow['total_amount'] ?? 0) - floatval($orderRow['shipping_fees'] ?? 0));
                 $totalReturnedPieces = 0;
@@ -12037,8 +11991,8 @@ switch ($module) {
                                 [$prodId, $warehouseId, $newStock]);
                         }
                         
-                        $refType = pick_allowed_enum($pdo, 'product_movements', 'reference_type', 'partial_return',
-                            ['partial_return', 'order_partial_return', 'full_return', 'order_hand_over', 'manual']);
+                        $refType = pick_allowed_enum($pdo, 'product_movements', 'reference_type', 'full_return',
+                            ['full_return', 'partial_return', 'order_partial_return', 'order_hand_over', 'manual']);
                         // Record product movement
                         execute_query($pdo,
                             "INSERT INTO product_movements (product_id, warehouse_id, movement_type, quantity_change, previous_quantity, new_quantity, reference_id, reference_type, notes, created_by)
@@ -12049,9 +12003,9 @@ switch ($module) {
                     }
                 }
 
-                // Preserve a delivered portion in history when only the rep's remaining stock is returned.
-                $returnedStatus = pick_allowed_enum($pdo, 'orders', 'status', $returnedOrderStatus,
-                    ['returned', 'partial', 'with_rep', 'pending']);
+                // 2. Set order status explicitly to 'returned' so it leaves custody completely
+                $returnedStatus = pick_allowed_enum($pdo, 'orders', 'status', 'returned',
+                    ['returned', 'full_return', 'pending']);
                 $updFields = "status = '$returnedStatus'";
                 if (column_exists($pdo, 'orders', 'updated_at')) $updFields .= ', updated_at = NOW()';
                 execute_query($pdo, "UPDATE orders SET $updFields WHERE id = ?", [$orderId]);
@@ -12066,7 +12020,7 @@ switch ($module) {
                             "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details)
                          VALUES (?, NULL, NULL, ?, ?, ?, NOW(), ?)",
                         [$txType, $relType, $repId, $totalReturnedValue,
-                             json_encode(['subtype' => $returnedJournalStatus, 'action' => 'returnToStock', 'order_id' => $orderId, 'model' => 'consignment'])]
+                             json_encode(['subtype' => 'full_return', 'action' => 'returnToStock', 'order_id' => $orderId, 'model' => 'consignment'])]
                     );
                 }
 
@@ -12093,20 +12047,20 @@ switch ($module) {
 
                         if ($journalRow && intval($journalRow['id']) > 0) {
                             execute_query($pdo,
-                                "UPDATE rep_journal_orders SET status = ?, event_date = CURDATE(), event_time = CURTIME(),
+                                "UPDATE rep_journal_orders SET status = 'full_return', event_date = CURDATE(), event_time = CURTIME(),
                                  journal_id = COALESCE(NULLIF(?, 0), journal_id),
                                  returned_pieces = COALESCE(returned_pieces,0) + ?,
                                  returned_value  = COALESCE(returned_value,0)  + ?
                                  WHERE id = ?",
-                                [$returnedJournalStatus, $targetJid, $totalReturnedPieces, $totalReturnedValue, intval($journalRow['id'])]
+                                [$targetJid, $totalReturnedPieces, $totalReturnedValue, intval($journalRow['id'])]
                             );
                             $jid = $targetJid;
                         } else {
                             $jid = $targetJid;
                             execute_query($pdo,
                                 "INSERT INTO rep_journal_orders (journal_id, rep_id, order_id, status, event_date, event_time, returned_pieces, returned_value)
-                                 VALUES (?, ?, ?, ?, CURDATE(), CURTIME(), ?, ?)",
-                                [$jid > 0 ? $jid : null, $repId, $orderId, $returnedJournalStatus, $totalReturnedPieces, $totalReturnedValue]
+                                 VALUES (?, ?, ?, 'full_return', CURDATE(), CURTIME(), ?, ?)",
+                                [$jid > 0 ? $jid : null, $repId, $orderId, $totalReturnedPieces, $totalReturnedValue]
                             );
                         }
 
@@ -12120,7 +12074,7 @@ switch ($module) {
                     }
                 } catch (Exception $e) { /* non-critical */ }
 
-                try { log_order_history($pdo, $orderId, $returnedStatus, $returnedJournalStatus, null, $repId); } catch (Exception $e) {}
+                try { log_order_history($pdo, $orderId, 'returned', 'return_to_stock', null, $repId); } catch (Exception $e) {}
 
                 $pdo->commit();
                 foreach (array_keys($journalsToRefresh) as $journalId) {
@@ -12573,7 +12527,7 @@ switch ($module) {
                 }
                 if ($status !== null) {
                     // Map requested status to an allowed enum value in this installation
-                    $allOrderStatuses = ['pending','confirmed','with_rep','in_delivery','delivered','partial','returned','postponed','no_answer','wrong_number','cancelled','closed','pending_payment','returned_with_rep'];
+                    $allOrderStatuses = ['pending','confirmed','with_rep','in_delivery','delivered','partial','returned','postponed','deferred','no_answer','wrong_number','cancelled','closed','pending_payment','returned_with_rep'];
                     $allowedStatus = pick_allowed_enum($pdo, 'orders', 'status', $status, $allOrderStatuses);
                     $set_parts[] = 'status = ?';
                     $values[] = $allowedStatus;
@@ -13740,6 +13694,43 @@ switch ($module) {
         break;
     case 'sales':
         $action = $_GET['action'] ?? 'create';
+        if ($action === 'getActiveCountsByRep') {
+            $sql = "
+                SELECT 
+                    o.rep_id, 
+                    COUNT(o.id) as ordersCount,
+                    COALESCE(SUM( (SELECT SUM(oi.quantity) FROM order_items oi WHERE oi.order_id = o.id) ), 0) as productsCount
+                FROM orders o
+                WHERE o.rep_id IS NOT NULL 
+                  AND o.status IN ('with_rep', 'partial', 'in_delivery', 'postponed', 'returned_with_rep', 'deferred')
+            ";
+            if (table_exists($pdo, 'rep_journal_orders')) {
+                $sql .= " AND NOT EXISTS (
+                    SELECT 1 FROM rep_journal_orders current_rjo
+                    WHERE current_rjo.order_id = o.id
+                      AND current_rjo.rep_id = o.rep_id
+                      AND current_rjo.status = 'delivered'
+                      AND current_rjo.id = (
+                          SELECT MAX(latest_rjo.id) FROM rep_journal_orders latest_rjo
+                          WHERE latest_rjo.order_id = o.id AND latest_rjo.rep_id = o.rep_id
+                      )
+                )";
+            }
+            $sql .= " GROUP BY o.rep_id";
+            
+            $stmt = execute_query($pdo, $sql);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            $out = [];
+            foreach ($rows as $r) {
+                $out[intval($r['rep_id'])] = [
+                    'rep_id' => intval($r['rep_id']),
+                    'ordersCount' => intval($r['ordersCount']),
+                    'productsCount' => intval($r['productsCount'])
+                ];
+            }
+            echo json_encode(['success' => true, 'data' => $out]);
+            break;
+        }
         if ($action === 'getRepDailyStats') {
             $repId = intval($_GET['rep_id'] ?? 0);
             if (!$repId) {
@@ -15504,7 +15495,7 @@ switch ($module) {
                 $openingOrdersCount = 0; $openingPieces = 0; $openingOldOrdersValue = 0;
                 $openingOrdersList = [];
                 if ($dateCol) {
-                    $statusList = "'with_rep','partial','postponed'";
+                    $statusList = "'with_rep','partial','postponed','deferred','returned_with_rep'";
                     $stmt = execute_query($pdo, "SELECT id FROM orders WHERE rep_id = ? AND status IN ($statusList)", [$repId]);
                     $ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
                     if (count($ids) > 0) {
@@ -17745,7 +17736,7 @@ switch ($module) {
                         }
                     } else {
                         // old custody orders (orders already assigned to rep BEFORE this operation)
-                        $statusList = "'with_rep','partial','postponed'";
+                        $statusList = "'with_rep','partial','postponed','deferred','returned_with_rep'";
                         $oldStmt = execute_query($pdo, "SELECT id FROM orders WHERE rep_id = ? AND status IN ($statusList) ORDER BY id ASC", [$repId]);
                         $oldIds = $oldStmt->fetchAll(PDO::FETCH_COLUMN);
                         $oldOrdersCount = count($oldIds);
@@ -18085,9 +18076,9 @@ switch ($module) {
                         // Also allow reassigning returned/pending orders even if they still carry an old rep_id
                         // from a previous assignment (e.g. the order was returned but rep_id was not cleared).
                         if (column_exists($pdo, 'orders', 'updated_at')) {
-                            $pdo->exec("UPDATE orders SET rep_id = $repId, status = '$withRepAllowed', updated_at = NOW() WHERE id IN ($inIds) AND (rep_id IS NULL OR rep_id = $repId OR status IN ('returned', 'pending', 'postponed', 'confirmed', 'no_answer'))");
+                            $pdo->exec("UPDATE orders SET rep_id = $repId, status = '$withRepAllowed', updated_at = NOW() WHERE id IN ($inIds) AND (rep_id IS NULL OR rep_id = $repId OR status IN ('returned', 'pending', 'postponed', 'confirmed', 'no_answer', 'deferred'))");
                         } else {
-                            $pdo->exec("UPDATE orders SET rep_id = $repId, status = '$withRepAllowed' WHERE id IN ($inIds) AND (rep_id IS NULL OR rep_id = $repId OR status IN ('returned', 'pending', 'postponed', 'confirmed', 'no_answer'))");
+                            $pdo->exec("UPDATE orders SET rep_id = $repId, status = '$withRepAllowed' WHERE id IN ($inIds) AND (rep_id IS NULL OR rep_id = $repId OR status IN ('returned', 'pending', 'postponed', 'confirmed', 'no_answer', 'deferred'))");
                         }
                         // Log history for each newly assigned order
                         foreach ($orders as $oid) {
@@ -18281,6 +18272,8 @@ switch ($module) {
                 echo json_encode(['success' => false, 'message' => 'Sale failed: ' . $e->getMessage()]);
             }
         }
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => "Unknown action '$action' in sales module."]);
         break;
     case 'customer_returns':
         $action = $_GET['action'] ?? 'create';
@@ -20017,12 +20010,55 @@ switch ($module) {
                     $expenseCategories = [];
                 }
 
+                // ── Returned orders summary for the date range ──
+                $returnedOrdersData = ['total' => 0, 'full' => 0, 'partial' => 0];
+                $returnedPiecesTotal = 0;
+                try {
+                    if (table_exists($pdo, 'rep_journal_orders')) {
+                        $hasRjo = true;
+                        $retDateCond = "DATE(rjo.event_date) BETWEEN ? AND ?";
+                        $retParams   = [$start, $end];
+
+                        // Count full returns
+                        $fullRetStmt = execute_query($pdo,
+                            "SELECT COUNT(DISTINCT rjo.order_id) AS cnt, COALESCE(SUM(rjo.returned_pieces),0) AS pieces
+                             FROM rep_journal_orders rjo
+                             WHERE rjo.status IN ('full_return','returned')
+                               AND $retDateCond",
+                            $retParams
+                        );
+                        $fullRetRow = $fullRetStmt->fetch(PDO::FETCH_ASSOC) ?: ['cnt'=>0,'pieces'=>0];
+
+                        // Count partial returns
+                        $partRetStmt = execute_query($pdo,
+                            "SELECT COUNT(DISTINCT rjo.order_id) AS cnt, COALESCE(SUM(rjo.returned_pieces),0) AS pieces
+                             FROM rep_journal_orders rjo
+                             WHERE rjo.status IN ('partial_return','partial','returned_with_rep')
+                               AND COALESCE(rjo.returned_pieces,0) > 0
+                               AND $retDateCond",
+                            $retParams
+                        );
+                        $partRetRow = $partRetStmt->fetch(PDO::FETCH_ASSOC) ?: ['cnt'=>0,'pieces'=>0];
+
+                        $returnedOrdersData = [
+                            'total'   => intval($fullRetRow['cnt']) + intval($partRetRow['cnt']),
+                            'full'    => intval($fullRetRow['cnt']),
+                            'partial' => intval($partRetRow['cnt']),
+                        ];
+                        $returnedPiecesTotal = intval($fullRetRow['pieces']) + intval($partRetRow['pieces']);
+                    }
+                } catch (Throwable $eRet) {
+                    // Non-critical — keep defaults
+                }
+
                 echo json_encode(['success' => true, 'data' => [
                     'starting_balance'          => $startingBalance,
                     'ending_balance'            => $runningBalance,
                     'treasuryBalanceHistory'     => $treasuryBalanceHistory,
                     'expenseCategories'          => $expenseCategories,
-                    'revenueAndExpenseRecords'   => $records
+                    'revenueAndExpenseRecords'   => $records,
+                    'returned_orders'            => $returnedOrdersData,
+                    'returned_pieces'            => $returnedPiecesTotal,
                 ]]);
             } catch (Throwable $e) {
                 echo json_encode(['success' => false, 'message' => 'Finance report failed: ' . $e->getMessage(), 'data' => ['starting_balance' => 0, 'treasuryBalanceHistory' => [], 'expenseCategories' => [], 'revenueAndExpenseRecords' => []]]);
