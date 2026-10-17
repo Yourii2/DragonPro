@@ -797,13 +797,9 @@ const SalesUpdateStatus: React.FC = () => {
     return exchangeDeliveredTotal - exchangeReturnedTotal;
   }, [exchangeDeliveredTotal, exchangeReturnedTotal]);
 
-  const exchangeShippingFees = useMemo(() => {
-    return Number(openExchangeOrder?.shipping || openExchangeOrder?.shipping_fees || openExchangeOrder?.shippingCost || 0);
-  }, [openExchangeOrder]);
-
   const exchangeCollectedTotal = useMemo(() => {
-    return (exchangePriceDiff > 0 ? exchangePriceDiff : 0) + exchangeShippingFees;
-  }, [exchangePriceDiff, exchangeShippingFees]);
+    return exchangePriceDiff > 0 ? exchangePriceDiff : 0;
+  }, [exchangePriceDiff]);
 
   const submitExchangeOrderItem = async () => {
     if (!openExchangeOrder) return;
@@ -1039,8 +1035,8 @@ const SalesUpdateStatus: React.FC = () => {
     const todayValue = todayOrders.reduce((s: any, o: any) => s + computeOrderSubtotal(o), 0);
     const totalAmount = allOrders.reduce((s: any, o: any) => s + computeOrderSubtotal(o), 0);
 
-    // حساب إجمالي التحصيل الفعلي (منتجات + شحن)
-    const totalRequiredToCollect = allOrders.reduce((s: any, o: any) => s + computeOrderSubtotal(o) + Number(o.shipping || o.shipping_fees || o.shippingCost || 0), 0);
+    // حساب إجمالي التحصيل الفعلي (منتجات بدون شحن)
+    const totalRequiredToCollect = totalAmount;
 
     const todayOrdersCount = todayOrders.length;
     const todayPieces = todayOrders.reduce((s: any, o: any) => s + ((o.products || []).reduce((ss: number, p: any) => ss + Number(p.quantity || p.qty || 0), 0)), 0);
@@ -1139,7 +1135,7 @@ const SalesUpdateStatus: React.FC = () => {
           </div>
           ${!isShippingMode ? `
           <div class="amount-badge">
-              <span class="lbl">إجمالي المنتجات (بدون شحن)</span>
+              <span class="lbl">إجمالي المنتجات</span>
               <span class="val">${totalAmount.toLocaleString()} ج.م</span>
           </div>
           ` : ''}
@@ -1157,31 +1153,27 @@ const SalesUpdateStatus: React.FC = () => {
           <div class="stat-box highlight"><div class="title">إجمالي الاوردرات</div><div class="value">${totalOrdersCount}</div></div>
           <div class="stat-box highlight"><div class="title">إجمالي القطع</div><div class="value">${totalPieces}</div></div>
           <div class="stat-box highlight"><div class="title">قيمة المنتجات</div><div class="value">${todayValue.toLocaleString()}</div></div>
-          <div class="stat-box highlight"><div class="title">إجمالي المطلوب تحصيله</div><div class="value">${totalRequiredToCollect.toLocaleString()}</div></div>
+          <div class="stat-box highlight"><div class="title">إجمالي المطلوب تحصيله</div><div class="value">${totalAmount.toLocaleString()}</div></div>
       </div>
 
         <table class="main-table">
           <thead>
             <tr>
               <th style="width: 7%;">الطلب</th>
-              <th style="width: 14%;">العميل</th>
-              <th style="width: 9%;">الهاتف</th>
-              <th style="width: 9%;">المحافظة</th>
-              <th style="width: 18%;">العنوان</th>
-              <th style="width: 8%;">الموظف/بيدج</th>
+              <th style="width: 15%;">العميل</th>
+              <th style="width: 10%;">الهاتف</th>
+              <th style="width: 10%;">المحافظة</th>
+              <th style="width: 22%;">العنوان</th>
+              <th style="width: 10%;">الموظف/بيدج</th>
               <th style="width: 6%;">القطع</th>
-              <th style="width: 8%;">قيمة المنتجات</th>
-              <th style="width: 6%;">شحن</th>
-              <th style="width: 9%;">المطلوب</th>
-              <th style="width: 8%;">ملاحظات</th>
+              <th style="width: 10%;">قيمة الأوردر</th>
+              <th style="width: 10%;">ملاحظات</th>
             </tr>
           </thead>
           <tbody>
             ${allOrders.map(o => {
       const pieces = (o.products || []).reduce((s: number, p: any) => s + Number(p.quantity || p.qty || 0), 0);
       const prodVal = computeOrderSubtotal(o);
-      const shipVal = Number(o.shipping || o.shipping_fees || o.shippingCost || 0);
-      const totalVal = prodVal + shipVal;
       return `
             <tr>
               <td class="font-black text-center">${o.orderNumber || o.order_number || ''}</td>
@@ -1191,9 +1183,7 @@ const SalesUpdateStatus: React.FC = () => {
               <td>${o.address || ''}</td>
               <td class="text-center">${o.employee || o.user_name || o.admin || o.created_by || '-'}<br><span style="font-size:9px; color:#555;">${o.page || o.source || '-'}</span></td>
               <td class="text-center font-black">${pieces}</td>
-              <td class="text-center font-black">${prodVal.toLocaleString()}</td>
-              <td class="text-center">${shipVal.toLocaleString()}</td>
-              <td class="text-center highlight-cell">${totalVal.toLocaleString()}</td>
+              <td class="text-center highlight-cell font-black">${prodVal.toLocaleString()}</td>
               <td>${o.notes || o.remark || o.customer_notes || '-'}</td>
             </tr>`;
     }).join('')}

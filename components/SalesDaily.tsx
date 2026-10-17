@@ -38,28 +38,7 @@ const normalizeText = (text: string) => {
     .replace(/[أإآ]/g, "ا")
     .replace(/ة/g, "ه")
     .replace(/\s+/g, " ");
-};// التحقق من الأصناف الجديدة فقط في الأوردر الحالي
-const orderTotal = (o: any) => {
-  // Prefer computing from products to avoid relying on inconsistent stored subtotal fields
-  let sub: number = 0;
-  if (Array.isArray(o.products) && o.products.length > 0) {
-    sub = o.products.reduce((s: number, p: any) => {
-      const qty = toNum(p.quantity ?? p.qty ?? 0);
-      let lineTotal = parseNumeric(p.total ?? p.total_price ?? p.lineTotal ?? p.line_total ?? p.amount ?? p.value);
-      if (!lineTotal || lineTotal === 0) {
-        const unit = parseNumeric(p.price ?? p.price_per_unit ?? p.sale_price ?? p.salePrice ?? p.unit_price ?? p.unitPrice);
-        lineTotal = unit * qty;
-      }
-      return s + toNum(lineTotal);
-    }, 0);
-  } else {
-    sub = parseNumeric(o.subTotal ?? o.total_amount ?? o.total ?? 0);
-  }
-  const ship = parseNumeric(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0);
-  return sub + ship;
-};
-
-// Server-consistent subtotal (exclude shipping) — used for rep assignment and "قيمة اوردرات اليوم"
+};// Server-consistent subtotal (exclude shipping) — used for rep assignment and "قيمة اوردرات اليوم"
 const orderSubtotal = (o: any) => {
   if (Array.isArray(o.products) && o.products.length > 0) {
     return o.products.reduce((s: number, p: any) => {
@@ -81,6 +60,11 @@ const orderSubtotal = (o: any) => {
     return Math.max(0, rawSub - ship);
   }
   return rawSub;
+};
+
+// Order total strictly without shipping for rep shifts
+const orderTotal = (o: any) => {
+  return orderSubtotal(o);
 };
 
 const orderPieces = (o: any) =>
@@ -1505,8 +1489,6 @@ const SalesDaily: React.FC = () => {
       `<div class="header"><div></div><div><h1>${reportTitle}</h1></div><div></div></div>` +
       `<div style="margin-top:8px">التاريخ: ${dateStr}</div>` +
       `<div style="margin-top:4px">يومية المندوب "${whoName}"</div>` +
-      `<div style="margin-top:4px">مصروفات الشحن: ${localTotalShipping.toLocaleString()} ج.م</div>` +
-      `<div style="margin-top:4px">الإجمالي شامل الشحن: ${(localOldOrdersValue + sumValue + localTotalShipping).toLocaleString()} ج.م</div>` +
       (showMoney
         ? `<div style="display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-top:10px;">
             <div style="border:1px solid #ddd; padding:10px; border-radius:8px; background:#fff">
@@ -1549,13 +1531,11 @@ const SalesDaily: React.FC = () => {
         : '') +
       `<table><thead><tr>
           <th>رقم اوردر</th><th>اسم العميل</th><th>الهاتف</th><th>المحافظة</th><th>العنوان</th>
-          <th>الموظف</th><th>البيدج</th><th>الإجمالي</th><th>شحن</th><th>الإجمالي الكلي</th><th>ملاحظات</th>
+          <th>الموظف</th><th>البيدج</th><th>قيمة الأوردر</th><th>ملاحظات</th>
         </tr></thead><tbody>` +
       ordersParam
         .map((o: any) => {
-          const sub = toNum(o.subTotal ?? o.total_amount ?? o.total ?? 0);
-          const ship = toNum(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0);
-          const tot = sub + ship;
+          const sub = orderSubtotal(o);
           return `<tr>
             <td>${o.orderNumber ?? o.order_number ?? o.id ?? ''}</td>
             <td>${o.customerName ?? o.customer_name ?? ''}</td>
@@ -1565,8 +1545,6 @@ const SalesDaily: React.FC = () => {
             <td>${o.employee ?? ''}</td>
             <td>${o.page ?? ''}</td>
             <td>${sub.toLocaleString()}</td>
-            <td>${ship.toLocaleString()}</td>
-            <td>${tot.toLocaleString()}</td>
             <td>${o.notes ?? ''}</td>
           </tr>`;
         })
@@ -1656,12 +1634,10 @@ const SalesDaily: React.FC = () => {
       </div>` +
       `<table><thead><tr>
           <th>رقم اوردر</th><th>اسم العميل</th><th>الهاتف</th><th>المحافظة</th><th>العنوان</th>
-          <th>الموظف</th><th>البيدج</th><th>الإجمالي</th><th>شحن</th><th>الإجمالي الكلي</th><th>ملاحظات</th>
+          <th>الموظف</th><th>البيدج</th><th>قيمة الأوردر</th><th>ملاحظات</th>
         </tr></thead><tbody>` +
       ordersParam.map((o: any) => {
         const sub = orderSubtotal(o);
-        const ship = parseNumeric(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0);
-        const tot = orderTotal(o);
         const emp = o.employee ?? o.employee_name ?? o.assigneeName ?? o.assigned_to ?? (o.assigned && (o.assigned.name || o.assigned.employee)) ?? '';
         const pg = o.page ?? o.page_number ?? o.page_no ?? o.pageNumber ?? o.package_page ?? '';
         return `<tr>
@@ -1673,8 +1649,6 @@ const SalesDaily: React.FC = () => {
             <td>${emp}</td>
             <td>${pg}</td>
             <td>${sub.toLocaleString()}</td>
-            <td>${ship.toLocaleString()}</td>
-            <td>${tot.toLocaleString()}</td>
             <td>${o.notes ?? ''}</td>
           </tr>`;
       }).join('') +
@@ -1704,8 +1678,6 @@ const SalesDaily: React.FC = () => {
     if (oldOrdersList.length > 0) {
       const oldRows = oldOrdersList.map((o: any) => {
         const sub = orderSubtotal(o);
-        const ship = parseNumeric(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0);
-        const tot = orderTotal(o);
         const emp = o.employee ?? o.employee_name ?? o.assigneeName ?? o.assigned_to ?? (o.assigned && (o.assigned.name || o.assigned.employee)) ?? '';
         const pg = o.page ?? o.page_number ?? o.page_no ?? o.pageNumber ?? o.package_page ?? '';
         // تاريخ إضافة الأوردر للمندوب/اليومية فقط (لا يُستخدم تاريخ إنشاء الأوردر)
@@ -1724,8 +1696,6 @@ const SalesDaily: React.FC = () => {
             <td>${emp}</td>
             <td>${pg}</td>
             <td>${sub.toLocaleString()}</td>
-            <td>${ship.toLocaleString()}</td>
-            <td>${tot.toLocaleString()}</td>
             <td style="text-align:center;">${assignDateFormatted}<br/>${lateBadge}</td>
             <td>${o.notes ?? ''}</td>
           </tr>`;
@@ -1737,7 +1707,7 @@ const SalesDaily: React.FC = () => {
         <table style="width:100%; border-collapse:collapse; margin-top:8px;">
           <thead><tr>
             <th>رقم اوردر</th><th>اسم العميل</th><th>الهاتف</th><th>المحافظة</th><th>العنوان</th>
-            <th>الموظف</th><th>البيدج</th><th>الإجمالي</th><th>شحن</th><th>الإجمالي الكلي</th>
+            <th>الموظف</th><th>البيدج</th><th>قيمة الأوردر</th>
             <th style="background:#fef2f2;">تاريخ التسليم للمندوب</th><th>ملاحظات</th>
           </tr></thead>
           <tbody>${oldRows}</tbody>
@@ -2551,9 +2521,7 @@ const SalesDaily: React.FC = () => {
                     { header: 'العنوان', key: 'address', width: 35 },
                     { header: 'الموظف', key: 'employee', width: 20 },
                     { header: 'البيدج', key: 'page', width: 20 },
-                    { header: 'الإجمالي', key: 'subtotal', width: 12 },
-                    { header: 'الشحن', key: 'shipping', width: 10 },
-                    { header: 'الإجمالي الكلي', key: 'total', width: 15 },
+                    { header: 'قيمة الأوردر', key: 'subtotal', width: 15 },
                     { header: 'ملاحظات', key: 'notes', width: 30 }
                   ];
 
@@ -2575,8 +2543,6 @@ const SalesDaily: React.FC = () => {
                       employee: o.employee ?? o.employee_name ?? o.assigneeName ?? o.assigned_to ?? (o.assigned && (o.assigned.name || o.assigned.employee)) ?? '',
                       page: o.page ?? o.page_number ?? o.page_no ?? o.pageNumber ?? o.package_page ?? '',
                       subtotal: orderSubtotal(o),
-                      shipping: parseNumeric(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0),
-                      total: orderTotal(o),
                       notes: o.notes ?? ''
                     });
 
@@ -2698,9 +2664,7 @@ const SalesDaily: React.FC = () => {
                       </div>
                     </label>
                     <div className="text-right text-xs">
-                      <div>المجموع: <span className="font-black">{orderSubtotal(p).toLocaleString()}</span></div>
-                      <div>الشحن: <span className="font-black">{parseNumeric(p.shipping ?? p.shipping_fees ?? p.shippingCost ?? 0).toLocaleString()}</span></div>
-                      <div className="font-black text-lg">الإجمالي: {orderTotal(p).toLocaleString()}</div>
+                      <div className="font-black text-base text-slate-800 dark:text-slate-100">قيمة الأوردر: {orderSubtotal(p).toLocaleString()} ج.م</div>
                     </div>
                   </div>
                 ))}
@@ -2741,9 +2705,7 @@ const SalesDaily: React.FC = () => {
                       </div>
                       <div className="flex items-center gap-3">
                         <div className="text-right text-xs">
-                          <div>المجموع: <span className="font-black">{sub.toLocaleString()}</span></div>
-                          <div>الشحن: <span className="font-black">{ship.toLocaleString()}</span></div>
-                          <div className="font-black text-lg">الإجمالي: {tot.toLocaleString()}</div>
+                          <div className="font-black text-base text-slate-800 dark:text-slate-100">قيمة الأوردر: {sub.toLocaleString()} ج.م</div>
                         </div>
                         <button onClick={() => { if (!startDailyUnlocked) { Swal.fire('حدد المندوب والخزينة والمستودع', 'الرجاء اختيار المندوب ثم الخزينة ثم المستودع لفتح هذه المنطقة', 'warning'); return; } removeSelectedOrder(Number(o.id)); }} className="text-rose-600 p-2 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-900/10 transition-colors"><Trash2 /></button>
                       </div>
@@ -2814,8 +2776,8 @@ const SalesDaily: React.FC = () => {
                       {/* Footer */}
                       <div className="flex items-center justify-between p-4 border-t border-slate-100 bg-slate-50/50 rounded-b-3xl">
                         <div className="flex flex-col">
-                          <span className="text-[10px] text-slate-400 font-bold">الإجمالي</span>
-                          <span className="font-black text-lg text-slate-800">{tot.toLocaleString()}</span>
+                          <span className="text-[10px] text-slate-400 font-bold">قيمة الأوردر</span>
+                          <span className="font-black text-lg text-slate-800">{tot.toLocaleString()} ج.م</span>
                         </div>
                         <div className="flex gap-2">
                           <button
@@ -2897,9 +2859,7 @@ const SalesDaily: React.FC = () => {
                         </div>
                         <div className="flex items-center gap-2">
                           <div className="text-right text-xs">
-                            <div>المجموع: <span className="font-black">{sub.toLocaleString()}</span></div>
-                            <div>الشحن: <span className="font-black">{ship.toLocaleString()}</span></div>
-                            <div className="font-black text-lg">الإجمالي: {tot.toLocaleString()}</div>
+                            <div className="font-black text-base text-slate-800 dark:text-slate-100">قيمة الأوردر: {sub.toLocaleString()} ج.م</div>
                           </div>
                         </div>
                       </div>
@@ -2968,8 +2928,8 @@ const SalesDaily: React.FC = () => {
                         {/* Footer */}
                         <div className="flex items-center justify-between p-4 border-t border-slate-100 bg-slate-50/50 rounded-b-3xl">
                           <div className="flex flex-col">
-                            <span className="text-[10px] text-slate-400 font-bold">الإجمالي</span>
-                            <span className="font-black text-lg text-slate-800">{tot.toLocaleString()}</span>
+                            <span className="text-[10px] text-slate-400 font-bold">قيمة الأوردر</span>
+                            <span className="font-black text-lg text-slate-800">{tot.toLocaleString()} ج.م</span>
                           </div>
                         </div>
                       </div>

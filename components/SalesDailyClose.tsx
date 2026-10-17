@@ -447,8 +447,6 @@ const SalesDailyClose: React.FC = () => {
     const fromDeferred = deferredOrders.filter(o => computeDeliveredNetPieces(o) > 0);
 
     return uniqOrdersById([...deliveredOrders, ...fromRet, ...fromActive, ...fromDeferred]).filter(o => {
-      const st = String(o.status || o.order_status || o.journal_status || '').toLowerCase();
-      if (st === 'exchange') return false;
       return computeDeliveredNetPieces(o) > 0;
     });
   }, [deliveredOrders, returnedOrders, activeOrders, deferredOrders]);
@@ -458,8 +456,6 @@ const SalesDailyClose: React.FC = () => {
     const fromDeferred = deferredOrders.filter(o => computeReturnedPieces(o) > 0);
 
     return uniqOrdersById([...returnedOrders, ...fromActive, ...fromDeferred]).filter(o => {
-      const st = String(o.status || o.order_status || o.journal_status || '').toLowerCase();
-      if (st === 'exchange') return false;
       return computeReturnedPieces(o) > 0;
     });
   }, [returnedOrders, activeOrders, deferredOrders]);
@@ -714,8 +710,9 @@ const SalesDailyClose: React.FC = () => {
           const oid = getRealOrderId(ord);
           const isRetWithRepOrd = String(ord.status || ord.order_status || '').toLowerCase() === 'returned_with_rep';
           const isPartialOrd = String(ord.status || ord.order_status || '').toLowerCase() === 'partial';
+          const hasRemainingPieces = computePieces(ord) > 0;
           if (!oid) continue;
-          if (!isRetWithRepOrd && !isPartialOrd && (deliveredIds.has(oid) || returnedIds.has(oid))) continue;
+          if (!isRetWithRepOrd && !isPartialOrd && !hasRemainingPieces && (deliveredIds.has(oid) || returnedIds.has(oid))) continue;
           if (deferredIds.has(oid) || activeIds.has(oid)) continue;
 
           const enrichedOrd = {
@@ -748,15 +745,20 @@ const SalesDailyClose: React.FC = () => {
         const journalStatus = String(o.journal_status || '').toLowerCase();
         const isRetWithRepOrder = (status === 'returned_with_rep' || orderStatus === 'returned_with_rep' || journalStatus === 'returned_with_rep');
         const isPartialReturnOrder = (status === 'partial_return' || orderStatus === 'partial' || journalStatus === 'partial_return' || status === 'partial');
+        const isFullReturnOrd = (status === 'returned' || orderStatus === 'returned' || status === 'full_return' || orderStatus === 'full_return' || journalStatus === 'full_return' || journalStatus === 'returned');
+        const isFullyDeliveredOrd = (status === 'delivered' || orderStatus === 'delivered' || journalStatus === 'delivered');
 
         // If it's returned_with_rep or partial_return and still has remaining items, it MUST stay in active custody!
         if (isRetWithRepOrder || (isPartialReturnOrder && computePieces(o) > 0)) return true;
 
+        // If the order has items remaining with the rep, and is neither fully returned nor fully delivered nor deferred, it MUST stay in active custody!
+        if (computePieces(o) > 0 && !isFullReturnOrd && !isFullyDeliveredOrd && journalStatus !== 'deferred') return true;
+
         if (finalReturnedIds.has(id)) return false;
         if (finalDeliveredIds.has(id)) return false;
         if (status === 'exchange' || orderStatus === 'exchange' || journalStatus === 'exchange') return false;
-        if (status === 'delivered' || orderStatus === 'delivered' || journalStatus === 'delivered') return false;
-        if (status === 'returned' || orderStatus === 'returned' || status === 'full_return' || orderStatus === 'full_return' || journalStatus === 'full_return' || journalStatus === 'returned') return false;
+        if (isFullyDeliveredOrd) return false;
+        if (isFullReturnOrd) return false;
         if (journalStatus === 'deferred') return false;
         return true;
       });
@@ -872,7 +874,7 @@ const SalesDailyClose: React.FC = () => {
       const orderIdStr = String(orderId);
       const isActivePartial = activeOrders.some(o => {
         const st = String(o.status || o.order_status || o.journal_status || '').toLowerCase();
-        return getRealOrderId(o) === orderIdStr && (st === 'partial' || st === 'partial_return');
+        return getRealOrderId(o) === orderIdStr && (st === 'partial' || st === 'partial_return' || st === 'returned_with_rep');
       });
       const actionName = isActivePartial ? 'undoPartialOrder' : 'undoDailyCloseOrder';
 

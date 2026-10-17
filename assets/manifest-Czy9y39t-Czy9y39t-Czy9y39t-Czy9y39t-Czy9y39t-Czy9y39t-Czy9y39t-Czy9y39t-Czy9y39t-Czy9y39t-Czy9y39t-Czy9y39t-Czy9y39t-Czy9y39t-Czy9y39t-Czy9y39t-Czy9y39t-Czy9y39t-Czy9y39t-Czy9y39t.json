@@ -1,0 +1,68 @@
+{
+  "id": "dragonpro-pwa-app",
+  "name": "دراجون برو DragonPro",
+  "short_name": "دراجون برو",
+  "description": "منظومة دراجون برو المتكاملة لإدارة المبيعات، المخازن، الحسابات والشحن",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f172a",
+  "theme_color": "#2563eb",
+  "categories": ["business", "finance", "productivity"],
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "Dragon.png",
+      "sizes": "529x439",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "المبيعات اليومية",
+      "short_name": "المبيعات",
+      "description": "تسجيل ومتابعة المبيعات اليومية",
+      "url": "./?view=sales-daily",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "إدارة الطلبات",
+      "short_name": "الطلبات",
+      "description": "استعراض وتأكيد وتوزيع الشحنات والطلبات",
+      "url": "./?view=orders",
+      "icons": [{ "src": "Dragon.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "لوحة المؤشرات",
+      "short_name": "الرئيسية",
+      "description": "الرئيسية ومؤشرات الأداء العامة",
+      "url": "./?view=dashboard",
+      "icons": [{ "src": "Dragon.png", "sizes": "192x192" }]
+    }
+  ]
+}
