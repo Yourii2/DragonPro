@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { API_BASE_PATH } from '../services/apiConfig';
 import { formatOrderTime, formatLocalDate } from '../services/dateUtils';
 import { assetUrl } from '../services/assetUrl';
+import { attachPersistedOrderIdentity } from '../services/orderImportResponse';
 import { Calendar, ShoppingCart, Printer, History, Search, PlusCircle, MinusCircle, UploadCloud, FileText, RefreshCcw, ClipboardPaste, MapPin, Phone, User, CheckSquare, Square, Eye, Edit, ChevronRight, AlertTriangle, AlertCircle, Lock } from 'lucide-react';
 import Swal from 'sweetalert2';
 import CustomSelect from './CustomSelect';
@@ -1659,8 +1660,9 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       });
       const jr = await resp.json();
       if (jr.success) {
-        setOrders(prevOrders => [...newOrders, ...prevOrders]);
-        Swal.fire('تم الحفظ', `تم إنشاء ${jr.created.length || newOrders.length} اوردرات بنجاح.`, 'success');
+        const savedOrders = attachPersistedOrderIdentity(newOrders, jr.created || []);
+        setOrders(prevOrders => [...savedOrders, ...prevOrders]);
+        Swal.fire('تم الحفظ', `تم إنشاء ${savedOrders.length} اوردرات بنجاح.`, 'success');
         setParsedOrders([]);
         setScriptText('');
         setView('manage-orders');
@@ -1669,11 +1671,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
       }
     } catch (e) {
       console.error('Import save failed', e);
-      Swal.fire('خطأ', 'فشل الاتصال بخادم الحفظ. تم حفظ الاوردرات محلياً.', 'warning');
-      setOrders(prevOrders => [...newOrders, ...prevOrders]);
-      setParsedOrders([]);
-      setScriptText('');
-      setView('manage-orders');
+      Swal.fire('تعذر تأكيد الحفظ', 'لم يصل تأكيد الحفظ من الخادم، لذلك لم تتم إضافة الأوردرات للطباعة. حدّث قائمة الأوردرات للتحقق قبل إعادة المحاولة.', 'warning');
     }
   };
 

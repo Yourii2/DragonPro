@@ -38,11 +38,15 @@ tmp_*
 # License files (customer-specific)
 *.lic
 
-# Editor directories and files
+# Editor and AI Assistant directories & files (Never commit to Git or push to GitHub)
+.vscode/
 .vscode/*
-!.vscode/extensions.json
-.idea
+.idea/
 .DS_Store
+.agent/
+.agents/
+.qodo/
+Please
 *.suo
 *.ntvs*
 *.njsproj

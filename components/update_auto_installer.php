@@ -37,6 +37,10 @@ function normalize_rel($rel) {
 
 function is_excluded($rel, $excludeList) {
     $rel = normalize_rel($rel);
+    // Never copy internal/developer or AI folders to customer installations
+    if (preg_match('#(^|/)(\.agent|\.agents|\.qodo|\.vscode|scratch|Please)(/|$)#i', $rel)) {
+        return true;
+    }
     foreach ($excludeList as $ex) {
         $ex = normalize_rel((string)$ex);
         if ($ex === '') continue;

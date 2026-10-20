@@ -103,7 +103,7 @@ rem ---------------------------------------------------------
 call :Log "[3/4] Checking dependencies..."
 if not exist "node_modules" (
     call :Log "[Wait] Installing project packages (this may take a few minutes)..."
-    call :Log "       >> Please wait, do not close the window..."
+    call :Log "       -- Please wait, do not close the window..."
     
     call npm.cmd install >> "%LOGFILE%" 2>&1
     if errorlevel 1 (
@@ -142,7 +142,7 @@ if "!NEED_BUILD!"=="0" (
 
 if "!NEED_BUILD!"=="1" (
     call :Log "[Wait] Detected updates or missing build. Building application (npm run build)..."
-    call :Log "       >> Please wait, this takes a few seconds..."
+    call :Log "       -- Please wait, this takes a few seconds..."
     call npm.cmd run build >> "%LOGFILE%" 2>&1
     if errorlevel 1 (
         call :Log "[!] Build had warnings or errors, check startup_3001_log.txt"

@@ -97,6 +97,7 @@ function add_dir_to_zip($zip, $dirPath, $zipBaseRel, $excludeExtensions = ['tmp'
         if ($file->isDir()) continue;
         $rel = substr($real, strlen($dirPath));
         $rel = str_replace('\\', '/', ltrim($rel, '/\\'));
+        if (preg_match('#(^|/)(\.agent|\.agents|\.qodo|\.vscode|scratch|Please)(/|$)#i', $rel)) continue;
         $targetInZip = rtrim($zipBaseRel, '/') . '/' . $rel;
         add_file_to_zip($zip, $real, $targetInZip);
     }

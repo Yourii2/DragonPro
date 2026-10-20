@@ -16,6 +16,7 @@ if (session_status() === PHP_SESSION_NONE) {
 
 // Set timezone to Egypt (UTC+2 — Africa/Cairo)
 date_default_timezone_set('Africa/Cairo');
+require_once __DIR__ . '/transaction_name_sql.php';
 
 // This endpoint must always return JSON. Prevent PHP warnings/notices
 // from being printed as HTML which breaks JSON parsing on the frontend.
@@ -2290,7 +2291,9 @@ if (!function_exists('get_arabic_status')) {
 function send_telegram_customer_notification($pdo, $order_id, $event_type = 'status_update') {
     try {
         if (!column_exists($pdo, 'customers', 'telegram_chat_id')) {
-            @$pdo->exec("ALTER TABLE customers ADD COLUMN telegram_chat_id VARCHAR(64) NULL INDEX");
+            if (!$pdo->inTransaction()) {
+                @$pdo->exec("ALTER TABLE customers ADD COLUMN telegram_chat_id VARCHAR(64) NULL INDEX");
+            }
         }
 
         $botToken = get_setting_value($pdo, 'telegram_bot_token', '');
@@ -2453,6 +2456,7 @@ function send_telegram_customer_notification($pdo, $order_id, $event_type = 'sta
 function ensure_rep_journal_orders_table($pdo) {
     static $checked = false;
     if ($checked) return;
+    if ($pdo->inTransaction()) return;
     try {
         if (!table_exists($pdo, 'rep_journal_orders')) {
             execute_query($pdo, "CREATE TABLE IF NOT EXISTS rep_journal_orders (
@@ -2486,11 +2490,30 @@ function ensure_rep_journal_orders_table($pdo) {
         if (table_exists($pdo, 'order_items') && !column_exists($pdo, 'order_items', 'delivered_quantity')) {
             execute_query($pdo, "ALTER TABLE order_items ADD COLUMN delivered_quantity INT DEFAULT 0");
         }
-        try { execute_query($pdo, "ALTER TABLE rep_journal_orders DROP INDEX uk_rep_order"); } catch (Exception $ex) {}
-        try { execute_query($pdo, "ALTER TABLE rep_journal_orders DROP INDEX rep_order_unique"); } catch (Exception $ex) {}
-        try { $pdo->exec("ALTER TABLE rep_journal_orders ADD UNIQUE KEY uk_rep_order_journal (rep_id, order_id, journal_id)"); } catch (Exception $ex) {}
-        try { $pdo->exec("ALTER TABLE rep_journal_orders ADD INDEX idx_rjo_order_id (order_id)"); } catch (Exception $ex) {}
-        try { $pdo->exec("ALTER TABLE rep_journal_orders ADD INDEX idx_rjo_journal_id (journal_id)"); } catch (Exception $ex) {}
+
+        $existingIndexes = [];
+        try {
+            $stmt = $pdo->query("SHOW INDEX FROM rep_journal_orders");
+            while ($idxRow = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                $existingIndexes[strtolower((string)($idxRow['Key_name'] ?? ''))] = true;
+            }
+        } catch (Exception $eIdx) {}
+
+        if (isset($existingIndexes['uk_rep_order'])) {
+            try { execute_query($pdo, "ALTER TABLE rep_journal_orders DROP INDEX uk_rep_order"); } catch (Exception $ex) {}
+        }
+        if (isset($existingIndexes['rep_order_unique'])) {
+            try { execute_query($pdo, "ALTER TABLE rep_journal_orders DROP INDEX rep_order_unique"); } catch (Exception $ex) {}
+        }
+        if (!isset($existingIndexes['uk_rep_order_journal'])) {
+            try { $pdo->exec("ALTER TABLE rep_journal_orders ADD UNIQUE KEY uk_rep_order_journal (rep_id, order_id, journal_id)"); } catch (Exception $ex) {}
+        }
+        if (!isset($existingIndexes['idx_rjo_order_id'])) {
+            try { $pdo->exec("ALTER TABLE rep_journal_orders ADD INDEX idx_rjo_order_id (order_id)"); } catch (Exception $ex) {}
+        }
+        if (!isset($existingIndexes['idx_rjo_journal_id'])) {
+            try { $pdo->exec("ALTER TABLE rep_journal_orders ADD INDEX idx_rjo_journal_id (journal_id)"); } catch (Exception $ex) {}
+        }
     } catch (Exception $e) {}
     $checked = true;
 }
@@ -2498,10 +2521,12 @@ function ensure_rep_journal_orders_table($pdo) {
 function ensure_rep_daily_journal_table($pdo) {
     static $checked = false;
     if ($checked) return;
+    if ($pdo->inTransaction()) return;
     try {
         $pdo->query("SELECT is_closed, daily_code, orders_json, closed_at, closed_by, prev_balance, payment_action, payment_amount, balance_after_payment, delivered_value, returned_value, postponed_value, interim_payment_amount, interim_payments_json, idempotency_token FROM rep_daily_journal LIMIT 1");
         $checked = true;
     } catch (Exception $e) {
+        if ($pdo->inTransaction()) return;
         try { execute_query($pdo, "ALTER TABLE rep_daily_journal DROP INDEX rep_date_unique"); } catch (Exception $ex) {}
         try { $pdo->exec("ALTER TABLE rep_daily_journal DROP INDEX rep_date_unique"); } catch (Exception $ex) {}
         execute_query($pdo, "CREATE TABLE IF NOT EXISTS rep_daily_journal (
@@ -3279,8 +3304,10 @@ function confirmation_validate_stock_for_orders(PDO $pdo, int $warehouseId, arra
 function refresh_rep_daily_journal_status_counts($pdo, $journalId) {
     $journalId = intval($journalId);
     if ($journalId <= 0) return;
-    ensure_rep_daily_journal_table($pdo);
-    ensure_rep_journal_orders_table($pdo);
+    if (!$pdo->inTransaction()) {
+        ensure_rep_daily_journal_table($pdo);
+        ensure_rep_journal_orders_table($pdo);
+    }
 
     $rows = execute_query($pdo,
         "SELECT status, COUNT(*) AS orders_count
@@ -11512,6 +11539,10 @@ switch ($module) {
             }
 
 
+            // Pre-flight DDL: run table checks BEFORE beginTransaction
+            ensure_rep_journal_orders_table($pdo);
+            ensure_rep_daily_journal_table($pdo);
+
             try {
                 $pdo->beginTransaction();
                 $returnedValue = 0.0;
@@ -11722,9 +11753,6 @@ switch ($module) {
                             );
                         }
 
-                        if ($targetJournalId > 0) {
-                            refresh_rep_daily_journal_status_counts($pdo, $targetJournalId);
-                        }
                     }
                 } catch (Exception $e) {}
 
@@ -11735,6 +11763,14 @@ switch ($module) {
                     log_order_history($pdo, $orderId, 'returned', 'partial_return', $notes ?: null, $histRepId);
                 } catch (Exception $e) {
                     // ignore history insertion failures
+                }
+
+                if ($pdo->inTransaction()) {
+                    $pdo->commit();
+                }
+
+                if (!empty($targetJournalId) && $targetJournalId > 0) {
+                    try { refresh_rep_daily_journal_status_counts($pdo, $targetJournalId); } catch (Exception $eRef) {}
                 }
 
                 // return updated order
@@ -11826,6 +11862,14 @@ switch ($module) {
             
             $newPrice = isset($newItemInput['price']) ? floatval($newItemInput['price']) : 0;
 
+            // Pre-flight DDL: run schema checks BEFORE beginTransaction()
+            // MySQL DDL (CREATE/ALTER TABLE) causes an implicit commit!
+            ensure_rep_journal_orders_table($pdo);
+            ensure_rep_daily_journal_table($pdo);
+            column_exists($pdo, 'order_items', 'total_price');
+            column_exists($pdo, 'orders', 'updated_at');
+
+            $targetJournalId = 0;
             try {
                 $pdo->beginTransaction();
 
@@ -11922,9 +11966,6 @@ switch ($module) {
                             [$targetJournalId, $repId, $orderId, $oldQty, $oldQty * floatval($oiRow['price_per_unit']), $newQty, $newQty * $newPrice]
                         );
                     }
-                    if ($targetJournalId > 0) {
-                        try { refresh_rep_daily_journal_status_counts($pdo, $targetJournalId); } catch (Exception $eRef) {}
-                    }
                 }
 
                 try { log_order_history($pdo, $orderId, 'exchange', 'order_exchange', 'order_item_exchanged', $repId); } catch (Exception $eHist) {}
@@ -11935,7 +11976,13 @@ switch ($module) {
                     execute_query($pdo, "UPDATE orders SET notes = ? WHERE id = ?", [$existingNotes . "استبدال: " . $notes, $orderId]);
                 }
                 
-                $pdo->commit();
+                if ($pdo->inTransaction()) {
+                    $pdo->commit();
+                }
+
+                if ($targetJournalId > 0) {
+                    try { refresh_rep_daily_journal_status_counts($pdo, $targetJournalId); } catch (Exception $eRef) {}
+                }
 
                 // Return updated order
                 $stmt = execute_query($pdo, "SELECT order_number FROM orders WHERE id = ? LIMIT 1", [$orderId]);
@@ -11953,6 +12000,9 @@ switch ($module) {
                     echo json_encode(['success'=>true, 'order' => $orderData]);
                     break;
                 }
+
+                echo json_encode(['success' => true]);
+                break;
 
             } catch (Exception $e) {
                 if ($pdo->inTransaction()) $pdo->rollBack();
@@ -12585,7 +12635,7 @@ switch ($module) {
                 }
                 if ($status !== null) {
                     // Map requested status to an allowed enum value in this installation
-                    $allOrderStatuses = ['pending','confirmed','with_rep','in_delivery','delivered','partial','returned','postponed','deferred','no_answer','wrong_number','cancelled','closed','pending_payment','returned_with_rep'];
+                    $allOrderStatuses = ['pending','confirmed','with_rep','in_delivery','delivered','partial','returned','postponed','deferred','no_answer','wrong_number','cancelled','closed','pending_payment','returned_with_rep','exchange'];
                     $allowedStatus = pick_allowed_enum($pdo, 'orders', 'status', $status, $allOrderStatuses);
                     $set_parts[] = 'status = ?';
                     $values[] = $allowedStatus;
@@ -13136,16 +13186,7 @@ switch ($module) {
 
                 $hasRepresentatives = true;
                 try { $pdo->query("SELECT 1 FROM representatives LIMIT 1"); } catch(Exception $e) { $hasRepresentatives = false; }
-                $repLookup = $hasRepresentatives
-                    ? "COALESCE((SELECT r.name FROM representatives r WHERE r.id = COALESCE(t.related_to_id, JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(t.details) THEN t.details ELSE NULL END, '$.rep_id'))) LIMIT 1),(SELECT u.name FROM users u WHERE u.id = COALESCE(t.related_to_id, JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(t.details) THEN t.details ELSE NULL END, '$.rep_id'))) LIMIT 1))"
-                    : "(SELECT u.name FROM users u WHERE u.id = COALESCE(t.related_to_id, JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(t.details) THEN t.details ELSE NULL END, '$.rep_id'))) LIMIT 1)";
-                $relatedNameExpr = "CASE 
-                    WHEN t.related_to_type = 'customer'  THEN (SELECT c.name FROM customers c WHERE c.id = t.related_to_id LIMIT 1)
-                    WHEN t.related_to_type = 'supplier'  THEN (SELECT s.name FROM suppliers s WHERE s.id = t.related_to_id LIMIT 1)
-                    WHEN t.related_to_type = 'employee'  THEN COALESCE((SELECT e.name FROM employees e WHERE e.id = t.related_to_id LIMIT 1),{$repLookup})
-                    WHEN t.related_to_type = 'rep'       THEN {$repLookup}
-                    WHEN JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(t.details) THEN t.details ELSE NULL END, '$.rep_id')) IS NOT NULL THEN {$repLookup}
-                    ELSE NULL END";
+                $relatedNameExpr = build_transaction_related_name_expr($hasRepresentatives);
 
                 $hasTxCreatedBy = column_exists($pdo, 'transactions', 'created_by');
                 $hasAuditLogs = table_exists($pdo, 'audit_logs');
@@ -13682,16 +13723,7 @@ switch ($module) {
 
                 $hasRepresentatives = true;
                 try { $pdo->query("SELECT 1 FROM representatives LIMIT 1"); } catch(Exception $e) { $hasRepresentatives = false; }
-                $repLookup = $hasRepresentatives
-                    ? "COALESCE((SELECT r.name FROM representatives r WHERE r.id = COALESCE(t.related_to_id, JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(t.details) THEN t.details ELSE NULL END, '$.rep_id'))) LIMIT 1),(SELECT u.name FROM users u WHERE u.id = COALESCE(t.related_to_id, JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(t.details) THEN t.details ELSE NULL END, '$.rep_id'))) LIMIT 1))"
-                    : "(SELECT u.name FROM users u WHERE u.id = COALESCE(t.related_to_id, JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(t.details) THEN t.details ELSE NULL END, '$.rep_id'))) LIMIT 1)";
-                $relatedNameExpr = "CASE 
-                    WHEN t.related_to_type = 'customer'  THEN (SELECT c.name FROM customers c WHERE c.id = t.related_to_id LIMIT 1)
-                    WHEN t.related_to_type = 'supplier'  THEN (SELECT s.name FROM suppliers s WHERE s.id = t.related_to_id LIMIT 1)
-                    WHEN t.related_to_type = 'employee'  THEN COALESCE((SELECT e.name FROM employees e WHERE e.id = t.related_to_id LIMIT 1),{$repLookup})
-                    WHEN t.related_to_type = 'rep'       THEN {$repLookup}
-                    WHEN JSON_UNQUOTE(JSON_EXTRACT(CASE WHEN JSON_VALID(t.details) THEN t.details ELSE NULL END, '$.rep_id')) IS NOT NULL THEN {$repLookup}
-                    ELSE NULL END";
+                $relatedNameExpr = build_transaction_related_name_expr($hasRepresentatives);
 
                 $hasTxCreatedBy = column_exists($pdo, 'transactions', 'created_by');
                 $createdByParts = [];
@@ -20136,30 +20168,41 @@ switch ($module) {
                 }
 
                 // ── Returned orders summary for the date range ──
+                // IMPORTANT: rep_journal_orders records history per order, so only the latest journal
+                // state of each order should count as delivered / returned. Counting every historical row
+                // can make the same order appear in both totals at once.
                 $returnedOrdersData = ['total' => 0, 'full' => 0, 'partial' => 0];
                 $returnedPiecesTotal = 0;
                 try {
                     if (table_exists($pdo, 'rep_journal_orders')) {
-                        $hasRjo = true;
-                        $retDateCond = "DATE(rjo.event_date) BETWEEN ? AND ?";
+                        $latestRjoSql = "
+                            SELECT rjo.*
+                            FROM rep_journal_orders rjo
+                            JOIN (
+                                SELECT order_id, MAX(id) AS max_id
+                                FROM rep_journal_orders
+                                GROUP BY order_id
+                            ) latest ON latest.order_id = rjo.order_id AND latest.max_id = rjo.id
+                        ";
+                        $retDateCond = "DATE(latest_rjo.event_date) BETWEEN ? AND ?";
                         $retParams   = [$start, $end];
 
-                        // Count full returns
+                        // Count full returns based on the latest status of each order.
                         $fullRetStmt = execute_query($pdo,
-                            "SELECT COUNT(DISTINCT rjo.order_id) AS cnt, COALESCE(SUM(rjo.returned_pieces),0) AS pieces
-                             FROM rep_journal_orders rjo
-                             WHERE rjo.status IN ('full_return','returned')
+                            "SELECT COUNT(DISTINCT latest_rjo.order_id) AS cnt, COALESCE(SUM(latest_rjo.returned_pieces),0) AS pieces
+                             FROM ($latestRjoSql) AS latest_rjo
+                             WHERE latest_rjo.status IN ('full_return','returned')
                                AND $retDateCond",
                             $retParams
                         );
                         $fullRetRow = $fullRetStmt->fetch(PDO::FETCH_ASSOC) ?: ['cnt'=>0,'pieces'=>0];
 
-                        // Count partial returns
+                        // Count partial returns based only on the latest status of each order.
                         $partRetStmt = execute_query($pdo,
-                            "SELECT COUNT(DISTINCT rjo.order_id) AS cnt, COALESCE(SUM(rjo.returned_pieces),0) AS pieces
-                             FROM rep_journal_orders rjo
-                             WHERE rjo.status IN ('partial_return','partial','returned_with_rep')
-                               AND COALESCE(rjo.returned_pieces,0) > 0
+                            "SELECT COUNT(DISTINCT latest_rjo.order_id) AS cnt, COALESCE(SUM(latest_rjo.returned_pieces),0) AS pieces
+                             FROM ($latestRjoSql) AS latest_rjo
+                             WHERE latest_rjo.status IN ('partial_return','partial','returned_with_rep')
+                               AND COALESCE(latest_rjo.returned_pieces,0) > 0
                                AND $retDateCond",
                             $retParams
                         );
