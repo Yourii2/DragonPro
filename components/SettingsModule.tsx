@@ -30,7 +30,8 @@ import {
   Monitor,
   Wifi,
   WifiOff,
-  Share2
+  Share2,
+  Calculator
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
@@ -64,6 +65,7 @@ const SettingsModule: React.FC = () => {
 
     deliveryMethod: (localStorage.getItem('Dragon_delivery_method') || 'reps').toString(), // 'reps' | 'direct' | 'shipping'
     purchasePriceType: localStorage.getItem('Dragon_purchase_price_type') || 'full_cost', // 'full_cost' | 'vendor_price'
+    productCostMethod: localStorage.getItem('Dragon_product_cost_method') || 'vendor_cost', // 'vendor_cost' | 'predefined_cost'
     currency: localStorage.getItem('Dragon_currency') || 'EGP',
     autoBackup: localStorage.getItem('Dragon_auto_backup') === 'true',
     backupFrequency: localStorage.getItem('Dragon_backup_freq') || 'daily',
@@ -226,6 +228,7 @@ const SettingsModule: React.FC = () => {
             productSource: settings.product_source || prev.productSource,
             deliveryMethod: settings.delivery_method || prev.deliveryMethod,
             purchasePriceType: settings.purchase_price_type || prev.purchasePriceType,
+            productCostMethod: settings.product_cost_method || prev.productCostMethod,
             autoBackup: settings.auto_backup !== undefined ? settings.auto_backup === 'true' : prev.autoBackup,
             backupFrequency: settings.backup_frequency || prev.backupFrequency,
             backupEmail: settings.backup_email || prev.backupEmail,
@@ -299,6 +302,7 @@ const SettingsModule: React.FC = () => {
         product_source: config.productSource,
         delivery_method: config.deliveryMethod,
         purchase_price_type: config.purchasePriceType,
+        product_cost_method: config.productCostMethod,
         whatsapp_access_token: config.whatsappAccessToken,
         whatsapp_phone_id: config.whatsappPhoneId,
         whatsapp_verify_token: config.whatsappVerifyToken,
@@ -429,6 +433,7 @@ const SettingsModule: React.FC = () => {
         localStorage.setItem('Dragon_product_source', config.productSource);
         localStorage.setItem('Dragon_delivery_method', config.deliveryMethod);
         localStorage.setItem('Dragon_purchase_price_type', config.purchasePriceType);
+        localStorage.setItem('Dragon_product_cost_method', config.productCostMethod);
         localStorage.setItem('Dragon_auto_backup', config.autoBackup.toString());
         localStorage.setItem('Dragon_backup_freq', config.backupFrequency);
         localStorage.setItem('Dragon_backup_email', config.backupEmail);
@@ -1111,6 +1116,34 @@ const SettingsModule: React.FC = () => {
             </div>
           </div>
           )}
+          {/* طريقة حساب تكلفة المنتج */}
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
+            <h3 className="font-bold flex items-center gap-2 mb-4 text-slate-800 dark:text-slate-100">
+              <Calculator className="text-emerald-500" size={18} /> طريقة حساب تكلفة المنتج
+            </h3>
+            <div className="space-y-3">
+              <label className="text-xs font-bold text-slate-500 dark:text-slate-400">اختر سياسة تحديد وتحديث تكلفة المنتجات في المخزن</label>
+              <CustomSelect
+                value={config.productCostMethod}
+                onChange={(v) => setConfig({ ...config, productCostMethod: v })}
+                options={[
+                  { value: 'vendor_cost', label: 'عن طريق تكلفة المصنعية فقط (تحديث التكلفة عند الاستلام)' },
+                  { value: 'predefined_cost', label: 'عن طريق قيمة التكلفة المحددة لكل منتج (ثابتة)' }
+                ]}
+              />
+              <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-800 text-[11px] leading-relaxed">
+                {config.productCostMethod === 'vendor_cost' ? (
+                  <p className="text-emerald-700 dark:text-emerald-400 font-medium">
+                    ✓ <strong className="font-bold">عن طريق تكلفة المصنعية فقط:</strong> في كل مرة يتم فيها استلام بضائع من مورد وإدخال قيمة المصنعية، يتم تحديث سعر تكلفة المنتج في صفحة المنتجات ليطابق المصنعية المدخلة.
+                  </p>
+                ) : (
+                  <p className="text-blue-700 dark:text-blue-400 font-medium">
+                    ✓ <strong className="font-bold">عن طريق قيمة التكلفة المحددة لكل منتج:</strong> لا يتم تحديث قيمة التكلفة في صفحة المنتجات عند استلام بضائع من المورد، وتظل التكلفة معتمدة على القيمة المحددة مسبقاً لكل منتج لضمان دقة وواقعية تقارير الأرباح.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
 
           {/* Backup Section */}
           <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">

@@ -828,21 +828,6 @@ if (!function_exists('ensure_orders_status_column_supports_all_statuses')) {
     }
 }
 
-if (!function_exists('ensure_orders_has_exchange_details')) {
-    function ensure_orders_has_exchange_details($pdo) {
-        static $checked = false;
-        if ($checked) return;
-        $checked = true;
-        if (!($pdo instanceof PDO)) return;
-        if (!table_exists($pdo, 'orders')) return;
-        if (!column_exists($pdo, 'orders', 'exchange_details')) {
-            try {
-                execute_query($pdo, "ALTER TABLE `orders` ADD COLUMN `exchange_details` LONGTEXT NULL");
-            } catch (Exception $e) {}
-        }
-    }
-}
-
 if (!function_exists('ensure_orders_status_has_cancelled')) {
     function ensure_orders_status_has_cancelled($pdo) {
         if (!($pdo instanceof PDO)) return;
@@ -963,6 +948,46 @@ if (!function_exists('user_has_permission')) {
         // If there is no matching row, default to allow to avoid breaking entire modules.
         if ($allowed === false || $allowed === null) return true;
         return intval($allowed) === 1;
+    }
+}
+
+if (!function_exists('user_can_access_named_treasury')) {
+    function user_can_access_named_treasury($pdo, $user_id, $treasury_name) {
+        if (!$user_id || !user_has_permission($pdo, $user_id, 'treasuries', 'view')) return false;
+
+        $treasuryId = intval(execute_query(
+            $pdo,
+            "SELECT id FROM treasuries WHERE name = ? LIMIT 1",
+            [$treasury_name]
+        )->fetchColumn() ?: 0);
+        if ($treasuryId <= 0) return false;
+
+        if (column_exists($pdo, 'users', 'restricted_treasury_id')) {
+            $restrictedId = execute_query(
+                $pdo,
+                "SELECT restricted_treasury_id FROM users WHERE id = ?",
+                [$user_id]
+            )->fetchColumn();
+            if ($restrictedId !== false && $restrictedId !== null
+                && intval($restrictedId) > 0 && intval($restrictedId) !== $treasuryId) {
+                return false;
+            }
+        }
+
+        if (table_exists($pdo, 'user_defaults')) {
+            $defaults = execute_query(
+                $pdo,
+                "SELECT default_treasury_id, can_change_treasury FROM user_defaults WHERE user_id = ? LIMIT 1",
+                [$user_id]
+            )->fetch(PDO::FETCH_ASSOC);
+            if ($defaults && !empty($defaults['default_treasury_id'])
+                && !boolval($defaults['can_change_treasury'])
+                && intval($defaults['default_treasury_id']) !== $treasuryId) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
 
@@ -2489,6 +2514,9 @@ function ensure_rep_journal_orders_table($pdo) {
         }
         if (table_exists($pdo, 'order_items') && !column_exists($pdo, 'order_items', 'delivered_quantity')) {
             execute_query($pdo, "ALTER TABLE order_items ADD COLUMN delivered_quantity INT DEFAULT 0");
+        }
+        if (table_exists($pdo, 'order_items') && !column_exists($pdo, 'order_items', 'returned_quantity')) {
+            execute_query($pdo, "ALTER TABLE order_items ADD COLUMN returned_quantity INT DEFAULT 0");
         }
 
         $existingIndexes = [];
@@ -10059,6 +10087,115 @@ switch ($module) {
             echo json_encode(['success' => true, 'data' => $results]);
             break;
         }
+        if ($action === 'updateRepresentativeInsurance') {
+            check_permission_or_die($pdo, 'users', 'edit');
+            $repId = intval($input['id'] ?? 0);
+            $name = trim((string)($input['name'] ?? ''));
+            $phone = trim((string)($input['phone'] ?? ''));
+            $insurancePaid = !empty($input['insurance_paid']) ? 1 : 0;
+            $insuranceAmountInput = $input['insurance_amount'] ?? 0;
+            if ($repId <= 0 || $name === '' || !is_numeric($insuranceAmountInput) || floatval($insuranceAmountInput) < 0) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'بيانات المندوب أو مبلغ التأمين غير صحيحة.']);
+                exit;
+            }
+
+            $newInsuranceAmount = $insurancePaid ? round(floatval($insuranceAmountInput), 2) : 0.0;
+            if (!column_exists($pdo, 'users', 'insurance_paid') || !column_exists($pdo, 'users', 'insurance_amount')) {
+                http_response_code(500);
+                echo json_encode(['success' => false, 'message' => 'أعمدة التأمين غير متاحة في قاعدة البيانات.']);
+                exit;
+            }
+            ensure_transactions_schema($pdo);
+
+            try {
+                $pdo->beginTransaction();
+                $rep = execute_query($pdo,
+                    "SELECT id, insurance_paid, insurance_amount FROM users WHERE id = ? AND role = 'representative' FOR UPDATE",
+                    [$repId]
+                )->fetch(PDO::FETCH_ASSOC);
+                if (!$rep) {
+                    throw new Exception('المندوب غير موجود.');
+                }
+
+                $oldInsuranceAmount = round(floatval($rep['insurance_amount'] ?? 0), 2);
+                $oldInsurancePaid = !empty($rep['insurance_paid']) ? 1 : 0;
+                $insuranceDelta = round($newInsuranceAmount - $oldInsuranceAmount, 2);
+                $insuranceChanged = abs($insuranceDelta) >= 0.01 || $insurancePaid !== $oldInsurancePaid;
+                if ($insuranceChanged) {
+                    $currentUserId = intval($_SESSION['user_id'] ?? 0);
+                    if (!user_has_permission($pdo, $currentUserId, 'transactions', 'add')
+                        || !user_can_access_named_treasury($pdo, $currentUserId, 'تأمين المناديب')) {
+                        throw new Exception('لا تملك صلاحية الوصول إلى خزينة تأمين المناديب وتعديل التأمين.');
+                    }
+                    $insuranceTreasury = execute_query($pdo,
+                        "SELECT id, current_balance FROM treasuries WHERE name = ? LIMIT 1 FOR UPDATE",
+                        ['تأمين المناديب']
+                    )->fetch(PDO::FETCH_ASSOC);
+                    if (!$insuranceTreasury) {
+                        throw new Exception('لم يتم العثور على خزينة تأمين المناديب.');
+                    }
+
+                    $treasuryId = intval($insuranceTreasury['id']);
+                }
+
+                if (abs($insuranceDelta) >= 0.01) {
+                    $treasuryId = intval($insuranceTreasury['id']);
+                    $type = $insuranceDelta > 0
+                        ? pick_allowed_enum($pdo, 'transactions', 'type', 'payment_in', ['payment_in', 'payment', 'rep_payment_in'])
+                        : pick_allowed_enum($pdo, 'transactions', 'type', 'payment_out', ['payment_out', 'payment', 'rep_payment_out']);
+                    if ($insuranceDelta < 0 && floatval($insuranceTreasury['current_balance'] ?? 0) < abs($insuranceDelta)) {
+                        throw new Exception('رصيد خزينة تأمين المناديب غير كافٍ لخفض مبلغ التأمين بهذا المقدار.');
+                    }
+                    $transactionDetails = [
+                        'subtype' => 'rep_insurance_adjustment',
+                        'rep_id' => $repId,
+                        'old_insurance_amount' => $oldInsuranceAmount,
+                        'new_insurance_amount' => $newInsuranceAmount,
+                        'notes' => $insuranceDelta > 0
+                            ? "زيادة تأمين المندوب #{$repId}"
+                            : "رد فرق تأمين المندوب #{$repId}",
+                    ];
+                    $columns = ['type', 'warehouse_id', 'treasury_id', 'related_to_type', 'related_to_id', 'amount', 'transaction_date', 'details'];
+                    $placeholders = ['?', '?', '?', '?', '?', '?', 'NOW()', '?'];
+                    $values = [$type, null, $treasuryId, 'none', null, $insuranceDelta, json_encode($transactionDetails, JSON_UNESCAPED_UNICODE)];
+                    if (column_exists($pdo, 'transactions', 'title')) {
+                        array_splice($columns, 1, 0, ['title']);
+                        array_splice($placeholders, 1, 0, ['?']);
+                        array_splice($values, 1, 0, ['تعديل تأمين مندوب']);
+                    }
+                    if (column_exists($pdo, 'transactions', 'created_by') && !empty($_SESSION['user_id'])) {
+                        $columns[] = 'created_by';
+                        $placeholders[] = '?';
+                        $values[] = intval($_SESSION['user_id']);
+                    }
+                    execute_query($pdo,
+                        "INSERT INTO transactions (" . implode(', ', $columns) . ") VALUES (" . implode(', ', $placeholders) . ")",
+                        $values
+                    );
+                    $transactionId = intval($pdo->lastInsertId());
+                    if (function_exists('finance_auto_post_transaction')) {
+                        finance_auto_post_transaction($pdo, $transactionId, $type, $insuranceDelta, 'none', $transactionDetails['notes']);
+                    }
+                    execute_query($pdo,
+                        "UPDATE treasuries SET current_balance = current_balance + ? WHERE id = ?",
+                        [$insuranceDelta, $treasuryId]
+                    );
+                }
+
+                execute_query($pdo,
+                    "UPDATE users SET name = ?, phone = ?, insurance_paid = ?, insurance_amount = ? WHERE id = ?",
+                    [$name, $phone, $insurancePaid, $newInsuranceAmount, $repId]
+                );
+                $pdo->commit();
+                echo json_encode(['success' => true, 'message' => 'تم تحديث بيانات المندوب والتأمين بنجاح.']);
+            } catch (Exception $e) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'فشل تحديث بيانات التأمين: ' . $e->getMessage()]);
+            }
+            exit;
+        }
         if ($action === 'getAllWithBalance') {
             check_permission_or_die($pdo, 'users', 'view');
             $rep_related_type = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'rep', ['rep','employee','none']);
@@ -10155,6 +10292,30 @@ switch ($module) {
         }
         if (column_exists($pdo, 'users', 'insurance_amount')) {
             $user_fields[] = 'insurance_amount';
+        }
+
+        if (($_GET['action'] ?? 'getAll') === 'update'
+            && (array_key_exists('insurance_paid', $input) || array_key_exists('insurance_amount', $input))) {
+            $repId = intval($input['id'] ?? 0);
+            $currentInsurance = $repId > 0
+                ? execute_query($pdo, "SELECT insurance_paid, insurance_amount FROM users WHERE id = ? AND role = 'representative' LIMIT 1", [$repId])->fetch(PDO::FETCH_ASSOC)
+                : false;
+            if ($currentInsurance) {
+                $nextPaid = array_key_exists('insurance_paid', $input)
+                    ? (!empty($input['insurance_paid']) ? 1 : 0)
+                    : (!empty($currentInsurance['insurance_paid']) ? 1 : 0);
+                $nextAmount = array_key_exists('insurance_amount', $input)
+                    ? round(floatval($input['insurance_amount']), 2)
+                    : round(floatval($currentInsurance['insurance_amount'] ?? 0), 2);
+                $insuranceChanged = $nextPaid !== (!empty($currentInsurance['insurance_paid']) ? 1 : 0)
+                    || abs($nextAmount - round(floatval($currentInsurance['insurance_amount'] ?? 0), 2)) >= 0.01;
+                if ($insuranceChanged
+                    && !user_can_access_named_treasury($pdo, intval($_SESSION['user_id'] ?? 0), 'تأمين المناديب')) {
+                    http_response_code(403);
+                    echo json_encode(['success' => false, 'message' => 'لا تملك صلاحية الوصول إلى خزينة تأمين المناديب وتعديل التأمين.']);
+                    break;
+                }
+            }
         }
 
         handle_crud($pdo, 'users', $input, $user_fields, $select_fields);
@@ -11438,7 +11599,10 @@ switch ($module) {
                 $assignedAtSubquery = $hasHistory
                     ? "(SELECT MAX(osh.created_at) FROM order_status_history osh WHERE osh.order_id = o.id AND (osh.status IN ('with_rep','partial') OR osh.action IN ('rep_assign','daily_start'))) AS assigned_at"
                     : "NULL AS assigned_at";
-                $sql = "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, o.created_at, {$assignedAtSubquery}{$extraColsSql}, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, COALESCE(NULLIF(o.address, ''), c.address) as address, COALESCE(NULLIF(o.governorate, ''), c.governorate) as governorate, o.id as order_id
+                $exchangeHistorySubquery = $hasHistory
+                    ? "(EXISTS (SELECT 1 FROM order_status_history exchange_history WHERE exchange_history.order_id = o.id AND exchange_history.action = 'order_exchange' AND NOT EXISTS (SELECT 1 FROM order_status_history exchange_undo WHERE exchange_undo.order_id = o.id AND exchange_undo.action = 'exchange_undo' AND exchange_undo.id > exchange_history.id))) AS was_exchanged"
+                    : "0 AS was_exchanged";
+                $sql = "SELECT o.id, o.order_number, o.customer_id, o.rep_id, o.status, o.total_amount, o.shipping_fees, o.notes, o.created_at, {$assignedAtSubquery}, {$exchangeHistorySubquery}{$extraColsSql}, c.name as customer_name, c.phone1 as phone1, c.phone2 as phone2, COALESCE(NULLIF(o.address, ''), c.address) as address, COALESCE(NULLIF(o.governorate, ''), c.governorate) as governorate, o.id as order_id
                     FROM orders o LEFT JOIN customers c ON o.customer_id = c.id
                     WHERE " . implode(' AND ', $where) . " ORDER BY o.created_at DESC";
 
@@ -11463,6 +11627,7 @@ switch ($module) {
                     'shipping' => $r['shipping_fees'],
                     'shipping_fees' => $r['shipping_fees'],
                     'notes' => $r['notes'],
+                    'was_exchanged' => !empty($r['was_exchanged']),
                     'discountType' => $r['discount_type'] ?? null,
                     'discountValue' => $r['discount_value'] ?? null,
                     'discountAmount' => $r['discount_amount'] ?? null,
@@ -11590,10 +11755,18 @@ switch ($module) {
 
                     $newQty = $prevQty - $retQty;
                     $linePrice = floatval($oi['price_per_unit'] ?? 0);
-                    if (column_exists($pdo, 'order_items', 'total_price')) {
-                        execute_query($pdo, "UPDATE order_items SET quantity = ?, total_price = ? WHERE id = ?", [$newQty, $newQty * $linePrice, $oi['id']]);
+                    if (column_exists($pdo, 'order_items', 'returned_quantity')) {
+                        if (column_exists($pdo, 'order_items', 'total_price')) {
+                            execute_query($pdo, "UPDATE order_items SET quantity = ?, returned_quantity = COALESCE(returned_quantity, 0) + ?, total_price = ? WHERE id = ?", [$newQty, $retQty, $newQty * $linePrice, $oi['id']]);
+                        } else {
+                            execute_query($pdo, "UPDATE order_items SET quantity = ?, returned_quantity = COALESCE(returned_quantity, 0) + ? WHERE id = ?", [$newQty, $retQty, $oi['id']]);
+                        }
                     } else {
-                        execute_query($pdo, "UPDATE order_items SET quantity = ? WHERE id = ?", [$newQty, $oi['id']]);
+                        if (column_exists($pdo, 'order_items', 'total_price')) {
+                            execute_query($pdo, "UPDATE order_items SET quantity = ?, total_price = ? WHERE id = ?", [$newQty, $newQty * $linePrice, $oi['id']]);
+                        } else {
+                            execute_query($pdo, "UPDATE order_items SET quantity = ? WHERE id = ?", [$newQty, $oi['id']]);
+                        }
                     }
 
                     $lineValue = $retQty * $linePrice;
@@ -11872,7 +12045,6 @@ switch ($module) {
             $targetJournalId = 0;
             try {
                 $pdo->beginTransaction();
-
                 // 4. Update Old Item (decrease quantity)
                 $remainingOldQty = intval($oiRow['quantity']) - $oldQty;
                 if ($remainingOldQty > 0) {
@@ -11889,26 +12061,12 @@ switch ($module) {
                     }
                 }
 
-                // 5. Return Old Item to Warehouse Stock
-                $oldProdToReturn = intval($oiRow['product_id']);
-                $oldStkStmt = execute_query($pdo, "SELECT quantity FROM stock WHERE product_id = ? AND warehouse_id = ? FOR UPDATE", [$oldProdToReturn, $warehouseId]);
-                if ($oldSrow = $oldStkStmt->fetch(PDO::FETCH_ASSOC)) {
-                    $newOldStock = intval($oldSrow['quantity']) + $oldQty;
-                    execute_query($pdo, "UPDATE stock SET quantity = ? WHERE product_id = ? AND warehouse_id = ?", [$newOldStock, $oldProdToReturn, $warehouseId]);
-                } else {
-                    execute_query($pdo, "INSERT INTO stock (product_id, warehouse_id, quantity) VALUES (?, ?, ?)", [$oldProdToReturn, $warehouseId, $oldQty]);
-                }
+                // 5. Stock adjustments:
+                // The item that was in the order remains deducted from stock (not returned).
+                // The replacement item comes from outside and does not deduct from warehouse stock
+                // (it only enters inventory if recorded as a returned item later).
 
-                // 6. Deduct New Item from Warehouse Stock
-                $newStkStmt = execute_query($pdo, "SELECT quantity FROM stock WHERE product_id = ? AND warehouse_id = ? FOR UPDATE", [$newVariantId, $warehouseId]);
-                if ($newSrow = $newStkStmt->fetch(PDO::FETCH_ASSOC)) {
-                    $newNewStock = intval($newSrow['quantity']) - $newQty;
-                    execute_query($pdo, "UPDATE stock SET quantity = ? WHERE product_id = ? AND warehouse_id = ?", [$newNewStock, $newVariantId, $warehouseId]);
-                } else {
-                    execute_query($pdo, "INSERT INTO stock (product_id, warehouse_id, quantity) VALUES (?, ?, ?)", [$newVariantId, $warehouseId, -$newQty]);
-                }
-
-                // 7. Add or Update New Item in order
+                // 6. Add or Update New Item in order
                 $checkNewStmt = execute_query($pdo, "SELECT id, quantity FROM order_items WHERE order_id = ? AND product_id = ? LIMIT 1", [$orderId, $newVariantId]);
                 $existingNewRow = $checkNewStmt->fetch(PDO::FETCH_ASSOC);
                 
@@ -11927,7 +12085,7 @@ switch ($module) {
                     }
                 }
 
-                // 8. Recalculate Order Total
+                // 7. Recalculate Order Total
                 $calcStmt = execute_query($pdo, "SELECT SUM(quantity * price_per_unit) as subtotal FROM order_items WHERE order_id = ?", [$orderId]);
                 $subtotal = floatval($calcStmt->fetchColumn() ?: 0);
                 
@@ -11937,10 +12095,15 @@ switch ($module) {
                 $newTotalAmount = $subtotal + $shipping - $discount + $tax;
                 
                 $repId = intval($orderRow['rep_id'] ?? 0);
+                $nextOrderStatus = $repId > 0 ? 'with_rep' : ($orderRow['status'] ?? 'pending');
+                if ($nextOrderStatus === 'exchange') {
+                    $nextOrderStatus = $repId > 0 ? 'with_rep' : 'pending';
+                }
+
                 if (column_exists($pdo, 'orders', 'updated_at')) {
-                    execute_query($pdo, "UPDATE orders SET status = 'exchange', total_amount = ?, updated_at = NOW() WHERE id = ?", [$newTotalAmount, $orderId]);
+                    execute_query($pdo, "UPDATE orders SET status = ?, total_amount = ?, updated_at = NOW() WHERE id = ?", [$nextOrderStatus, $newTotalAmount, $orderId]);
                 } else {
-                    execute_query($pdo, "UPDATE orders SET status = 'exchange', total_amount = ? WHERE id = ?", [$newTotalAmount, $orderId]);
+                    execute_query($pdo, "UPDATE orders SET status = ?, total_amount = ? WHERE id = ?", [$nextOrderStatus, $newTotalAmount, $orderId]);
                 }
 
                 if ($repId > 0 && table_exists($pdo, 'rep_journal_orders')) {
@@ -11951,31 +12114,33 @@ switch ($module) {
                     if ($jRow) {
                         execute_query($pdo,
                             "UPDATE rep_journal_orders 
-                             SET status = 'exchange', 
+                             SET status = 'with_rep',
                                  journal_id = COALESCE(NULLIF(?, 0), journal_id),
-                                 delivered_pieces = ?, delivered_value = ?, 
-                                 returned_pieces = ?, returned_value = ?, 
+                                 delivered_pieces = 0, delivered_value = 0,
+                                 returned_pieces = 0, returned_value = 0,
                                  event_date = CURDATE(), event_time = CURTIME() 
                              WHERE id = ?",
-                            [$targetJournalId, $oldQty, $oldQty * floatval($oiRow['price_per_unit']), $newQty, $newQty * $newPrice, intval($jRow['id'])]
+                            [$targetJournalId, intval($jRow['id'])]
                         );
                     } else {
                         execute_query($pdo,
                             "INSERT INTO rep_journal_orders (journal_id, rep_id, order_id, status, delivered_pieces, delivered_value, returned_pieces, returned_value, event_date, event_time) 
-                             VALUES (?, ?, ?, 'exchange', ?, ?, ?, ?, CURDATE(), CURTIME())",
-                            [$targetJournalId, $repId, $orderId, $oldQty, $oldQty * floatval($oiRow['price_per_unit']), $newQty, $newQty * $newPrice]
+                             VALUES (?, ?, ?, 'with_rep', 0, 0, 0, 0, CURDATE(), CURTIME())",
+                            [$targetJournalId, $repId, $orderId]
                         );
                     }
                 }
 
                 try { log_order_history($pdo, $orderId, 'exchange', 'order_exchange', 'order_item_exchanged', $repId); } catch (Exception $eHist) {}
 
-                // 9. Note history
-                if ($notes) {
-                    $existingNotes = $orderRow['notes'] ? $orderRow['notes'] . "\n" : "";
-                    execute_query($pdo, "UPDATE orders SET notes = ? WHERE id = ?", [$existingNotes . "استبدال: " . $notes, $orderId]);
+                // Keep an exchange marker on the order so custody and journal lists can display its type.
+                $existingNotes = trim((string)($orderRow['notes'] ?? ''));
+                if (strpos($existingNotes, 'استبدال') === false) {
+                    $exchangeNote = $notes !== '' ? "استبدال: " . $notes : 'استبدال';
+                    $updatedNotes = $existingNotes !== '' ? $existingNotes . "\n" . $exchangeNote : $exchangeNote;
+                    execute_query($pdo, "UPDATE orders SET notes = ? WHERE id = ?", [$updatedNotes, $orderId]);
                 }
-                
+
                 if ($pdo->inTransaction()) {
                     $pdo->commit();
                 }
@@ -12329,7 +12494,11 @@ switch ($module) {
                         }
                     }
 
-                    $orderNumber = $ord['orderNumber'] ?? null;
+                    $orderNumber = $ord['orderNumber'] ?? ($ord['order_number'] ?? null);
+                    if ($orderNumber !== null) {
+                        $orderNumber = trim((string)$orderNumber);
+                        if ($orderNumber === '') $orderNumber = null;
+                    }
                     // optional incoming employee/page from import payload - accept several key variants (english, raw, arabic)
                     $employee = null;
                     $employeeKeys = ['employee','employee_raw','created_by','createdBy','employee_name','الموظف','الموظف_name','employeeName'];
@@ -13361,6 +13530,21 @@ switch ($module) {
                 $details['created_by'] = $createdBy;
                 $details['created_by_name'] = $createdByName;
                 $details['employee_name'] = $createdByName;
+                $transactionSubtype = (string)($details['subtype'] ?? '');
+                $requiresInsuranceTreasuryAccess = strtolower(trim((string)$type)) === 'rep_settlement'
+                    || in_array($transactionSubtype, [
+                    'rep_insurance_apply',
+                    'rep_insurance_return',
+                    'rep_insurance_adjustment',
+                    'rep_insurance_deposit',
+                    'rep_settlement'
+                ], true);
+                if ($requiresInsuranceTreasuryAccess
+                    && !user_can_access_named_treasury($pdo, intval($_SESSION['user_id'] ?? 0), 'تأمين المناديب')) {
+                    http_response_code(403);
+                    echo json_encode(['success' => false, 'message' => 'لا تملك صلاحية الوصول إلى خزينة تأمين المناديب لإجراء هذه التسوية.']);
+                    break;
+                }
                 if ($notes) {
                     $details['notes'] = $notes;
                 }
@@ -16268,6 +16452,10 @@ switch ($module) {
                 $where[] = 'rjo.journal_id IN (' . implode(',', array_map('intval', $selectedJournalIds)) . ')';
                 $hasExchangeDetailsCol = column_exists($pdo, 'orders', 'exchange_details');
                 $exchangeDetailsSelect = $hasExchangeDetailsCol ? 'o.exchange_details,' : '';
+                $hasOrderStatusHistory = table_exists($pdo, 'order_status_history');
+                $exchangeHistorySelect = $hasOrderStatusHistory
+                    ? "(EXISTS (SELECT 1 FROM order_status_history exchange_history WHERE exchange_history.order_id = o.id AND exchange_history.action = 'order_exchange' AND NOT EXISTS (SELECT 1 FROM order_status_history exchange_undo WHERE exchange_undo.order_id = o.id AND exchange_undo.action = 'exchange_undo' AND exchange_undo.id > exchange_history.id))) AS was_exchanged,"
+                    : "0 AS was_exchanged,";
 
                 $rows = execute_query($pdo,
                     "SELECT rjo.id AS jro_id, rjo.journal_id, rjo.rep_id, rjo.order_id,
@@ -16277,6 +16465,7 @@ switch ($module) {
                             COALESCE(rjo.delivered_pieces, 0) AS delivered_pieces,
                             COALESCE(rjo.delivered_value, 0) AS delivered_value,
                             o.order_number, o.total_amount, o.shipping_fees, o.status AS order_status,
+                            {$exchangeHistorySelect}
                             {$exchangeDetailsSelect}
                             o.notes AS order_notes, o.created_at,
                             c.name AS customer_name, c.phone1, COALESCE(NULLIF(o.address, ''), c.address) AS address, COALESCE(NULLIF(o.governorate, ''), c.governorate) AS governorate
@@ -16308,9 +16497,11 @@ switch ($module) {
                     $inStr = implode(',', array_map('intval', $orderIds));
                     $hasDelivCol = column_exists($pdo, 'order_items', 'delivered_quantity');
                     $delivSelect = $hasDelivCol ? 'COALESCE(oi.delivered_quantity, 0) AS delivered_quantity' : '0 AS delivered_quantity';
+                    $hasRetCol = column_exists($pdo, 'order_items', 'returned_quantity');
+                    $retSelect = $hasRetCol ? 'COALESCE(oi.returned_quantity, 0) AS returned_quantity' : '0 AS returned_quantity';
                     if ($hasVariants) {
                         $iRows = $pdo->query(
-                            "SELECT oi.id AS order_item_id, oi.order_id, oi.product_id, oi.quantity, {$delivSelect}, oi.price_per_unit,
+                            "SELECT oi.id AS order_item_id, oi.order_id, oi.product_id, oi.quantity, {$delivSelect}, {$retSelect}, oi.price_per_unit,
                                     COALESCE(pv.name, '') AS name,
                                     COALESCE(pv.color, '') AS color, COALESCE(pv.size, '') AS size
                              FROM order_items oi
@@ -16319,7 +16510,7 @@ switch ($module) {
                         )->fetchAll(PDO::FETCH_ASSOC);
                     } else {
                         $iRows = $pdo->query(
-                            "SELECT oi.id AS order_item_id, oi.order_id, oi.product_id, oi.quantity, {$delivSelect}, oi.price_per_unit,
+                            "SELECT oi.id AS order_item_id, oi.order_id, oi.product_id, oi.quantity, {$delivSelect}, {$retSelect}, oi.price_per_unit,
                                     COALESCE(p.name, '') AS name, '' AS color, '' AS size
                              FROM order_items oi
                              LEFT JOIN products p ON p.id = oi.product_id
@@ -16337,7 +16528,8 @@ switch ($module) {
                             'quantity'  => intval($it['quantity']),
                             'qty'       => intval($it['quantity']),
                             'delivered_quantity' => intval($it['delivered_quantity'] ?? 0),
-                            'original_quantity' => intval($it['quantity']) + intval($it['delivered_quantity'] ?? 0),
+                            'returned_quantity'  => intval($it['returned_quantity'] ?? 0),
+                            'original_quantity' => intval($it['quantity']) + intval($it['delivered_quantity'] ?? 0) + intval($it['returned_quantity'] ?? 0),
                             'price'     => floatval($it['price_per_unit']),
                         ];
                     }
@@ -16391,6 +16583,7 @@ switch ($module) {
                         'rep_id'       => intval($r['rep_id']),
                         'order_number' => $r['order_number'],
                         'status'       => $r['journal_status'],
+                        'journal_status' => $r['journal_status'],
                         'order_status' => $r['order_status'],
                         'total_amount' => floatval($r['total_amount'] ?? 0),
                         'total'        => floatval($r['total_amount'] ?? 0),
@@ -16401,6 +16594,9 @@ switch ($module) {
                         'delivered_value' => floatval($r['delivered_value'] ?? 0),
                         'returned_pieces_fallback' => intval($partialReturnedPiecesFallbackMap[$oid] ?? 0),
                         'returned_value_fallback' => floatval($partialReturnedValueFallbackMap[$oid] ?? 0),
+                        'was_exchanged' => !empty($r['was_exchanged']),
+                        'notes' => $r['order_notes'] ?? '',
+                        'order_notes' => $r['order_notes'] ?? '',
                         'exchange_details' => !empty($r['exchange_details']) ? (is_string($r['exchange_details']) ? json_decode($r['exchange_details'], true) : $r['exchange_details']) : null,
                         'customer_name'=> $r['customer_name'],
                         'phone'        => $r['phone1'],
@@ -16424,24 +16620,45 @@ switch ($module) {
                     $totalOrderPieces += $retPieces;
 
                     $isFullReturn = ($st === 'full_return' || $st === 'returned');
-                    if ($st === 'with_rep') {
+                    if ($st === 'with_rep' || $st === 'deferred') {
                         $isFullReturn = false;
                     } elseif (!$isFullReturn && ($ordSt === 'returned' || $ordSt === 'full_return')) {
                         $isFullReturn = true;
                     }
-                    if (!$isFullReturn && $totalOrderPieces > 0 && $retPieces >= $totalOrderPieces && $st !== 'with_rep') {
+                    if (!$isFullReturn && $totalOrderPieces > 0 && $retPieces >= $totalOrderPieces && $st !== 'with_rep' && $st !== 'deferred') {
                         $isFullReturn = true;
                     }
 
                     // returned_with_rep = تسليم جزئي done, remaining items still with rep → stays in active (العهدة الحالية)
                     // partial_return = partial return registered via SalesUpdateStatus, remaining with rep → stays in active
-                    $isStillWithRep = ($st === 'returned_with_rep' || $ordSt === 'returned_with_rep' || $st === 'partial_return' || ($st === 'with_rep' && $ordSt === 'partial'));
+                    $isStillWithRep = ($st !== 'deferred') && ($st === 'returned_with_rep' || $ordSt === 'returned_with_rep' || $st === 'partial_return' || ($st === 'with_rep' && $ordSt === 'partial'));
 
                     // isPartial = some delivered + some returned, CONFIRMED delivery (journal status 'partial' or 'delivered' with retPieces)
-                    $isPartial = !$isFullReturn && !$isStillWithRep &&
+                    $isPartial = !$isFullReturn && !$isStillWithRep && ($st !== 'deferred') &&
                         ($retPieces > 0 && in_array($st, ['partial', 'delivered']));
 
-                    if ($isFullReturn) {
+                    if ($st === 'deferred') {
+                        // Any order explicitly marked deferred in this daily journal belongs strictly in deferred (النزول)
+                        $deferred[] = $order;
+                        // If it has partial delivery pieces recorded, also include in delivered list for daily journal calculations
+                        if (intval($order['delivered_pieces'] ?? 0) > 0) {
+                            if ($from && $to) {
+                                $ed = $r['event_date'];
+                                if ($ed >= $from && $ed <= $to) $delivered[] = $order;
+                            } else {
+                                $delivered[] = $order;
+                            }
+                        }
+                        $directRetPieces = intval($order['returned_pieces'] ?? 0) ?: intval($order['returned_pieces_fallback'] ?? 0);
+                        if ($directRetPieces > 0) {
+                            if ($from && $to) {
+                                $ed = $r['event_date'];
+                                if ($ed >= $from && $ed <= $to) $returned[] = $order;
+                            } else {
+                                $returned[] = $order;
+                            }
+                        }
+                    } elseif ($isFullReturn) {
                         if ($from && $to) { $ed = $r['event_date']; if ($ed >= $from && $ed <= $to) $returned[] = $order; }
                         else $returned[] = $order;
                     } elseif ($isPartial) {
@@ -16480,22 +16697,25 @@ switch ($module) {
                             }
                         }
                     } elseif ($st === 'exchange' || $ordSt === 'exchange') {
-                        // Exchange order has delivered pieces (new item) and returned pieces (old item)
-                        if ($from && $to) {
-                            $ed = $r['event_date'];
-                            if ($ed >= $from && $ed <= $to) {
-                                $delivered[] = $order;
-                                $returned[]  = $order;
+                        $delivPieces = intval($order['delivered_pieces'] ?? 0);
+                        $retPieces = intval($order['returned_pieces'] ?? 0);
+                        if ($delivPieces > 0 || $retPieces > 0) {
+                            if ($from && $to) {
+                                $ed = $r['event_date'];
+                                if ($ed >= $from && $ed <= $to) {
+                                    if ($delivPieces > 0) $delivered[] = $order;
+                                    if ($retPieces > 0) $returned[]  = $order;
+                                }
+                            } else {
+                                if ($delivPieces > 0) $delivered[] = $order;
+                                if ($retPieces > 0) $returned[]  = $order;
                             }
                         } else {
-                            $delivered[] = $order;
-                            $returned[]  = $order;
+                            $active[] = $order;
                         }
                     } elseif ($st === 'delivered' || $ordSt === 'delivered') {
                         if ($from && $to) { $ed = $r['event_date']; if ($ed >= $from && $ed <= $to) $delivered[] = $order; }
                         else $delivered[] = $order;
-                    } elseif ($st === 'deferred') {
-                        $deferred[] = $order;
                     } else {
                         $active[] = $order;
                     }
@@ -16522,7 +16742,8 @@ switch ($module) {
                 if ($shouldIncludeCurrentCustody) {
                     // Include active (with_rep/partial/postponed/deferred) orders for this rep
                     $currentOrdersRows = execute_query($pdo,
-                        "SELECT o.id, o.rep_id, o.order_number, o.status, o.total_amount, o.shipping_fees, o.created_at,
+                        "SELECT o.id, o.rep_id, o.order_number, o.status, o.total_amount, o.shipping_fees, o.created_at, o.notes,
+                                {$exchangeHistorySelect}
                                 c.name AS customer_name, c.phone1, COALESCE(NULLIF(o.address, ''), c.address) AS address, COALESCE(NULLIF(o.governorate, ''), c.governorate) AS governorate
                          FROM orders o
                          LEFT JOIN customers c ON c.id = o.customer_id
@@ -16587,6 +16808,9 @@ switch ($module) {
                             'rep_id'       => intval($currentOrderRow['rep_id'] ?? 0),
                             'order_number' => $currentOrderRow['order_number'],
                             'order_status' => $currentOrderRow['status'],
+                            'notes'        => $currentOrderRow['notes'] ?? '',
+                            'order_notes'  => $currentOrderRow['notes'] ?? '',
+                            'was_exchanged'=> !empty($currentOrderRow['was_exchanged']),
                             'status'       => 'with_rep',
                             'total_amount' => floatval($currentOrderRow['total_amount'] ?? 0),
                             'total'        => floatval($currentOrderRow['total_amount'] ?? 0),
@@ -16814,7 +17038,14 @@ switch ($module) {
                     // Synchronize orders table status & rep_id
                     $mappedOrderStatus = null;
                     if ($status === 'deferred') {
-                        $mappedOrderStatus = 'deferred';
+                        // أوردرات النزول تظل في عهدة المندوب وحالتها في جدول الطلبات مع المندوب (with_rep) ولا تتغير لحالة نزول
+                        $currOrd = execute_query($pdo, "SELECT status FROM orders WHERE id = ? LIMIT 1", [$oid])->fetch(PDO::FETCH_ASSOC);
+                        $currentOrderStatus = strtolower(trim($currOrd['status'] ?? ''));
+                        if ($currentOrderStatus === 'returned_with_rep') {
+                            $mappedOrderStatus = 'returned_with_rep';
+                        } else {
+                            $mappedOrderStatus = 'with_rep';
+                        }
                     } elseif ($status === 'with_rep') {
                         $mappedOrderStatus = 'with_rep';
                     } elseif ($status === 'delivered') {
@@ -17055,6 +17286,242 @@ switch ($module) {
             exit;
         }
 
+        if ($action === 'undoOrderExchange') {
+            http_response_code(410);
+            echo json_encode(['success' => false, 'message' => 'تم إيقاف التراجع عن الاستبدال.']);
+            exit;
+
+            $repId = intval($input['rep_id'] ?? 0);
+            $orderId = intval($input['order_id'] ?? 0);
+            if ($repId <= 0 || $orderId <= 0) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'rep_id and order_id are required.']);
+                exit;
+            }
+
+            ensure_rep_journal_orders_table($pdo);
+            ensure_rep_daily_journal_table($pdo);
+            try {
+                assert_order_not_in_closed_journal($pdo, $orderId, $repId);
+            } catch (Exception $eCheck) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => $eCheck->getMessage()]);
+                exit;
+            }
+
+            try {
+                $pdo->beginTransaction();
+                $orderRow = execute_query($pdo, "SELECT * FROM orders WHERE id = ? AND rep_id = ? FOR UPDATE", [$orderId, $repId])->fetch(PDO::FETCH_ASSOC);
+                if (!$orderRow) {
+                    throw new Exception('الطلب غير موجود في عهدة هذا المندوب.');
+                }
+                if (!in_array(strtolower((string)($orderRow['status'] ?? '')), ['with_rep', 'exchange', 'partial', 'partial_return'], true)) {
+                    throw new Exception('يمكن التراجع عن الاستبدال فقط قبل تسليم الطلب أو إرجاعه أو نقله إلى النزول.');
+                }
+
+                $exchangeState = json_decode((string)($orderRow['exchange_details'] ?? ''), true);
+                if (!is_array($exchangeState) || intval($exchangeState['version'] ?? 0) !== 1 || empty($exchangeState['history']) || !is_array($exchangeState['history'])) {
+                    throw new Exception('لا توجد بيانات محفوظة كافية للتراجع عن هذا الاستبدال بأمان. الاستبدالات السابقة للتحديث لا يمكن إلغاؤها تلقائيًا.');
+                }
+
+                $exchangeRecord = array_pop($exchangeState['history']);
+                $itemsBefore = $exchangeRecord['items_before'] ?? null;
+                $orderBefore = $exchangeRecord['order_before'] ?? null;
+                if (!is_array($itemsBefore) || !is_array($orderBefore)) {
+                    throw new Exception('بيانات التراجع عن الاستبدال غير مكتملة.');
+                }
+
+                $historyAfterExchange = [];
+                if (table_exists($pdo, 'order_status_history')) {
+                    $historyAfterExchange = execute_query($pdo,
+                        "SELECT action FROM order_status_history
+                         WHERE order_id = ? AND id > (
+                           SELECT COALESCE(MAX(id), 0) FROM order_status_history
+                           WHERE order_id = ? AND action = 'order_exchange'
+                         )
+                         ORDER BY id ASC",
+                        [$orderId, $orderId]
+                    )->fetchAll(PDO::FETCH_COLUMN);
+                    foreach ($historyAfterExchange as $historyAction) {
+                        if (!in_array($historyAction, ['partial_return', 'partial_return_undo'], true)) {
+                            throw new Exception('لا يمكن التراجع عن الاستبدال بعد تسليم الطلب أو إجراء تغيير آخر غير المرتجع الجزئي.');
+                        }
+                    }
+                }
+                $hasLaterPartialChange = !empty($historyAfterExchange);
+                $hasPartialUndoAfterExchange = in_array('partial_return_undo', $historyAfterExchange, true);
+                $affectedItemIds = array_values(array_unique(array_filter(array_map('intval', $exchangeRecord['affected_item_ids'] ?? []))));
+                $itemsAfterAffected = $exchangeRecord['items_after_affected'] ?? null;
+                $hasDifferentialSnapshot = array_key_exists('affected_item_ids', $exchangeRecord)
+                    && is_array($exchangeRecord['affected_item_ids'])
+                    && is_array($itemsAfterAffected);
+                $previousItemIds = [];
+                foreach ($itemsBefore as $itemBefore) {
+                    $itemId = intval($itemBefore['id'] ?? 0);
+                    if ($itemId > 0) $previousItemIds[$itemId] = true;
+                }
+
+                $currentItems = execute_query($pdo, "SELECT * FROM order_items WHERE order_id = ? FOR UPDATE", [$orderId])->fetchAll(PDO::FETCH_ASSOC);
+                if ($hasLaterPartialChange && !$hasDifferentialSnapshot) {
+                    throw new Exception('بيانات هذا الاستبدال لا تحفظ تفاصيل كافية للفصل بينه وبين المرتجع الجزئي.');
+                }
+
+                if ($hasDifferentialSnapshot) {
+                    $currentItemsById = [];
+                    foreach ($currentItems as $currentItem) {
+                        $currentItemsById[intval($currentItem['id'] ?? 0)] = $currentItem;
+                    }
+                    $itemFieldsToCompare = ['product_id', 'quantity', 'price_per_unit', 'total_price', 'returned_quantity', 'delivered_quantity'];
+                    foreach ($affectedItemIds as $itemId) {
+                        $afterItem = $itemsAfterAffected[$itemId] ?? $itemsAfterAffected[(string)$itemId] ?? null;
+                        if (!is_array($afterItem)) {
+                            throw new Exception('بيانات صنف الاستبدال غير مكتملة.');
+                        }
+                        $currentItem = $currentItemsById[$itemId] ?? null;
+                        if (!$currentItem) {
+                            throw new Exception('تغير صنف الاستبدال بعد تسجيله؛ لا يمكن التراجع عنه بأمان.');
+                        }
+                        foreach ($itemFieldsToCompare as $field) {
+                            if (array_key_exists($field, $afterItem) && ($currentItem[$field] ?? null) != $afterItem[$field]) {
+                                throw new Exception('تم تسجيل تغيير على أحد أصناف الاستبدال. ألغِ ذلك التغيير أولًا حتى لا يتأثر المرتجع الجزئي.');
+                            }
+                        }
+                    }
+
+                    foreach ($affectedItemIds as $itemId) {
+                        if (!isset($previousItemIds[$itemId])) {
+                            execute_query($pdo, "DELETE FROM order_items WHERE id = ? AND order_id = ?", [$itemId, $orderId]);
+                        }
+                    }
+                    foreach ($itemsBefore as $itemBefore) {
+                        $itemId = intval($itemBefore['id'] ?? 0);
+                        if ($itemId <= 0 || !in_array($itemId, $affectedItemIds, true)) continue;
+                        $assignments = [];
+                        $values = [];
+                        foreach ($itemBefore as $column => $value) {
+                            if ($column === 'id') continue;
+                            $assignments[] = "`" . str_replace("`", "``", $column) . "` = ?";
+                            $values[] = $value;
+                        }
+                        if (!empty($assignments)) {
+                            $values[] = $itemId;
+                            $values[] = $orderId;
+                            execute_query($pdo, "UPDATE order_items SET " . implode(', ', $assignments) . " WHERE id = ? AND order_id = ?", $values);
+                        }
+                    }
+                } else {
+                    foreach ($currentItems as $currentItem) {
+                        $itemId = intval($currentItem['id'] ?? 0);
+                        if ($itemId > 0 && !isset($previousItemIds[$itemId])) {
+                            execute_query($pdo, "DELETE FROM order_items WHERE id = ? AND order_id = ?", [$itemId, $orderId]);
+                        }
+                    }
+
+                    foreach ($itemsBefore as $itemBefore) {
+                        $itemId = intval($itemBefore['id'] ?? 0);
+                        if ($itemId <= 0) continue;
+                        $exists = execute_query($pdo, "SELECT id FROM order_items WHERE id = ? AND order_id = ? LIMIT 1", [$itemId, $orderId])->fetchColumn();
+                        if ($exists) {
+                            $assignments = [];
+                            $values = [];
+                            foreach ($itemBefore as $column => $value) {
+                                if ($column === 'id') continue;
+                                $assignments[] = "`" . str_replace("`", "``", $column) . "` = ?";
+                                $values[] = $value;
+                            }
+                            if (!empty($assignments)) {
+                                $values[] = $itemId;
+                                execute_query($pdo, "UPDATE order_items SET " . implode(', ', $assignments) . " WHERE id = ?", $values);
+                            }
+                        } else {
+                            $columns = array_keys($itemBefore);
+                            $quotedColumns = array_map(function($column) { return "`" . str_replace("`", "``", $column) . "`"; }, $columns);
+                            $placeholders = implode(', ', array_fill(0, count($columns), '?'));
+                            execute_query($pdo, "INSERT INTO order_items (" . implode(', ', $quotedColumns) . ") VALUES ($placeholders)", array_values($itemBefore));
+                        }
+                    }
+                }
+
+                $journalBefore = $exchangeRecord['journal_before'] ?? null;
+                if (table_exists($pdo, 'rep_journal_orders')) {
+                    $currentJournal = execute_query($pdo, "SELECT * FROM rep_journal_orders WHERE order_id = ? AND rep_id = ? ORDER BY id DESC LIMIT 1 FOR UPDATE", [$orderId, $repId])->fetch(PDO::FETCH_ASSOC);
+                    if ($currentJournal && !in_array(strtolower((string)($currentJournal['status'] ?? '')), ['with_rep', 'exchange', 'partial', 'partial_return'], true)) {
+                        throw new Exception('يمكن التراجع عن الاستبدال فقط قبل تغيير حالة الطلب في اليومية.');
+                    }
+                    if (is_array($journalBefore) && intval($journalBefore['id'] ?? 0) > 0) {
+                        $journalId = intval($journalBefore['id']);
+                        if ($currentJournal && intval($currentJournal['id']) === $journalId) {
+                            if ($hasLaterPartialChange) {
+                                $journalBefore['returned_pieces'] = ($hasPartialUndoAfterExchange ? 0 : intval($journalBefore['returned_pieces'] ?? 0))
+                                    + intval($currentJournal['returned_pieces'] ?? 0);
+                                $journalBefore['returned_value'] = ($hasPartialUndoAfterExchange ? 0 : floatval($journalBefore['returned_value'] ?? 0))
+                                    + floatval($currentJournal['returned_value'] ?? 0);
+                                $journalBefore['status'] = $currentJournal['status'] ?? 'with_rep';
+                            }
+                            $assignments = [];
+                            $values = [];
+                            foreach ($journalBefore as $column => $value) {
+                                if ($column === 'id') continue;
+                                $assignments[] = "`" . str_replace("`", "``", $column) . "` = ?";
+                                $values[] = $value;
+                            }
+                            if (!empty($assignments)) {
+                                $values[] = $journalId;
+                                execute_query($pdo, "UPDATE rep_journal_orders SET " . implode(', ', $assignments) . " WHERE id = ?", $values);
+                            }
+                        } elseif (!$currentJournal) {
+                            $columns = array_keys($journalBefore);
+                            $quotedColumns = array_map(function($column) { return "`" . str_replace("`", "``", $column) . "`"; }, $columns);
+                            $placeholders = implode(', ', array_fill(0, count($columns), '?'));
+                            execute_query($pdo, "INSERT INTO rep_journal_orders (" . implode(', ', $quotedColumns) . ") VALUES ($placeholders)", array_values($journalBefore));
+                        } else {
+                            throw new Exception('تغيّر سجل اليومية منذ الاستبدال؛ لا يمكن استعادته بأمان.');
+                        }
+                    } elseif ($currentJournal && !$hasLaterPartialChange) {
+                        execute_query($pdo, "DELETE FROM rep_journal_orders WHERE id = ?", [intval($currentJournal['id'])]);
+                    }
+                }
+
+                $previousDetails = $exchangeRecord['previous_exchange_details'] ?? null;
+                $restoredStatus = $hasLaterPartialChange
+                    ? (string)($orderRow['status'] ?? 'with_rep')
+                    : (string)($orderBefore['status'] ?? 'with_rep');
+                $restoredTotal = floatval($orderBefore['total_amount'] ?? 0);
+                $restoredNotes = $orderBefore['notes'] ?? '';
+                if ($hasDifferentialSnapshot) {
+                    $itemsSubtotal = floatval(execute_query($pdo,
+                        "SELECT COALESCE(SUM(quantity * price_per_unit), 0) FROM order_items WHERE order_id = ?",
+                        [$orderId]
+                    )->fetchColumn() ?? 0);
+                    $restoredTotal = max(0, $itemsSubtotal + floatval($orderRow['shipping_fees'] ?? 0) - floatval($orderRow['discount_amount'] ?? 0) + floatval($orderRow['tax_amount'] ?? 0));
+                }
+                if ($hasLaterPartialChange) {
+                    $restoredNotes = trim((string)preg_replace('/(?:^|\R)استبدال(?::[^\r\n]*)?(?=\R|$)/u', '', (string)($orderRow['notes'] ?? '')));
+                }
+                execute_query($pdo,
+                    "UPDATE orders SET status = ?, total_amount = ?, notes = ?, exchange_details = ?" .
+                    (column_exists($pdo, 'orders', 'updated_at') ? ", updated_at = NOW()" : "") .
+                    " WHERE id = ?",
+                    [$restoredStatus, $restoredTotal, $restoredNotes, $previousDetails, $orderId]
+                );
+
+                $pdo->commit();
+
+                try { log_order_history($pdo, $orderId, $restoredStatus, 'exchange_undo', 'order_exchange_undone', $repId); } catch (Exception $eHist) {}
+                $journalIdToRefresh = intval($journalBefore['journal_id'] ?? 0);
+                if ($journalIdToRefresh > 0) {
+                    try { refresh_rep_daily_journal_status_counts($pdo, $journalIdToRefresh); } catch (Exception $eRef) {}
+                }
+
+                echo json_encode(['success' => true, 'message' => 'تم التراجع عن الاستبدال فقط مع الحفاظ على حالة المرتجع الجزئي.']);
+            } catch (Exception $e) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'فشل التراجع عن الاستبدال: ' . $e->getMessage()]);
+            }
+            exit;
+        }
+
         if ($action === 'undoDailyCloseOrder') {
             $repId    = intval($input['rep_id']    ?? 0);
             $undoType = strtolower(trim((string)($input['undo_type'] ?? 'return')));
@@ -17214,6 +17681,7 @@ switch ($module) {
                 $totalPiecesRestored = 0;
                 $totalValueRestored  = 0;
                 $actualReturnedPieces = 0;
+                $movementRestoredByProduct = [];
 
                 if (count($movements) > 0) {
                     $byProduct = [];
@@ -17267,17 +17735,43 @@ switch ($module) {
                                 }
                                 $totalPiecesRestored += $orderQty;
                                 $totalValueRestored  += floatval($oiRow['price_per_unit']) * $orderQty;
+                                $movementRestoredByProduct[$pId] = ($movementRestoredByProduct[$pId] ?? 0) + $orderQty;
                             }
                         }
                     }
                 }
 
-                // Recalculate true order total directly from order_items
-                $trueOrderTotal = floatval(execute_query($pdo,
+                // Restore any remaining returned_quantity directly on order_items
+                if (column_exists($pdo, 'order_items', 'returned_quantity')) {
+                    $retItems = execute_query($pdo, "SELECT id, product_id, quantity, returned_quantity, price_per_unit FROM order_items WHERE order_id = ? AND returned_quantity > 0", [$orderId])->fetchAll(PDO::FETCH_ASSOC);
+                    foreach ($retItems as $rIt) {
+                        $rq = intval($rIt['returned_quantity']);
+                        $productId = intval($rIt['product_id']);
+                        $restoredFromMovements = min($rq, intval($movementRestoredByProduct[$productId] ?? 0));
+                        $movementRestoredByProduct[$productId] = max(0, intval($movementRestoredByProduct[$productId] ?? 0) - $restoredFromMovements);
+                        $fallbackQty = $rq - $restoredFromMovements;
+                        $restoredQty = intval($rIt['quantity']) + $fallbackQty;
+                        $up = floatval($rIt['price_per_unit']);
+                        if (column_exists($pdo, 'order_items', 'total_price')) {
+                            execute_query($pdo, "UPDATE order_items SET quantity = ?, returned_quantity = 0, total_price = ? WHERE id = ?", [$restoredQty, $restoredQty * $up, $rIt['id']]);
+                        } else {
+                            execute_query($pdo, "UPDATE order_items SET quantity = ?, returned_quantity = 0 WHERE id = ?", [$restoredQty, $rIt['id']]);
+                        }
+                        $totalPiecesRestored += $fallbackQty;
+                        $totalValueRestored  += $fallbackQty * $up;
+                    }
+                }
+
+                // Recalculate true order total directly from order_items with shipping, discount and tax
+                $shipping = floatval($orderRow['shipping_fees'] ?? 0);
+                $discount = floatval($orderRow['discount_amount'] ?? 0);
+                $tax = floatval($orderRow['tax_amount'] ?? 0);
+                $itemsSubtotal = floatval(execute_query($pdo,
                     "SELECT COALESCE(SUM((quantity + COALESCE(delivered_quantity, 0)) * price_per_unit), 0) FROM order_items WHERE order_id = ?",
                     [$orderId]
                 )->fetchColumn() ?? 0);
-                if ($trueOrderTotal > 0) {
+                if ($itemsSubtotal > 0) {
+                    $trueOrderTotal = max(0.0, $itemsSubtotal + $shipping - $discount + $tax);
                     execute_query($pdo, "UPDATE orders SET total_amount = ? WHERE id = ?", [$trueOrderTotal, $orderId]);
                 }
 
@@ -17531,6 +18025,7 @@ switch ($module) {
                     $totalPiecesRestored = 0;
                     $totalValueRestored  = 0;
                     $actualReturnedPieces = 0;
+                    $movementRestoredByProduct = [];
 
                     if (count($movements) > 0) {
                         $byProduct = [];
@@ -17576,17 +18071,43 @@ switch ($module) {
                                     }
                                     $totalPiecesRestored += $orderQty;
                                     $totalValueRestored  += floatval($oiRow['price_per_unit']) * $orderQty;
+                                    $movementRestoredByProduct[$pId] = ($movementRestoredByProduct[$pId] ?? 0) + $orderQty;
                                 }
                             }
                         }
                     }
 
-                    // Deterministic order total from order_items
-                    $trueOrderTotal = floatval(execute_query($pdo,
+                    // Restore any remaining returned_quantity directly on order_items
+                    if (column_exists($pdo, 'order_items', 'returned_quantity')) {
+                        $retItems = execute_query($pdo, "SELECT id, product_id, quantity, returned_quantity, price_per_unit FROM order_items WHERE order_id = ? AND returned_quantity > 0", [$orderId])->fetchAll(PDO::FETCH_ASSOC);
+                        foreach ($retItems as $rIt) {
+                            $rq = intval($rIt['returned_quantity']);
+                            $productId = intval($rIt['product_id']);
+                            $restoredFromMovements = min($rq, intval($movementRestoredByProduct[$productId] ?? 0));
+                            $movementRestoredByProduct[$productId] = max(0, intval($movementRestoredByProduct[$productId] ?? 0) - $restoredFromMovements);
+                            $fallbackQty = $rq - $restoredFromMovements;
+                            $restoredQty = intval($rIt['quantity']) + $fallbackQty;
+                            $up = floatval($rIt['price_per_unit']);
+                            if (column_exists($pdo, 'order_items', 'total_price')) {
+                                execute_query($pdo, "UPDATE order_items SET quantity = ?, returned_quantity = 0, total_price = ? WHERE id = ?", [$restoredQty, $restoredQty * $up, $rIt['id']]);
+                            } else {
+                                execute_query($pdo, "UPDATE order_items SET quantity = ?, returned_quantity = 0 WHERE id = ?", [$restoredQty, $rIt['id']]);
+                            }
+                            $totalPiecesRestored += $fallbackQty;
+                            $totalValueRestored  += $fallbackQty * $up;
+                        }
+                    }
+
+                    // Recalculate true order total directly from order_items with shipping, discount and tax
+                    $shipping = floatval($orderRow['shipping_fees'] ?? 0);
+                    $discount = floatval($orderRow['discount_amount'] ?? 0);
+                    $tax = floatval($orderRow['tax_amount'] ?? 0);
+                    $itemsSubtotal = floatval(execute_query($pdo,
                         "SELECT COALESCE(SUM((quantity + COALESCE(delivered_quantity, 0)) * price_per_unit), 0) FROM order_items WHERE order_id = ?",
                         [$orderId]
                     )->fetchColumn() ?? 0);
-                    if ($trueOrderTotal > 0) {
+                    if ($itemsSubtotal > 0) {
+                        $trueOrderTotal = max(0.0, $itemsSubtotal + $shipping - $discount + $tax);
                         execute_query($pdo, "UPDATE orders SET total_amount = ? WHERE id = ?", [$trueOrderTotal, $orderId]);
                     }
 
@@ -18985,6 +19506,33 @@ switch ($module) {
                 }
                 $stmt = execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txType_local, $warehouseId, null, $rel_local, $supplierId, $invoiceTotal, json_encode($detailsPayload)]);
                 $purchaseId = $pdo->lastInsertId();
+
+                // Determine product cost calculation / update method
+                // 'vendor_cost' = update product cost_price upon receiving
+                // 'predefined_cost' = do NOT update product cost_price in product_variants upon receiving
+                $productCostMethod = trim((string)($input['productCostMethod'] ?? ''));
+                if ($productCostMethod === '') {
+                    try {
+                        $stmtCfg = execute_query($pdo, "SELECT v FROM app_settings WHERE k = 'product_cost_method' LIMIT 1");
+                        $cfgVal = $stmtCfg->fetchColumn();
+                        if ($cfgVal !== false && $cfgVal !== null && trim((string)$cfgVal) !== '') {
+                            $productCostMethod = trim((string)$cfgVal);
+                        } elseif (table_exists($pdo, 'settings')) {
+                            $stmtLeg = execute_query($pdo, "SELECT config_value FROM settings WHERE config_key = 'product_cost_method' LIMIT 1");
+                            $legVal = $stmtLeg->fetchColumn();
+                            if ($legVal !== false && $legVal !== null && trim((string)$legVal) !== '') {
+                                $productCostMethod = trim((string)$legVal);
+                            }
+                        }
+                    } catch (Exception $e) {
+                        $productCostMethod = 'vendor_cost';
+                    }
+                }
+                if ($productCostMethod === '') {
+                    $productCostMethod = 'vendor_cost';
+                }
+                $shouldUpdateCost = ($productCostMethod === 'vendor_cost');
+
                 foreach ($items as $it) {
                     $productId = intval($it['productId'] ?? 0);
                     $itemType = $it['itemType'] ?? 'product';
@@ -19047,7 +19595,7 @@ switch ($module) {
                     if (!$productId) continue;
 
                     if ($baseType === 'fabric' && table_exists($pdo, 'fabric_stock')) {
-                        if ($cost > 0 && column_exists($pdo, 'fabrics', 'cost_price')) {
+                        if ($cost > 0 && $shouldUpdateCost && column_exists($pdo, 'fabrics', 'cost_price')) {
                             execute_query($pdo, "UPDATE fabrics SET cost_price = ? WHERE id = ?", [round($cost, 4), $productId]);
                         }
 
@@ -19077,7 +19625,7 @@ switch ($module) {
 
                     if ($baseType === 'accessory' && table_exists($pdo, 'accessory_stock')) {
                         $qtyInt = intval($qty);
-                        if ($cost > 0 && column_exists($pdo, 'accessories', 'cost_price')) {
+                        if ($cost > 0 && $shouldUpdateCost && column_exists($pdo, 'accessories', 'cost_price')) {
                             execute_query($pdo, "UPDATE accessories SET cost_price = ? WHERE id = ?", [round($cost, 4), $productId]);
                         }
 
@@ -19107,12 +19655,12 @@ switch ($module) {
 
                     // Store products
                     if ($baseType === 'product') {
-                        // Update cost price and purchase price directly with the unit cost/workmanship entered
-                        if ($cost > 0 || $price > 0) {
+                        // Update cost price and purchase price directly with unit cost/workmanship only if method is vendor_cost
+                        if (($cost > 0 && $shouldUpdateCost) || $price > 0) {
                             $setParts = [];
                             $vals = [];
 
-                            if ($cost > 0) {
+                            if ($cost > 0 && $shouldUpdateCost) {
                                 $setParts[] = 'cost_price = ?';
                                 $vals[] = round($cost, 4);
                                 if (column_exists($pdo, 'product_variants', 'purchase_price')) {

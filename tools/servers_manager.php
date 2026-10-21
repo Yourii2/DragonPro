@@ -37,7 +37,8 @@ function server_login($srv) {
     curl_setopt($ch, CURLOPT_COOKIEJAR, $cookieFile);
     curl_setopt($ch, CURLOPT_COOKIEFILE, $cookieFile);
     curl_setopt($ch, CURLOPT_TIMEOUT, 20);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
     $res = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
@@ -57,7 +58,8 @@ function server_check_updates($srv, $cookieFile) {
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_COOKIEFILE, $cookieFile);
     curl_setopt($ch, CURLOPT_TIMEOUT, 20);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
     $res = curl_exec($ch);
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
@@ -69,7 +71,7 @@ function server_check_updates($srv, $cookieFile) {
     return null;
 }
 
-function server_run_update($srv, $cookieFile, $tags = ['v2.0.6']) {
+function server_run_update($srv, $cookieFile, $tags = []) {
     $url = rtrim($srv['url'], '/') . '/components/update_auto_installer.php?action=run';
     $ch = curl_init($url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
@@ -78,7 +80,8 @@ function server_run_update($srv, $cookieFile, $tags = ['v2.0.6']) {
     curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
     curl_setopt($ch, CURLOPT_COOKIEFILE, $cookieFile);
     curl_setopt($ch, CURLOPT_TIMEOUT, 180);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
     $res = curl_exec($ch);
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
@@ -143,14 +146,13 @@ if ($command === 'update') {
 
         $cookie = $auth['cookie'];
         $up = server_check_updates($srv, $cookie);
-        $curVer = $up['current_version'] ?? 'Unknown';
-        echo "    - Current Version: v{$curVer}\n";
-
-        if ($curVer === '2.0.6') {
-            echo "    - Server is ALREADY up-to-date on v2.0.6! Skipping.\n\n";
+        if (!is_array($up)) {
+            echo "    [ERROR] Cannot update: failed to fetch release status.\n\n";
             @unlink($cookie);
             continue;
         }
+        $curVer = $up['current_version'] ?? 'Unknown';
+        echo "    - Current Version: v{$curVer}\n";
 
         $pendingTags = [];
         if (!empty($up['releases'])) {
@@ -161,7 +163,9 @@ if ($command === 'update') {
             }
         }
         if (empty($pendingTags)) {
-            $pendingTags = ['v2.0.5', 'v2.0.6'];
+            echo "    [OK] No newer releases available.\n\n";
+            @unlink($cookie);
+            continue;
         }
 
         echo "    - Triggering update with tags (" . implode(', ', $pendingTags) . ") via update_auto_installer...\n";

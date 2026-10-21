@@ -1221,6 +1221,7 @@ const InventoryModule: React.FC<InventoryModuleProps> = ({ initialView }) => {
           credentials: 'include',
           body: JSON.stringify({
             ...receivingData,
+            productCostMethod: (localStorage.getItem('Dragon_product_cost_method') || 'vendor_cost').toString(),
             items: (receivingData.items || []).map((item: any) => {
               const vPrice = Number(item.vendorPrice || 0);
               const cPrice = Number(item.newCostPrice ?? item.costPrice ?? 0);

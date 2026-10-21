@@ -53,6 +53,7 @@ const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
     // New setup options
     productSource: 'both', // 'factory' | 'suppliers' | 'both'
     purchasePriceType: 'full_cost', // 'full_cost' | 'vendor_price'
+    productCostMethod: 'vendor_cost', // 'vendor_cost' | 'predefined_cost'
     salesDisplayMethod: 'company', // 'company' | 'sales_offices'
     salePriceSource: 'product', // 'product' | 'order'
     currency: 'EGP',
@@ -471,10 +472,10 @@ const SetupWizard: React.FC<SetupWizardProps> = ({ onComplete }) => {
                   </select>
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-500 mr-2">سعر الشراء في الاستلام والمرتجع</label>
-                  <select value={formData.purchasePriceType} onChange={(e) => setFormData({ ...formData, purchasePriceType: e.target.value })} className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20">
-                    <option value="full_cost">تكلفة كاملة (التكلفة الفعلية)</option>
-                    <option value="vendor_price">سعر المورد (المصنعية)</option>
+                  <label className="text-xs font-bold text-slate-500 mr-2">طريقة حساب تكلفة المنتج</label>
+                  <select value={formData.productCostMethod} onChange={(e) => setFormData({ ...formData, productCostMethod: e.target.value })} className="w-full bg-slate-50 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20">
+                    <option value="vendor_cost">عن طريق تكلفة المصنعية فقط (تحديث عند الاستلام)</option>
+                    <option value="predefined_cost">عن طريق قيمة التكلفة المحددة لكل منتج (ثابتة)</option>
                   </select>
                 </div>
               </div>

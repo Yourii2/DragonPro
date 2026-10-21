@@ -324,6 +324,7 @@ $stmt->execute([$input['adminName'], $input['adminUsername'], $hashed_password])
         // New installer options (product/sales/currency)
         'product_source' => $input['productSource'] ?? 'both',
         'purchase_price_type' => $input['purchasePriceType'] ?? 'full_cost',
+        'product_cost_method' => $input['productCostMethod'] ?? 'vendor_cost',
         'sales_display_method' => $input['salesDisplayMethod'] ?? 'company',
         'sale_price_source' => $input['salePriceSource'] ?? 'product'
     ];

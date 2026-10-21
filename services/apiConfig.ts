@@ -58,14 +58,13 @@ const tryResolveApiBasePath = async () => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3000);
 
-      const response = await fetch(`${candidate}/test.php`, { 
+      const response = await fetch(`${candidate}/settings.php?action=get`, {
         credentials: 'include',
         signal: controller.signal
       });
       clearTimeout(timeoutId);
-      const text = await response.text();
-      const json = JSON.parse(text);
-      if (json && json.status === 'success') {
+      const json = await response.json();
+      if (json && json.success) {
         setResolvedApiBasePath(candidate);
       }
     } catch (e) {
@@ -79,18 +78,10 @@ export { API_BASE_PATH };
 // Test connection to PHP server
 export async function testConnection(): Promise<boolean> {
   try {
-    const response = await fetch(`${API_BASE_PATH}/test.php`, { credentials: 'include' });
-    const text = await response.text();
-    try {
-      const result = JSON.parse(text);
-      return result && result.status === 'success';
-    } catch {
-      // Most common cause: API_BASE_PATH points to a static server (Vite) and returns raw PHP.
-      console.error('Connection test failed: non-JSON response (first 120 chars):', text.slice(0, 120));
-      return false;
-    }
-  } catch (error) {
-    console.error('Connection test failed:', error);
+    const response = await fetch(`${API_BASE_PATH}/settings.php?action=get`, { credentials: 'include' });
+    const result = await response.json();
+    return !!(result && result.success);
+  } catch {
     return false;
   }
 }

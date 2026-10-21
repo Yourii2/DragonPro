@@ -53,7 +53,8 @@ echo [3/5] Staging release files...
 set "STAGE_ROOT=%cd%\release_stage"
 set "STAGE=%STAGE_ROOT%\DragonPro_%VERSION%"
 
-if exist "%STAGE_ROOT%" rmdir /s /q "%STAGE_ROOT%"
+if not exist "%STAGE_ROOT%" mkdir "%STAGE_ROOT%"
+if exist "%STAGE%" rmdir /s /q "%STAGE%"
 mkdir "%STAGE%" >nul
 
 rem Runtime package layout:

@@ -153,6 +153,7 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
   const [treasuries, setTreasuries] = useState<any[]>([]);
   const [warehouses, setWarehouses] = useState<any[]>([]);
   const [userDefaults, setUserDefaults] = useState<any>(null);
+  const canAccessInsuranceTreasury = treasuries.some((treasury: any) => (treasury?.name || treasury?.title) === 'تأمين المناديب');
 
   // ─── تدقيق ومطابقة أرصدة المناديب ───
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
@@ -773,8 +774,23 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
     (async () => {
       try {
         if (editingRep) {
-          // لا يتم تعديل مبلغ التأمين (ولا حالة دفع التأمين) عند التعديل
-          const res = await fetch(`${API_BASE_PATH}/api.php?module=users&action=update`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: formData.name, phone: formData.phone, role: 'representative', id: editingRep.id, insurance_paid: editingRep.insurance_paid ? 1 : 0, insurance_amount: Number(editingRep.insurance_amount || 0) }) });
+          const insurancePaid = formData.insurance_paid;
+          const insuranceAmount = insurancePaid ? Number(formData.insurance_amount || 0) : 0;
+          if (!Number.isFinite(insuranceAmount) || insuranceAmount < 0) {
+            Swal.fire('قيمة غير صحيحة', 'يرجى إدخال مبلغ تأمين صحيح لا يقل عن صفر.', 'warning');
+            return;
+          }
+          const res = await fetch(`${API_BASE_PATH}/api.php?module=users&action=updateRepresentativeInsurance`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: editingRep.id,
+              name: formData.name,
+              phone: formData.phone,
+              insurance_paid: insurancePaid ? 1 : 0,
+              insurance_amount: insuranceAmount
+            })
+          });
           const raw = await res.text();
           let js: any = null;
           try { js = JSON.parse(raw); } catch (e) { console.error('Save rep raw response (update):', raw); Swal.fire('خطأ في الخادم', raw.substring(0, 1000), 'error'); return; }
@@ -870,6 +886,9 @@ const RepresentativesModule: React.FC<RepresentativesModuleProps> = ({ initialVi
 
   const openSettle = async (rep: any) => {
     if (!rep) return;
+    if (!canAccessInsuranceTreasury) {
+      return Swal.fire('غير مصرح', 'تسوية حساب المندوب متاحة فقط للمستخدم الذي لديه صلاحية الوصول إلى خزينة تأمين المناديب.', 'warning');
+    }
 
     const repId = Number(rep.id);
     const repName = rep.name || `مندوب ${repId}`;
@@ -2214,6 +2233,9 @@ ${productsSummaryHtml}
   };
 
   const handleSettleRepAccount = async () => {
+    if (!canAccessInsuranceTreasury) {
+      return Swal.fire('غير مصرح', 'تسوية حساب المندوب متاحة فقط للمستخدم الذي لديه صلاحية الوصول إلى خزينة تأمين المناديب.', 'warning');
+    }
     if (!selectedRepId) return Swal.fire('اختر مندوب', 'يرجى اختيار مندوب أولاً.', 'warning');
 
     const currentBalance = Number(repCashBalance || 0);
@@ -2728,7 +2750,7 @@ ${productsSummaryHtml}
                           >
                             <Trash2 size={16} />
                           </button>
-                          <button onClick={() => openSettle(rep)} className="p-2 text-muted hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-xl transition-all" title="تسوية"><Wallet size={16} /></button>
+                          <button onClick={() => openSettle(rep)} disabled={!canAccessInsuranceTreasury} className={`p-2 rounded-xl transition-all ${canAccessInsuranceTreasury ? 'text-muted hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20' : 'cursor-not-allowed opacity-40 text-muted'}`} title={canAccessInsuranceTreasury ? 'تسوية' : 'تتطلب صلاحية الوصول إلى خزينة تأمين المناديب'}><Wallet size={16} /></button>
                           <button onClick={() => handleOpenModal(rep)} className="p-2 text-muted hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded-xl transition-all" title="تعديل"><Edit size={16} /></button>
                         </div>
                       </td>
@@ -3345,13 +3367,17 @@ ${productsSummaryHtml}
                 <input type="text" value={formData.phone} onChange={e => setFormData({ ...formData, phone: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm" />
               </div>
               <div className="space-y-1 flex items-center">
-                <input id="insurance_paid" type="checkbox" disabled={!!editingRep} checked={formData.insurance_paid} onChange={e => setFormData({ ...formData, insurance_paid: e.target.checked })} className="mr-2" />
+                <input id="insurance_paid" type="checkbox" disabled={!!editingRep && !canAccessInsuranceTreasury} checked={formData.insurance_paid} onChange={e => setFormData({ ...formData, insurance_paid: e.target.checked, insurance_amount: e.target.checked ? formData.insurance_amount : '' })} className="mr-2" />
                 <label htmlFor="insurance_paid" className="text-xs font-bold text-muted">دفع تأمين</label>
               </div>
+              {editingRep && !canAccessInsuranceTreasury && (
+                <p className="text-[11px] text-rose-600 mr-2">لا يمكن تعديل التأمين دون صلاحية الوصول إلى خزينة تأمين المناديب.</p>
+              )}
               {formData.insurance_paid && (
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-muted mr-2">مبلغ التأمين المدفوع</label>
-                  <input type="number" min="0" disabled={!!editingRep} required={!editingRep} value={formData.insurance_amount} onChange={e => setFormData({ ...formData, insurance_amount: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm" />
+                  <input type="number" min="0" step="0.01" disabled={!!editingRep && !canAccessInsuranceTreasury} required value={formData.insurance_amount} onChange={e => setFormData({ ...formData, insurance_amount: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm" />
+                  {editingRep && <p className="text-[11px] text-muted mr-2">سيُسجل فرق المبلغ في خزينة تأمين المناديب.</p>}
                 </div>
               )}
               <button type="submit" className="w-full bg-accent text-white py-4 rounded-2xl font-black shadow-xl shadow-blue-500/30 hover:bg-blue-700 transition-all flex items-center justify-center gap-2">

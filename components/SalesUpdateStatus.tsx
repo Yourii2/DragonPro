@@ -851,12 +851,16 @@ const SalesUpdateStatus: React.FC = () => {
       }
 
       if (data.order && openRepOrders && Array.isArray(openRepOrders.orders)) {
-        const updated = data.order;
+        const updated = normalizeOrdersForReturnsView([data.order])[0] || data.order;
         setOpenRepOrders((prev: any) => {
           if (!prev) return prev;
+          const existingIndex = (prev.orders || []).findIndex((o: any) => String(o.id) === String(updated.id));
+          const orders = existingIndex >= 0
+            ? prev.orders.map((o: any, index: number) => index === existingIndex ? { ...o, ...updated } : o)
+            : [updated, ...(prev.orders || [])];
           return {
             ...prev,
-            orders: (prev.orders || []).filter((o: any) => String(o.id) !== String(updated.id))
+            orders
           };
         });
       }
@@ -884,11 +888,12 @@ const SalesUpdateStatus: React.FC = () => {
           : `0 ج.م (متكافئ)`;
 
       Swal.fire({
-        title: 'تم تسجيل الاستبدال واستلام المرتجع بالمخزن',
+        title: 'تم تسجيل الاستبدال بنجاح',
         html: `<div style="text-align: right; direction: rtl; font-size: 13px; line-height: 1.8;">
-          <div><b>المسلَّم للعميل (الصنف الجديد):</b> ${exchangeOldItem.name} (${exchangeOldItem.exchangeQty} قطعة - ${exchangeDeliveredTotal.toLocaleString()} ج.م)</div>
-          <div><b>المرتجع للمخزن (الصنف القديم):</b> ${selectedNewVariant.parent_name || selectedNewVariant.name} (${selectedNewVariant.color || ''} ${selectedNewVariant.size || ''}) - ${exchangeReturnedTotal.toLocaleString()} ج.م</div>
+          <div><b>الصنف المستبدل:</b> ${exchangeOldItem.name} (${exchangeOldItem.exchangeQty} قطعة)</div>
+          <div><b>الصنف البديل الجديد:</b> ${selectedNewVariant.parent_name || selectedNewVariant.name} (${selectedNewVariant.color || ''} ${selectedNewVariant.size || ''})</div>
           <div><b>فرق السعر:</b> <span style="font-weight:bold; color:${exchangePriceDiff >= 0 ? '#059669' : '#2563eb'}">${diffText}</span></div>
+          <div style="margin-top: 8px; color: #4b5563; font-size: 12px;">الأوردر الآن في عهدة المندوب بالإجمالي الجديد ليتم تحديد حالته في صفحة إغلاق اليومية.</div>
         </div>`,
         icon: 'success',
         confirmButtonText: 'حسناً'
@@ -1705,12 +1710,12 @@ const SalesUpdateStatus: React.FC = () => {
                         <div className="flex justify-between items-center">
                           <div className="flex items-center gap-2">
                             <span className="font-bold text-slate-800">#{o.orderNumber || o.order_number} — {o.customerName || o.customer_name}</span>
-                            {String(o.status || '').toLowerCase() === 'returned_with_rep' && (
+                            {['returned_with_rep', 'partial_return', 'partial'].includes(String(o.status || o.order_status || '').toLowerCase()) && (
                               <span className="text-[10px] font-bold bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full border border-orange-200">
-                                مرتجع جزئي مع المندوب
+                                {String(o.status || o.order_status || '').toLowerCase() === 'returned_with_rep' ? 'مرتجع جزئي مع المندوب' : 'مرتجع جزئي'}
                               </span>
                             )}
-                            {String(o.status || '').toLowerCase() === 'exchange' && (
+                            {(String(o.status || o.order_status || '').toLowerCase() === 'exchange' || Boolean(o.was_exchanged) || String(o.notes || '').includes('استبدال')) && (
                               <span className="text-[10px] font-bold bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full border border-purple-200">
                                 استبدال
                               </span>
@@ -1935,7 +1940,7 @@ const SalesUpdateStatus: React.FC = () => {
                   {/* Warehouse Selector Banner */}
                   <div className="py-2.5 px-3 bg-amber-50/70 dark:bg-amber-950/20 border-b border-amber-200 dark:border-amber-900/40 flex flex-wrap items-center justify-between gap-3 text-xs">
                     <div className="flex items-center gap-2 flex-1 min-w-[260px]">
-                      <span className="font-bold text-amber-900 dark:text-amber-200 whitespace-nowrap">مستودع استلام الصنف المرتجع (مطلوب):</span>
+                      <span className="font-bold text-amber-900 dark:text-amber-200 whitespace-nowrap">المستودع (كتالوج الأصناف):</span>
                       <div className="w-64">
                         <CustomSelect
                           value={exchangeWarehouse ? String(exchangeWarehouse) : ''}
@@ -1949,23 +1954,23 @@ const SalesUpdateStatus: React.FC = () => {
                       </div>
                     </div>
                     <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                      * يدخل المنتج المرتجع من العميل إلى هذا المستودع وتُسجل حركته تلقائياً.
+                      * يتم استبدال الصنف في الطلب وتحديث إجماليه مع بقائه في عهدة المندوب لحين إغلاق اليومية.
                     </div>
                   </div>
 
                   {/* Modal Body - 2 Columns */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-1 overflow-y-auto flex-1 custom-scrollbar my-3">
                     
-                    {/* Column 1: Delivered Item Selection */}
+                    {/* Column 1: Item to Exchange */}
                     <div className="border border-slate-200 dark:border-slate-800 rounded-xl p-3 flex flex-col bg-slate-50/50 dark:bg-slate-900/30">
                       <div className="flex justify-between items-center mb-2.5">
                         <span className="font-black text-xs text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                           <span className="w-5 h-5 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-[11px]">1</span>
-                          <span>المنتج المُسلَّم للعميل (المطلوب في هذا الطلب):</span>
+                          <span>الصنف المراد استبداله من الطلب:</span>
                         </span>
                         {exchangeOldItem && (
                           <span className="text-[11px] font-bold text-amber-600 bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 rounded-full">
-                            محدد للتسليم
+                            محدد للاستبدال
                           </span>
                         )}
                       </div>
@@ -2040,12 +2045,12 @@ const SalesUpdateStatus: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Column 2: Returned Item Selection */}
+                    {/* Column 2: New Replacement Item Selection */}
                     <div className="border border-slate-200 dark:border-slate-800 rounded-xl p-3 flex flex-col bg-slate-50/50 dark:bg-slate-900/30">
                       <div className="flex justify-between items-center mb-2.5">
                         <span className="font-black text-xs text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                           <span className="w-5 h-5 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-[11px]">2</span>
-                          <span>المنتج المرتجع المستلم من العميل (يدخل المخزن):</span>
+                          <span>الصنف البديل الجديد:</span>
                         </span>
                       </div>
 
@@ -2378,7 +2383,7 @@ const SalesUpdateStatus: React.FC = () => {
                           className="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-black rounded-xl shadow-md transition-all flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           {exchangeSubmitting ? <Loader2 size={14} className="animate-spin" /> : <ArrowLeftRight size={14} />}
-                          <span>{exchangeSubmitting ? 'جاري الاستبدال...' : 'تأكيد الاستبدال واستلام المرتجع'}</span>
+                          <span>{exchangeSubmitting ? 'جاري الاستبدال...' : 'تأكيد استبدال الصنف'}</span>
                         </button>
                       </div>
                     </div>
@@ -2395,4 +2400,3 @@ const SalesUpdateStatus: React.FC = () => {
 };
 
 export default SalesUpdateStatus;
-

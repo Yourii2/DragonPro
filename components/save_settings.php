@@ -111,6 +111,8 @@ try {
         'delivery_method' => $input['delivery_method'] ?? 'reps',
         // New setting: purchase price type used in receiving & returns ('full_cost' | 'vendor_price')
         'purchase_price_type' => $input['purchase_price_type'] ?? 'full_cost',
+        // New setting: product cost calculation method ('vendor_cost' | 'predefined_cost')
+        'product_cost_method' => $input['product_cost_method'] ?? 'vendor_cost',
         'currency' => $input['currency'] ?? 'EGP',
         'auto_backup' => $input['auto_backup'] ?? 'false',
         'backup_frequency' => $input['backup_frequency'] ?? 'daily',

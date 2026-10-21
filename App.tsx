@@ -30,7 +30,7 @@ import ReportRepCustody from './components/ReportRepCustody';
 import ReportRepPerformance from './components/ReportRepPerformance';
 import WorkersModule from './components/WorkersModule';
 import BarcodePrintPage from './components/BarcodePrintPage';
-import { API_BASE_PATH, testConnection } from './services/apiConfig';
+import { API_BASE_PATH } from './services/apiConfig';
 import Swal from 'sweetalert2';
 import { useTheme } from './components/ThemeContext';
 import TrialExpiredPage from './components/TrialExpiredPage';

@@ -1450,13 +1450,17 @@ const SalesDaily: React.FC = () => {
         const id = Number(o.id || o.order_id || 0);
         if (!id) return;
         seen.add(id);
-        sessionPayload.orders_data.push({ id, order_number: o.orderNumber ?? o.order_number ?? id, customer_name: o.customerName ?? o.customer_name ?? '', type: 'old', pieces: orderPieces(o), value: orderSubtotal(o) });
+        const sub = orderSubtotal(o);
+        const ship = parseNumeric(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0);
+        sessionPayload.orders_data.push({ id, order_number: o.orderNumber ?? o.order_number ?? id, customer_name: o.customerName ?? o.customer_name ?? '', type: 'old', pieces: orderPieces(o), value: sub, shipping: ship, total: sub + ship });
       });
       (ordersParam || []).forEach((o: any) => {
         const id = Number(o.id || o.order_id || 0);
         if (!id) return;
         if (seen.has(id)) return;
-        sessionPayload.orders_data.push({ id, order_number: o.orderNumber ?? o.order_number ?? id, customer_name: o.customerName ?? o.customer_name ?? '', type: 'today', pieces: orderPieces(o), value: orderSubtotal(o) });
+        const sub = orderSubtotal(o);
+        const ship = parseNumeric(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0);
+        sessionPayload.orders_data.push({ id, order_number: o.orderNumber ?? o.order_number ?? id, customer_name: o.customerName ?? o.customer_name ?? '', type: 'today', pieces: orderPieces(o), value: sub, shipping: ship, total: sub + ship });
       });
 
       try {
@@ -1494,36 +1498,41 @@ const SalesDaily: React.FC = () => {
             <div style="border:1px solid #ddd; padding:10px; border-radius:8px; background:#fff">
               <div style="font-weight:800; margin-bottom:8px;">الأرصدة القديمة</div>
               <div>قيمه الاوردرات القديمه: <b>${localOldOrdersValue.toLocaleString()} ج.م</b></div>
-              <div style="margin-top:6px">الرصيد السابق (دين/رصيد): <b>${balanceLabel(prevBal)} ${Math.abs(prevBal).toLocaleString()} ج.م</b></div>
-              <div style="margin-top:6px">اجمالي الاوردرات القديمه: <b>${localOldOrdersCount}</b></div>
-              <div style="margin-top:4px">منتجات مميزة: <b>${localOldDistinct}</b></div>
-              <div style="margin-top:4px">قطع قديمة: <b>${localOldPiecesCount.toLocaleString()}</b></div>
+              <div>الرصيد السابق (دين/رصيد): <b>${balanceLabel(prevBal)} ${Math.abs(prevBal).toLocaleString()} ج.م</b></div>
+              <div>اجمالي الاوردرات القديمه: <b>${localOldOrdersCount}</b></div>
+              <div>منتجات مميزة: <b>${localOldDistinct}</b></div>
+              <div>قطع قديمة: <b>${localOldPiecesCount.toLocaleString()}</b></div>
+              ${localOldShipping > 0 ? `<div>مصاريف شحن قديمة: <b>${localOldShipping.toLocaleString()} ج.م</b></div>` : ''}
             </div>
             <div style="border:1px solid #ddd; padding:10px; border-radius:8px; background:#fff">
               <div style="font-weight:800; margin-bottom:8px;">تسليم اليوم (المحدد الآن)</div>
-                <div>قيمة اوردرات اليوم: <b>${sumValue.toLocaleString()} ج.م</b></div>
-                  <div style="margin-top:6px">عدد اوردرات اليوم: <b>${ordersParam.length}</b></div>
-              <div style="margin-top:6px">عدد قطع اليوم: <b>${localTodayPieces}</b></div>
-              <div style="margin-top:4px">منتجات مميزة: <b>${localTodayDistinct}</b></div>
+              <div>قيمة اوردرات اليوم: <b>${sumValue.toLocaleString()} ج.م</b></div>
+              <div>مصاريف الشحن: <b>${localTodayShipping.toLocaleString()} ج.م</b></div>
+              <div>الإجمالي شامل الشحن: <b>${(sumValue + localTodayShipping).toLocaleString()} ج.م</b></div>
+              <div>عدد اوردرات اليوم: <b>${ordersParam.length}</b></div>
+              <div>عدد قطع اليوم: <b>${localTodayPieces}</b></div>
+              <div>منتجات مميزة: <b>${localTodayDistinct}</b></div>
             </div>
             <div style="border:1px solid #ddd; padding:10px; border-radius:8px; background:#fff">
               <div style="font-weight:800; margin-bottom:8px;">الإجماليات</div>
               <div>اجمالي الاوردرات: <b>${(localOldOrdersValue + sumValue).toLocaleString()} ج.م</b></div>
-              <div style="margin-top:6px">في عهدة: ${localOldOrdersValue.toLocaleString()} + اليوم: ${sumValue.toLocaleString()}</div>
-              <div style="margin-top:6px">الدين النهائي (قديم + اليوم): <b>${balanceLabel(finalBalBeforePay)} ${Math.abs(finalBalBeforePay).toLocaleString()} ج.م</b></div>
-              <div style="margin-top:6px">إجمالي الاوردرات: <b>${localTotalOrdersCount}</b> (قديم ${localOldOrdersCount} + اليوم ${orders.length})</div>
-              <div style="margin-top:6px">إجمالي القطع: <b>${localTotalPieces.toLocaleString()}</b> (قديم ${localOldPiecesCount.toLocaleString()} + اليوم ${localTodayPieces})</div>
+              <div>إجمالي الشحن: <b>${localTotalShipping.toLocaleString()} ج.م</b></div>
+              <div>الإجمالي شامل الشحن: <b>${(localOldOrdersValue + sumValue + localTotalShipping).toLocaleString()} ج.م</b></div>
+              <div>في عهدة: ${localOldOrdersValue.toLocaleString()} + اليوم: ${sumValue.toLocaleString()}</div>
+              <div>الدين النهائي (قديم + اليوم): <b>${balanceLabel(finalBalBeforePay)} ${Math.abs(finalBalBeforePay).toLocaleString()} ج.م</b></div>
+              <div>إجمالي الاوردرات: <b>${localTotalOrdersCount}</b> (قديم ${localOldOrdersCount} + اليوم ${orders.length})</div>
+              <div>إجمالي القطع: <b>${localTotalPieces.toLocaleString()}</b> (قديم ${localOldPiecesCount.toLocaleString()} + اليوم ${localTodayPieces})</div>
             </div>
           </div>
           <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:12px; margin-top:12px;">
             <div style="border:1px solid #ddd; padding:10px; border-radius:8px; background:#eefbf1">
               <div style="font-weight:800; margin-bottom:6px;">المبلغ المدفوع الآن</div>
               <div>النوع: <b>${paymentAction === 'collect' ? 'تحصيل من المندوب' : 'دفع إلى المندوب'}</b></div>
-              <div style="margin-top:6px">المبلغ الآن: <b>${Math.abs(paymentAdjustment).toLocaleString()} ج.م</b></div>
+              <div>المبلغ الآن: <b>${Math.abs(paymentAdjustment).toLocaleString()} ج.م</b></div>
               <div style="margin-top:6px; color:${paymentAction === 'collect' ? '#059669' : '#be123c'}">${paymentAction === 'collect' ? 'تحصيل — يقلل مديونية المندوب' : 'دفع — يزيد مديونية المندوب'}</div>
             </div>
             <div style="border:1px solid #ddd; padding:10px; border-radius:8px; background:#fff5f6">
-              <div style="font-weight:800; margin-bottom:6px;"الباقي بعد الدفع</div>
+              <div style="font-weight:800; margin-bottom:6px;">الباقي بعد الدفع</div>
               <div style="font-size:20px; font-weight:800;">${Math.abs(afterPay).toLocaleString()} ${balanceLabel(afterPay)} ج.م</div>
               <div style="margin-top:6px">الرصيد بعد الدفع: ${Math.abs(afterPay).toLocaleString()} (${balanceLabel(afterPay)})</div>
             </div>
@@ -1531,11 +1540,12 @@ const SalesDaily: React.FC = () => {
         : '') +
       `<table><thead><tr>
           <th>رقم اوردر</th><th>اسم العميل</th><th>الهاتف</th><th>المحافظة</th><th>العنوان</th>
-          <th>الموظف</th><th>البيدج</th><th>قيمة الأوردر</th><th>ملاحظات</th>
+          <th>الموظف</th><th>البيدج</th><th>قيمة الأوردر</th><th>مصاريف الشحن</th><th>الإجمالي شامل الشحن</th><th>ملاحظات</th>
         </tr></thead><tbody>` +
       ordersParam
         .map((o: any) => {
           const sub = orderSubtotal(o);
+          const ship = parseNumeric(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0);
           return `<tr>
             <td>${o.orderNumber ?? o.order_number ?? o.id ?? ''}</td>
             <td>${o.customerName ?? o.customer_name ?? ''}</td>
@@ -1544,7 +1554,9 @@ const SalesDaily: React.FC = () => {
             <td>${o.address ?? ''}</td>
             <td>${o.employee ?? ''}</td>
             <td>${o.page ?? ''}</td>
-            <td>${sub.toLocaleString()}</td>
+            <td style="font-weight:700;">${sub.toLocaleString()}</td>
+            <td style="font-weight:700; color:#0369a1;">${ship.toLocaleString()}</td>
+            <td style="font-weight:800;">${(sub + ship).toLocaleString()}</td>
             <td>${o.notes ?? ''}</td>
           </tr>`;
         })
@@ -1612,11 +1624,14 @@ const SalesDaily: React.FC = () => {
               <div>قيمة اوردرات قديمة: <b>${localOldOrdersValue.toLocaleString()} ج.م</b></div>
               <div>المستحق: <b>${balanceLabel(prevBal)} ${Math.abs(prevBal).toLocaleString()} ج.م</b></div>
               <div>الاوردرات: <b>${localOldOrdersCount}</b> • قطع: <b>${localOldPiecesCount.toLocaleString()}</b></div>
+              ${localOldShipping > 0 ? `<div>مصاريف شحن قديمة: <b>${localOldShipping.toLocaleString()} ج.م</b></div>` : ''}
             </div>
 
             <div style="flex:1; padding:6px; border:1px solid #ddd; border-radius:6px">
               <div style="font-weight:700;">تسليم اليوم (المحدد الآن)</div>
               <div>قيمة اوردرات اليوم: <b>${sumValue.toLocaleString()} ج.م</b></div>
+              <div>مصاريف الشحن: <b>${localTodayShipping.toLocaleString()} ج.م</b></div>
+              <div>الإجمالي شامل الشحن: <b>${(sumValue + localTodayShipping).toLocaleString()} ج.م</b></div>
               <div>عدد اوردرات: <b>${ordersParam.length}</b> • قطع: <b>${localTodayPieces}</b></div>
             </div>
 
@@ -1634,10 +1649,12 @@ const SalesDaily: React.FC = () => {
       </div>` +
       `<table><thead><tr>
           <th>رقم اوردر</th><th>اسم العميل</th><th>الهاتف</th><th>المحافظة</th><th>العنوان</th>
-          <th>الموظف</th><th>البيدج</th><th>قيمة الأوردر</th><th>ملاحظات</th>
+          <th>الموظف</th><th>البيدج</th><th>قيمة الأوردر</th><th>مصاريف الشحن</th><th>الإجمالي شامل الشحن</th><th>ملاحظات</th>
         </tr></thead><tbody>` +
       ordersParam.map((o: any) => {
         const sub = orderSubtotal(o);
+        const ship = parseNumeric(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0);
+        const totalWithShip = sub + ship;
         const emp = o.employee ?? o.employee_name ?? o.assigneeName ?? o.assigned_to ?? (o.assigned && (o.assigned.name || o.assigned.employee)) ?? '';
         const pg = o.page ?? o.page_number ?? o.page_no ?? o.pageNumber ?? o.package_page ?? '';
         return `<tr>
@@ -1648,11 +1665,23 @@ const SalesDaily: React.FC = () => {
             <td>${o.address ?? ''}</td>
             <td>${emp}</td>
             <td>${pg}</td>
-            <td>${sub.toLocaleString()}</td>
+            <td style="font-weight:700;">${sub.toLocaleString()}</td>
+            <td style="font-weight:700; color:#0369a1;">${ship.toLocaleString()}</td>
+            <td style="font-weight:800;">${totalWithShip.toLocaleString()}</td>
             <td>${o.notes ?? ''}</td>
           </tr>`;
       }).join('') +
-      `</tbody></table>`;
+      `</tbody>
+      <tfoot>
+        <tr style="background:#f1f5f9; font-weight:800;">
+          <td colspan="7" style="text-align:center;">الإجمالي (${ordersParam.length} أوردر)</td>
+          <td>${sumValue.toLocaleString()} ج.م</td>
+          <td style="color:#0369a1;">${localTodayShipping.toLocaleString()} ج.م</td>
+          <td>${(sumValue + localTodayShipping).toLocaleString()} ج.م</td>
+          <td></td>
+        </tr>
+      </tfoot>
+      </table>`;
 
     // Build an "اوردرات نزول" table for assigned (old) orders, show if any
     const oldOrdersList = Array.isArray(assignedOrders) ? assignedOrders : [];
@@ -1678,6 +1707,8 @@ const SalesDaily: React.FC = () => {
     if (oldOrdersList.length > 0) {
       const oldRows = oldOrdersList.map((o: any) => {
         const sub = orderSubtotal(o);
+        const ship = parseNumeric(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0);
+        const totalWithShip = sub + ship;
         const emp = o.employee ?? o.employee_name ?? o.assigneeName ?? o.assigned_to ?? (o.assigned && (o.assigned.name || o.assigned.employee)) ?? '';
         const pg = o.page ?? o.page_number ?? o.page_no ?? o.pageNumber ?? o.package_page ?? '';
         // تاريخ إضافة الأوردر للمندوب/اليومية فقط (لا يُستخدم تاريخ إنشاء الأوردر)
@@ -1695,7 +1726,9 @@ const SalesDaily: React.FC = () => {
             <td>${o.address ?? ''}</td>
             <td>${emp}</td>
             <td>${pg}</td>
-            <td>${sub.toLocaleString()}</td>
+            <td style="font-weight:700;">${sub.toLocaleString()}</td>
+            <td style="font-weight:700; color:#0369a1;">${ship.toLocaleString()}</td>
+            <td style="font-weight:800;">${totalWithShip.toLocaleString()}</td>
             <td style="text-align:center;">${assignDateFormatted}<br/>${lateBadge}</td>
             <td>${o.notes ?? ''}</td>
           </tr>`;
@@ -1707,10 +1740,19 @@ const SalesDaily: React.FC = () => {
         <table style="width:100%; border-collapse:collapse; margin-top:8px;">
           <thead><tr>
             <th>رقم اوردر</th><th>اسم العميل</th><th>الهاتف</th><th>المحافظة</th><th>العنوان</th>
-            <th>الموظف</th><th>البيدج</th><th>قيمة الأوردر</th>
+            <th>الموظف</th><th>البيدج</th><th>قيمة الأوردر</th><th>مصاريف الشحن</th><th>الإجمالي شامل الشحن</th>
             <th style="background:#fef2f2;">تاريخ التسليم للمندوب</th><th>ملاحظات</th>
           </tr></thead>
           <tbody>${oldRows}</tbody>
+          <tfoot>
+            <tr style="background:#f1f5f9; font-weight:800;">
+              <td colspan="7" style="text-align:center;">إجمالي القديم (${oldOrdersList.length} أوردر)</td>
+              <td>${localOldOrdersValue.toLocaleString()} ج.م</td>
+              <td style="color:#0369a1;">${localOldShipping.toLocaleString()} ج.م</td>
+              <td>${(localOldOrdersValue + localOldShipping).toLocaleString()} ج.م</td>
+              <td colspan="2"></td>
+            </tr>
+          </tfoot>
         </table>
       `;
     }
@@ -2522,6 +2564,8 @@ const SalesDaily: React.FC = () => {
                     { header: 'الموظف', key: 'employee', width: 20 },
                     { header: 'البيدج', key: 'page', width: 20 },
                     { header: 'قيمة الأوردر', key: 'subtotal', width: 15 },
+                    { header: 'مصاريف الشحن', key: 'shipping', width: 15 },
+                    { header: 'الإجمالي شامل الشحن', key: 'total', width: 18 },
                     { header: 'ملاحظات', key: 'notes', width: 30 }
                   ];
 
@@ -2534,6 +2578,8 @@ const SalesDaily: React.FC = () => {
 
                   // Add rows
                   todayOrdersUnique.forEach((o: any) => {
+                    const sub = orderSubtotal(o);
+                    const ship = parseNumeric(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0);
                     const row = worksheet.addRow({
                       orderNumber: o.orderNumber ?? o.order_number ?? o.id ?? '',
                       customerName: o.customerName ?? o.customer_name ?? '',
@@ -2542,7 +2588,9 @@ const SalesDaily: React.FC = () => {
                       address: o.address ?? '',
                       employee: o.employee ?? o.employee_name ?? o.assigneeName ?? o.assigned_to ?? (o.assigned && (o.assigned.name || o.assigned.employee)) ?? '',
                       page: o.page ?? o.page_number ?? o.page_no ?? o.pageNumber ?? o.package_page ?? '',
-                      subtotal: orderSubtotal(o),
+                      subtotal: sub,
+                      shipping: ship,
+                      total: sub + ship,
                       notes: o.notes ?? ''
                     });
 
@@ -2706,6 +2754,11 @@ const SalesDaily: React.FC = () => {
                       <div className="flex items-center gap-3">
                         <div className="text-right text-xs">
                           <div className="font-black text-base text-slate-800 dark:text-slate-100">قيمة الأوردر: {sub.toLocaleString()} ج.م</div>
+                          {ship > 0 && (
+                            <div className="text-[11px] text-blue-600 dark:text-blue-400 font-bold mt-0.5">
+                              + شحن: {ship.toLocaleString()} ج.م (الإجمالي: {(sub + ship).toLocaleString()} ج.م)
+                            </div>
+                          )}
                         </div>
                         <button onClick={() => { if (!startDailyUnlocked) { Swal.fire('حدد المندوب والخزينة والمستودع', 'الرجاء اختيار المندوب ثم الخزينة ثم المستودع لفتح هذه المنطقة', 'warning'); return; } removeSelectedOrder(Number(o.id)); }} className="text-rose-600 p-2 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-900/10 transition-colors"><Trash2 /></button>
                       </div>
@@ -2776,8 +2829,14 @@ const SalesDaily: React.FC = () => {
                       {/* Footer */}
                       <div className="flex items-center justify-between p-4 border-t border-slate-100 bg-slate-50/50 rounded-b-3xl">
                         <div className="flex flex-col">
-                          <span className="text-[10px] text-slate-400 font-bold">قيمة الأوردر</span>
-                          <span className="font-black text-lg text-slate-800">{tot.toLocaleString()} ج.م</span>
+                          <span className="text-[10px] text-slate-400 font-bold">قيمة الأوردر: {orderSubtotal(o).toLocaleString()} ج.م</span>
+                          {parseNumeric(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0) > 0 ? (
+                            <span className="font-bold text-xs text-blue-600 dark:text-blue-400">
+                              + شحن: {parseNumeric(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0).toLocaleString()} ج.م (الإجمالي: {(orderSubtotal(o) + parseNumeric(o.shipping ?? o.shipping_fees ?? o.shippingCost ?? 0)).toLocaleString()} ج.م)
+                            </span>
+                          ) : (
+                            <span className="font-black text-lg text-slate-800">{tot.toLocaleString()} ج.م</span>
+                          )}
                         </div>
                         <div className="flex gap-2">
                           <button

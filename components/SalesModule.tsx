@@ -1248,10 +1248,9 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
         });
         const jr = await resp.json();
         if (jr.success) {
+          const newId = (jr.created && jr.created[0]) ? Number(jr.created[0].order_id || jr.created[0].id) : undefined;
+          await refreshOrdersList(newId ? [newId] : undefined);
           Swal.fire('تم الحفظ', 'تم إنشاء الاوردر بنجاح.', 'success');
-          // refresh orders
-          const r = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll`);
-          const jr2 = await r.json(); if (jr2.success) setOrders(jr2.data || []);
           setView('manage-orders');
         } else {
           Swal.fire('فشل الحفظ', jr.message || 'فشل إنشاء الاوردر', 'error');
@@ -1329,7 +1328,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
             const startMatch = content.match(startRegex);
             if (!startMatch) return '';
             const startIndex = startMatch.index! + startMatch[0].length;
-            const terminatorRegex = /(?:^|\n)\s*(?:الإسم|الاسم|المحافظة|المحافظه|المنطقة|منطقة|محافظة|محافظه|العنوان|التليفون|تليفون|موبايل|الموبايل|الهاتف|عدد\s*القطع|تفاصيل\s*المنتج|تفاصيل\s*الطلب|تفاصيل\s*الاوردر|المنتجات|المنتج|السعر|سعر|الشحن|شحن|مصاريف\s*الشحن|الاجمالي|الإجمالي|الاجمالى|الموظف|موظف|مودريتور|البيدج|بيدج|الصفحة|صفحة|ملاحظات|ملاحظة|ملاحظه)\s*[:=]?/gi;
+            const terminatorRegex = /(?:^|\n)\s*(?:الإسم|الاسم|المحافظة|المحافظه|المنطقة|منطقة|محافظة|محافظه|العنوان|التليفون|تليفون|موبايل|الموبايل|الهاتف|رقم\s*الاوردر|رقم\s*الطلب|كود\s*الاوردر|كود\s*الطلب|كود|عدد\s*القطع|تفاصيل\s*المنتج|تفاصيل\s*الطلب|تفاصيل\s*الاوردر|المنتجات|المنتج|السعر|سعر|الشحن|شحن|مصاريف\s*الشحن|الاجمالي|الإجمالي|الاجمالى|الموظف|موظف|مودريتور|البيدج|بيدج|الصفحة|صفحة|ملاحظات|ملاحظة|ملاحظه)\s*[:=]?/gi;
             let endIndex = content.length;
             let m: RegExpExecArray | null;
             while ((m = terminatorRegex.exec(content)) !== null) {
@@ -1367,7 +1366,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
 
         const extractPhoneBlock = (content: string): string => {
           const phoneKeys = ['التليفون', 'تليفون', 'موبايل', 'الموبايل', 'الهاتف'];
-          const phoneTerminators = ['تفاصيل المنتج', 'تفاصيل الطلب', 'المنتجات', 'السعر:', 'الشحن:', 'الاجمالي:', 'الموظف:', 'البيدج:', 'ملاحظات:', 'ملاحظة:', 'الإسم:', 'الاسم:', 'المحافظة:', 'العنوان:'];
+          const phoneTerminators = ['تفاصيل المنتج', 'تفاصيل الطلب', 'المنتجات', 'السعر:', 'الشحن:', 'الاجمالي:', 'الموظف:', 'البيدج:', 'ملاحظات:', 'ملاحظة:', 'الإسم:', 'الاسم:', 'المحافظة:', 'العنوان:', 'رقم الاوردر:', 'رقم الطلب:', 'كود الاوردر:', 'كود الطلب:', 'كود:'];
           for (const key of phoneKeys) {
             const startRe = new RegExp(`${key}\\s*:?\\s*`);
             const m = content.match(startRe);
@@ -1459,7 +1458,8 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
 
         const notes1 = extractField('ملاحظات', block, true) || extractField('ملاحظة', block, true) || extractField('ملاحظه', block, true);
         orderData.notes = notes1;
-        orderData.orderNumber = (maxId + index + 1).toString();
+        const extractedNum = extractField('رقم الاوردر', block) || extractField('رقم الطلب', block) || extractField('كود الاوردر', block) || extractField('كود الطلب', block) || extractField('كود', block);
+        orderData.orderNumber = extractedNum ? normalizeNumbers(extractedNum).replace(/^[#\s]+/, '').trim() : (maxId + index + 1).toString();
         orderData.rawBlock = block;
 
         return orderData;
@@ -1878,7 +1878,7 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
     }
   }, [ordersToPrint]);
 
-  const refreshOrdersList = async () => {
+  const refreshOrdersList = async (preferredSelectedIds?: number[]) => {
     try {
       const r = await fetch(`${API_BASE_PATH}/api.php?module=orders&action=getAll`);
       const jr = await r.json();
@@ -1927,15 +1927,22 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
             console.error('Auto-normalize failed', e);
           }
         })();
-        try {
-          const saved = JSON.parse(localStorage.getItem('OrdersModule_selectedOrders') || '[]');
-          if (Array.isArray(saved) && saved.length > 0) {
-            // restore only ids that still exist in fetched orders
-            const valid = saved.map((s: any) => Number(s)).filter((id: any) => fetched.find((o: any) => Number(o.id) === Number(id)));
-            if (valid.length > 0) setSelectedOrders(valid);
+        if (preferredSelectedIds && preferredSelectedIds.length > 0) {
+          setSelectedOrders(preferredSelectedIds);
+          try {
+            localStorage.setItem('OrdersModule_selectedOrders', JSON.stringify(preferredSelectedIds));
+          } catch (e) { }
+        } else {
+          try {
+            const saved = JSON.parse(localStorage.getItem('OrdersModule_selectedOrders') || '[]');
+            if (Array.isArray(saved) && saved.length > 0) {
+              // restore only ids that still exist in fetched orders
+              const valid = saved.map((s: any) => Number(s)).filter((id: any) => fetched.find((o: any) => Number(o.id) === Number(id)));
+              if (valid.length > 0) setSelectedOrders(valid);
+            }
+          } catch (e) {
+            // ignore JSON parse errors
           }
-        } catch (e) {
-          // ignore JSON parse errors
         }
       }
     } catch (e) {
@@ -2218,7 +2225,6 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                         { value: 'pending', label: 'قيد الانتظار' },
                         { value: 'confirmed', label: 'مؤكد' },
                         { value: 'with_rep', label: 'مع المندوب' },
-                        { value: 'returned_with_rep', label: 'مرتجع جزئي مع المندوب' },
                         { value: 'in_delivery', label: 'قيد التسليم' },
                         { value: 'delivered', label: 'تم التسليم' },
                         { value: 'partial', label: 'تسليم جزئي' },
@@ -2353,7 +2359,6 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                     { value: 'pending', label: 'قيد الانتظار' },
                     { value: 'confirmed', label: 'مؤكد' },
                     { value: 'with_rep', label: 'مع المندوب' },
-                    { value: 'returned_with_rep', label: 'مرتجع جزئي مع المندوب' },
                     { value: 'in_delivery', label: 'قيد التسليم' },
                     { value: 'delivered', label: 'تم التسليم' },
                     { value: 'partial', label: 'تسليم جزئي' },
@@ -2933,7 +2938,6 @@ const OrdersModule: React.FC<OrdersModuleProps> = ({ initialView }) => {
                   { value: 'pending', label: 'قيد الانتظار' },
                   { value: 'confirmed', label: 'مؤكد' },
                   { value: 'with_rep', label: 'مع المندوب' },
-                  { value: 'returned_with_rep', label: 'مرتجع جزئي مع المندوب' },
                   { value: 'in_delivery', label: 'قيد التسليم' },
                   { value: 'delivered', label: 'تم التسليم' },
                   { value: 'partial', label: 'تسليم جزئي' },

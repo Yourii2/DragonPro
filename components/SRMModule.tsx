@@ -347,7 +347,8 @@ const SRMModule: React.FC = () => {
                   items: itemsPayload,
                   paidAmount,
                   treasuryId,
-                  notes: receiveNotes
+                  notes: receiveNotes,
+                  productCostMethod: (localStorage.getItem('Dragon_product_cost_method') || 'vendor_cost').toString()
               })
           });
           const result = await response.json();
