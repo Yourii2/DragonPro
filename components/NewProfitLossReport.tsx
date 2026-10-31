@@ -32,6 +32,17 @@ import { API_BASE_PATH } from '../services/apiConfig';
 import { formatLocalDate, getFirstDayOfMonth, getDaysAgo } from '../services/dateUtils';
 import { useTheme } from './ThemeContext';
 
+interface ProductVariantItem {
+  variant_id: number;
+  color: string;
+  size: string;
+  custody_qty: number;
+  warehouse_qty: number;
+  total_qty: number;
+  cost_price: number;
+  total_cost: number;
+}
+
 interface CapitalProduct {
   product_id: number;
   product_name: string;
@@ -40,12 +51,20 @@ interface CapitalProduct {
   total_qty: number;
   cost_price: number;
   total_cost: number;
+  variants?: ProductVariantItem[];
   notes: string;
+}
+
+interface ExpenseCategoryItem {
+  category_name: string;
+  total_amount: number;
+  count: number;
 }
 
 interface ExpenseItem {
   id: number;
   name: string;
+  category?: string;
   amount: number;
   date: string;
   treasury_name?: string;
@@ -72,18 +91,30 @@ const NewProfitLossReport: React.FC = () => {
 
   // Raw data from API
   const [capitalProducts, setCapitalProducts] = useState<CapitalProduct[]>([]);
+  const [apiOpenDailiesTotal, setApiOpenDailiesTotal] = useState(0);
+  const [apiRepsDebtTotal, setApiRepsDebtTotal] = useState(0);
+  const [apiNetRepsDebt, setApiNetRepsDebt] = useState(0);
   const [apiRepsAdvance, setApiRepsAdvance] = useState(0);
   const [apiSuppliersBalance, setApiSuppliersBalance] = useState(0);
   const [apiCashInSafes, setApiCashInSafes] = useState(0);
+  const [apiPenalties, setApiPenalties] = useState(0);
+  const [apiBonuses, setApiBonuses] = useState(0);
 
   const [expensesList, setExpensesList] = useState<ExpenseItem[]>([]);
+  const [expenseCategories, setExpenseCategories] = useState<ExpenseCategoryItem[]>([]);
   const [soldProducts, setSoldProducts] = useState<ProfitLossProduct[]>([]);
+  const [showVariantDetails, setShowVariantDetails] = useState(false);
 
   // Manual Overrides / Interactive adjustments
   const [isManualOverride, setIsManualOverride] = useState(false);
+  const [customOpenDailiesTotal, setCustomOpenDailiesTotal] = useState<number | null>(null);
+  const [customRepsDebtTotal, setCustomRepsDebtTotal] = useState<number | null>(null);
+  const [customNetRepsDebt, setCustomNetRepsDebt] = useState<number | null>(null);
   const [customRepsAdvance, setCustomRepsAdvance] = useState<number | null>(null);
   const [customSuppliersBalance, setCustomSuppliersBalance] = useState<number | null>(null);
   const [customCashInSafes, setCustomCashInSafes] = useState<number | null>(null);
+  const [customPenalties, setCustomPenalties] = useState<number | null>(null);
+  const [customBonuses, setCustomBonuses] = useState<number | null>(null);
   const [customCostPrices, setCustomCostPrices] = useState<Record<number, number>>({});
 
   // View option: show only products with sales or all products in P&L
@@ -106,11 +137,23 @@ const NewProfitLossReport: React.FC = () => {
         const pl = json.data.profit_loss || {};
 
         setCapitalProducts(cap.products || []);
-        setApiRepsAdvance(Number(cap.reps_advance || 0));
+        const openD = Number(cap.open_dailies_total || 0);
+        const debtD = Number(cap.reps_debt_total || 0);
+        const netD = cap.net_reps_debt !== undefined ? Number(cap.net_reps_debt) : (openD - debtD);
+        setApiOpenDailiesTotal(openD);
+        setApiRepsDebtTotal(debtD);
+        setApiNetRepsDebt(netD);
+        setApiRepsAdvance(Number(cap.reps_advance ?? netD));
         setApiSuppliersBalance(Number(cap.suppliers_balance || 0));
         setApiCashInSafes(Number(cap.cash_in_safes || 0));
 
+        const pen = Number(pl.total_penalties || 0);
+        const bon = Number(pl.total_bonuses || 0);
+        setApiPenalties(pen);
+        setApiBonuses(bon);
+
         setExpensesList(exp.rows || []);
+        setExpenseCategories(exp.categories || []);
         setSoldProducts(pl.products || []);
       } else {
         Swal.fire('تنبيه', json.message || 'لم يتم العثور على بيانات لهذه الفترة.', 'info');
@@ -129,9 +172,14 @@ const NewProfitLossReport: React.FC = () => {
 
   // Reset custom overrides
   const resetOverrides = () => {
+    setCustomOpenDailiesTotal(null);
+    setCustomRepsDebtTotal(null);
+    setCustomNetRepsDebt(null);
     setCustomRepsAdvance(null);
     setCustomSuppliersBalance(null);
     setCustomCashInSafes(null);
+    setCustomPenalties(null);
+    setCustomBonuses(null);
     setCustomCostPrices({});
     Swal.fire({
       icon: 'success',
@@ -199,7 +247,12 @@ const NewProfitLossReport: React.FC = () => {
       };
     });
 
-    const repsAdv = customRepsAdvance !== null ? customRepsAdvance : apiRepsAdvance;
+    const openDailies = customOpenDailiesTotal !== null ? customOpenDailiesTotal : apiOpenDailiesTotal;
+    const repsDebt = customRepsDebtTotal !== null ? customRepsDebtTotal : apiRepsDebtTotal;
+    const netRepsDebt = customNetRepsDebt !== null 
+      ? customNetRepsDebt 
+      : (customRepsAdvance !== null ? customRepsAdvance : (openDailies - repsDebt));
+    const repsAdv = netRepsDebt;
     const supBal = customSuppliersBalance !== null ? customSuppliersBalance : apiSuppliersBalance;
     const safesBal = customCashInSafes !== null ? customCashInSafes : apiCashInSafes;
 
@@ -212,22 +265,42 @@ const NewProfitLossReport: React.FC = () => {
       totWarehouse,
       totQty,
       totCost,
+      openDailies,
+      repsDebt,
+      netRepsDebt,
       repsAdv,
       supBal,
       netInventory,
       safesBal,
       netCapital
     };
-  }, [capitalProducts, customCostPrices, customRepsAdvance, customSuppliersBalance, customCashInSafes, apiRepsAdvance, apiSuppliersBalance, apiCashInSafes]);
+  }, [capitalProducts, customCostPrices, customOpenDailiesTotal, customRepsDebtTotal, customNetRepsDebt, customRepsAdvance, customSuppliersBalance, customCashInSafes, apiOpenDailiesTotal, apiRepsDebtTotal, apiNetRepsDebt, apiRepsAdvance, apiSuppliersBalance, apiCashInSafes]);
 
   // 2. Processed Expenses
   const processedExpenses = useMemo(() => {
-    const total = expensesList.reduce((acc, curr) => acc + Number(curr.amount || 0), 0);
+    let catList = expenseCategories;
+    if (!catList || catList.length === 0) {
+      const map = new Map<string, { total: number; count: number }>();
+      expensesList.forEach(e => {
+        const cat = e.category || e.name || 'مصروفات عامة';
+        const curr = map.get(cat) || { total: 0, count: 0 };
+        curr.total += Number(e.amount || 0);
+        curr.count += 1;
+        map.set(cat, curr);
+      });
+      catList = Array.from(map.entries()).map(([k, v]) => ({
+        category_name: k,
+        total_amount: v.total,
+        count: v.count
+      }));
+    }
+    const total = catList.reduce((acc, curr) => acc + Number(curr.total_amount || 0), 0);
     return {
+      categories: catList,
       rows: expensesList,
       total
     };
-  }, [expensesList]);
+  }, [expenseCategories, expensesList]);
 
   // 3. Processed Profit & Loss Products
   const processedProfitLoss = useMemo(() => {
@@ -294,7 +367,9 @@ const NewProfitLossReport: React.FC = () => {
     const totProductProfit = combinedRows.reduce((a, b) => a + Number(b.product_profit || 0), 0);
 
     const expensesTotal = processedExpenses.total;
-    const netCompanyProfit = totProductProfit - expensesTotal;
+    const penalties = customPenalties !== null ? customPenalties : apiPenalties;
+    const bonuses = customBonuses !== null ? customBonuses : apiBonuses;
+    const netCompanyProfit = totProductProfit - expensesTotal + penalties - bonuses;
 
     return {
       rows: combinedRows,
@@ -302,9 +377,11 @@ const NewProfitLossReport: React.FC = () => {
       totRevenue,
       totProductProfit,
       expensesTotal,
+      penalties,
+      bonuses,
       netCompanyProfit
     };
-  }, [capitalProducts, soldProducts, customCostPrices, showSoldOnly, processedExpenses.total]);
+  }, [capitalProducts, soldProducts, customCostPrices, showSoldOnly, processedExpenses.total, customPenalties, apiPenalties, customBonuses, apiBonuses]);
 
   // Number Formatter
   const fmt = (n: number) => {
@@ -393,22 +470,22 @@ const NewProfitLossReport: React.FC = () => {
       });
 
       const expH1 = ws.getCell('I2');
-      expH1.value = 'اسم الصنف';
+      expH1.value = 'التصنيف';
       styleCell(expH1, C_HEADER_FILL, C_HEADER_TEXT, true);
 
       const expH2 = ws.getCell('J2');
       expH2.value = 'المبلغ ';
       styleCell(expH2, C_HEADER_FILL, C_HEADER_TEXT, true);
 
-      // ── EXPENSES ROWS (Columns I & J) ──
+      // ── EXPENSES ROWS (Columns I & J: Grouped by Category) ──
       let expRow = 3;
-      processedExpenses.rows.forEach(exp => {
+      processedExpenses.categories.forEach(cat => {
         const ci = ws.getCell(`I${expRow}`);
-        ci.value = exp.name;
+        ci.value = cat.category_name;
         styleCell(ci, null, 'FF000000', false);
 
         const cj = ws.getCell(`J${expRow}`);
-        cj.value = exp.amount;
+        cj.value = cat.total_amount;
         styleCell(cj, null, 'FF000000', false, '#,##0.00');
         expRow++;
       });
@@ -462,13 +539,33 @@ const NewProfitLossReport: React.FC = () => {
 
       styleCell(ws.getCell(`G${rTotCap}`), null, 'FF000000', true);
 
-      // Reps Advance Row
-      const rAdv = rTotCap + 1;
+      // Open Dailies Row
+      const rOpen = rTotCap + 1;
+      ws.mergeCells(`A${rOpen}:D${rOpen}`);
+      ws.getCell(`A${rOpen}`).value = 'إجمالي اليوميات المفتوحة الآن';
+      styleCell(ws.getCell(`A${rOpen}`), C_HEADER_FILL, C_HEADER_TEXT, true);
+      ws.mergeCells(`F${rOpen}:G${rOpen}`);
+      ws.getCell(`F${rOpen}`).value = processedCapital.openDailies;
+      styleCell(ws.getCell(`F${rOpen}`), null, 'FF000000', true, '#,##0.00');
+      styleCell(ws.getCell(`E${rOpen}`), C_HEADER_FILL, C_HEADER_TEXT, true);
+
+      // Reps Debt Row
+      const rDebt = rOpen + 1;
+      ws.mergeCells(`A${rDebt}:D${rDebt}`);
+      ws.getCell(`A${rDebt}`).value = 'إجمالي مديونية المناديب الآن';
+      styleCell(ws.getCell(`A${rDebt}`), C_HEADER_FILL, C_HEADER_TEXT, true);
+      ws.mergeCells(`F${rDebt}:G${rDebt}`);
+      ws.getCell(`F${rDebt}`).value = processedCapital.repsDebt;
+      styleCell(ws.getCell(`F${rDebt}`), null, 'FF000000', true, '#,##0.00');
+      styleCell(ws.getCell(`E${rDebt}`), C_HEADER_FILL, C_HEADER_TEXT, true);
+
+      // Net Reps Debt / Advance Row
+      const rAdv = rDebt + 1;
       ws.mergeCells(`A${rAdv}:D${rAdv}`);
-      ws.getCell(`A${rAdv}`).value = 'مدفوع مقدما  من المناديب';
+      ws.getCell(`A${rAdv}`).value = 'صافي مديونية المناديب';
       styleCell(ws.getCell(`A${rAdv}`), C_HEADER_FILL, C_HEADER_TEXT, true);
       ws.mergeCells(`F${rAdv}:G${rAdv}`);
-      ws.getCell(`F${rAdv}`).value = processedCapital.repsAdv;
+      ws.getCell(`F${rAdv}`).value = { formula: `F${rOpen}-F${rDebt}` };
       styleCell(ws.getCell(`F${rAdv}`), null, 'FF000000', true, '#,##0.00');
       styleCell(ws.getCell(`E${rAdv}`), C_HEADER_FILL, C_HEADER_TEXT, true);
 
@@ -602,14 +699,32 @@ const NewProfitLossReport: React.FC = () => {
       ws.getCell(`F${rPlExp}`).value = { formula: `J${rExpTot}` };
       styleCell(ws.getCell(`F${rPlExp}`), null, 'FF000000', true, '#,##0.00');
 
-      // P&L Row 33 (Net Company Profit)
-      const rNetProf = rPlExp + 1;
+      // P&L Row: Penalties (تضاف على الأرباح)
+      const rPlPen = rPlExp + 1;
+      ws.mergeCells(`A${rPlPen}:E${rPlPen}`);
+      ws.getCell(`A${rPlPen}`).value = 'إجمالي الغرامات والجزاءات (تضاف على الأرباح) (+)';
+      styleCell(ws.getCell(`A${rPlPen}`), 'FFE2EFDA', 'FF375623', true);
+      ws.mergeCells(`F${rPlPen}:G${rPlPen}`);
+      ws.getCell(`F${rPlPen}`).value = processedProfitLoss.penalties;
+      styleCell(ws.getCell(`F${rPlPen}`), null, 'FF276A3C', true, '#,##0.00');
+
+      // P&L Row: Bonuses (تتخصم من الأرباح)
+      const rPlBon = rPlPen + 1;
+      ws.mergeCells(`A${rPlBon}:E${rPlBon}`);
+      ws.getCell(`A${rPlBon}`).value = 'إجمالي الحوافز والمكافآت (تتخصم من الأرباح) (-)';
+      styleCell(ws.getCell(`A${rPlBon}`), 'FFFCE4D6', 'FFC65911', true);
+      ws.mergeCells(`F${rPlBon}:G${rPlBon}`);
+      ws.getCell(`F${rPlBon}`).value = processedProfitLoss.bonuses;
+      styleCell(ws.getCell(`F${rPlBon}`), null, 'FFC00000', true, '#,##0.00');
+
+      // P&L Row: Net Company Profit
+      const rNetProf = rPlBon + 1;
       ws.mergeCells(`A${rNetProf}:D${rNetProf}`);
       ws.getCell(`A${rNetProf}`).value = 'صافي اربح الشركة ';
       styleCell(ws.getCell(`A${rNetProf}`), C_BLUE_ACCENT, 'FF000000', true);
       styleCell(ws.getCell(`E${rNetProf}`), C_BLUE_ACCENT, 'FF000000', true);
       ws.mergeCells(`F${rNetProf}:G${rNetProf}`);
-      ws.getCell(`F${rNetProf}`).value = { formula: `E${rPlTot}-F${rPlExp}` };
+      ws.getCell(`F${rNetProf}`).value = { formula: `E${rPlTot}-F${rPlExp}+F${rPlPen}-F${rPlBon}` };
       styleCell(ws.getCell(`F${rNetProf}`), C_BLUE_ACCENT, 'FF000000', true, '#,##0.00');
 
       // Spacer column H
@@ -779,12 +894,32 @@ const NewProfitLossReport: React.FC = () => {
                 <span>لوحة التحكم بالمدخلات اليدوية:</span>
               </div>
               <div className="flex items-center gap-2">
-                <label className="text-slate-600 dark:text-slate-400">مدفوع مقدماً من المناديب:</label>
+                <label className="text-slate-600 dark:text-slate-400">إجمالي اليوميات المفتوحة:</label>
                 <input
                   type="number"
-                  placeholder={String(apiRepsAdvance)}
-                  value={customRepsAdvance !== null ? customRepsAdvance : ''}
-                  onChange={e => setCustomRepsAdvance(e.target.value === '' ? null : Number(e.target.value))}
+                  placeholder={String(apiOpenDailiesTotal)}
+                  value={customOpenDailiesTotal !== null ? customOpenDailiesTotal : ''}
+                  onChange={e => setCustomOpenDailiesTotal(e.target.value === '' ? null : Number(e.target.value))}
+                  className="w-28 px-2 py-1 bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700 rounded-lg text-xs font-bold"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-slate-600 dark:text-slate-400">إجمالي مديونية المناديب:</label>
+                <input
+                  type="number"
+                  placeholder={String(apiRepsDebtTotal)}
+                  value={customRepsDebtTotal !== null ? customRepsDebtTotal : ''}
+                  onChange={e => setCustomRepsDebtTotal(e.target.value === '' ? null : Number(e.target.value))}
+                  className="w-28 px-2 py-1 bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700 rounded-lg text-xs font-bold"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-slate-600 dark:text-slate-400">صافي مديونية المناديب:</label>
+                <input
+                  type="number"
+                  placeholder={String(apiNetRepsDebt)}
+                  value={customNetRepsDebt !== null ? customNetRepsDebt : ''}
+                  onChange={e => setCustomNetRepsDebt(e.target.value === '' ? null : Number(e.target.value))}
                   className="w-28 px-2 py-1 bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700 rounded-lg text-xs font-bold"
                 />
               </div>
@@ -806,6 +941,26 @@ const NewProfitLossReport: React.FC = () => {
                   value={customCashInSafes !== null ? customCashInSafes : ''}
                   onChange={e => setCustomCashInSafes(e.target.value === '' ? null : Number(e.target.value))}
                   className="w-28 px-2 py-1 bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700 rounded-lg text-xs font-bold"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-slate-600 dark:text-slate-400">إجمالي الغرامات (+ للأرباح):</label>
+                <input
+                  type="number"
+                  placeholder={String(apiPenalties)}
+                  value={customPenalties !== null ? customPenalties : ''}
+                  onChange={e => setCustomPenalties(e.target.value === '' ? null : Number(e.target.value))}
+                  className="w-28 px-2 py-1 bg-white dark:bg-slate-800 border border-emerald-400 dark:border-emerald-700 rounded-lg text-xs font-bold text-emerald-600 dark:text-emerald-400"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-slate-600 dark:text-slate-400">إجمالي الحوافز (- من الأرباح):</label>
+                <input
+                  type="number"
+                  placeholder={String(apiBonuses)}
+                  value={customBonuses !== null ? customBonuses : ''}
+                  onChange={e => setCustomBonuses(e.target.value === '' ? null : Number(e.target.value))}
+                  className="w-28 px-2 py-1 bg-white dark:bg-slate-800 border border-rose-400 dark:border-rose-700 rounded-lg text-xs font-bold text-rose-600 dark:text-rose-400"
                 />
               </div>
             </div>
@@ -880,6 +1035,13 @@ const NewProfitLossReport: React.FC = () => {
             <div className="text-2xl font-black mt-1 tracking-tight">
               {fmt(processedProfitLoss.netCompanyProfit)} <span className="text-xs font-normal text-white/80">{currencySymbol}</span>
             </div>
+            {(processedProfitLoss.penalties > 0 || processedProfitLoss.bonuses > 0) && (
+              <div className="text-[10px] text-white/80 mt-1 flex items-center gap-2">
+                <span>غرامات: +{fmt(processedProfitLoss.penalties)}</span>
+                <span>•</span>
+                <span>حوافز: -{fmt(processedProfitLoss.bonuses)}</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -890,10 +1052,21 @@ const NewProfitLossReport: React.FC = () => {
         <div className="lg:col-span-8 space-y-6">
           {/* Table 1: تفاصيل رأس مال الشركة */}
           <div className="bg-white dark:bg-slate-800 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
-            {/* Header Title */}
-            <div className="bg-[#44546a] text-white px-6 py-3.5 text-center font-black text-sm tracking-wide shadow-sm flex items-center justify-center gap-2">
-              <Building size={18} />
-              <span>تفاصيل رأس مال الشركة</span>
+            {/* Header Title with toggle */}
+            <div className="bg-[#44546a] text-white px-6 py-3.5 flex items-center justify-between shadow-sm">
+              <div className="flex items-center gap-2 font-black text-sm tracking-wide">
+                <Building size={18} />
+                <span>تفاصيل رأس مال الشركة</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowVariantDetails(!showVariantDetails)}
+                className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-all flex items-center gap-1.5"
+                title="عرض أو إخفاء تفاصيل المقاس واللون لكل منتج"
+              >
+                <Layers size={13} />
+                <span>{showVariantDetails ? 'إخفاء تفاصيل المقاس واللون' : 'تفاصيل المقاس واللون'}</span>
+              </button>
             </div>
 
             {/* Table Content */}
@@ -912,26 +1085,46 @@ const NewProfitLossReport: React.FC = () => {
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700 text-slate-800 dark:text-slate-200">
                   {processedCapital.rows.map((p, idx) => (
-                    <tr key={p.product_id} className={`hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors ${idx % 2 === 1 ? 'bg-slate-50/50 dark:bg-slate-900/20' : ''}`}>
-                      <td className="py-2.5 px-3 text-right font-bold border-l border-slate-200 dark:border-slate-700">{p.product_name}</td>
-                      <td className="py-2.5 px-3 border-l border-slate-200 dark:border-slate-700 font-semibold">{fmt(p.custody_qty)}</td>
-                      <td className="py-2.5 px-3 border-l border-slate-200 dark:border-slate-700 font-semibold">{fmt(p.warehouse_qty)}</td>
-                      <td className="py-2.5 px-3 border-l border-slate-200 dark:border-slate-700 font-black text-indigo-600 dark:text-indigo-400">{fmt(p.totalUnits)}</td>
-                      <td className="py-2.5 px-3 border-l border-slate-200 dark:border-slate-700">
-                        {isManualOverride ? (
-                          <input
-                            type="number"
-                            value={p.effectiveCost}
-                            onChange={e => setCustomCostPrices(prev => ({ ...prev, [p.product_id]: Number(e.target.value) }))}
-                            className="w-20 px-1 py-0.5 text-center font-bold bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 rounded"
-                          />
-                        ) : (
-                          <span className="font-semibold">{fmt(p.effectiveCost)}</span>
-                        )}
-                      </td>
-                      <td className="py-2.5 px-3 border-l border-slate-200 dark:border-slate-700 font-black">{fmt(p.totalItemCost)}</td>
-                      <td className="py-2.5 px-3 text-slate-400 text-[11px]">{p.notes || '-'}</td>
-                    </tr>
+                    <React.Fragment key={p.product_id}>
+                      <tr className={`hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors ${idx % 2 === 1 ? 'bg-slate-50/50 dark:bg-slate-900/20' : ''}`}>
+                        <td className="py-2.5 px-3 text-right font-bold border-l border-slate-200 dark:border-slate-700">{p.product_name}</td>
+                        <td className="py-2.5 px-3 border-l border-slate-200 dark:border-slate-700 font-semibold">{fmt(p.custody_qty)}</td>
+                        <td className="py-2.5 px-3 border-l border-slate-200 dark:border-slate-700 font-semibold">{fmt(p.warehouse_qty)}</td>
+                        <td className="py-2.5 px-3 border-l border-slate-200 dark:border-slate-700 font-black text-indigo-600 dark:text-indigo-400">{fmt(p.totalUnits)}</td>
+                        <td className="py-2.5 px-3 border-l border-slate-200 dark:border-slate-700">
+                          {isManualOverride ? (
+                            <input
+                              type="number"
+                              value={p.effectiveCost}
+                              onChange={e => setCustomCostPrices(prev => ({ ...prev, [p.product_id]: Number(e.target.value) }))}
+                              className="w-20 px-1 py-0.5 text-center font-bold bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 rounded"
+                            />
+                          ) : (
+                            <span className="font-semibold">{fmt(p.effectiveCost)}</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 border-l border-slate-200 dark:border-slate-700 font-black">{fmt(p.totalItemCost)}</td>
+                        <td className="py-2.5 px-3 text-slate-400 text-[11px]">{p.notes || '-'}</td>
+                      </tr>
+
+                      {/* Variant Sub-rows when detailed view is enabled */}
+                      {showVariantDetails && p.variants && p.variants.length > 0 && p.variants.map((v) => (
+                        <tr key={`v-${p.product_id}-${v.variant_id}`} className="bg-indigo-50/40 dark:bg-indigo-950/20 text-[11px] text-slate-600 dark:text-slate-300 border-t border-dashed border-indigo-200/50 dark:border-indigo-800/40">
+                          <td className="py-1.5 px-3 text-right pr-6 border-l border-slate-200 dark:border-slate-700">
+                            <span className="text-indigo-400 ml-1">↳</span>
+                            <span className="font-semibold text-indigo-700 dark:text-indigo-300">
+                              {v.color || 'لون افتراضي'} / {v.size || 'مقاس افتراضي'}
+                            </span>
+                          </td>
+                          <td className="py-1.5 px-3 border-l border-slate-200 dark:border-slate-700 font-mono">{fmt(v.custody_qty)}</td>
+                          <td className="py-1.5 px-3 border-l border-slate-200 dark:border-slate-700 font-mono">{fmt(v.warehouse_qty)}</td>
+                          <td className="py-1.5 px-3 border-l border-slate-200 dark:border-slate-700 font-mono font-bold text-indigo-600 dark:text-indigo-400">{fmt(v.total_qty)}</td>
+                          <td className="py-1.5 px-3 border-l border-slate-200 dark:border-slate-700 font-mono text-emerald-700 dark:text-emerald-400">{fmt(v.cost_price)}</td>
+                          <td className="py-1.5 px-3 border-l border-slate-200 dark:border-slate-700 font-mono font-bold">{fmt(v.total_cost)}</td>
+                          <td className="py-1.5 px-3 text-slate-400 text-[10px]">متغير للمنتج</td>
+                        </tr>
+                      ))}
+                    </React.Fragment>
                   ))}
 
                   {/* Summary Row: الإجمالي */}
@@ -945,9 +1138,29 @@ const NewProfitLossReport: React.FC = () => {
                     <td className="py-3 px-3"></td>
                   </tr>
 
-                  {/* Row: مدفوع مقدما من المناديب */}
+                  {/* Row: إجمالي اليوميات المفتوحة الآن */}
                   <tr className="bg-[#44546a]/10 dark:bg-slate-800 font-bold border-t border-slate-200 dark:border-slate-700">
-                    <td colSpan={4} className="py-2.5 px-4 text-right bg-[#44546a] text-white">مدفوع مقدماً من المناديب</td>
+                    <td colSpan={4} className="py-2.5 px-4 text-right bg-[#44546a] text-white">إجمالي اليوميات المفتوحة الآن</td>
+                    <td className="bg-[#44546a]"></td>
+                    <td colSpan={2} className="py-2.5 px-3 text-center font-black text-blue-600 dark:text-blue-400 border-r border-slate-200 dark:border-slate-700">
+                      {fmt(processedCapital.openDailies)} {currencySymbol}
+                    </td>
+                  </tr>
+
+                  {/* Row: إجمالي مديونية المناديب الآن */}
+                  <tr className="bg-[#44546a]/10 dark:bg-slate-800 font-bold border-t border-slate-200 dark:border-slate-700">
+                    <td colSpan={4} className="py-2.5 px-4 text-right bg-[#44546a] text-white">إجمالي مديونية المناديب الآن</td>
+                    <td className="bg-[#44546a]"></td>
+                    <td colSpan={2} className="py-2.5 px-3 text-center font-black text-amber-600 dark:text-amber-400 border-r border-slate-200 dark:border-slate-700">
+                      {fmt(processedCapital.repsDebt)} {currencySymbol}
+                    </td>
+                  </tr>
+
+                  {/* Row: صافي مديونية المناديب */}
+                  <tr className="bg-[#44546a]/10 dark:bg-slate-800 font-bold border-t border-slate-200 dark:border-slate-700">
+                    <td colSpan={4} className="py-2.5 px-4 text-right bg-[#44546a] text-white">
+                      صافي مديونية المناديب (اليوميات المفتوحة - مديونية المناديب)
+                    </td>
                     <td className="bg-[#44546a]"></td>
                     <td colSpan={2} className="py-2.5 px-3 text-center font-black text-slate-800 dark:text-slate-200 border-r border-slate-200 dark:border-slate-700">
                       {fmt(processedCapital.repsAdv)} {currencySymbol}
@@ -1065,10 +1278,44 @@ const NewProfitLossReport: React.FC = () => {
                     </td>
                   </tr>
 
+                  {/* Row: إجمالي الغرامات (تضاف على الأرباح) */}
+                  <tr className="bg-emerald-50/70 dark:bg-emerald-950/30 font-bold border-t border-slate-200 dark:border-slate-700">
+                    <td colSpan={5} className="py-2.5 px-4 text-right text-emerald-800 dark:text-emerald-300">
+                      <div className="flex items-center justify-between">
+                        <span className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span>
+                          <span>إجمالي الغرامات والجزاءات (تضاف على الأرباح)</span>
+                        </span>
+                        <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/60 px-2 py-0.5 rounded-full">(+) زيادة في الأرباح</span>
+                      </div>
+                    </td>
+                    <td colSpan={2} className="py-2.5 px-3 text-center font-black text-emerald-600 dark:text-emerald-400 text-sm">
+                      + {fmt(processedProfitLoss.penalties)} {currencySymbol}
+                    </td>
+                  </tr>
+
+                  {/* Row: إجمالي الحوافز (تتخصم من الأرباح) */}
+                  <tr className="bg-rose-50/70 dark:bg-rose-950/30 font-bold border-t border-slate-200 dark:border-slate-700">
+                    <td colSpan={5} className="py-2.5 px-4 text-right text-rose-800 dark:text-rose-300">
+                      <div className="flex items-center justify-between">
+                        <span className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block"></span>
+                          <span>إجمالي الحوافز والمكافآت (تتخصم من الأرباح)</span>
+                        </span>
+                        <span className="text-[11px] font-bold text-rose-600 dark:text-rose-400 bg-rose-100 dark:bg-rose-900/60 px-2 py-0.5 rounded-full">(-) خصم من الأرباح</span>
+                      </div>
+                    </td>
+                    <td colSpan={2} className="py-2.5 px-3 text-center font-black text-rose-600 dark:text-rose-400 text-sm">
+                      - {fmt(processedProfitLoss.bonuses)} {currencySymbol}
+                    </td>
+                  </tr>
+
                   {/* Highlighted Row: صافي أرباح الشركة */}
                   <tr className="bg-[#b4c6e7] dark:bg-blue-900/60 font-black border-t-2 border-indigo-400 text-slate-950 dark:text-white">
                     <td colSpan={4} className="py-3.5 px-4 text-right text-sm">صافي اربح الشركة</td>
-                    <td className="bg-[#b4c6e7] dark:bg-blue-900/60"></td>
+                    <td className="bg-[#b4c6e7] dark:bg-blue-900/60 text-center text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      (أرباح المنتجات - المصروفات + الغرامات - الحوافز)
+                    </td>
                     <td colSpan={2} className={`py-3.5 px-3 text-center text-base tracking-tight ${
                       processedProfitLoss.netCompanyProfit >= 0 ? 'text-emerald-950 dark:text-emerald-200' : 'text-rose-950 dark:text-rose-200'
                     }`}>
@@ -1101,27 +1348,33 @@ const NewProfitLossReport: React.FC = () => {
               <table className="w-full text-center border-collapse text-xs">
                 <thead>
                   <tr className="bg-[#596b82] text-white font-bold border-b border-slate-600 sticky top-0">
-                    <th className="py-2.5 px-3 border-l border-slate-600 text-right">اسم الصنف</th>
-                    <th className="py-2.5 px-3 w-28">المبلغ</th>
+                    <th className="py-2.5 px-3 border-l border-slate-600 text-right">التصنيف</th>
+                    <th className="py-2.5 px-3 w-32">المبلغ</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700 text-slate-800 dark:text-slate-200">
-                  {processedExpenses.rows.length === 0 ? (
+                  {processedExpenses.categories.length === 0 ? (
                     <tr>
                       <td colSpan={2} className="py-8 text-center text-slate-400">
                         لا توجد مصروفات تشغيلية مسجلة لهذه الفترة
                       </td>
                     </tr>
                   ) : (
-                    processedExpenses.rows.map((exp, idx) => (
-                      <tr key={exp.id || idx} className={`hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors ${idx % 2 === 1 ? 'bg-slate-50/50 dark:bg-slate-900/20' : ''}`}>
+                    processedExpenses.categories.map((cat, idx) => (
+                      <tr key={cat.category_name || idx} className={`hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors ${idx % 2 === 1 ? 'bg-slate-50/50 dark:bg-slate-900/20' : ''}`}>
                         <td className="py-2.5 px-3 text-right font-medium border-l border-slate-200 dark:border-slate-700">
-                          <div className="font-semibold text-slate-800 dark:text-slate-100">{exp.name}</div>
-                          {exp.date && (
-                            <div className="text-[10px] text-slate-400 mt-0.5">{exp.date.split(' ')[0]}</div>
-                          )}
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-slate-800 dark:text-slate-100">{cat.category_name}</span>
+                            {cat.count > 1 && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 font-semibold">
+                                {cat.count} حركات
+                              </span>
+                            )}
+                          </div>
                         </td>
-                        <td className="py-2.5 px-3 font-bold text-rose-600 dark:text-rose-400">{fmt(exp.amount)}</td>
+                        <td className="py-2.5 px-3 font-bold text-rose-600 dark:text-rose-400 font-mono text-xs">
+                          {fmt(cat.total_amount)}
+                        </td>
                       </tr>
                     ))
                   )}

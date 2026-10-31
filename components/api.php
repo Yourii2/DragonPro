@@ -22208,7 +22208,7 @@ switch ($module) {
                 $hasPV = table_exists($pdo, 'product_variants');
                 $costSelect = $hasPV
                     ? "COALESCE(
-                        NULLIF((SELECT pv.cost_price FROM product_variants pv WHERE pv.product_id = p.id AND pv.cost_price > 0 LIMIT 1), 0),
+                        NULLIF((SELECT pv.cost_price FROM product_variants pv WHERE pv.product_id = p.id AND pv.cost_price > 0 ORDER BY pv.id ASC LIMIT 1), 0),
                         NULLIF((SELECT pv.purchase_price FROM product_variants pv WHERE pv.product_id = p.id AND pv.purchase_price > 0 LIMIT 1), 0),
                         0
                     )"
@@ -22218,8 +22218,18 @@ switch ($module) {
                     SELECT 
                         p.id,
                         p.name,
-                        COALESCE((SELECT SUM(s.quantity) FROM stock s WHERE s.product_id = p.id), 0) AS warehouse_qty,
-                        COALESCE((SELECT SUM(rc.quantity) FROM rep_stock_custody rc WHERE rc.product_id = p.id), 0) 
+                        COALESCE((
+                            SELECT SUM(s.quantity) 
+                            FROM stock s 
+                            LEFT JOIN product_variants pv ON pv.id = s.product_id
+                            WHERE pv.product_id = p.id OR s.product_id = p.id
+                        ), 0) AS warehouse_qty,
+                        COALESCE((
+                            SELECT SUM(rc.quantity) 
+                            FROM rep_stock_custody rc 
+                            LEFT JOIN product_variants pv ON pv.id = rc.product_id
+                            WHERE pv.product_id = p.id OR rc.product_id = p.id
+                        ), 0) 
                         + COALESCE((
                             SELECT SUM(oi.quantity) 
                             FROM order_items oi 
@@ -22243,11 +22253,69 @@ switch ($module) {
                 $totProdCost = 0.0;
 
                 foreach ($products as $p) {
-                    $c = floatval($p['custody_qty'] ?? 0);
-                    $w = floatval($p['warehouse_qty'] ?? 0);
+                    $pId = intval($p['id']);
+                    $varItems = [];
+                    $varWhTot = 0.0;
+                    $varCustodyTot = 0.0;
+                    $varCostTot = 0.0;
+                    $validCosts = [];
+
+                    if ($hasPV) {
+                        $vStmt = $pdo->prepare("
+                            SELECT 
+                                pv.id,
+                                pv.color,
+                                pv.size,
+                                COALESCE(NULLIF(pv.cost_price, 0), NULLIF(pv.purchase_price, 0), 0) as cost_price,
+                                COALESCE((SELECT SUM(s.quantity) FROM stock s WHERE s.product_id = pv.id), 0) as wh_qty,
+                                COALESCE((SELECT SUM(rc.quantity) FROM rep_stock_custody rc WHERE rc.product_id = pv.id), 0)
+                                + COALESCE((SELECT SUM(oi.quantity) FROM order_items oi JOIN orders o ON o.id = oi.order_id WHERE oi.product_id = pv.id AND o.status = 'with_rep'), 0) as custody_qty
+                            FROM product_variants pv
+                            WHERE pv.product_id = ?
+                            ORDER BY pv.id ASC
+                        ");
+                        $vStmt->execute([$pId]);
+                        $rawVariants = $vStmt->fetchAll(PDO::FETCH_ASSOC);
+
+                        foreach ($rawVariants as $rv) {
+                            $vc = floatval($rv['custody_qty'] ?? 0);
+                            $vw = floatval($rv['wh_qty'] ?? 0);
+                            $vt = $vc + $vw;
+                            $vcost = floatval($rv['cost_price'] ?? 0);
+                            $vItemCost = $vt * $vcost;
+
+                            $varCustodyTot += $vc;
+                            $varWhTot += $vw;
+                            $varCostTot += $vItemCost;
+                            if ($vcost > 0) $validCosts[] = $vcost;
+
+                            $varItems[] = [
+                                'variant_id' => intval($rv['id']),
+                                'color' => $rv['color'] ?? '',
+                                'size' => $rv['size'] ?? '',
+                                'custody_qty' => $vc,
+                                'warehouse_qty' => $vw,
+                                'total_qty' => $vt,
+                                'cost_price' => $vcost,
+                                'total_cost' => $vItemCost
+                            ];
+                        }
+                    }
+
+                    $c = count($varItems) > 0 ? $varCustodyTot : floatval($p['custody_qty'] ?? 0);
+                    $w = count($varItems) > 0 ? $varWhTot : floatval($p['warehouse_qty'] ?? 0);
                     $tot = $c + $w;
                     $cost = floatval($p['cost_price'] ?? 0);
-                    $itemCost = $tot * $cost;
+                    $itemCost = count($varItems) > 0 && $varCostTot > 0 ? $varCostTot : 0.0;
+                    if ($tot > 0 && $itemCost > 0) {
+                        $cost = $itemCost / $tot;
+                    } elseif (!empty($validCosts)) {
+                        $cost = array_sum($validCosts) / count($validCosts);
+                        $itemCost = $tot * $cost;
+                    } else {
+                        $itemCost = $tot * $cost;
+                    }
+
 
                     $totCustody += $c;
                     $totWh += $w;
@@ -22260,7 +22328,8 @@ switch ($module) {
                         'custody_qty' => $c,
                         'warehouse_qty' => $w,
                         'total_qty' => $tot,
-                        'cost_price' => $cost,
+                        'cost_price' => round($cost, 2),
+                        'variants' => $varItems,
                         'total_cost' => $itemCost,
                         'notes' => $p['notes'] ?? ''
                     ];
@@ -22269,7 +22338,15 @@ switch ($module) {
                 // Default liabilities and assets
                 $repsAdvance = 0.0;
                 try {
-                    $repsAdvance = floatval($pdo->query("SELECT COALESCE(SUM(ABS(amount)), 0) FROM transactions WHERE related_to_type = 'rep' AND type = 'payment_out' AND JSON_UNQUOTE(JSON_EXTRACT(details, '$.subtype')) = 'advance'")->fetchColumn() ?: 0);
+                    $sqlOpen = "SELECT COALESCE(SUM(GREATEST(0, COALESCE(NULLIF(rdj.total_orders_value, 0), (rdj.assigned_value + rdj.old_orders_value), 0) - COALESCE(rdj.interim_payment_amount, 0))), 0) FROM rep_daily_journal rdj WHERE rdj.is_closed = 0";
+                    $openDailiesTotal = floatval($pdo->query($sqlOpen)->fetchColumn() ?: 0);
+                    if ($openDailiesTotal <= 0) {
+                        $openDailiesTotal = floatval($pdo->query("SELECT COALESCE(SUM(total_amount), 0) FROM orders WHERE status = 'with_rep'")->fetchColumn() ?: 0);
+                    }
+                    $sqlDebt = "SELECT COALESCE(SUM(CASE WHEN rep_bal.balance < 0 THEN ABS(rep_bal.balance) ELSE 0 END), 0) FROM users u JOIN (SELECT related_to_id, SUM(amount) as balance FROM transactions WHERE (related_to_type = 'rep' OR related_to_type = 'employee') GROUP BY related_to_id) rep_bal ON rep_bal.related_to_id = u.id WHERE u.role = 'representative'";
+                    $repsDebtTotal = floatval($pdo->query($sqlDebt)->fetchColumn() ?: 0);
+                    $netRepsDebt = $openDailiesTotal - $repsDebtTotal;
+                    $repsAdvance = $netRepsDebt;
                 } catch (Exception $e) {}
 
                 $suppliersBalance = 0.0;
@@ -22312,6 +22389,20 @@ switch ($module) {
                 $rawExpenses = $stmtExp->fetchAll(PDO::FETCH_ASSOC);
 
                 $expenseRows = [];
+                $categoryGroups = [];
+                $categoryMap = [
+                    'ads' => 'إعلانات وتسويق',
+                    'salaries' => 'رواتب وأجور',
+                    'salary' => 'رواتب وأجور',
+                    'rent' => 'إيجارات',
+                    'utilities' => 'مرافق وخدمات (كهرباء / مياه)',
+                    'transport' => 'انتقالات وشحن وبنزين',
+                    'maintenance' => 'صيانة وإصلاح',
+                    'hospitality' => 'ضيافة وبوفيه',
+                    'supplies' => 'أدوات ومهمات مكتبية',
+                    'other' => 'مصروفات متنوعة وعامة',
+                    'general' => 'مصروفات عامة'
+                ];
                 $totalExpenses = 0.0;
                 $fabricKeywords = ['خام', 'خامات', 'قماش', 'اقمش', 'أقمش', 'توب', 'غزل', 'نسيج', 'materials', 'fabric'];
 
@@ -22340,6 +22431,36 @@ switch ($module) {
                     $amt = abs(floatval($e['amount']));
                     $totalExpenses += $amt;
                     $name = $title ?: ($notes ?: 'مصروف تشغيلي');
+                    $catKey = strtolower($rawCat);
+                    $categoryName = '';
+                    if (isset($categoryMap[$catKey])) {
+                        $categoryName = $categoryMap[$catKey];
+                    } elseif (!empty($rawCat) && !in_array($catKey, ['none', 'null', '0'])) {
+                        $categoryName = $rawCat;
+                    } else {
+                        if (mb_strpos($combined, 'راتب') !== false || mb_strpos($combined, 'رواتب') !== false || mb_strpos($combined, 'مرتب') !== false || mb_strpos($combined, 'سلفة') !== false) {
+                            $categoryName = 'رواتب وأجور';
+                        } elseif (mb_strpos($combined, 'إعلان') !== false || mb_strpos($combined, 'اعلان') !== false || mb_strpos($combined, 'تسويق') !== false || mb_strpos($combined, 'فيس') !== false || mb_strpos($combined, 'تيك') !== false) {
+                            $categoryName = 'إعلانات وتسويق';
+                        } elseif (mb_strpos($combined, 'إيجار') !== false || mb_strpos($combined, 'ايجار') !== false) {
+                            $categoryName = 'إيجارات';
+                        } elseif (mb_strpos($combined, 'كهربا') !== false || mb_strpos($combined, 'مياه') !== false || mb_strpos($combined, 'نت') !== false || mb_strpos($combined, 'انترنت') !== false) {
+                            $categoryName = 'مرافق وخدمات (كهرباء / مياه)';
+                        } elseif (mb_strpos($combined, 'شحن') !== false || mb_strpos($combined, 'نقل') !== false || mb_strpos($combined, 'بنزين') !== false || mb_strpos($combined, 'مواصل') !== false) {
+                            $categoryName = 'انتقالات وشحن وبنزين';
+                        } elseif (mb_strpos($combined, 'صيان') !== false || mb_strpos($combined, 'تصليح') !== false) {
+                            $categoryName = 'صيانة وإصلاح';
+                        } elseif (mb_strpos($combined, 'بوفيه') !== false || mb_strpos($combined, 'ضياف') !== false || mb_strpos($combined, 'أكل') !== false || mb_strpos($combined, 'شاي') !== false) {
+                            $categoryName = 'ضيافة وبوفيه';
+                        } else {
+                            $categoryName = $title ?: 'مصروفات متنوعة وعامة';
+                        }
+                    }
+                    if (!isset($categoryGroups[$categoryName])) {
+                        $categoryGroups[$categoryName] = ['category_name' => $categoryName, 'total_amount' => 0.0, 'count' => 0];
+                    }
+                    $categoryGroups[$categoryName]['total_amount'] += $amt;
+                    $categoryGroups[$categoryName]['count']++;
                     $expenseRows[] = [
                         'id' => intval($e['id']),
                         'name' => $name,
@@ -22348,6 +22469,9 @@ switch ($module) {
                         'treasury_name' => $e['treasury_name'] ?? ''
                     ];
                 }
+
+                $expenseCategoryRows = array_values($categoryGroups);
+                usort($expenseCategoryRows, function($a, $b) { return $b['total_amount'] <=> $a['total_amount']; });
 
                 // 3. Profit & Loss: Products Sold
                 $salesCostExpr = $hasPV
@@ -22421,13 +22545,72 @@ switch ($module) {
                         'product_name' => $sr['product_name'],
                         'sold_qty' => $q,
                         'sales_revenue' => $rev,
-                        'cost_price' => $cost,
+                        'cost_price' => round($cost, 2),
+                        'variants' => $varItems,
                         'product_profit' => $profit,
                         'notes' => ''
                     ];
                 }
 
-                $netCompanyProfit = $totProductProfit - $totalExpenses;
+                // 4. Penalties and Bonuses
+                $totalPenalties = 0.0;
+                $totalBonuses = 0.0;
+
+                // Employee penalties & bonuses
+                if (table_exists($pdo, 'employee_transactions')) {
+                    $stmtEmpPen = $pdo->prepare("SELECT COALESCE(SUM(amount), 0) FROM employee_transactions WHERE type = 'penalty' AND DATE(date) BETWEEN ? AND ?");
+                    $stmtEmpPen->execute([$start, $end]);
+                    $totalPenalties += floatval($stmtEmpPen->fetchColumn() ?: 0);
+
+                    $stmtEmpBon = $pdo->prepare("SELECT COALESCE(SUM(amount), 0) FROM employee_transactions WHERE type = 'bonus' AND DATE(date) BETWEEN ? AND ?");
+                    $stmtEmpBon->execute([$start, $end]);
+                    $totalBonuses += floatval($stmtEmpBon->fetchColumn() ?: 0);
+                }
+
+                // Worker penalties & bonuses
+                if (table_exists($pdo, 'worker_transactions')) {
+                    $stmtWrkPen = $pdo->prepare("SELECT COALESCE(SUM(amount), 0) FROM worker_transactions WHERE type = 'penalty' AND DATE(date) BETWEEN ? AND ?");
+                    $stmtWrkPen->execute([$start, $end]);
+                    $totalPenalties += floatval($stmtWrkPen->fetchColumn() ?: 0);
+
+                    $stmtWrkBon = $pdo->prepare("SELECT COALESCE(SUM(amount), 0) FROM worker_transactions WHERE type = 'bonus' AND DATE(date) BETWEEN ? AND ?");
+                    $stmtWrkBon->execute([$start, $end]);
+                    $totalBonuses += floatval($stmtWrkBon->fetchColumn() ?: 0);
+                }
+
+                // Other penalties in transactions (e.g. rep penalties / fines)
+                if (table_exists($pdo, 'transactions')) {
+                    $stmtTxPen = $pdo->prepare("
+                        SELECT COALESCE(SUM(ABS(amount)), 0)
+                        FROM transactions
+                        WHERE DATE(transaction_date) BETWEEN ? AND ?
+                          AND (
+                            JSON_UNQUOTE(JSON_EXTRACT(details, '$.subtype')) = 'rep_penalty'
+                            OR JSON_UNQUOTE(JSON_EXTRACT(details, '$.action')) = 'status_penalty'
+                            OR (related_to_type = 'rep' AND (title LIKE '%غرام%' OR title LIKE '%جزاء%'))
+                          )
+                    ");
+                    $stmtTxPen->execute([$start, $end]);
+                    $totalPenalties += floatval($stmtTxPen->fetchColumn() ?: 0);
+
+                    // Other bonuses in transactions (non-expense or rep bonuses)
+                    $stmtTxBon = $pdo->prepare("
+                        SELECT COALESCE(SUM(ABS(amount)), 0)
+                        FROM transactions
+                        WHERE DATE(transaction_date) BETWEEN ? AND ?
+                          AND type != 'expense'
+                          AND (
+                            JSON_UNQUOTE(JSON_EXTRACT(details, '$.subtype')) = 'rep_bonus_in'
+                            OR ((related_to_type IS NULL OR related_to_type NOT IN ('employee', 'worker')) AND (title LIKE '%مكافأة%' OR title LIKE '%مكافاه%' OR title LIKE '%حافز%' OR title LIKE '%حوافز%'))
+                          )
+                    ");
+                    $stmtTxBon->execute([$start, $end]);
+                    $totalBonuses += floatval($stmtTxBon->fetchColumn() ?: 0);
+                }
+
+                $totalPenalties = round($totalPenalties, 2);
+                $totalBonuses = round($totalBonuses, 2);
+                $netCompanyProfit = $totProductProfit - $totalExpenses + $totalPenalties - $totalBonuses;
 
                 echo json_encode([
                     'success' => true,
@@ -22438,6 +22621,9 @@ switch ($module) {
                             'total_warehouse_qty' => $totWh,
                             'total_stock_qty' => $totQty,
                             'total_products_cost' => $totProdCost,
+                            'open_dailies_total' => $openDailiesTotal ?? 0.0,
+                            'reps_debt_total' => $repsDebtTotal ?? 0.0,
+                            'net_reps_debt' => $netRepsDebt ?? 0.0,
                             'reps_advance' => $repsAdvance,
                             'suppliers_balance' => $suppliersBalance,
                             'net_inventory' => $netInventory,
@@ -22445,6 +22631,7 @@ switch ($module) {
                             'net_capital' => $netCapital
                         ],
                         'expenses' => [
+                            'categories' => $expenseCategoryRows,
                             'rows' => $expenseRows,
                             'total_expenses' => $totalExpenses
                         ],
@@ -22454,6 +22641,8 @@ switch ($module) {
                             'total_sales_revenue' => $totSalesRev,
                             'total_product_profit' => $totProductProfit,
                             'total_expenses_no_fabrics' => $totalExpenses,
+                            'total_penalties' => $totalPenalties,
+                            'total_bonuses' => $totalBonuses,
                             'net_company_profit' => $netCompanyProfit
                         ],
                         'meta' => [
