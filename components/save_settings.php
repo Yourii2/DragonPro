@@ -134,7 +134,16 @@ try {
         'telegram_ai_provider' => $input['telegram_ai_provider'] ?? 'gemini',
         'telegram_notify_customers' => $input['telegram_notify_customers'] ?? 'true',
         'tg_templates' => $input['tg_templates'] ?? '',
-        'waybill_template' => $input['waybill_template'] ?? ($current['waybill_template'] ?? '1')
+        'waybill_template' => $input['waybill_template'] ?? ($current['waybill_template'] ?? '1'),
+        'easyorders_enabled' => $input['easyorders_enabled'] ?? ($current['easyorders_enabled'] ?? 'false'),
+        'easyorders_api_key' => $input['easyorders_api_key'] ?? ($current['easyorders_api_key'] ?? ''),
+        'woocommerce_enabled' => $input['woocommerce_enabled'] ?? ($current['woocommerce_enabled'] ?? 'false'),
+        'woocommerce_store_url' => $input['woocommerce_store_url'] ?? ($current['woocommerce_store_url'] ?? ''),
+        'woocommerce_consumer_key' => $input['woocommerce_consumer_key'] ?? ($current['woocommerce_consumer_key'] ?? ''),
+        'woocommerce_consumer_secret' => $input['woocommerce_consumer_secret'] ?? ($current['woocommerce_consumer_secret'] ?? ''),
+        'shopify_enabled' => $input['shopify_enabled'] ?? ($current['shopify_enabled'] ?? 'false'),
+        'shopify_store_domain' => $input['shopify_store_domain'] ?? ($current['shopify_store_domain'] ?? ''),
+        'shopify_access_token' => $input['shopify_access_token'] ?? ($current['shopify_access_token'] ?? '')
     ];
 
     // If company logo is a data URL, persist it to app_files and set company_logo_file_id

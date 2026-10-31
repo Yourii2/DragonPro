@@ -31,7 +31,18 @@ import {
   Wifi,
   WifiOff,
   Share2,
-  Calculator
+  Calculator,
+  Sliders,
+  Sparkles,
+  Layers,
+  Search,
+  Bot,
+  ShoppingBag,
+  Send,
+  HardDrive,
+  Check,
+  ExternalLink,
+  ArrowRight
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { API_BASE_PATH } from '../services/apiConfig';
@@ -88,6 +99,15 @@ const SettingsModule: React.FC = () => {
     externalApiToken: '',
     telegramBotToken: '',
     telegramAiApiKey: '',
+    easyordersEnabled: false,
+    easyordersApiKey: '',
+    woocommerceEnabled: false,
+    woocommerceStoreUrl: '',
+    woocommerceConsumerKey: '',
+    woocommerceConsumerSecret: '',
+    shopifyEnabled: false,
+    shopifyStoreDomain: '',
+    shopifyAccessToken: '',
     telegramAiProvider: 'gemini',
     telegramNotifyCustomers: true,
     telegramTemplates: localStorage.getItem('Dragon_tg_templates') || JSON.stringify([
@@ -116,6 +136,112 @@ const SettingsModule: React.FC = () => {
   );
   const [clientIdSaving, setClientIdSaving] = useState(false);
   const [allClientIds, setAllClientIds] = useState<any[]>([]);
+
+  type SettingsTab = 'general' | 'sales_inventory' | 'integrations' | 'messaging' | 'backup_database' | 'system_support';
+  const [activeTab, setActiveTab] = useState<SettingsTab>('general');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        handleSave();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [config]);
+
+  const activeIntegrationsCount = [
+    config.easyordersEnabled,
+    config.woocommerceEnabled,
+    config.shopifyEnabled
+  ].filter(Boolean).length;
+
+  const tabKeywords: Record<SettingsTab, { name: string; keywords: string[] }> = {
+    general: {
+      name: 'الهوية والبيانات',
+      keywords: ['هوية', 'شعار', 'لوجو', 'اسم', 'هاتف', 'تواصل', 'عنوان', 'شروط', 'فاتورة', 'عملة', 'جنيه', 'ريال', 'دولار', 'ترخيص', 'تفعيل', 'logo', 'currency', 'license', 'name', 'phone']
+    },
+    sales_inventory: {
+      name: 'المبيعات والمخزن',
+      keywords: ['بيع', 'مكاتب', 'توصيل', 'مناديب', 'شحن', 'مصنع', 'موردين', 'توريد', 'شراء', 'سعر', 'تكلفة', 'مصنعية', 'مخزن', 'منتجات', 'cost', 'delivery', 'sales', 'vendor']
+    },
+    integrations: {
+      name: 'المتاجر والمنصات',
+      keywords: ['متجر', 'متاجر', 'ووكومرس', 'شوبيفاي', 'ايزي', 'اوردرز', 'منصة', 'api', 'webhook', 'woocommerce', 'shopify', 'easyorders', 'token', 'meta', 'واتساب']
+    },
+    messaging: {
+      name: 'المراسلات والتنبيهات',
+      keywords: ['تليجرام', 'telegram', 'bot', 'بوت', 'ذكاء', 'ai', 'gemini', 'openai', 'واتساب', 'whatsapp', 'قوالب', 'تقارير', 'إيميل', 'بريد', 'تقرير', 'email', 'otp']
+    },
+    backup_database: {
+      name: 'قواعد البيانات والصيانة',
+      keywords: ['نسخ', 'احتياطي', 'استرجاع', 'قاعدة', 'بيانات', 'sql', 'كاش', 'مسح', 'حذف', 'إعادة تعيين', 'خطر', 'backup', 'restore', 'cache', 'database', 'reset']
+    },
+    system_support: {
+      name: 'التحديثات والدعم الفني',
+      keywords: ['تحديث', 'تحديثات', 'دعم', 'فني', 'rustdesk', 'ريموت', 'تحكم', 'update', 'support', 'remote']
+    }
+  };
+
+  const getMatchingTabs = (query: string): SettingsTab[] => {
+    if (!query.trim()) return [];
+    const q = query.toLowerCase().trim();
+    return (Object.keys(tabKeywords) as SettingsTab[]).filter(tabId => 
+      tabKeywords[tabId].keywords.some(k => k.includes(q) || q.includes(k)) ||
+      tabKeywords[tabId].name.toLowerCase().includes(q)
+    );
+  };
+
+  const matchingTabs = getMatchingTabs(searchQuery);
+
+  const tabs: { id: SettingsTab; label: string; sublabel: string; icon: any; color: string; badge?: any }[] = [
+    {
+      id: 'general',
+      label: 'الهوية والبيانات',
+      sublabel: 'الاسم، الشعار، العملة، والترخيص',
+      icon: Building2,
+      color: 'from-blue-500 to-indigo-600',
+    },
+    {
+      id: 'sales_inventory',
+      label: 'المبيعات والمخزن',
+      sublabel: 'البيع، التوصيل، التكلفة، والتوريد',
+      icon: Package,
+      color: 'from-emerald-500 to-teal-600',
+    },
+    {
+      id: 'integrations',
+      label: 'المتاجر والمنصات',
+      sublabel: 'Woo, Shopify, EasyOrders, API',
+      icon: ShoppingBag,
+      color: 'from-purple-500 to-indigo-600',
+      badge: activeIntegrationsCount > 0 ? `${activeIntegrationsCount} نشط` : null,
+    },
+    {
+      id: 'messaging',
+      label: 'المراسلات والتنبيهات',
+      sublabel: 'تليجرام الذكي، واتساب، تقارير الإيميل',
+      icon: Send,
+      color: 'from-sky-500 to-blue-600',
+    },
+    {
+      id: 'backup_database',
+      label: 'قواعد البيانات والصيانة',
+      sublabel: 'النسخ الاحتياطي، الكاش، واسترجاع البيانات',
+      icon: HardDrive,
+      color: 'from-amber-500 to-orange-600',
+    },
+    {
+      id: 'system_support',
+      label: 'التحديثات والدعم الفني',
+      sublabel: 'RustDesk عن بُعد، وسجل التحديثات',
+      icon: LifeBuoy,
+      color: 'from-rose-500 to-pink-600',
+      badge: updateInfo?.has_update ? 'تحديث متاح' : null,
+    },
+  ];
 
   const activationStatusClass = activation.status === 'كاملة'
     ? 'text-emerald-400'
@@ -247,6 +373,15 @@ const SettingsModule: React.FC = () => {
             telegramBotToken: settings.telegram_bot_token || prev.telegramBotToken,
             telegramAiApiKey: settings.telegram_ai_api_key || prev.telegramAiApiKey,
             telegramAiProvider: settings.telegram_ai_provider || prev.telegramAiProvider,
+            easyordersEnabled: settings.easyorders_enabled !== undefined ? (settings.easyorders_enabled === 'true' || settings.easyorders_enabled === '1' || settings.easyorders_enabled === true) : prev.easyordersEnabled,
+            easyordersApiKey: settings.easyorders_api_key || prev.easyordersApiKey,
+            woocommerceEnabled: settings.woocommerce_enabled !== undefined ? (settings.woocommerce_enabled === 'true' || settings.woocommerce_enabled === '1' || settings.woocommerce_enabled === true) : prev.woocommerceEnabled,
+            woocommerceStoreUrl: settings.woocommerce_store_url || prev.woocommerceStoreUrl,
+            woocommerceConsumerKey: settings.woocommerce_consumer_key || prev.woocommerceConsumerKey,
+            woocommerceConsumerSecret: settings.woocommerce_consumer_secret || prev.woocommerceConsumerSecret,
+            shopifyEnabled: settings.shopify_enabled !== undefined ? (settings.shopify_enabled === 'true' || settings.shopify_enabled === '1' || settings.shopify_enabled === true) : prev.shopifyEnabled,
+            shopifyStoreDomain: settings.shopify_store_domain || prev.shopifyStoreDomain,
+            shopifyAccessToken: settings.shopify_access_token || prev.shopifyAccessToken,
             telegramNotifyCustomers: settings.telegram_notify_customers !== undefined ? (settings.telegram_notify_customers === 'true' || settings.telegram_notify_customers === '1') : prev.telegramNotifyCustomers,
             telegramTemplates: settings.tg_templates || prev.telegramTemplates
           }));
@@ -308,6 +443,15 @@ const SettingsModule: React.FC = () => {
         whatsapp_verify_token: config.whatsappVerifyToken,
         external_api_token: config.externalApiToken,
         telegram_bot_token: config.telegramBotToken,
+        easyorders_enabled: config.easyordersEnabled ? 'true' : 'false',
+        easyorders_api_key: config.easyordersApiKey,
+        woocommerce_enabled: config.woocommerceEnabled ? 'true' : 'false',
+        woocommerce_store_url: config.woocommerceStoreUrl,
+        woocommerce_consumer_key: config.woocommerceConsumerKey,
+        woocommerce_consumer_secret: config.woocommerceConsumerSecret,
+        shopify_enabled: config.shopifyEnabled ? 'true' : 'false',
+        shopify_store_domain: config.shopifyStoreDomain,
+        shopify_access_token: config.shopifyAccessToken,
         telegram_ai_api_key: config.telegramAiApiKey,
         telegram_ai_provider: config.telegramAiProvider,
         telegram_notify_customers: config.telegramNotifyCustomers.toString(),
@@ -361,6 +505,157 @@ const SettingsModule: React.FC = () => {
       });
     } finally {
       setTelegramActivating(false);
+    }
+  };
+
+  const [easyordersTesting, setEasyordersTesting] = useState(false);
+
+  const testEasyordersConnection = async () => {
+    if (!config.easyordersApiKey) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'فحص اتصال EasyOrders',
+        text: 'يرجى إدخال مفتاح الـ API (Api-Key) أولاً.',
+        confirmButtonText: 'حسناً'
+      });
+      return;
+    }
+
+    setEasyordersTesting(true);
+    try {
+      const response = await fetch(`${API_BASE_PATH}/easyorders/api_handler.php?action=test_connection`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: config.easyordersApiKey })
+      });
+      const result = await response.json();
+      if (result.success) {
+        Swal.fire({
+          icon: 'success',
+          title: 'تم الاتصال بنجاح! ⚡',
+          text: result.message,
+          confirmButtonText: 'ممتاز'
+        });
+      } else {
+        Swal.fire({
+          icon: 'error',
+          title: 'فشل فحص الاتصال',
+          text: result.message,
+          confirmButtonText: 'حسناً'
+        });
+      }
+    } catch (e: any) {
+      Swal.fire({
+        icon: 'error',
+        title: 'خطأ في الاتصال',
+        text: 'تعذر الاتصال بخوادم EasyOrders. يرجى التحقق من اتصالك بالإنترنت.',
+        confirmButtonText: 'حسناً'
+      });
+    } finally {
+      setEasyordersTesting(false);
+    }
+  };
+
+  const [woocommerceTesting, setWoocommerceTesting] = useState(false);
+
+  const testWoocommerceConnection = async () => {
+    if (!config.woocommerceStoreUrl || !config.woocommerceConsumerKey || !config.woocommerceConsumerSecret) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'فحص اتصال WooCommerce',
+        text: 'يرجى إدخال رابط المتجر ومفتاحي Consumer Key و Consumer Secret أولاً.',
+        confirmButtonText: 'حسناً'
+      });
+      return;
+    }
+
+    setWoocommerceTesting(true);
+    try {
+      const response = await fetch(`${API_BASE_PATH}/woocommerce/api_handler.php?action=test_connection`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          store_url: config.woocommerceStoreUrl,
+          consumer_key: config.woocommerceConsumerKey,
+          consumer_secret: config.woocommerceConsumerSecret
+        })
+      });
+      const result = await response.json();
+      if (result.success) {
+        Swal.fire({
+          icon: 'success',
+          title: 'تم الاتصال بنجاح! 🛍️',
+          text: result.message,
+          confirmButtonText: 'ممتاز'
+        });
+      } else {
+        Swal.fire({
+          icon: 'error',
+          title: 'فشل فحص الاتصال',
+          text: result.message,
+          confirmButtonText: 'حسناً'
+        });
+      }
+    } catch (e: any) {
+      Swal.fire({
+        icon: 'error',
+        title: 'خطأ في الاتصال',
+        text: 'تعذر الاتصال بمتجر ووكومرس. يرجى التحقق من صحة الرابط واتصالك بالإنترنت.',
+        confirmButtonText: 'حسناً'
+      });
+    } finally {
+      setWoocommerceTesting(false);
+    }
+  };
+
+  const [shopifyTesting, setShopifyTesting] = useState(false);
+
+  const testShopifyConnection = async () => {
+    if (!config.shopifyStoreDomain || !config.shopifyAccessToken) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'فحص اتصال Shopify',
+        text: 'يرجى إدخال نطاق المتجر (Store Domain) وتوكن الوصول (Access Token) أولاً.',
+        confirmButtonText: 'حسناً'
+      });
+      return;
+    }
+
+    setShopifyTesting(true);
+    try {
+      const response = await fetch(`${API_BASE_PATH}/shopify/api_handler.php?action=test_connection`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          shop_domain: config.shopifyStoreDomain,
+          access_token: config.shopifyAccessToken
+        })
+      });
+      const result = await response.json();
+      if (result.success) {
+        Swal.fire({
+          icon: 'success',
+          title: 'تم الاتصال بنجاح! 🟢',
+          text: result.message,
+          confirmButtonText: 'ممتاز'
+        });
+      } else {
+        Swal.fire({
+          icon: 'error',
+          title: 'فشل فحص الاتصال',
+          text: result.message,
+          confirmButtonText: 'حسناً'
+        });
+      }
+    } catch (e: any) {
+      Swal.fire({
+        icon: 'error',
+        title: 'خطأ في الاتصال',
+        text: 'تعذر الاتصال بسيرفر شوبيفاي. يرجى التحقق من اتصالك بالإنترنت.',
+        confirmButtonText: 'حسناً'
+      });
+    } finally {
+      setShopifyTesting(false);
     }
   };
 
@@ -965,29 +1260,169 @@ const SettingsModule: React.FC = () => {
 
   return (
     <>
-    <div className="space-y-6 max-w-5xl mx-auto pb-12 transition-colors duration-300 animate-in fade-in">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-black text-slate-900 dark:text-white">إعدادات النظام</h2>
-          <p className="text-slate-500 dark:text-slate-400 text-sm">إدارة هوية الشركة وتراخيص العمل وقواعد البيانات</p>
+      <div className="min-h-screen pb-16 transition-colors duration-300 animate-in fade-in">
+        {/* Sticky Header with Title, Search & Save */}
+        <div className="sticky top-0 z-30 bg-white/85 dark:bg-slate-900/85 backdrop-blur-xl border-b border-slate-200/80 dark:border-slate-800/80 py-3.5 mb-6 shadow-sm">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            {/* Title & Badge */}
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-violet-600 text-white flex items-center justify-center shadow-lg shadow-indigo-500/25 ring-4 ring-indigo-500/10">
+                <Sliders size={22} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-xl md:text-2xl font-black text-slate-900 dark:text-white tracking-tight">إعدادات النظام</h2>
+                  <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm">Dragon Pro</span>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">لوحة التحكم المركزية لتهيئة النظام، المتاجر الإلكترونية، والمراسلات</p>
+              </div>
+            </div>
+
+            {/* Search & Actions */}
+            <div className="flex items-center gap-3">
+              {/* Quick Search */}
+              <div className="relative flex-1 md:w-64">
+                <Search size={15} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="بحث سريع في الإعدادات..."
+                  className="w-full pl-8 pr-9 py-2 bg-slate-50 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/80 rounded-xl text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all shadow-inner"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs w-4 h-4 flex items-center justify-center rounded-full hover:bg-slate-200 dark:hover:bg-slate-700"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              {/* Save Button */}
+              <button
+                onClick={handleSave}
+                className="relative group overflow-hidden bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-700 hover:to-indigo-800 text-white px-5 py-2.5 rounded-xl font-bold text-xs md:text-sm flex items-center gap-2 shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 transition-all active:scale-95 shrink-0"
+              >
+                <Save size={16} />
+                <span>حفظ التغييرات</span>
+                <kbd className="hidden sm:inline-block text-[10px] font-mono bg-white/20 px-1.5 py-0.5 rounded text-blue-100">Ctrl+S</kbd>
+              </button>
+            </div>
+          </div>
         </div>
-        <button
-          onClick={handleSave}
-          className="bg-blue-600 text-white px-6 py-2.5 rounded-2xl font-bold flex items-center gap-2 shadow-lg shadow-blue-500/20 hover:bg-blue-700 transition-all active:scale-95"
-        >
-          <Save size={18} /> حفظ التغييرات
-        </button>
-      </div>
 
-      {isSaved && (
-        <div className="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800/50 flex items-center gap-3">
-          <CheckCircle size={18} /> تم حفظ الإعدادات وتحديث بيانات النظام بنجاح.
+        {/* Success Alert */}
+        {isSaved && (
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 mb-4">
+            <div className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 p-3.5 rounded-2xl border border-emerald-500/20 flex items-center gap-3 text-xs md:text-sm font-bold shadow-sm animate-in fade-in slide-in-from-top-2">
+              <CheckCircle size={18} className="text-emerald-500 shrink-0" />
+              <span>تم حفظ وتطبيق كافة الإعدادات وتحديث بيانات النظام بنجاح.</span>
+            </div>
+          </div>
+        )}
+
+        {/* Search Results Suggestion Bar */}
+        {searchQuery.trim() && (
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 mb-4">
+            <div className="bg-blue-50/90 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/50 rounded-2xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
+                <Search size={15} />
+                <span>نتائج البحث عن "<strong>{searchQuery}</strong>":</span>
+                {matchingTabs.length > 0 ? (
+                  <span className="text-slate-500 dark:text-slate-400">تم العثور على أقسام مطابقة في:</span>
+                ) : (
+                  <span className="text-rose-500">لا توجد أقسام مطابقة للكلمة المدخلة.</span>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {matchingTabs.map(tabId => {
+                  const t = tabs.find(x => x.id === tabId);
+                  if (!t) return null;
+                  return (
+                    <button
+                      key={tabId}
+                      onClick={() => {
+                        setActiveTab(tabId);
+                        setSearchQuery('');
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-blue-600 text-white font-bold text-[11px] hover:bg-blue-700 transition-all shadow-sm flex items-center gap-1"
+                    >
+                      <span>{t.label}</span>
+                      <ArrowRight size={12} className="rotate-180" />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Horizontal Tabs Bar */}
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 mb-8">
+          <div className="bg-white/90 dark:bg-slate-800/90 backdrop-blur-xl p-2 rounded-3xl border border-slate-200/80 dark:border-slate-700/80 shadow-sm">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+              {tabs.map((tab) => {
+                const Icon = tab.icon;
+                const isActive = activeTab === tab.id;
+                const isMatch = matchingTabs.includes(tab.id);
+
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => {
+                      setActiveTab(tab.id);
+                      if (searchQuery) setSearchQuery('');
+                    }}
+                    className={`relative flex flex-col items-center justify-center py-3.5 px-3 rounded-2xl transition-all duration-200 text-center select-none group ${
+                      isActive
+                        ? 'bg-gradient-to-b from-blue-50/90 to-indigo-50/50 dark:from-slate-700/80 dark:to-slate-800/90 text-blue-600 dark:text-blue-400 shadow-md shadow-blue-500/10 border border-blue-200/80 dark:border-blue-700/60 scale-[1.02]'
+                        : isMatch
+                          ? 'bg-amber-50/60 dark:bg-amber-950/20 text-slate-700 dark:text-slate-300 hover:bg-amber-100/50 border border-amber-300/50 dark:border-amber-700/40'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-700/40 border border-transparent'
+                    }`}
+                  >
+                    <div className="relative mb-1.5">
+                      <div
+                        className={`w-10 h-10 rounded-2xl flex items-center justify-center transition-all duration-300 group-hover:scale-110 shadow-sm ${
+                          isActive
+                            ? `bg-gradient-to-tr ${tab.color} text-white shadow-md shadow-blue-500/25`
+                            : 'bg-slate-100 dark:bg-slate-700/70 text-slate-500 dark:text-slate-400 group-hover:bg-slate-200 dark:group-hover:bg-slate-600'
+                        }`}
+                      >
+                        <Icon size={18} />
+                      </div>
+                      {tab.badge && (
+                        <span className="absolute -top-1 -right-1 px-1.5 py-0.5 rounded-full text-[9px] font-black bg-emerald-500 text-white shadow-sm ring-2 ring-white dark:ring-slate-800">
+                          {tab.badge}
+                        </span>
+                      )}
+                    </div>
+
+                    <span className={`text-xs font-black tracking-tight ${isActive ? 'text-blue-600 dark:text-blue-400' : 'text-slate-700 dark:text-slate-200'}`}>
+                      {tab.label}
+                    </span>
+                    <span className="text-[10px] text-slate-400 dark:text-slate-500 line-clamp-1 mt-0.5 font-medium">
+                      {tab.sublabel}
+                    </span>
+
+                    {isActive && (
+                      <span className="absolute bottom-1 w-10 h-1 rounded-full bg-gradient-to-r from-blue-600 to-indigo-600" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
-      )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6">
-
+        {/* Tab Content Panels */}
+        <div className="max-w-7xl mx-auto px-4 sm:px-6">
+          {/* TAB 1: GENERAL */}
+          {activeTab === 'general' && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-300">
+              <div className="lg:col-span-2 space-y-6">
           {/* Identity & Logo */}
           <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
             <h3 className="font-bold flex items-center gap-2 mb-6 text-slate-800 dark:text-slate-100"><Building2 className="text-blue-500" size={18}/> هوية المؤسسة والشعار</h3>
@@ -1057,6 +1492,49 @@ const SettingsModule: React.FC = () => {
             </div>
           </div>
 
+              </div>
+              <div className="space-y-6">
+<div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
+            <h3 className="font-bold flex items-center gap-2 mb-6 text-slate-800 dark:text-slate-100"><Coins className="text-amber-500" size={18}/> العملة</h3>
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500 dark:text-slate-400">العملة الافتراضية</label>
+                <CustomSelect
+                  value={config.currency}
+                  onChange={(v) => setConfig({...config, currency: v})}
+                  options={[{ value: 'EGP', label: 'الجنيه المصري (EGP)' }, { value: 'SAR', label: 'الريال السعودي (SAR)' }, { value: 'USD', label: 'الدولار الأمريكي (USD)' }, { value: 'AED', label: 'الدرهم الإماراتي (AED)' }]}
+                />
+              </div>
+            </div>
+          </div>
+
+          
+<div className="bg-gradient-to-br from-slate-800 to-slate-950 p-6 rounded-3xl text-white shadow-xl relative overflow-hidden">
+             <div className="absolute -top-4 -right-4 opacity-10 rotate-12"><ShieldCheck size={120} /></div>
+             <h3 className="font-bold mb-8 flex items-center gap-2"><ShieldCheck className="text-blue-400" /> الترخيص</h3>
+             <div className="space-y-4 relative z-10">
+               <div className="bg-white/5 p-3 rounded-2xl flex justify-between items-center">
+                 <span className="text-xs text-slate-400">الحالة:</span>
+                 <span className={`text-sm font-bold ${activationStatusClass}`}>{activation.status}</span>
+               </div>
+               <div className="bg-white/5 p-3 rounded-2xl flex justify-between items-center">
+                 <span className="text-xs text-slate-400">ينتهي في:</span>
+                 <span className="text-sm font-bold">{activation.expiry || 'غير محدد'}</span>
+               </div>
+               <div className="bg-white/5 p-3 rounded-2xl flex justify-between items-center">
+                 <span className="text-xs text-slate-400">آخر تحقق:</span>
+                 <span className="text-sm font-bold">{activation.last_check || 'غير معروف'}</span>
+               </div>
+             </div>
+          </div>
+
+                        </div>
+            </div>
+          )}
+
+          {/* TAB 2: SALES & INVENTORY */}
+          {activeTab === 'sales_inventory' && (
+            <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in duration-300">
           {/* طريقة البيع */}
           <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
             <h3 className="font-bold flex items-center gap-2 mb-4 text-slate-800 dark:text-slate-100">طريقة البيع</h3>
@@ -1145,93 +1623,62 @@ const SettingsModule: React.FC = () => {
             </div>
           </div>
 
-          {/* Backup Section */}
-          <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
-            <h3 className="font-bold flex items-center gap-2 mb-6 text-slate-800 dark:text-slate-100"><Database className="text-indigo-500" size={18}/> قواعد البيانات والنسخ الاحتياطي</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-3">
-                <button onClick={runManualBackup} disabled={isBackingUp} className="w-full flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-900 rounded-2xl hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-all">
-                  <div className="flex items-center gap-3">
-                    <div className="bg-indigo-100 dark:bg-indigo-900/40 p-2.5 rounded-xl text-indigo-600 dark:text-indigo-400">
-                      {isBackingUp ? <RefreshCw className="animate-spin" size={20} /> : <Download size={20} />}
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm font-bold text-slate-800 dark:text-slate-200">تصدير نسخة (Backup)</p>
-                      <p className="text-[10px] text-slate-500">تحميل ملف SQL حالي</p>
-                    </div>
-                  </div>
-                </button>
-                <input type="file" ref={restoreInputRef} className="hidden" accept=".sql" onChange={handleRestoreFile} />
-                <button onClick={runRestore} disabled={isRestoring} className="w-full flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-900 rounded-2xl hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-all">
-                  <div className="flex items-center gap-3">
-                    <div className="bg-amber-100 dark:bg-amber-900/40 p-2.5 rounded-xl text-amber-600 dark:text-amber-400">
-                      {isRestoring ? <RefreshCw className="animate-spin" size={20} /> : <Upload size={20} />}
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm font-bold text-slate-800 dark:text-slate-200">استرجاع بيانات (Restore)</p>
-                      <p className="text-[10px] text-slate-500">رفع ملف SQL خارجي</p>
-                    </div>
-                  </div>
-                </button>
-              </div>
-
-              <div className="space-y-4 md:border-r md:pr-6 border-slate-100 dark:border-slate-700">
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-500 mr-2">بريد استلام النسخة الاحتياطية</label>
-                  <input
-                    type="email"
-                    placeholder="example@email.com"
-                    value={config.backupEmail}
-                    onChange={e => setConfig({ ...config, backupEmail: e.target.value, backupEmailVerified: false })}
-                    className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
-                  />
-                  <p className="text-[11px] text-muted">سيتم استخدام هذا البريد لإرسال النسخ الاحتياطية عند تفعيل الإرسال عبر البريد.</p>
-                  {!config.backupEmailVerified && (
-                    <div className="flex flex-col gap-2">
-                      <button onClick={sendOtp} disabled={otpLoading || !config.backupEmail} className="px-3 py-2 bg-blue-600 text-white rounded">
-                        إرسال كود التحقق
-                      </button>
-                      {otpSent && (
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="text"
-                            placeholder="ادخل كود التحقق"
-                            value={otpCode}
-                            onChange={e => setOtpCode(e.target.value)}
-                            className="flex-1 bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-2 px-3 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
-                          />
-                          <button onClick={verifyOtp} disabled={otpLoading} className="px-3 py-2 bg-emerald-600 text-white rounded">
-                            تأكيد
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {config.backupEmailVerified && (
-                    <button onClick={sendBackupEmailNow} className="px-3 py-2 bg-emerald-600 text-white rounded">
-                      إرسال نسخة احتياطية
-                    </button>
-                  )}
-                </div>
-                <div className="flex items-center justify-between p-2">
-                  <span className="text-sm font-bold text-slate-700 dark:text-slate-300">النسخ التلقائي للسيرفر</span>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" className="sr-only peer" checked={config.autoBackup} onChange={(e) => setConfig({...config, autoBackup: e.target.checked})} />
-                    <div className="w-11 h-6 bg-slate-200 dark:bg-slate-700 rounded-full peer peer-checked:bg-indigo-600 after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:-translate-x-full"></div>
-                  </label>
-                </div>
-                <div className={`space-y-1 ${!config.autoBackup ? 'opacity-40' : ''}`}>
-                  <label className="text-[10px] font-bold text-slate-500 mr-2">توقيت النسخ</label>
-                  <CustomSelect
-                    value={config.backupFrequency}
-                    onChange={(v) => setConfig({...config, backupFrequency: v})}
-                    disabled={!config.autoBackup}
-                    options={[{ value: 'hourly', label: 'كل ساعة عمل' }, { value: 'daily', label: 'يومياً (منتصف الليل)' }, { value: 'weekly', label: 'أسبوعياً (كل جمعة)' }]}
-                  />
-                </div>
-              </div>
             </div>
-          </div>
+          )}
+
+          {/* TAB 3: INTEGRATIONS */}
+          {activeTab === 'integrations' && (
+            <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in duration-300">
+              {/* Modern Integrations Hub Header Banner */}
+              <div className="p-6 rounded-3xl bg-gradient-to-r from-purple-950 via-indigo-950 to-slate-900 text-white border border-purple-500/30 shadow-xl relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl pointer-events-none"></div>
+                <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-purple-500/30 text-purple-200 border border-purple-400/30">
+                        منظومة الربط الشامل
+                      </span>
+                      <span className="text-xs text-purple-200 font-bold">
+                        {activeIntegrationsCount > 0 ? `(${activeIntegrationsCount} منصات نشطة حالياً)` : '(لا توجد منصات مفعلة حالياً)'}
+                      </span>
+                    </div>
+                    <h3 className="text-lg font-black tracking-tight text-white flex items-center gap-2">
+                      <ShoppingBag className="text-purple-400" size={20} /> الربط مع منصات التجارة الإلكترونية والـ API
+                    </h3>
+                    <p className="text-xs text-purple-200/80 leading-relaxed">
+                      استقبال وتوليد الأوردرات تلقائياً في ثوانٍ، وتحديث بيانات العملاء والمخزون بدون أي تدخل يدوي.
+                    </p>
+                  </div>
+                  
+                  {/* Status Badges */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition-all ${
+                      config.easyordersEnabled 
+                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm shadow-amber-500/20' 
+                        : 'bg-white/5 text-slate-400 border-white/10'
+                    }`}>
+                      <span className={`w-2 h-2 rounded-full ${config.easyordersEnabled ? 'bg-amber-400 animate-pulse' : 'bg-slate-500'}`} />
+                      EasyOrders
+                    </span>
+                    <span className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition-all ${
+                      config.woocommerceEnabled 
+                        ? 'bg-purple-500/20 text-purple-300 border-purple-500/40 shadow-sm shadow-purple-500/20' 
+                        : 'bg-white/5 text-slate-400 border-white/10'
+                    }`}>
+                      <span className={`w-2 h-2 rounded-full ${config.woocommerceEnabled ? 'bg-purple-400 animate-pulse' : 'bg-slate-500'}`} />
+                      WooCommerce
+                    </span>
+                    <span className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition-all ${
+                      config.shopifyEnabled 
+                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-sm shadow-emerald-500/20' 
+                        : 'bg-white/5 text-slate-400 border-white/10'
+                    }`}>
+                      <span className={`w-2 h-2 rounded-full ${config.shopifyEnabled ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+                      Shopify
+                    </span>
+                  </div>
+                </div>
+              </div>
 
           {/* External Integration Section */}
           <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
@@ -1240,121 +1687,292 @@ const SettingsModule: React.FC = () => {
             </h3>
             
             <div className="space-y-6">
-              {/* 1. ربط المتجر الخارجي */}
-              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-700">
-                <h4 className="text-xs font-black text-slate-700 dark:text-slate-300 mb-3">ربط المتجر الخارجي (WooCommerce / Shopify):</h4>
+              {/* 1. ربط متجر ووكومرس */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-700 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-black text-slate-700 dark:text-slate-300 flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-lg bg-purple-500/10 text-purple-500 flex items-center justify-center font-bold text-xs">🛍️</span>
+                    ربط متجر ووكومرس (WooCommerce):
+                  </h4>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-bold text-slate-500">{config.woocommerceEnabled ? 'مفعل' : 'معطل'}</span>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={config.woocommerceEnabled}
+                        onChange={e => setConfig({ ...config, woocommerceEnabled: e.target.checked })}
+                        className="sr-only peer"
+                      />
+                      <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+                    </label>
+                  </div>
+                </div>
+
                 <div className="grid gap-4 md:grid-cols-2">
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 mb-1 block">رابط الاستدعاء للطلب (Callback URL)</label>
+                  <div className="md:col-span-2">
+                    <label className="text-[10px] font-bold text-slate-400 mb-1 block">رابط الويب هوك في ووكومرس (Webhook Delivery URL)</label>
                     <div className="flex gap-2">
                       <input
                         type="text"
                         readOnly
-                        value={`${API_BASE_PATH}/api_external.php?action=create_order`}
+                        value={`${typeof window !== 'undefined' ? window.location.origin : ''}${API_BASE_PATH}/woocommerce/webhook.php`}
                         className="w-full bg-white dark:bg-slate-800 border-none rounded-xl py-2 px-3 text-xs font-mono text-slate-600 dark:text-slate-400 select-all"
                       />
                       <button
                         type="button"
-                        onClick={() => copyToClipboard(`${API_BASE_PATH}/api_external.php?action=create_order`, 'رابط الاستدعاء')}
-                        className="px-3 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-xl text-xs font-bold transition-colors hover:bg-indigo-100"
+                        onClick={() => copyToClipboard(`${window.location.origin}${API_BASE_PATH}/woocommerce/webhook.php`, 'رابط ويب هوك ووكومرس')}
+                        className="px-3 bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 rounded-xl text-xs font-bold transition-colors hover:bg-purple-100"
                       >
                         نسخ
                       </button>
                     </div>
                   </div>
+
                   <div>
-                    <label className="text-[10px] font-bold text-slate-400 mb-1 block">مفتاح الحماية الخارجي (API Key / Token)</label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={config.externalApiToken}
-                        onChange={e => setConfig({...config, externalApiToken: e.target.value})}
-                        placeholder="سيتم توليده تلقائياً عند الحفظ إذا تركته فارغاً"
-                        className="w-full bg-white dark:bg-slate-800 border-none rounded-xl py-2 px-3 text-xs font-mono text-slate-700 dark:text-white"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => copyToClipboard(config.externalApiToken, 'مفتاح الحماية')}
-                        className="px-3 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-xl text-xs font-bold transition-colors hover:bg-indigo-100"
-                      >
-                        نسخ
-                      </button>
-                    </div>
+                    <label className="text-[10px] font-bold text-slate-400 mb-1 block">رابط متجر ووكومرس (Store URL)</label>
+                    <input
+                      type="text"
+                      value={config.woocommerceStoreUrl}
+                      onChange={e => setConfig({ ...config, woocommerceStoreUrl: e.target.value })}
+                      placeholder="https://yourstore.com"
+                      className="w-full bg-white dark:bg-slate-800 border-none rounded-xl py-2 px-3 text-xs font-mono text-slate-700 dark:text-white"
+                    />
                   </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 mb-1 block">مفتاح العميل (Consumer Key)</label>
+                    <input
+                      type="password"
+                      value={config.woocommerceConsumerKey}
+                      onChange={e => setConfig({ ...config, woocommerceConsumerKey: e.target.value })}
+                      placeholder="ck_..."
+                      className="w-full bg-white dark:bg-slate-800 border-none rounded-xl py-2 px-3 text-xs font-mono text-slate-700 dark:text-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 mb-1 block">المفتاح السري (Consumer Secret)</label>
+                    <input
+                      type="password"
+                      value={config.woocommerceConsumerSecret}
+                      onChange={e => setConfig({ ...config, woocommerceConsumerSecret: e.target.value })}
+                      placeholder="cs_..."
+                      className="w-full bg-white dark:bg-slate-800 border-none rounded-xl py-2 px-3 text-xs font-mono text-slate-700 dark:text-white"
+                    />
+                  </div>
+
+                  <div className="flex items-end">
+                    <button
+                      type="button"
+                      onClick={testWoocommerceConnection}
+                      disabled={woocommerceTesting}
+                      className="w-full py-2 px-3 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-sm"
+                    >
+                      {woocommerceTesting ? 'جارٍ الفحص...' : 'فحص اتصال ووكومرس'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-2 border-t border-slate-200 dark:border-slate-800">
+                  <span className="text-[11px] text-slate-400">سحب الطلبات، مطابقة الـ SKU، ومحاكي الفحص المباشر.</span>
+                  <a
+                    href={`${API_BASE_PATH}/woocommerce/index.php`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 hover:bg-purple-100 rounded-xl text-xs font-bold transition-all"
+                  >
+                    <span>فتح لوحة تحكم ووكومرس المتكاملة ↗</span>
+                  </a>
                 </div>
               </div>
 
-              {/* 2. ربط بوابة واتساب ميتا */}
-              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-700">
-                <h4 className="text-xs font-black text-slate-700 dark:text-slate-300 mb-3">ربط الواتساب السحابي (WhatsApp Business Cloud API - Meta):</h4>
+              {/* 2. ربط متجر شوبيفاي */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-700 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-black text-slate-700 dark:text-slate-300 flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-lg bg-emerald-500/10 text-emerald-500 flex items-center justify-center font-bold text-xs">🟢</span>
+                    ربط متجر شوبيفاي (Shopify):
+                  </h4>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-bold text-slate-500">{config.shopifyEnabled ? 'مفعل' : 'معطل'}</span>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={config.shopifyEnabled}
+                        onChange={e => setConfig({ ...config, shopifyEnabled: e.target.checked })}
+                        className="sr-only peer"
+                      />
+                      <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                    </label>
+                  </div>
+                </div>
+
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="md:col-span-2">
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-400 mb-1 block">رابط الاستدعاء للويب هوك بميتا (Webhook Callback URL)</label>
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            readOnly
-                            value={`${API_BASE_PATH}/whatsapp_webhook.php`}
-                            className="w-full bg-white dark:bg-slate-800 border-none rounded-xl py-2 px-3 text-xs font-mono text-slate-600 dark:text-slate-400 select-all"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => copyToClipboard(`${API_BASE_PATH}/whatsapp_webhook.php`, 'رابط الويب هوك')}
-                            className="px-3 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-xl text-xs font-bold transition-colors hover:bg-indigo-100"
-                          >
-                            نسخ
-                          </button>
-                        </div>
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-400 mb-1 block">رمز التحقق للويب هوك (Verify Token)</label>
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            value={config.whatsappVerifyToken}
-                            onChange={e => setConfig({...config, whatsappVerifyToken: e.target.value})}
-                            className="w-full bg-white dark:bg-slate-800 border-none rounded-xl py-2 px-3 text-xs font-mono text-slate-700 dark:text-white"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => copyToClipboard(config.whatsappVerifyToken, 'رمز التحقق')}
-                            className="px-3 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-xl text-xs font-bold transition-colors hover:bg-indigo-100"
-                          >
-                            نسخ
-                          </button>
-                        </div>
-                      </div>
+                    <label className="text-[10px] font-bold text-slate-400 mb-1 block">رابط الويب هوك في شوبيفاي (Shopify Webhook URL)</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        readOnly
+                        value={`${typeof window !== 'undefined' ? window.location.origin : ''}${API_BASE_PATH}/shopify/webhook.php`}
+                        className="w-full bg-white dark:bg-slate-800 border-none rounded-xl py-2 px-3 text-xs font-mono text-slate-600 dark:text-slate-400 select-all"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(`${window.location.origin}${API_BASE_PATH}/shopify/webhook.php`, 'رابط ويب هوك شوبيفاي')}
+                        className="px-3 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 rounded-xl text-xs font-bold transition-colors hover:bg-emerald-100"
+                      >
+                        نسخ
+                      </button>
                     </div>
                   </div>
-                  
+
                   <div>
-                    <label className="text-[10px] font-bold text-slate-400 mb-1 block">رقم معرّف الهاتف الخاص بميتا (Phone Number ID)</label>
+                    <label className="text-[10px] font-bold text-slate-400 mb-1 block">نطاق المتجر (Shopify Store Domain)</label>
                     <input
                       type="text"
-                      value={config.whatsappPhoneId}
-                      onChange={e => setConfig({...config, whatsappPhoneId: e.target.value})}
-                      placeholder="أدخل الـ Phone Number ID من حساب ميتا"
-                      className="w-full bg-white dark:bg-slate-800 border-none rounded-xl py-2.5 px-3 text-xs font-mono text-slate-700 dark:text-white"
+                      value={config.shopifyStoreDomain}
+                      onChange={e => setConfig({ ...config, shopifyStoreDomain: e.target.value })}
+                      placeholder="your-store.myshopify.com"
+                      className="w-full bg-white dark:bg-slate-800 border-none rounded-xl py-2 px-3 text-xs font-mono text-slate-700 dark:text-white"
                     />
                   </div>
 
                   <div>
-                    <label className="text-[10px] font-bold text-slate-400 mb-1 block">رمز الوصول الدائم الخاص بالواتساب (Permanent Access Token)</label>
+                    <label className="text-[10px] font-bold text-slate-400 mb-1 block">توكن الـ Admin API (Access Token)</label>
                     <input
-                      type="text"
-                      value={config.whatsappAccessToken}
-                      onChange={e => setConfig({...config, whatsappAccessToken: e.target.value})}
-                      placeholder="أدخل الـ Access Token من حساب ميتا"
-                      className="w-full bg-white dark:bg-slate-800 border-none rounded-xl py-2.5 px-3 text-xs font-mono text-slate-700 dark:text-white"
+                      type="password"
+                      value={config.shopifyAccessToken}
+                      onChange={e => setConfig({ ...config, shopifyAccessToken: e.target.value })}
+                      placeholder="shpat_..."
+                      className="w-full bg-white dark:bg-slate-800 border-none rounded-xl py-2 px-3 text-xs font-mono text-slate-700 dark:text-white"
                     />
                   </div>
+
+                  <div className="md:col-span-2 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={testShopifyConnection}
+                      disabled={shopifyTesting}
+                      className="py-2 px-5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-sm"
+                    >
+                      {shopifyTesting ? 'جارٍ الفحص...' : 'فحص اتصال شوبيفاي'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-2 border-t border-slate-200 dark:border-slate-800">
+                  <span className="text-[11px] text-slate-400">سحب الطلبات، مطابقة المتغيرات والـ SKU، وسجل العمليات.</span>
+                  <a
+                    href={`${API_BASE_PATH}/shopify/index.php`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 rounded-xl text-xs font-bold transition-all"
+                  >
+                    <span>فتح لوحة تحكم شوبيفاي المتكاملة ↗</span>
+                  </a>
                 </div>
               </div>
             </div>
           </div>
 
+          {/* EasyOrders Integration Section */}
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold flex items-center gap-2 text-slate-800 dark:text-slate-100">
+                <span className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center font-black text-sm">⚡</span>
+                ربط منصة إيزي أوردرز (EasyOrders Integration)
+              </h3>
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
+                  {config.easyordersEnabled ? 'مفعل' : 'معطل'}
+                </span>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={config.easyordersEnabled}
+                    onChange={e => setConfig({ ...config, easyordersEnabled: e.target.checked })}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+                </label>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-6 leading-relaxed">
+              اربط برنامج DragonPro تلقائياً مع متجرك على منصة <strong>EasyOrders (easy-orders.net)</strong> لاستقبال جميع الطلبات فور إنشائها وحقنها في شاشة المبيعات وبوالص الشحن والمخازن مباشرة دون أي تدخل يدوي.
+            </p>
+
+            <div className="space-y-4">
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-700 space-y-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 mb-1 block">رابط الاستدعاء للويب هوك (EasyOrders Webhook URL)</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        readOnly
+                        value={`${typeof window !== 'undefined' ? window.location.origin : ''}${API_BASE_PATH}/easyorders/webhook.php`}
+                        className="w-full bg-white dark:bg-slate-800 border-none rounded-xl py-2 px-3 text-xs font-mono text-slate-600 dark:text-slate-400 select-all"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(`${window.location.origin}${API_BASE_PATH}/easyorders/webhook.php`, 'رابط الويب هوك الخاص بـ EasyOrders')}
+                        className="px-3 bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 rounded-xl text-xs font-bold transition-colors hover:bg-amber-100 whitespace-nowrap"
+                      >
+                        نسخ
+                      </button>
+                    </div>
+                    <span className="text-[10px] text-slate-400 mt-1 block">ضعه في لوحة تحكم EasyOrders في قسم: Public API &gt; Webhooks</span>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 mb-1 block">مفتاح الـ API الخاص بمتجرك (EasyOrders Api-Key)</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        value={config.easyordersApiKey}
+                        onChange={e => setConfig({ ...config, easyordersApiKey: e.target.value })}
+                        placeholder="أدخل مفتاح الـ Api-Key من لوحة تحكم EasyOrders..."
+                        className="w-full bg-white dark:bg-slate-800 border-none rounded-xl py-2 px-3 text-xs font-mono text-slate-700 dark:text-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={testEasyordersConnection}
+                        disabled={easyordersTesting}
+                        className="px-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-colors whitespace-nowrap shadow-sm"
+                      >
+                        {easyordersTesting ? 'جارٍ الفحص...' : 'فحص الاتصال'}
+                      </button>
+                    </div>
+                    <span className="text-[10px] text-slate-400 mt-1 block">يتم استخدامه لجلب تفاصيل المنتجات والمزامنة اليدوية</span>
+                  </div>
+                </div>
+
+                <div className="pt-3 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-200 dark:border-slate-800">
+                  <div className="text-xs text-slate-500 dark:text-slate-400">
+                    <span className="font-bold text-slate-700 dark:text-slate-300">مركز التحكم المتكامل:</span> سحب ومزامنة الطلبات، فحص مطابقة الباركود، محاكي الاختبار، وسجل الحركات.
+                  </div>
+                  <a
+                    href={`${API_BASE_PATH}/easyorders/index.php`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-600 hover:to-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-indigo-500/20 whitespace-nowrap"
+                  >
+                    <span>⚡ فتح لوحة تحكم إيزي أوردرز المتكاملة</span>
+                    <span className="text-[10px] opacity-80">↗</span>
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+
+            </div>
+          )}
+
+          {/* TAB 4: MESSAGING */}
+          {activeTab === 'messaging' && (
+            <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in duration-300">
           {/* Telegram Bot Integration Section */}
           <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
             <h3 className="font-bold flex items-center gap-2 mb-6 text-slate-800 dark:text-slate-100">
@@ -1550,6 +2168,83 @@ const SettingsModule: React.FC = () => {
             </div>
           </div>
 
+
+
+          {/* ربط الواتساب السحابي الرسمي (Meta Cloud API) */}
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
+            <h3 className="font-bold flex items-center gap-2 mb-3 text-slate-800 dark:text-slate-100">
+              <span className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center font-bold text-sm">💬</span>
+              ربط الواتساب السحابي (WhatsApp Business Cloud API - Meta)
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-6">
+              تهيئة الربط المباشر مع واجهة Meta Cloud API لإرسال الإشعارات وتأكيدات الأوردرات للعملاء تلقائياً عبر رقم واتساب الأعمال الرسمي.
+            </p>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="md:col-span-2">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 mb-1 block">رابط الاستدعاء للويب هوك بميتا (Webhook Callback URL)</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        readOnly
+                        value={`${API_BASE_PATH}/whatsapp_webhook.php`}
+                        className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-xs font-mono text-slate-600 dark:text-slate-400 select-all"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(`${API_BASE_PATH}/whatsapp_webhook.php`, 'رابط الويب هوك')}
+                        className="px-3 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 rounded-xl text-xs font-bold transition-colors hover:bg-emerald-100"
+                      >
+                        نسخ
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 mb-1 block">رمز التحقق للويب هوك (Verify Token)</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={config.whatsappVerifyToken}
+                        onChange={e => setConfig({...config, whatsappVerifyToken: e.target.value})}
+                        className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2 px-3 text-xs font-mono text-slate-700 dark:text-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(config.whatsappVerifyToken, 'رمز التحقق')}
+                        className="px-3 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 rounded-xl text-xs font-bold transition-colors hover:bg-emerald-100"
+                      >
+                        نسخ
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 mb-1 block">رقم معرّف الهاتف الخاص بميتا (Phone Number ID)</label>
+                <input
+                  type="text"
+                  value={config.whatsappPhoneId}
+                  onChange={e => setConfig({...config, whatsappPhoneId: e.target.value})}
+                  placeholder="أدخل الـ Phone Number ID من حساب ميتا"
+                  className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2.5 px-3 text-xs font-mono text-slate-700 dark:text-white"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 mb-1 block">رمز الوصول الدائم الخاص بالواتساب (Permanent Access Token)</label>
+                <input
+                  type="text"
+                  value={config.whatsappAccessToken}
+                  onChange={e => setConfig({...config, whatsappAccessToken: e.target.value})}
+                  placeholder="أدخل الـ Access Token من حساب ميتا"
+                  className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-xl py-2.5 px-3 text-xs font-mono text-slate-700 dark:text-white"
+                />
+              </div>
+            </div>
+          </div>
+
           {/* WhatsApp Templates Section */}
           <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
             <div className="flex items-center justify-between mb-6">
@@ -1617,6 +2312,227 @@ const SettingsModule: React.FC = () => {
             </div>
           </div>
 
+
+          {/* Daily Reports Section */}
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
+            <h3 className="font-bold flex items-center gap-2 mb-6 text-slate-800 dark:text-slate-100"><History className="text-emerald-500" size={18}/> التقارير اليومية عبر البريد</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-500 mr-2">بريد استلام التقارير اليومية</label>
+                  <input
+                    type="email"
+                    placeholder="example@email.com"
+                    value={config.reportEmail}
+                    onChange={e => setConfig({ ...config, reportEmail: e.target.value, reportEmailVerified: false })}
+                    className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
+                  />
+                  <p className="text-[11px] text-muted mt-2">سيتم استخدام هذا البريد لإرسال التقارير اليومية.</p>
+                  {!config.reportEmailVerified && (
+                    <div className="flex flex-col gap-2">
+                      <button onClick={sendReportOtp} disabled={reportOtpLoading || !config.reportEmail} className="px-3 py-2 bg-blue-600 text-white rounded">
+                        إرسال كود التحقق
+                      </button>
+                      {reportOtpSent && (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            placeholder="ادخل كود التحقق"
+                            value={reportOtpCode}
+                            onChange={e => setReportOtpCode(e.target.value)}
+                            className="flex-1 bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-2 px-3 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
+                          />
+                          <button onClick={verifyReportOtp} disabled={reportOtpLoading} className="px-3 py-2 bg-emerald-600 text-white rounded">
+                            تأكيد
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {config.reportEmailVerified && (
+                    <button onClick={sendDailyReportNow} className="px-3 py-2 bg-emerald-600 text-white rounded">
+                      إرسال تقرير اليوم الآن
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-4 md:border-r md:pr-6 border-slate-100 dark:border-slate-700">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-500 mr-2">أنواع التقارير اليومية</label>
+                  <div className="flex flex-col gap-2">
+                    <label className="inline-flex items-center gap-2 text-sm">
+                      <input type="checkbox" checked={config.reportDailySales} onChange={e => setConfig({ ...config, reportDailySales: e.target.checked })} />
+                      تقرير المبيعات اليومي
+                    </label>
+                    <label className="inline-flex items-center gap-2 text-sm">
+                      <input type="checkbox" checked={config.reportDailyTreasury} onChange={e => setConfig({ ...config, reportDailyTreasury: e.target.checked })} />
+                      تقرير الخزينة اليومي
+                    </label>
+                    <label className="inline-flex items-center gap-2 text-sm">
+                      <input type="checkbox" checked={config.reportDailyAudit} onChange={e => setConfig({ ...config, reportDailyAudit: e.target.checked })} />
+                      تقرير شامل للعمليات اليومية
+                    </label>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between p-2">
+                  <span className="text-sm font-bold text-slate-700 dark:text-slate-300">إرسال تلقائي يومي</span>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" className="sr-only peer" checked={config.reportAuto} onChange={(e) => setConfig({ ...config, reportAuto: e.target.checked })} />
+                    <div className="w-11 h-6 bg-slate-200 dark:bg-slate-700 rounded-full peer peer-checked:bg-emerald-600 after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:-translate-x-full"></div>
+                  </label>
+                </div>
+                <button
+                  onClick={async () => {
+                    try {
+                      const result = await saveSettingsToServer(false);
+                      if (result.success) {
+                        Swal.fire('تم', 'تم حفظ إعدادات التقارير.', 'success');
+                      } else {
+                        Swal.fire('فشل', result.message || 'تعذر حفظ إعدادات التقارير.', 'error');
+                      }
+                    } catch (e) {
+                      Swal.fire('خطأ', 'تعذر الاتصال بالخادم.', 'error');
+                    }
+                  }}
+                  className="px-3 py-2 bg-slate-200 rounded text-sm"
+                >
+                  حفظ إعدادات التقارير
+                </button>
+                <p className="text-[11px] text-muted">لتفعيل الإرسال التلقائي، شغّل المهمة المجدولة للملف report_run.php.</p>
+              </div>
+            </div>
+          </div>
+            </div>
+          )}
+
+          {/* TAB 5: BACKUP & DATABASE */}
+          {activeTab === 'backup_database' && (
+            <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in duration-300">
+          {/* Backup Section */}
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
+            <h3 className="font-bold flex items-center gap-2 mb-6 text-slate-800 dark:text-slate-100"><Database className="text-indigo-500" size={18}/> قواعد البيانات والنسخ الاحتياطي</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-3">
+                <button onClick={runManualBackup} disabled={isBackingUp} className="w-full flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-900 rounded-2xl hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-all">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-indigo-100 dark:bg-indigo-900/40 p-2.5 rounded-xl text-indigo-600 dark:text-indigo-400">
+                      {isBackingUp ? <RefreshCw className="animate-spin" size={20} /> : <Download size={20} />}
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-bold text-slate-800 dark:text-slate-200">تصدير نسخة (Backup)</p>
+                      <p className="text-[10px] text-slate-500">تحميل ملف SQL حالي</p>
+                    </div>
+                  </div>
+                </button>
+                <input type="file" ref={restoreInputRef} className="hidden" accept=".sql" onChange={handleRestoreFile} />
+                <button onClick={runRestore} disabled={isRestoring} className="w-full flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-900 rounded-2xl hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-all">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-amber-100 dark:bg-amber-900/40 p-2.5 rounded-xl text-amber-600 dark:text-amber-400">
+                      {isRestoring ? <RefreshCw className="animate-spin" size={20} /> : <Upload size={20} />}
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-bold text-slate-800 dark:text-slate-200">استرجاع بيانات (Restore)</p>
+                      <p className="text-[10px] text-slate-500">رفع ملف SQL خارجي</p>
+                    </div>
+                  </div>
+                </button>
+              </div>
+
+              <div className="space-y-4 md:border-r md:pr-6 border-slate-100 dark:border-slate-700">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-500 mr-2">بريد استلام النسخة الاحتياطية</label>
+                  <input
+                    type="email"
+                    placeholder="example@email.com"
+                    value={config.backupEmail}
+                    onChange={e => setConfig({ ...config, backupEmail: e.target.value, backupEmailVerified: false })}
+                    className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
+                  />
+                  <p className="text-[11px] text-muted">سيتم استخدام هذا البريد لإرسال النسخ الاحتياطية عند تفعيل الإرسال عبر البريد.</p>
+                  {!config.backupEmailVerified && (
+                    <div className="flex flex-col gap-2">
+                      <button onClick={sendOtp} disabled={otpLoading || !config.backupEmail} className="px-3 py-2 bg-blue-600 text-white rounded">
+                        إرسال كود التحقق
+                      </button>
+                      {otpSent && (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            placeholder="ادخل كود التحقق"
+                            value={otpCode}
+                            onChange={e => setOtpCode(e.target.value)}
+                            className="flex-1 bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-2 px-3 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
+                          />
+                          <button onClick={verifyOtp} disabled={otpLoading} className="px-3 py-2 bg-emerald-600 text-white rounded">
+                            تأكيد
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {config.backupEmailVerified && (
+                    <button onClick={sendBackupEmailNow} className="px-3 py-2 bg-emerald-600 text-white rounded">
+                      إرسال نسخة احتياطية
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center justify-between p-2">
+                  <span className="text-sm font-bold text-slate-700 dark:text-slate-300">النسخ التلقائي للسيرفر</span>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" className="sr-only peer" checked={config.autoBackup} onChange={(e) => setConfig({...config, autoBackup: e.target.checked})} />
+                    <div className="w-11 h-6 bg-slate-200 dark:bg-slate-700 rounded-full peer peer-checked:bg-indigo-600 after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:-translate-x-full"></div>
+                  </label>
+                </div>
+                <div className={`space-y-1 ${!config.autoBackup ? 'opacity-40' : ''}`}>
+                  <label className="text-[10px] font-bold text-slate-500 mr-2">توقيت النسخ</label>
+                  <CustomSelect
+                    value={config.backupFrequency}
+                    onChange={(v) => setConfig({...config, backupFrequency: v})}
+                    disabled={!config.autoBackup}
+                    options={[{ value: 'hourly', label: 'كل ساعة عمل' }, { value: 'daily', label: 'يومياً (منتصف الليل)' }, { value: 'weekly', label: 'أسبوعياً (كل جمعة)' }]}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+{/* تفريغ كاش المتصفح */}
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
+            <h3 className="font-bold flex items-center gap-2 mb-3 text-slate-800 dark:text-slate-100">
+              <RefreshCw className="text-blue-500" size={18}/> تفريغ كاش المتصفح
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 leading-relaxed">
+              إذا كانت بعض التحديثات أو الشاشات لا تظهر بشكل صحيح، يمكنك مسح الملفات المؤقتة المخزنة في المتصفح وتحديث الصفحة فوراً.
+            </p>
+            <button
+              onClick={handleClearBrowserCache}
+              className="w-full py-2.5 bg-slate-100 dark:bg-slate-700/60 hover:bg-blue-600 hover:text-white text-slate-700 dark:text-slate-200 rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-2 active:scale-95 border border-slate-200 dark:border-slate-600 shadow-sm"
+            >
+              <RefreshCw size={14} /> تفريغ الكاش وإعادة التحميل
+            </button>
+          </div>
+
+          
+<div className="bg-rose-50 dark:bg-rose-950/20 p-6 rounded-3xl border border-rose-100 dark:border-rose-900/50 shadow-sm">
+             <h4 className="font-bold text-rose-700 dark:text-rose-400 flex items-center gap-2 mb-2"><AlertCircle size={16}/> منطقة الخطر</h4>
+             <p className="text-[10px] text-rose-600 dark:text-rose-500 mb-4">سيؤدي هذا الإجراء إلى حذف كافة الإعدادات والبيانات والبدء من جديد بمعالج التثبيت.</p>
+             <button
+                onClick={handleSystemReset}
+                className="w-full py-2.5 bg-rose-600 text-white rounded-xl text-xs font-bold hover:bg-rose-700 transition-all shadow-lg shadow-rose-500/20 active:scale-95"
+             >
+               إعادة تعيين النظام بالكامل
+             </button>
+          </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 6: SYSTEM & SUPPORT */}
+          {activeTab === 'system_support' && (
+            <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in duration-300">
           {/* Updates Section */}
           <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
             <h3 className="font-bold flex items-center gap-2 mb-4 text-slate-800 dark:text-slate-100"><RefreshCw className="text-slate-500" size={18}/> تحديث النظام</h3>
@@ -1644,6 +2560,7 @@ const SettingsModule: React.FC = () => {
               </div>
             </div>
           </div>
+
 
           {/* Support Section (RustDesk) */}
           <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
@@ -1785,163 +2702,10 @@ const SettingsModule: React.FC = () => {
             </div>
           </div>
 
-          {/* Daily Reports Section */}
-          <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
-            <h3 className="font-bold flex items-center gap-2 mb-6 text-slate-800 dark:text-slate-100"><History className="text-emerald-500" size={18}/> التقارير اليومية عبر البريد</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-3">
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-500 mr-2">بريد استلام التقارير اليومية</label>
-                  <input
-                    type="email"
-                    placeholder="example@email.com"
-                    value={config.reportEmail}
-                    onChange={e => setConfig({ ...config, reportEmail: e.target.value, reportEmailVerified: false })}
-                    className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3 px-4 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
-                  />
-                  <p className="text-[11px] text-muted mt-2">سيتم استخدام هذا البريد لإرسال التقارير اليومية.</p>
-                  {!config.reportEmailVerified && (
-                    <div className="flex flex-col gap-2">
-                      <button onClick={sendReportOtp} disabled={reportOtpLoading || !config.reportEmail} className="px-3 py-2 bg-blue-600 text-white rounded">
-                        إرسال كود التحقق
-                      </button>
-                      {reportOtpSent && (
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="text"
-                            placeholder="ادخل كود التحقق"
-                            value={reportOtpCode}
-                            onChange={e => setReportOtpCode(e.target.value)}
-                            className="flex-1 bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-2 px-3 text-sm focus:ring-2 ring-blue-500/20 text-slate-900 dark:text-white"
-                          />
-                          <button onClick={verifyReportOtp} disabled={reportOtpLoading} className="px-3 py-2 bg-emerald-600 text-white rounded">
-                            تأكيد
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {config.reportEmailVerified && (
-                    <button onClick={sendDailyReportNow} className="px-3 py-2 bg-emerald-600 text-white rounded">
-                      إرسال تقرير اليوم الآن
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              <div className="space-y-4 md:border-r md:pr-6 border-slate-100 dark:border-slate-700">
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-500 mr-2">أنواع التقارير اليومية</label>
-                  <div className="flex flex-col gap-2">
-                    <label className="inline-flex items-center gap-2 text-sm">
-                      <input type="checkbox" checked={config.reportDailySales} onChange={e => setConfig({ ...config, reportDailySales: e.target.checked })} />
-                      تقرير المبيعات اليومي
-                    </label>
-                    <label className="inline-flex items-center gap-2 text-sm">
-                      <input type="checkbox" checked={config.reportDailyTreasury} onChange={e => setConfig({ ...config, reportDailyTreasury: e.target.checked })} />
-                      تقرير الخزينة اليومي
-                    </label>
-                    <label className="inline-flex items-center gap-2 text-sm">
-                      <input type="checkbox" checked={config.reportDailyAudit} onChange={e => setConfig({ ...config, reportDailyAudit: e.target.checked })} />
-                      تقرير شامل للعمليات اليومية
-                    </label>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between p-2">
-                  <span className="text-sm font-bold text-slate-700 dark:text-slate-300">إرسال تلقائي يومي</span>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" className="sr-only peer" checked={config.reportAuto} onChange={(e) => setConfig({ ...config, reportAuto: e.target.checked })} />
-                    <div className="w-11 h-6 bg-slate-200 dark:bg-slate-700 rounded-full peer peer-checked:bg-emerald-600 after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:-translate-x-full"></div>
-                  </label>
-                </div>
-                <button
-                  onClick={async () => {
-                    try {
-                      const result = await saveSettingsToServer(false);
-                      if (result.success) {
-                        Swal.fire('تم', 'تم حفظ إعدادات التقارير.', 'success');
-                      } else {
-                        Swal.fire('فشل', result.message || 'تعذر حفظ إعدادات التقارير.', 'error');
-                      }
-                    } catch (e) {
-                      Swal.fire('خطأ', 'تعذر الاتصال بالخادم.', 'error');
-                    }
-                  }}
-                  className="px-3 py-2 bg-slate-200 rounded text-sm"
-                >
-                  حفظ إعدادات التقارير
-                </button>
-                <p className="text-[11px] text-muted">لتفعيل الإرسال التلقائي، شغّل المهمة المجدولة للملف report_run.php.</p>
-              </div>
             </div>
-          </div>
-        </div>
-
-        {/* Sidebar Settings */}
-        <div className="space-y-6">
-          <div className="bg-gradient-to-br from-slate-800 to-slate-950 p-6 rounded-3xl text-white shadow-xl relative overflow-hidden">
-             <div className="absolute -top-4 -right-4 opacity-10 rotate-12"><ShieldCheck size={120} /></div>
-             <h3 className="font-bold mb-8 flex items-center gap-2"><ShieldCheck className="text-blue-400" /> الترخيص</h3>
-             <div className="space-y-4 relative z-10">
-               <div className="bg-white/5 p-3 rounded-2xl flex justify-between items-center">
-                 <span className="text-xs text-slate-400">الحالة:</span>
-                 <span className={`text-sm font-bold ${activationStatusClass}`}>{activation.status}</span>
-               </div>
-               <div className="bg-white/5 p-3 rounded-2xl flex justify-between items-center">
-                 <span className="text-xs text-slate-400">ينتهي في:</span>
-                 <span className="text-sm font-bold">{activation.expiry || 'غير محدد'}</span>
-               </div>
-               <div className="bg-white/5 p-3 rounded-2xl flex justify-between items-center">
-                 <span className="text-xs text-slate-400">آخر تحقق:</span>
-                 <span className="text-sm font-bold">{activation.last_check || 'غير معروف'}</span>
-               </div>
-             </div>
-          </div>
-
-          <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
-            <h3 className="font-bold flex items-center gap-2 mb-6 text-slate-800 dark:text-slate-100"><Coins className="text-amber-500" size={18}/> العملة</h3>
-            <div className="space-y-4">
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500 dark:text-slate-400">العملة الافتراضية</label>
-                <CustomSelect
-                  value={config.currency}
-                  onChange={(v) => setConfig({...config, currency: v})}
-                  options={[{ value: 'EGP', label: 'الجنيه المصري (EGP)' }, { value: 'SAR', label: 'الريال السعودي (SAR)' }, { value: 'USD', label: 'الدولار الأمريكي (USD)' }, { value: 'AED', label: 'الدرهم الإماراتي (AED)' }]}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* تفريغ كاش المتصفح */}
-          <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm transition-colors">
-            <h3 className="font-bold flex items-center gap-2 mb-3 text-slate-800 dark:text-slate-100">
-              <RefreshCw className="text-blue-500" size={18}/> تفريغ كاش المتصفح
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 leading-relaxed">
-              إذا كانت بعض التحديثات أو الشاشات لا تظهر بشكل صحيح، يمكنك مسح الملفات المؤقتة المخزنة في المتصفح وتحديث الصفحة فوراً.
-            </p>
-            <button
-              onClick={handleClearBrowserCache}
-              className="w-full py-2.5 bg-slate-100 dark:bg-slate-700/60 hover:bg-blue-600 hover:text-white text-slate-700 dark:text-slate-200 rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-2 active:scale-95 border border-slate-200 dark:border-slate-600 shadow-sm"
-            >
-              <RefreshCw size={14} /> تفريغ الكاش وإعادة التحميل
-            </button>
-          </div>
-
-          <div className="bg-rose-50 dark:bg-rose-950/20 p-6 rounded-3xl border border-rose-100 dark:border-rose-900/50 shadow-sm">
-             <h4 className="font-bold text-rose-700 dark:text-rose-400 flex items-center gap-2 mb-2"><AlertCircle size={16}/> منطقة الخطر</h4>
-             <p className="text-[10px] text-rose-600 dark:text-rose-500 mb-4">سيؤدي هذا الإجراء إلى حذف كافة الإعدادات والبيانات والبدء من جديد بمعالج التثبيت.</p>
-             <button
-                onClick={handleSystemReset}
-                className="w-full py-2.5 bg-rose-600 text-white rounded-xl text-xs font-bold hover:bg-rose-700 transition-all shadow-lg shadow-rose-500/20 active:scale-95"
-             >
-               إعادة تعيين النظام بالكامل
-             </button>
-          </div>
+          )}
         </div>
       </div>
-    </div>
 
       {/* ── Update Manager Modal ── */}
       {showUpdateModal && (

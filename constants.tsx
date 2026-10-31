@@ -187,8 +187,10 @@ export const MENU_ITEMS = [
     slug: 'reports',
     subItems: [
       { label: 'الأرباح والخسائر', slug: 'accounting' },
+      { label: 'الأرباح والخسائر الجديد', slug: 'new-profit-loss' },
       { label: 'المبيعات', slug: 'sales' },
       { label: 'ملخص الفترة', slug: 'totals' },
+      { label: 'ملخص اليومية', slug: 'new-period-summary' },
       { label: 'تقرير منتجات', slug: 'product-report' },
       { label: 'أعمار الديون', slug: 'outstanding-balances' },
       { label: 'الغرامات و الحافز', slug: 'fines-incentives' },

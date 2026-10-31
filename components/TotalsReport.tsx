@@ -69,7 +69,10 @@ const TotalsReport: React.FC = () => {
       if (finRes && finRes.success) {
         setStartingBalance(Number(finRes.data.starting_balance || 0));
         const th = finRes.data.treasuryBalanceHistory || [];
-        setEndBalance(th.length ? Number(th[th.length-1].balance) : Number(finRes.data.starting_balance || 0));
+        const calculatedEnd = finRes.data.ending_balance !== undefined
+          ? Number(finRes.data.ending_balance)
+          : (th.length ? Number(th[th.length - 1].balance) : Number(finRes.data.starting_balance || 0));
+        setEndBalance(calculatedEnd);
         setRecords(finRes.data.revenueAndExpenseRecords || []);
       } else {
         setStartingBalance(0); setEndBalance(0); setRecords([]);
@@ -85,19 +88,18 @@ const TotalsReport: React.FC = () => {
         setPerDayStats([]); setOrderTotals({});
       }
 
-      // ── 3. Rep assigned journal (Closed journals only) ─────────────
+      // ── 3. Rep assigned journal (New journals opened in period) ─────
       try {
-        const repUrl = `${API_BASE_PATH}/api.php?module=sales&action=getRepDailyJournal&from=${startDate}&to=${endDate}&closed_only=1`;
+        const repUrl = `${API_BASE_PATH}/api.php?module=sales&action=getRepDailyJournal&from=${startDate}&to=${endDate}`;
         const repRes = await fetch(repUrl).then(r => r.json()).catch(() => null);
         if (repRes && repRes.success && Array.isArray(repRes.data)) {
           const grouped: Record<string, any> = {};
           repRes.data.forEach((row: any) => {
-            if (Number(row.is_closed) !== 1) return; // closed journals only
-            const d = String(row.closed_at ? row.closed_at.slice(0, 10) : (row.journal_date || row.created_at || '')).slice(0, 10);
+            const d = String(row.journal_date || row.created_at || '').slice(0, 10);
             if (!d) return;
             if (!grouped[d]) grouped[d] = { date: d, orders: 0, pieces: 0 };
-            grouped[d].orders += Number(row.orders_assigned_count || 0);
-            grouped[d].pieces += Number(row.pieces_assigned_count || 0);
+            grouped[d].orders += Number(row.orders_assigned_count || row.journal_orders_count || 0);
+            grouped[d].pieces += Number(row.pieces_assigned_count || row.journal_pieces_count || 0);
           });
           setAssignedToRepsStats(Object.values(grouped));
         } else {
@@ -111,7 +113,7 @@ const TotalsReport: React.FC = () => {
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [startDate, endDate, treasuryId]);
 
   const [sortKey, setSortKey] = useState<string>('date');
   const [sortAsc, setSortAsc] = useState(false);
@@ -132,10 +134,23 @@ const TotalsReport: React.FC = () => {
     pieces: assignedToRepsStats.reduce((s, d) => s + Number(d.pieces || 0), 0),
   }), [assignedToRepsStats]);
 
-  // Merged per-day for table
+  // Merged per-day for table (union dates from orders & journals)
   const tableRows = useMemo(() => {
-    const rows = perDayStats.map((day: any) => {
-      const repDay = assignedToRepsStats.find(r => r.date === day.date);
+    const datesSet = new Set<string>();
+    perDayStats.forEach((p: any) => { if (p.date) datesSet.add(p.date); });
+    assignedToRepsStats.forEach((r: any) => { if (r.date) datesSet.add(r.date); });
+
+    const rows = Array.from(datesSet).map((d: string) => {
+      const day = perDayStats.find((p: any) => p.date === d) || {
+        date: d,
+        delivered_orders: 0,
+        returned_orders: 0,
+        delivered_pieces: 0,
+        returned_pieces: 0,
+        delivered_amount: 0,
+        returned_amount: 0,
+      };
+      const repDay = assignedToRepsStats.find((r: any) => r.date === d);
       return {
         ...day,
         rep_orders: repDay?.orders || 0,

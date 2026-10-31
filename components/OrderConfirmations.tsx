@@ -525,12 +525,13 @@ const OrderConfirmations: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>('wrong_number');
   const [activeSortAsc, setActiveSortAsc] = useState(false);
 
+  const [users, setUsers] = useState<any[]>([]);
   const [companySettings, setCompanySettings] = useState<any>({
     name: localStorage.getItem('Dragon_company_name') || 'اسم الشركة',
     phone: localStorage.getItem('Dragon_company_phone') || '01000000000',
     address: localStorage.getItem('Dragon_company_address') || '',
     terms: localStorage.getItem('Dragon_company_terms') || 'المعاينة حق للعميل قبل الاستلام.',
-    logo: localStorage.getItem('Dragon_company_logo') || null
+    logo: localStorage.getItem('Dragon_company_logo_url') || localStorage.getItem('Dragon_company_logo') || null
   });
 
   useEffect(() => {
@@ -553,6 +554,13 @@ const OrderConfirmations: React.FC = () => {
           }
         }
       } catch (e) {}
+
+      fetch(`${API_BASE_PATH}/api.php?module=users&action=getAll`)
+        .then(r => r.json())
+        .then(jr => {
+          if (jr?.success && Array.isArray(jr.data)) setUsers(jr.data);
+        })
+        .catch(() => {});
     })();
   }, []);
 
@@ -1090,7 +1098,15 @@ const OrderConfirmations: React.FC = () => {
     if (selectedActiveOrderIds.length > 0) {
       const selectedOrders = activeSelectedRepOrders
         .filter((assignment) => selectedActiveOrderIds.includes(Number(assignment.order_id)))
-        .map((assignment) => assignment.order)
+        .map((assignment) => {
+          const ord = assignment.order;
+          if (!ord) return null;
+          return {
+            ...ord,
+            rep_name: ord.rep_name || assignment.rep_name || '',
+            repName: ord.repName || assignment.rep_name || ''
+          };
+        })
         .filter(Boolean);
 
       if (selectedOrders.length > 0) {
@@ -1101,7 +1117,15 @@ const OrderConfirmations: React.FC = () => {
 
     if (activeSelectedRepOrders.length > 0) {
       const selectedOrders = activeSelectedRepOrders
-        .map((assignment) => assignment.order)
+        .map((assignment) => {
+          const ord = assignment.order;
+          if (!ord) return null;
+          return {
+            ...ord,
+            rep_name: ord.rep_name || assignment.rep_name || '',
+            repName: ord.repName || assignment.rep_name || ''
+          };
+        })
         .filter(Boolean);
 
       if (selectedOrders.length > 0) {
@@ -1116,7 +1140,15 @@ const OrderConfirmations: React.FC = () => {
       const jr = await res.json();
       if (jr && jr.success && Array.isArray(jr.data) && jr.data.length > 0) {
         const activeAssignments = jr.data.filter((a: any) => String(a.status || '').toLowerCase() === 'assigned');
-        const allOrders = activeAssignments.map((a: any) => a.order).filter(Boolean);
+        const allOrders = activeAssignments.map((a: any) => {
+          const ord = a.order;
+          if (!ord) return null;
+          return {
+            ...ord,
+            rep_name: ord.rep_name || a.rep_name || '',
+            repName: ord.repName || a.rep_name || ''
+          };
+        }).filter(Boolean);
         if (allOrders.length > 0) {
           setOrdersToPrint(allOrders);
           return;
@@ -1171,7 +1203,15 @@ const OrderConfirmations: React.FC = () => {
       : cancelledAssignments;
 
     const selectedOrders = ordersToFilter
-      .map((assignment) => assignment.order)
+      .map((assignment) => {
+        const ord = assignment.order;
+        if (!ord) return null;
+        return {
+          ...ord,
+          rep_name: ord.rep_name || assignment.rep_name || '',
+          repName: ord.repName || assignment.rep_name || ''
+        };
+      })
       .filter(Boolean);
 
     if (!selectedOrders.length) {
@@ -1764,7 +1804,7 @@ const OrderConfirmations: React.FC = () => {
         </div>
       </div>
 
-      {ordersToPrint ? <PrintableOrders orders={ordersToPrint} companyName={companySettings.name} companyPhone={companySettings.phone} companyAddress={companySettings.address} companyLogo={companySettings.logo || undefined} terms={companySettings.terms} /> : null}
+      {ordersToPrint ? <PrintableOrders orders={ordersToPrint} companyName={companySettings.name} companyPhone={companySettings.phone} companyAddress={companySettings.address} companyLogo={companySettings.logo || undefined} terms={companySettings.terms} users={users} /> : null}
       
         </div> {/* نهاية العمود الأيمن */}
         

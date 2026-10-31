@@ -50,6 +50,8 @@ import ReportOutstandingBalances from './ReportOutstandingBalances';
 import ReportFinesIncentives from './ReportFinesIncentives';
 import ReportExpenses from './ReportExpenses';
 import ReportRepCustody from './ReportRepCustody';
+import NewPeriodSummaryReport from './NewPeriodSummaryReport';
+import NewProfitLossReport from './NewProfitLossReport';
 import { useTheme } from './ThemeContext';
 import CustomSelect from './CustomSelect';
 
@@ -754,6 +756,8 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
           <button onClick={() => setActiveSubTab('accounting')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'accounting' ? 'bg-violet-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Coins size={16} /> الأرباح والخسائر</button>
           <button onClick={() => setActiveSubTab('sales')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'sales' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><ShoppingCart size={16} /> المبيعات</button>
           <button onClick={() => setActiveSubTab('totals')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'totals' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><FileText size={16} /> ملخص الفترة</button>
+          <button onClick={() => setActiveSubTab('new-period-summary')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'new-period-summary' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Table size={16} /> ملخص اليومية</button>
+          <button onClick={() => setActiveSubTab('new-profit-loss')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'new-profit-loss' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Coins size={16} /> الأرباح والخسائر الجديد</button>
           <button onClick={() => setActiveSubTab('product-report')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'product-report' ? 'bg-teal-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Package size={16} /> تسليمات المنتجات</button>
           <button onClick={() => setActiveSubTab('outstanding-balances')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'outstanding-balances' ? 'bg-rose-500 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><CreditCard size={16} /> أعمار الديون</button>
           <button onClick={() => setActiveSubTab('fines-incentives')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all shrink-0 ${activeSubTab === 'fines-incentives' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'}`}><Coins size={16} /> الغرامات و الحافز</button>
@@ -906,6 +910,18 @@ const ReportsModule: React.FC<ReportsModuleProps> = ({ initialView }) => {
       {activeSubTab === 'totals' && (
         <div>
           <TotalsReport />
+        </div>
+      )}
+
+      {activeSubTab === 'new-period-summary' && (
+        <div>
+          <NewPeriodSummaryReport />
+        </div>
+      )}
+
+      {activeSubTab === 'new-profit-loss' && (
+        <div>
+          <NewProfitLossReport />
         </div>
       )}
 

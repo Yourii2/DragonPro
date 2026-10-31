@@ -3730,6 +3730,13 @@ if (!function_exists('nexus_fetch_orders_by_ids')) {
         if (column_exists($pdo, 'orders', 'page'))                $extraCols[] = 'o.page';
         if (column_exists($pdo, 'orders', 'shipping_company_id')) $extraCols[] = 'o.shipping_company_id';
         if (column_exists($pdo, 'orders', 'updated_at'))          $extraCols[] = 'o.updated_at';
+        if (column_exists($pdo, 'orders', 'discount_type'))       $extraCols[] = 'o.discount_type';
+        if (column_exists($pdo, 'orders', 'discount_value'))      $extraCols[] = 'o.discount_value';
+        if (column_exists($pdo, 'orders', 'discount_amount'))     $extraCols[] = 'o.discount_amount';
+        if (column_exists($pdo, 'orders', 'tax_type'))            $extraCols[] = 'o.tax_type';
+        if (column_exists($pdo, 'orders', 'tax_value'))           $extraCols[] = 'o.tax_value';
+        if (column_exists($pdo, 'orders', 'tax_amount'))          $extraCols[] = 'o.tax_amount';
+        if (column_exists($pdo, 'orders', 'items_json'))          $extraCols[] = 'o.items_json';
         $extraSql = $extraCols ? ', ' . implode(', ', $extraCols) : '';
 
         $hasHistory = table_exists($pdo, 'order_status_history');
@@ -3740,11 +3747,13 @@ if (!function_exists('nexus_fetch_orders_by_ids')) {
         $rows = $pdo->query(
             "SELECT o.id, o.order_number, o.rep_id, o.status, o.total_amount, o.shipping_fees,
              o.notes, o.created_at, {$assignedAtSubquery}{$extraSql},
-             c.name AS customer_name, c.phone1 AS phone1,
+             c.name AS customer_name, c.phone1 AS phone1, c.phone2 AS phone2,
              COALESCE(NULLIF(o.address, ''), c.address) AS address,
-             COALESCE(NULLIF(o.governorate, ''), c.governorate) AS governorate
+             COALESCE(NULLIF(o.governorate, ''), c.governorate) AS governorate,
+             u.name AS rep_name
              FROM orders o
              LEFT JOIN customers c ON o.customer_id = c.id
+             LEFT JOIN users u ON o.rep_id = u.id
              WHERE o.id IN ($in) ORDER BY o.id"
         )->fetchAll(PDO::FETCH_ASSOC);
 
@@ -3752,27 +3761,36 @@ if (!function_exists('nexus_fetch_orders_by_ids')) {
         foreach ($rows as $r) {
             // Compute total from order_items if orders.total_amount is 0 or NULL
             $oMap[intval($r['id'])] = [
-                'id'           => intval($r['id']),
-                'orderNumber'  => $r['order_number'],
-                'order_number' => $r['order_number'],
-                'customerName' => $r['customer_name'],
-                'customer_name'=> $r['customer_name'],
-                'phone'        => $r['phone1'],
-                'phone1'       => $r['phone1'],
-                'address'      => $r['address'],
-                'governorate'  => $r['governorate'] ?? '',
-                'status'       => $r['status'],
-                'total'        => floatval($r['total_amount'] ?? 0),
-                'total_amount' => floatval($r['total_amount'] ?? 0),
-                'shipping'     => floatval($r['shipping_fees'] ?? 0),
-                'shipping_fees'=> floatval($r['shipping_fees'] ?? 0),
-                'notes'        => $r['notes'],
-                'rep_id'       => $r['rep_id'],
-                'employee'     => $r['employee'] ?? null,
-                'page'         => $r['page'] ?? null,
-                'created_at'   => $r['created_at'],
-                'assigned_at'  => $r['assigned_at'] ?? null,
-                'products'     => [],
+                'id'             => intval($r['id']),
+                'orderNumber'    => $r['order_number'],
+                'order_number'   => $r['order_number'],
+                'customerName'   => $r['customer_name'],
+                'customer_name'  => $r['customer_name'],
+                'phone'          => $r['phone1'],
+                'phone1'         => $r['phone1'],
+                'phone2'         => $r['phone2'] ?? '',
+                'address'        => $r['address'],
+                'governorate'    => $r['governorate'] ?? '',
+                'status'         => $r['status'],
+                'total'          => floatval($r['total_amount'] ?? 0),
+                'total_amount'   => floatval($r['total_amount'] ?? 0),
+                'shipping'       => floatval($r['shipping_fees'] ?? 0),
+                'shipping_fees'  => floatval($r['shipping_fees'] ?? 0),
+                'notes'          => $r['notes'],
+                'rep_id'         => $r['rep_id'],
+                'rep_name'       => $r['rep_name'] ?? '',
+                'repName'        => $r['rep_name'] ?? '',
+                'discountType'   => $r['discount_type'] ?? null,
+                'discountValue'  => $r['discount_value'] ?? null,
+                'discountAmount' => $r['discount_amount'] ?? null,
+                'taxType'        => $r['tax_type'] ?? null,
+                'taxValue'       => $r['tax_value'] ?? null,
+                'taxAmount'      => $r['tax_amount'] ?? null,
+                'employee'       => $r['employee'] ?? null,
+                'page'           => $r['page'] ?? null,
+                'created_at'     => $r['created_at'],
+                'assigned_at'    => $r['assigned_at'] ?? null,
+                'products'       => [],
             ];
         }
 
@@ -3832,6 +3850,17 @@ if (!function_exists('nexus_fetch_orders_by_ids')) {
                 'price'     => floatval($it['price_per_unit']),
                 'total'     => floatval($it['line_total']),
             ];
+        }
+
+        // Attach items from items_json if order_items was empty
+        foreach ($rows as $r) {
+            $oid = intval($r['id']);
+            if (isset($oMap[$oid]) && empty($oMap[$oid]['products']) && !empty($r['items_json'])) {
+                $dec = @json_decode($r['items_json'], true);
+                if (is_array($dec) && !empty($dec)) {
+                    $oMap[$oid]['products'] = $dec;
+                }
+            }
         }
 
         // Return in the original requested order, compute total from products if orders.total_amount was 0
@@ -19120,6 +19149,43 @@ switch ($module) {
 
                     if ($type === 'advance' || $type === 'bonus') {
                          execute_query($pdo, "UPDATE treasuries SET current_balance = current_balance - ? WHERE id = ?", [$amount, $treasury_id]);
+
+                         // Record in general transactions ledger (for treasury statement & finance reports)
+                         try {
+                             if ($treasury_id > 0) {
+                                 $empName = '';
+                                 $empStmt = execute_query($pdo, "SELECT name FROM employees WHERE id = ?", [$employee_id]);
+                                 $empName = $empStmt->fetchColumn() ?: ('موظف #' . $employee_id);
+                                 $actingUser = get_current_acting_user($pdo);
+                                 $txType_local = pick_allowed_enum($pdo, 'transactions', 'type', 'payment_out', ['payment_out', 'expense', 'other', 'payment']);
+                                 $rel_local = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'employee', ['employee', 'none']);
+                                 $typeLabel = ($type === 'advance') ? 'سلفة' : 'مكافأة';
+                                 $txDate = ($date ? $date : date('Y-m-d')) . ' ' . date('H:i:s');
+                                 $txDetails = [
+                                     'subtype' => 'expense',
+                                     'category' => 'salaries',
+                                     'notes' => 'صرف ' . $typeLabel . ' للموظف ' . $empName . ($notes ? (' - ' . $notes) : ''),
+                                     'reason' => 'صرف ' . $typeLabel . ' للموظف ' . $empName . ($notes ? (' - ' . $notes) : ''),
+                                     'employee_id' => $employee_id,
+                                     'employee_name' => $empName,
+                                     'employee_tx_type' => $type,
+                                     'created_by' => $actingUser['id'] ?? null,
+                                     'created_by_name' => $actingUser['name'] ?? null
+                                 ];
+                                 $hasCatCol = column_exists($pdo, 'transactions', 'category');
+                                 $hasCreatedByCol = column_exists($pdo, 'transactions', 'created_by');
+
+                                 if ($hasCatCol && $hasCreatedByCol && !empty($actingUser['id'])) {
+                                     execute_query($pdo, "INSERT INTO transactions (type, treasury_id, related_to_type, related_to_id, amount, transaction_date, details, category, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", [$txType_local, $treasury_id, $rel_local, $employee_id, -$amount, $txDate, json_encode($txDetails, JSON_UNESCAPED_UNICODE), 'salaries', $actingUser['id']]);
+                                 } elseif ($hasCatCol) {
+                                     execute_query($pdo, "INSERT INTO transactions (type, treasury_id, related_to_type, related_to_id, amount, transaction_date, details, category) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [$txType_local, $treasury_id, $rel_local, $employee_id, -$amount, $txDate, json_encode($txDetails, JSON_UNESCAPED_UNICODE), 'salaries']);
+                                 } else {
+                                     execute_query($pdo, "INSERT INTO transactions (type, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, ?)", [$txType_local, $treasury_id, $rel_local, $employee_id, -$amount, $txDate, json_encode($txDetails, JSON_UNESCAPED_UNICODE)]);
+                                 }
+                             }
+                         } catch (Exception $txEx) {
+                             error_log("Failed to insert employee advance/bonus general transaction: " . $txEx->getMessage());
+                         }
                     }
                     
                     $pdo->commit();
@@ -19435,6 +19501,39 @@ switch ($module) {
                     // Update treasury balance
                     execute_query($pdo, "UPDATE treasuries SET current_balance = current_balance - ? WHERE id = ?", [$net_salary, $treasury_id]);
 
+                    // Record in general transactions ledger (for treasury statement & finance reports)
+                    try {
+                        $empName = '';
+                        $empStmt = execute_query($pdo, "SELECT name FROM employees WHERE id = ?", [$employee_id]);
+                        $empName = $empStmt->fetchColumn() ?: ('موظف #' . $employee_id);
+                        $actingUser = get_current_acting_user($pdo);
+                        $txType_local = pick_allowed_enum($pdo, 'transactions', 'type', 'payment_out', ['payment_out', 'expense', 'other', 'payment']);
+                        $rel_local = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'employee', ['employee', 'none']);
+                        $txDetails = [
+                            'subtype' => 'expense',
+                            'category' => 'salaries',
+                            'notes' => 'صرف راتب شهر ' . date('Y-m') . ' للموظف ' . $empName,
+                            'reason' => 'صرف راتب شهر ' . date('Y-m') . ' للموظف ' . $empName,
+                            'employee_id' => $employee_id,
+                            'employee_name' => $empName,
+                            'salary_id' => $salary_id,
+                            'created_by' => $actingUser['id'] ?? null,
+                            'created_by_name' => $actingUser['name'] ?? null
+                        ];
+                        $hasCatCol = column_exists($pdo, 'transactions', 'category');
+                        $hasCreatedByCol = column_exists($pdo, 'transactions', 'created_by');
+
+                        if ($hasCatCol && $hasCreatedByCol && !empty($actingUser['id'])) {
+                            execute_query($pdo, "INSERT INTO transactions (type, treasury_id, related_to_type, related_to_id, amount, transaction_date, details, category, created_by) VALUES (?, ?, ?, ?, ?, NOW(), ?, ?, ?)", [$txType_local, $treasury_id, $rel_local, $employee_id, -$net_salary, json_encode($txDetails, JSON_UNESCAPED_UNICODE), 'salaries', $actingUser['id']]);
+                        } elseif ($hasCatCol) {
+                            execute_query($pdo, "INSERT INTO transactions (type, treasury_id, related_to_type, related_to_id, amount, transaction_date, details, category) VALUES (?, ?, ?, ?, ?, NOW(), ?, ?)", [$txType_local, $treasury_id, $rel_local, $employee_id, -$net_salary, json_encode($txDetails, JSON_UNESCAPED_UNICODE), 'salaries']);
+                        } else {
+                            execute_query($pdo, "INSERT INTO transactions (type, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, NOW(), ?)", [$txType_local, $treasury_id, $rel_local, $employee_id, -$net_salary, json_encode($txDetails, JSON_UNESCAPED_UNICODE)]);
+                        }
+                    } catch (Exception $txEx) {
+                        error_log("Failed to insert salary general transaction: " . $txEx->getMessage());
+                    }
+
                     $pdo->commit();
                     echo json_encode(['success' => true, 'message' => 'Salary paid successfully.']);
 
@@ -19697,9 +19796,51 @@ switch ($module) {
                     execute_query($pdo, "UPDATE suppliers SET total_debit = total_debit + ? WHERE id = ?", [$invoiceTotal, $supplierId]);
                 }
                 if ($paidAmount > 0) {
+                    // 1. Deduct paid amount from treasury
+                    if ($treasuryId > 0) {
+                        $tStmt = execute_query($pdo, "SELECT current_balance FROM treasuries WHERE id = ? FOR UPDATE", [$treasuryId]);
+                        $tRow = $tStmt->fetch(PDO::FETCH_ASSOC);
+                        $curBal = $tRow ? floatval($tRow['current_balance']) : 0;
+                        if (!$tRow || $curBal < $paidAmount) {
+                            throw new Exception('رصيد الخزينة غير كافٍ لسداد الدفعة النقدية للمورد. (المطلوب: ' . $paidAmount . ' | المتاح: ' . $curBal . ')');
+                        }
+                        execute_query($pdo, "UPDATE treasuries SET current_balance = current_balance - ? WHERE id = ?", [$paidAmount, $treasuryId]);
+                    }
+
+                    // 2. Insert into transactions table as negative (cash out) with category materials
+                    $suppName = '';
+                    try {
+                        $sStmt = execute_query($pdo, "SELECT name FROM suppliers WHERE id = ?", [$supplierId]);
+                        $suppName = $sStmt->fetchColumn() ?: '';
+                    } catch (Exception $eSupp) {}
+
+                    $actingUser = get_current_acting_user($pdo);
                     $txType_local = pick_allowed_enum($pdo, 'transactions', 'type', 'payment_out', ['payment_out','payment','payment_in']);
                     $rel_local = pick_allowed_enum($pdo, 'transactions', 'related_to_type', 'supplier', ['supplier','rep','customer','none']);
-                    execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txType_local, $warehouseId, $treasuryId, $rel_local, $supplierId, $paidAmount, json_encode(['paid_for' => $purchaseId])]);
+                    $txDetails = [
+                        'subtype' => 'supplier_payment',
+                        'category' => 'materials',
+                        'notes' => 'دفع كاش للمورد (' . $suppName . ') عند استلام بضاعة - إذن #' . $purchaseId,
+                        'reason' => 'دفع كاش للمورد (' . $suppName . ') عند استلام بضاعة - إذن #' . $purchaseId,
+                        'paid_for' => $purchaseId,
+                        'supplier_id' => $supplierId,
+                        'supplier_name' => $suppName,
+                        'created_by' => $actingUser['id'] ?? null,
+                        'created_by_name' => $actingUser['name'] ?? null
+                    ];
+
+                    $hasCatCol = column_exists($pdo, 'transactions', 'category');
+                    $hasCreatedByCol = column_exists($pdo, 'transactions', 'created_by');
+
+                    if ($hasCatCol && $hasCreatedByCol && !empty($actingUser['id'])) {
+                        execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details, category, created_by) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?)", [$txType_local, $warehouseId, $treasuryId, $rel_local, $supplierId, -$paidAmount, json_encode($txDetails, JSON_UNESCAPED_UNICODE), 'materials', $actingUser['id']]);
+                    } elseif ($hasCatCol) {
+                        execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details, category) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?, ?)", [$txType_local, $warehouseId, $treasuryId, $rel_local, $supplierId, -$paidAmount, json_encode($txDetails, JSON_UNESCAPED_UNICODE), 'materials']);
+                    } else {
+                        execute_query($pdo, "INSERT INTO transactions (type, warehouse_id, treasury_id, related_to_type, related_to_id, amount, transaction_date, details) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)", [$txType_local, $warehouseId, $treasuryId, $rel_local, $supplierId, -$paidAmount, json_encode($txDetails, JSON_UNESCAPED_UNICODE)]);
+                    }
+
+                    // 3. Update supplier total credit
                     execute_query($pdo, "UPDATE suppliers SET total_credit = total_credit + ? WHERE id = ?", [$paidAmount, $supplierId]);
                 }
                 $pdo->commit();
@@ -20605,14 +20746,22 @@ switch ($module) {
                 $treasury_id = intval($_GET['treasury_id'] ?? 0);
                 $trFilter = $treasury_id > 0 ? "AND t.treasury_id = " . intval($treasury_id) : "AND t.treasury_id IS NOT NULL";
 
-                $startBalSql = "
-                    SELECT COALESCE(SUM(t.amount), 0) AS balance_before
-                    FROM transactions t
-                    WHERE t.transaction_date < ?
-                      $trFilter
-                ";
-                $stmtStart = execute_query($pdo, $startBalSql, [$start_dt]);
-                $startingBalance = floatval($stmtStart->fetchColumn() ?: 0);
+                // Anchored Starting Balance calculation:
+                // Starting balance at start_dt = (Current Balance of treasury/treasuries) - (all transactions on those treasuries since start_dt)
+                if ($treasury_id > 0) {
+                    $curBalStmt = execute_query($pdo, "SELECT COALESCE(SUM(current_balance), 0) FROM treasuries WHERE id = ?", [$treasury_id]);
+                    $currentBalance = floatval($curBalStmt->fetchColumn() ?: 0);
+
+                    $txSinceStartStmt = execute_query($pdo, "SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE transaction_date >= ? AND treasury_id = ?", [$start_dt, $treasury_id]);
+                    $txSinceStart = floatval($txSinceStartStmt->fetchColumn() ?: 0);
+                } else {
+                    $curBalStmt = execute_query($pdo, "SELECT COALESCE(SUM(current_balance), 0) FROM treasuries");
+                    $currentBalance = floatval($curBalStmt->fetchColumn() ?: 0);
+
+                    $txSinceStartStmt = execute_query($pdo, "SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE transaction_date >= ? AND treasury_id IS NOT NULL", [$start_dt]);
+                    $txSinceStart = floatval($txSinceStartStmt->fetchColumn() ?: 0);
+                }
+                $startingBalance = $currentBalance - $txSinceStart;
 
                 $txSql = "
                     SELECT 
@@ -21704,6 +21853,620 @@ switch ($module) {
             } catch (Exception $e) {
                 // http_response_code(500);
                 echo json_encode(['success' => false, 'message' => 'Expenses report failed: ' . $e->getMessage()]);
+            }
+        } elseif ($action === 'new_period_summary' || $action === 'getNewPeriodSummary') {
+            try {
+                ensure_rep_daily_journal_table($pdo);
+
+                $start = !empty($_GET['start_date']) ? trim($_GET['start_date']) : (!empty($_GET['from']) ? trim($_GET['from']) : date('Y-m-01'));
+                $end   = !empty($_GET['end_date'])   ? trim($_GET['end_date'])   : (!empty($_GET['to'])   ? trim($_GET['to'])   : date('Y-m-t'));
+                $repId = isset($_GET['rep_id']) && is_numeric($_GET['rep_id']) ? intval($_GET['rep_id']) : null;
+                $viewMode = isset($_GET['view_mode']) ? trim($_GET['view_mode']) : 'rep_summary';
+
+                $where = [];
+                $params = [];
+
+                if ($start) {
+                    $where[] = "j.journal_date >= ?";
+                    $params[] = $start;
+                }
+                if ($end) {
+                    $where[] = "j.journal_date <= ?";
+                    $params[] = $end;
+                }
+                if ($repId) {
+                    $where[] = "j.rep_id = ?";
+                    $params[] = $repId;
+                }
+
+                $whereSql = count($where) > 0 ? "WHERE " . implode(" AND ", $where) : "";
+
+                $sql = "
+                    SELECT 
+                        j.*,
+                        COALESCE(u.name, j.employee, CONCAT('مندوب #', j.rep_id)) as rep_name,
+                        u.phone as rep_phone
+                    FROM rep_daily_journal j
+                    LEFT JOIN users u ON u.id = j.rep_id
+                    $whereSql
+                    ORDER BY j.journal_date ASC, j.rep_id ASC, j.id ASC
+                ";
+
+                $stmt = execute_query($pdo, $sql, $params);
+                $rawJournals = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+                $repFinesMap = [];
+                $repIncentivesMap = [];
+                if (table_exists($pdo, 'transactions')) {
+                    $txParams = [$start . ' 00:00:00', $end . ' 23:59:59'];
+                    $txSql = "
+                        SELECT t.related_to_id as rep_id, t.type, t.amount, t.details
+                        FROM transactions t
+                        WHERE t.transaction_date BETWEEN ? AND ?
+                    ";
+                    $txStmt = execute_query($pdo, $txSql, $txParams);
+                    while ($tx = $txStmt->fetch(PDO::FETCH_ASSOC)) {
+                        $rId = intval($tx['rep_id'] ?? 0);
+                        if ($rId <= 0) continue;
+                        $det = json_decode($tx['details'] ?? '{}', true) ?: [];
+                        $sub = strtolower($det['subtype'] ?? ($det['type'] ?? ''));
+                        $amt = abs(floatval($tx['amount'] ?? 0));
+                        if (strpos($sub, 'fine') !== false || strpos($sub, 'penalty') !== false || strpos($sub, 'غرام') !== false) {
+                            $repFinesMap[$rId] = ($repFinesMap[$rId] ?? 0) + $amt;
+                        } elseif (strpos($sub, 'bonus') !== false || strpos($sub, 'incentive') !== false || strpos($sub, 'حافز') !== false) {
+                            $repIncentivesMap[$rId] = ($repIncentivesMap[$rId] ?? 0) + $amt;
+                        }
+                    }
+                }
+
+                $processedRows = [];
+
+                if ($viewMode === 'rep_summary') {
+                    $repGroups = [];
+                    foreach ($rawJournals as $j) {
+                        $rId = intval($j['rep_id']);
+                        if (!isset($repGroups[$rId])) {
+                            $repGroups[$rId] = [];
+                        }
+                        $repGroups[$rId][] = $j;
+                    }
+
+                    $seq = 1;
+                    foreach ($repGroups as $rId => $journals) {
+                        $firstJ = $journals[0];
+                        $lastJ = $journals[count($journals) - 1];
+                        $repName = $firstJ['rep_name'];
+
+                        $oldOrdersCount = intval($firstJ['opening_orders_count'] ?? 0);
+                        $oldPiecesCount = intval($firstJ['opening_pieces_count'] ?? 0);
+                        $oldOrdersVal   = floatval($firstJ['old_orders_value'] ?? 0);
+                        $prevBalance    = floatval($firstJ['prev_balance'] ?? 0);
+
+                        $newOrdersCount = 0;
+                        $newPiecesCount = 0;
+                        $newOrdersVal   = 0.0;
+                        $paidCollected  = 0.0;
+                        $paidToRep      = 0.0;
+
+                        $deliveredOrders = 0;
+                        $deliveredPieces = 0;
+                        $deliveredVal    = 0.0;
+                        $postponedOrders = 0;
+                        $postponedPieces = 0;
+                        $postponedVal    = 0.0;
+                        $returnedOrders  = 0;
+                        $returnedPieces  = 0;
+                        $returnedVal     = 0.0;
+                        $interimPayments = 0.0;
+
+                        foreach ($journals as $j) {
+                            $newOrdersCount += intval($j['orders_assigned_count'] ?? 0);
+                            $newPiecesCount += intval($j['pieces_assigned_count'] ?? 0);
+                            $newOrdersVal   += floatval($j['assigned_value'] ?? 0);
+
+                            $pAct = strtolower(trim($j['payment_action'] ?? ''));
+                            $pAmt = abs(floatval($j['payment_amount'] ?? 0));
+                            if ($pAct === 'collect') $paidCollected += $pAmt;
+                            elseif ($pAct === 'pay') $paidToRep += $pAmt;
+
+                            $deliveredOrders += intval($j['orders_delivered_count'] ?? 0);
+                            $deliveredPieces += intval($j['pieces_delivered'] ?? 0);
+                            $deliveredVal    += floatval($j['delivered_value'] ?? 0);
+
+                            $postponedOrders += intval($j['orders_postponed_count'] ?? 0);
+                            $postponedPieces += intval($j['pieces_postponed'] ?? 0);
+                            $postponedVal    += floatval($j['postponed_value'] ?? 0);
+
+                            $returnedOrders  += intval($j['orders_returned_count'] ?? 0);
+                            $returnedPieces  += intval($j['pieces_returned'] ?? 0);
+                            $returnedVal     += floatval($j['returned_value'] ?? 0);
+
+                            $interimPayments += floatval($j['interim_payment_amount'] ?? 0);
+                        }
+
+                        $totalOrdersCount = $oldOrdersCount + $newOrdersCount;
+                        $totalPiecesCount = $oldPiecesCount + $newPiecesCount;
+                        $totalOrdersVal   = $oldOrdersVal + $newOrdersVal;
+
+                        $startNetBalance = $prevBalance + $totalOrdersVal - $paidCollected + $paidToRep;
+                        $beforeReturns   = $deliveredVal + $returnedVal + $prevBalance;
+
+                        $fines = floatval($repFinesMap[$rId] ?? 0);
+                        $incentives = floatval($repIncentivesMap[$rId] ?? 0);
+
+                        $closeCollected = 0.0;
+                        $closePaid = 0.0;
+                        $finalClosingBal = floatval($lastJ['closing_amount'] ?? 0);
+
+                        $netRequiredToClose = $beforeReturns - $returnedVal - $interimPayments - $fines + $incentives;
+                        if ($finalClosingBal != 0) {
+                            $diff = $netRequiredToClose - $finalClosingBal;
+                            if ($diff > 0) $closeCollected = $diff;
+                            elseif ($diff < 0) $closePaid = abs($diff);
+                        } else {
+                            $closeCollected = max(0, $netRequiredToClose);
+                        }
+
+                        $processedRows[] = [
+                            'seq'                     => $seq++,
+                            'rep_id'                  => $rId,
+                            'rep_name'                => $repName,
+                            'session_count'           => count($journals),
+                            'date_display'            => "$start إلى $end",
+                            // بدء يوميات
+                            'old_orders_count'        => $oldOrdersCount,
+                            'old_pieces_count'        => $oldPiecesCount,
+                            'old_orders_value'        => $oldOrdersVal,
+                            'prev_balance'            => $prevBalance,
+                            'new_orders_count'        => $newOrdersCount,
+                            'new_pieces_count'        => $newPiecesCount,
+                            'new_orders_value'        => $newOrdersVal,
+                            'total_orders_count'      => $totalOrdersCount,
+                            'total_pieces_count'      => $totalPiecesCount,
+                            'total_orders_value'      => $totalOrdersVal,
+                            'paid_collected'          => $paidCollected,
+                            'paid_to_rep'             => $paidToRep,
+                            'start_net_balance'       => $startNetBalance,
+                            // إغلاق اليوميات
+                            'delivered_orders_count'  => $deliveredOrders,
+                            'delivered_pieces'        => $deliveredPieces,
+                            'delivered_value'         => $deliveredVal,
+                            'postponed_orders_count'  => $postponedOrders,
+                            'postponed_pieces'        => $postponedPieces,
+                            'postponed_value'         => $postponedVal,
+                            'returned_orders_count'   => $returnedOrders,
+                            'returned_pieces'         => $returnedPieces,
+                            'returned_value'          => $returnedVal,
+                            'balance_before_returns'  => $beforeReturns,
+                            'interim_payments'        => $interimPayments,
+                            'fines'                   => $fines,
+                            'incentives'              => $incentives,
+                            'close_collected'         => $closeCollected,
+                            'close_paid'              => $closePaid,
+                            'final_closing_balance'   => $finalClosingBal,
+                        ];
+                    }
+                } else {
+                    $seq = 1;
+                    foreach ($rawJournals as $j) {
+                        $rId = intval($j['rep_id']);
+                        $repName = $j['rep_name'];
+
+                        $oldOrdersCount = intval($j['opening_orders_count'] ?? 0);
+                        $oldPiecesCount = intval($j['opening_pieces_count'] ?? 0);
+                        $oldOrdersVal   = floatval($j['old_orders_value'] ?? 0);
+                        $prevBalance    = floatval($j['prev_balance'] ?? 0);
+
+                        $newOrdersCount = intval($j['orders_assigned_count'] ?? 0);
+                        $newPiecesCount = intval($j['pieces_assigned_count'] ?? 0);
+                        $newOrdersVal   = floatval($j['assigned_value'] ?? 0);
+
+                        $totalOrdersCount = intval($j['total_orders_count'] ?? ($oldOrdersCount + $newOrdersCount));
+                        $totalPiecesCount = intval($j['total_pieces_count'] ?? ($oldPiecesCount + $newPiecesCount));
+                        $totalOrdersVal   = floatval($j['total_orders_value'] ?? ($oldOrdersVal + $newOrdersVal));
+
+                        $pAct = strtolower(trim($j['payment_action'] ?? ''));
+                        $pAmt = abs(floatval($j['payment_amount'] ?? 0));
+                        $paidCollected = ($pAct === 'collect') ? $pAmt : 0.0;
+                        $paidToRep = ($pAct === 'pay') ? $pAmt : 0.0;
+                        $startNetBal = floatval($j['balance_after_payment'] ?? ($prevBalance + $totalOrdersVal - $paidCollected + $paidToRep));
+
+                        $deliveredOrders = intval($j['orders_delivered_count'] ?? 0);
+                        $deliveredPieces = intval($j['pieces_delivered'] ?? 0);
+                        $deliveredVal    = floatval($j['delivered_value'] ?? 0);
+
+                        $postponedOrders = intval($j['orders_postponed_count'] ?? 0);
+                        $postponedPieces = intval($j['pieces_postponed'] ?? 0);
+                        $postponedVal    = floatval($j['postponed_value'] ?? 0);
+
+                        $returnedOrders  = intval($j['orders_returned_count'] ?? 0);
+                        $returnedPieces  = intval($j['pieces_returned'] ?? 0);
+                        $returnedVal     = floatval($j['returned_value'] ?? 0);
+
+                        $interimPayments = floatval($j['interim_payment_amount'] ?? 0);
+                        $beforeReturns   = $deliveredVal + $returnedVal + $prevBalance;
+
+                        $fines = 0.0;
+                        $incentives = 0.0;
+                        $finalClosingBal = floatval($j['closing_amount'] ?? 0);
+
+                        $closeCollected = 0.0;
+                        $closePaid = 0.0;
+                        $netRequiredToClose = $beforeReturns - $returnedVal - $interimPayments;
+                        if ($finalClosingBal != 0) {
+                            $diff = $netRequiredToClose - $finalClosingBal;
+                            if ($diff > 0) $closeCollected = $diff;
+                            elseif ($diff < 0) $closePaid = abs($diff);
+                        } else {
+                            $closeCollected = max(0, $netRequiredToClose);
+                        }
+
+                        $processedRows[] = [
+                            'seq'                     => $seq++,
+                            'rep_id'                  => $rId,
+                            'rep_name'                => $repName,
+                            'journal_id'              => intval($j['id']),
+                            'daily_code'              => $j['daily_code'] ?: ('DLY-' . str_pad($j['id'], 5, '0', STR_PAD_LEFT)),
+                            'journal_date'            => $j['journal_date'],
+                            'is_closed'               => intval($j['is_closed'] ?? 0),
+                            'date_display'            => $j['journal_date'],
+                            // بدء يوميات
+                            'old_orders_count'        => $oldOrdersCount,
+                            'old_pieces_count'        => $oldPiecesCount,
+                            'old_orders_value'        => $oldOrdersVal,
+                            'prev_balance'            => $prevBalance,
+                            'new_orders_count'        => $newOrdersCount,
+                            'new_pieces_count'        => $newPiecesCount,
+                            'new_orders_value'        => $newOrdersVal,
+                            'total_orders_count'      => $totalOrdersCount,
+                            'total_pieces_count'      => $totalPiecesCount,
+                            'total_orders_value'      => $totalOrdersVal,
+                            'paid_collected'          => $paidCollected,
+                            'paid_to_rep'             => $paidToRep,
+                            'start_net_balance'       => $startNetBal,
+                            // إغلاق اليوميات
+                            'delivered_orders_count'  => $deliveredOrders,
+                            'delivered_pieces'        => $deliveredPieces,
+                            'delivered_value'         => $deliveredVal,
+                            'postponed_orders_count'  => $postponedOrders,
+                            'postponed_pieces'        => $postponedPieces,
+                            'postponed_value'         => $postponedVal,
+                            'returned_orders_count'   => $returnedOrders,
+                            'returned_pieces'         => $returnedPieces,
+                            'returned_value'          => $returnedVal,
+                            'balance_before_returns'  => $beforeReturns,
+                            'interim_payments'        => $interimPayments,
+                            'fines'                   => $fines,
+                            'incentives'              => $incentives,
+                            'close_collected'         => $closeCollected,
+                            'close_paid'              => $closePaid,
+                            'final_closing_balance'   => $finalClosingBal,
+                        ];
+                    }
+                }
+
+                $totals = [
+                    'old_orders_count'        => array_sum(array_column($processedRows, 'old_orders_count')),
+                    'old_pieces_count'        => array_sum(array_column($processedRows, 'old_pieces_count')),
+                    'old_orders_value'        => array_sum(array_column($processedRows, 'old_orders_value')),
+                    'prev_balance'            => array_sum(array_column($processedRows, 'prev_balance')),
+                    'new_orders_count'        => array_sum(array_column($processedRows, 'new_orders_count')),
+                    'new_pieces_count'        => array_sum(array_column($processedRows, 'new_pieces_count')),
+                    'new_orders_value'        => array_sum(array_column($processedRows, 'new_orders_value')),
+                    'total_orders_count'      => array_sum(array_column($processedRows, 'total_orders_count')),
+                    'total_pieces_count'      => array_sum(array_column($processedRows, 'total_pieces_count')),
+                    'total_orders_value'      => array_sum(array_column($processedRows, 'total_orders_value')),
+                    'paid_collected'          => array_sum(array_column($processedRows, 'paid_collected')),
+                    'paid_to_rep'             => array_sum(array_column($processedRows, 'paid_to_rep')),
+                    'start_net_balance'       => array_sum(array_column($processedRows, 'start_net_balance')),
+                    'delivered_orders_count'  => array_sum(array_column($processedRows, 'delivered_orders_count')),
+                    'delivered_pieces'        => array_sum(array_column($processedRows, 'delivered_pieces')),
+                    'delivered_value'         => array_sum(array_column($processedRows, 'delivered_value')),
+                    'postponed_orders_count'  => array_sum(array_column($processedRows, 'postponed_orders_count')),
+                    'postponed_pieces'        => array_sum(array_column($processedRows, 'postponed_pieces')),
+                    'postponed_value'         => array_sum(array_column($processedRows, 'postponed_value')),
+                    'returned_orders_count'   => array_sum(array_column($processedRows, 'returned_orders_count')),
+                    'returned_pieces'         => array_sum(array_column($processedRows, 'returned_pieces')),
+                    'returned_value'          => array_sum(array_column($processedRows, 'returned_value')),
+                    'balance_before_returns'  => array_sum(array_column($processedRows, 'balance_before_returns')),
+                    'interim_payments'        => array_sum(array_column($processedRows, 'interim_payments')),
+                    'fines'                   => array_sum(array_column($processedRows, 'fines')),
+                    'incentives'              => array_sum(array_column($processedRows, 'incentives')),
+                    'close_collected'         => array_sum(array_column($processedRows, 'close_collected')),
+                    'close_paid'              => array_sum(array_column($processedRows, 'close_paid')),
+                    'final_closing_balance'   => array_sum(array_column($processedRows, 'final_closing_balance')),
+                ];
+
+                echo json_encode([
+                    'success' => true,
+                    'data' => [
+                        'rows' => $processedRows,
+                        'totals' => $totals,
+                        'meta' => [
+                            'start_date' => $start,
+                            'end_date' => $end,
+                            'rep_id' => $repId,
+                            'view_mode' => $viewMode,
+                            'count' => count($processedRows)
+                        ]
+                    ]
+                ], JSON_UNESCAPED_UNICODE);
+            } catch (Exception $e) {
+                echo json_encode(['success' => false, 'message' => 'New period summary failed: ' . $e->getMessage()]);
+            }
+
+        } elseif ($action === 'new_profit_loss' || $action === 'getNewProfitLoss') {
+            try {
+                ensure_rep_daily_journal_table($pdo);
+                ensure_rep_journal_orders_table($pdo);
+
+                $start = !empty($_GET['start_date']) ? trim($_GET['start_date']) : (!empty($_GET['from']) ? trim($_GET['from']) : date('Y-m-01'));
+                $end   = !empty($_GET['end_date'])   ? trim($_GET['end_date'])   : (!empty($_GET['to'])   ? trim($_GET['to'])   : date('Y-m-d'));
+                $dtParams = [$start . ' 00:00:00', $end . ' 23:59:59'];
+
+                // 1. Capital Products
+                $hasPV = table_exists($pdo, 'product_variants');
+                $costSelect = $hasPV
+                    ? "COALESCE(
+                        NULLIF((SELECT pv.cost_price FROM product_variants pv WHERE pv.product_id = p.id AND pv.cost_price > 0 LIMIT 1), 0),
+                        NULLIF((SELECT pv.purchase_price FROM product_variants pv WHERE pv.product_id = p.id AND pv.purchase_price > 0 LIMIT 1), 0),
+                        0
+                    )"
+                    : "0";
+
+                $prodSql = "
+                    SELECT 
+                        p.id,
+                        p.name,
+                        COALESCE((SELECT SUM(s.quantity) FROM stock s WHERE s.product_id = p.id), 0) AS warehouse_qty,
+                        COALESCE((SELECT SUM(rc.quantity) FROM rep_stock_custody rc WHERE rc.product_id = p.id), 0) 
+                        + COALESCE((
+                            SELECT SUM(oi.quantity) 
+                            FROM order_items oi 
+                            JOIN orders o ON o.id = oi.order_id 
+                            LEFT JOIN product_variants pv ON pv.id = oi.product_id
+                            WHERE (pv.product_id = p.id OR oi.product_id = p.id) 
+                              AND o.status = 'with_rep'
+                        ), 0) AS custody_qty,
+                        {$costSelect} AS cost_price,
+                        COALESCE(p.description, '') AS notes
+                    FROM products p
+                    WHERE p.is_archived = 0
+                    ORDER BY p.name ASC
+                ";
+                $products = $pdo->query($prodSql)->fetchAll(PDO::FETCH_ASSOC);
+
+                $capitalRows = [];
+                $totCustody = 0.0;
+                $totWh = 0.0;
+                $totQty = 0.0;
+                $totProdCost = 0.0;
+
+                foreach ($products as $p) {
+                    $c = floatval($p['custody_qty'] ?? 0);
+                    $w = floatval($p['warehouse_qty'] ?? 0);
+                    $tot = $c + $w;
+                    $cost = floatval($p['cost_price'] ?? 0);
+                    $itemCost = $tot * $cost;
+
+                    $totCustody += $c;
+                    $totWh += $w;
+                    $totQty += $tot;
+                    $totProdCost += $itemCost;
+
+                    $capitalRows[] = [
+                        'product_id' => intval($p['id']),
+                        'product_name' => $p['name'],
+                        'custody_qty' => $c,
+                        'warehouse_qty' => $w,
+                        'total_qty' => $tot,
+                        'cost_price' => $cost,
+                        'total_cost' => $itemCost,
+                        'notes' => $p['notes'] ?? ''
+                    ];
+                }
+
+                // Default liabilities and assets
+                $repsAdvance = 0.0;
+                try {
+                    $repsAdvance = floatval($pdo->query("SELECT COALESCE(SUM(ABS(amount)), 0) FROM transactions WHERE related_to_type = 'rep' AND type = 'payment_out' AND JSON_UNQUOTE(JSON_EXTRACT(details, '$.subtype')) = 'advance'")->fetchColumn() ?: 0);
+                } catch (Exception $e) {}
+
+                $suppliersBalance = 0.0;
+                try {
+                    $suppliersBalance = floatval($pdo->query("SELECT COALESCE(SUM(GREATEST(0, total_debit - total_credit)), 0) FROM suppliers")->fetchColumn() ?: 0);
+                } catch (Exception $e) {}
+
+                $cashInSafes = 0.0;
+                try {
+                    $cashInSafes = floatval($pdo->query("SELECT COALESCE(SUM(current_balance), 0) FROM treasuries")->fetchColumn() ?: 0);
+                } catch (Exception $e) {}
+
+                $netInventory = $totProdCost - $repsAdvance - $suppliersBalance;
+                $netCapital = $netInventory + $cashInSafes;
+
+                // 2. Expenses (strictly excluding raw materials & fabrics)
+                $expSql = "
+                    SELECT 
+                        t.id,
+                        t.transaction_date,
+                        t.type,
+                        t.category,
+                        t.title,
+                        t.details,
+                        t.amount,
+                        tr.name AS treasury_name
+                    FROM transactions t
+                    LEFT JOIN treasuries tr ON t.treasury_id = tr.id
+                    WHERE t.amount < 0
+                      AND (
+                          t.type = 'expense' 
+                          OR JSON_UNQUOTE(JSON_EXTRACT(t.details, '$.subtype')) = 'expense'
+                          OR (t.type = 'payment_out' AND t.related_to_type = 'none' AND (t.title LIKE '%مصروف%' OR JSON_UNQUOTE(JSON_EXTRACT(t.details, '$.category')) IN ('ads','salaries','rent','utilities','transport','maintenance','hospitality','supplies','other')))
+                      )
+                      AND t.transaction_date BETWEEN ? AND ?
+                    ORDER BY t.transaction_date DESC, t.id DESC
+                ";
+                $stmtExp = $pdo->prepare($expSql);
+                $stmtExp->execute($dtParams);
+                $rawExpenses = $stmtExp->fetchAll(PDO::FETCH_ASSOC);
+
+                $expenseRows = [];
+                $totalExpenses = 0.0;
+                $fabricKeywords = ['خام', 'خامات', 'قماش', 'اقمش', 'أقمش', 'توب', 'غزل', 'نسيج', 'materials', 'fabric'];
+
+                foreach ($rawExpenses as $e) {
+                    $details = json_decode($e['details'] ?? '{}', true) ?: [];
+                    $notes = $details['notes'] ?? $details['note'] ?? $details['reason'] ?? '';
+                    $rawCat = trim((string)($e['category'] ?? ($details['category'] ?? '')));
+                    $title = trim((string)($e['title'] ?? ''));
+                    $combined = mb_strtolower($title . ' ' . $notes . ' ' . $rawCat);
+
+                    // Strictly filter out fabrics and raw materials
+                    $isFabric = false;
+                    if (in_array($rawCat, ['materials', 'fabrics', 'خامات', 'اقمشة', 'أقمشة', 'الخامات و الاقمشه', 'الخامات والأقمشة'])) {
+                        $isFabric = true;
+                    } else {
+                        foreach ($fabricKeywords as $kw) {
+                            if (mb_strpos($combined, $kw) !== false) {
+                                $isFabric = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if ($isFabric) continue;
+
+                    $amt = abs(floatval($e['amount']));
+                    $totalExpenses += $amt;
+                    $name = $title ?: ($notes ?: 'مصروف تشغيلي');
+                    $expenseRows[] = [
+                        'id' => intval($e['id']),
+                        'name' => $name,
+                        'amount' => $amt,
+                        'date' => $e['transaction_date'],
+                        'treasury_name' => $e['treasury_name'] ?? ''
+                    ];
+                }
+
+                // 3. Profit & Loss: Products Sold
+                $salesCostExpr = $hasPV
+                    ? "COALESCE(
+                        NULLIF((SELECT pv2.cost_price FROM product_variants pv2 WHERE pv2.product_id = COALESCE(ppar.id, pv.product_id, oi.product_id) AND pv2.cost_price > 0 LIMIT 1), 0),
+                        NULLIF(pv.cost_price, 0),
+                        NULLIF(pv.purchase_price, 0),
+                        0
+                    )"
+                    : "0";
+
+                $salesSql = "
+                    SELECT 
+                        COALESCE(ppar.id, pv.product_id, oi.product_id) AS product_id,
+                        COALESCE(ppar.name, pv.name, CONCAT('منتج #', oi.product_id)) AS product_name,
+                        {$salesCostExpr} AS cost_price,
+                        SUM(
+                            CASE
+                                WHEN (COALESCE(rjo.status, o.status) = 'partial') AND COALESCE(rjo.returned_pieces, 0) > 0 AND COALESCE(o_tot.tot_qty, 0) > 0
+                                THEN GREATEST(0.0, oi.quantity * (1.0 - (LEAST(rjo.returned_pieces, o_tot.tot_qty) / o_tot.tot_qty)))
+                                ELSE oi.quantity
+                            END
+                        ) AS sold_qty,
+                        SUM(
+                            CASE
+                                WHEN (COALESCE(rjo.status, o.status) = 'partial') AND COALESCE(rjo.returned_pieces, 0) > 0 AND COALESCE(o_tot.tot_qty, 0) > 0
+                                THEN GREATEST(0.0, oi.quantity * (1.0 - (LEAST(rjo.returned_pieces, o_tot.tot_qty) / o_tot.tot_qty)))
+                                ELSE oi.quantity
+                            END * oi.price_per_unit
+                        ) AS sales_revenue
+                    FROM order_items oi
+                    JOIN orders o ON o.id = oi.order_id
+                    LEFT JOIN (
+                        SELECT order_id, MAX(id) AS max_id FROM rep_journal_orders GROUP BY order_id
+                    ) latest_rjo ON latest_rjo.order_id = o.id
+                    LEFT JOIN rep_journal_orders rjo ON rjo.id = latest_rjo.max_id
+                    LEFT JOIN rep_daily_journal rdj ON rdj.id = rjo.journal_id
+                    LEFT JOIN (
+                        SELECT order_id, SUM(quantity) as tot_qty FROM order_items GROUP BY order_id
+                    ) o_tot ON o_tot.order_id = o.id
+                    LEFT JOIN product_variants pv ON pv.id = oi.product_id
+                    LEFT JOIN products ppar ON ppar.id = pv.product_id
+                    WHERE (
+                        (rdj.is_closed = 1 AND rjo.status IN ('delivered', 'partial') AND DATE(COALESCE(rdj.closed_at, rdj.journal_date)) BETWEEN ? AND ?)
+                        OR (o.status IN ('delivered', 'partial') AND (rdj.id IS NULL OR rdj.is_closed = 0) AND DATE(o.created_at) BETWEEN ? AND ?)
+                    )
+                    GROUP BY product_id, product_name, cost_price
+                    ORDER BY sales_revenue DESC
+                ";
+                $stmtSales = $pdo->prepare($salesSql);
+                $stmtSales->execute([$start, $end, $start, $end]);
+                $salesRows = $stmtSales->fetchAll(PDO::FETCH_ASSOC);
+
+                $profitLossRows = [];
+                $totSoldQty = 0.0;
+                $totSalesRev = 0.0;
+                $totProductProfit = 0.0;
+
+                foreach ($salesRows as $sr) {
+                    $q = floatval($sr['sold_qty'] ?? 0);
+                    $rev = floatval($sr['sales_revenue'] ?? 0);
+                    $cost = floatval($sr['cost_price'] ?? 0);
+                    $profit = $rev - ($q * $cost);
+
+                    $totSoldQty += $q;
+                    $totSalesRev += $rev;
+                    $totProductProfit += $profit;
+
+                    $profitLossRows[] = [
+                        'product_id' => intval($sr['product_id']),
+                        'product_name' => $sr['product_name'],
+                        'sold_qty' => $q,
+                        'sales_revenue' => $rev,
+                        'cost_price' => $cost,
+                        'product_profit' => $profit,
+                        'notes' => ''
+                    ];
+                }
+
+                $netCompanyProfit = $totProductProfit - $totalExpenses;
+
+                echo json_encode([
+                    'success' => true,
+                    'data' => [
+                        'capital' => [
+                            'products' => $capitalRows,
+                            'total_custody_qty' => $totCustody,
+                            'total_warehouse_qty' => $totWh,
+                            'total_stock_qty' => $totQty,
+                            'total_products_cost' => $totProdCost,
+                            'reps_advance' => $repsAdvance,
+                            'suppliers_balance' => $suppliersBalance,
+                            'net_inventory' => $netInventory,
+                            'cash_in_safes' => $cashInSafes,
+                            'net_capital' => $netCapital
+                        ],
+                        'expenses' => [
+                            'rows' => $expenseRows,
+                            'total_expenses' => $totalExpenses
+                        ],
+                        'profit_loss' => [
+                            'products' => $profitLossRows,
+                            'total_sold_qty' => $totSoldQty,
+                            'total_sales_revenue' => $totSalesRev,
+                            'total_product_profit' => $totProductProfit,
+                            'total_expenses_no_fabrics' => $totalExpenses,
+                            'net_company_profit' => $netCompanyProfit
+                        ],
+                        'meta' => [
+                            'start_date' => $start,
+                            'end_date' => $end,
+                            'products_count' => count($capitalRows),
+                            'sold_products_count' => count($profitLossRows),
+                            'expenses_count' => count($expenseRows)
+                        ]
+                    ]
+                ], JSON_UNESCAPED_UNICODE);
+            } catch (Exception $e) {
+                echo json_encode(['success' => false, 'message' => 'New profit & loss report failed: ' . $e->getMessage()]);
             }
         }
         break;

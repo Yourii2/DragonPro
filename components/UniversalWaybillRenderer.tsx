@@ -53,8 +53,23 @@ export const pickPhone = (phones: any, fallback: string = ''): string => {
 export const getOrderData = (order: any) => {
   const orderNumber = order?.orderNumber || order?.order_number || order?.id || '—';
   const customerName = order?.customerName || order?.name || order?.customer_name || 'عميل نقدي';
-  const phone1 = pickPhone(order?.phone1 || order?.phone || order?.phone_number || '', '—');
-  const phone2 = pickPhone(order?.phone2 || order?.secondary_phone || order?.alt_phone || order?.phone_2 || '', '');
+  let phone1 = pickPhone(order?.phone1 || order?.phone || order?.phone_number || '', '—');
+  let phone2 = pickPhone(order?.phone2 || order?.secondary_phone || order?.alt_phone || order?.phone_2 || '', '');
+
+  if (!phone2) {
+    const rawAllPhones = normalizeNumbers(`${order?.phone1 || ''} ${order?.phone || ''} ${order?.phone_number || ''}`);
+    const matches = rawAllPhones.match(/\d{11}/g) || [];
+    if (matches.length >= 2) {
+      if (!phone1 || phone1 === '—') {
+        phone1 = matches[0];
+        phone2 = matches[1];
+      } else if (matches[0] === phone1) {
+        phone2 = matches[1];
+      } else {
+        phone2 = matches[0];
+      }
+    }
+  }
   const gov = order?.governorate || order?.city || order?.gov || 'غير محدد';
   const address = order?.address || order?.full_address || 'غير محدد';
   const notes = order?.notes || order?.note || order?.order_notes || '';

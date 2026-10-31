@@ -121,7 +121,7 @@ export default defineConfig(({ mode }) => {
       // Allow all external hosts when accessed via a public hostname (e.g. Cloudflare tunnels)
       allowedHosts: true,
       proxy: {
-        '^/components/.*\\.php(\\?.*)?$': {
+        '^/(components|easyorders|woocommerce|shopify)/.*\\.php(\\?.*)?$': {
           target: `http://127.0.0.1${phpBasePath}`,
           changeOrigin: true,
           secure: false,
@@ -142,7 +142,7 @@ export default defineConfig(({ mode }) => {
       host: '0.0.0.0',
       allowedHosts: true,
       proxy: {
-        '^/components/.*\\.php(\\?.*)?$': {
+        '^/(components|easyorders|woocommerce|shopify)/.*\\.php(\\?.*)?$': {
           target: `http://127.0.0.1${phpBasePath}`,
           changeOrigin: true,
           secure: false,

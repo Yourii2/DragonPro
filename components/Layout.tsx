@@ -163,7 +163,7 @@ const Layout: React.FC<LayoutProps> = ({
   const normalize = (v:any) => (v||'').toString().toLowerCase();
   const pageAliases: Record<string, string[]> = {
     reps: ['list', 'rep-cycle', 'rep-performance', 'rep-custody'],
-    reports: ['accounting', 'sales', 'totals', 'product-report', 'outstanding-balances', 'fines-incentives', 'expenses'],
+    reports: ['accounting', 'new-profit-loss', 'sales', 'totals', 'new-period-summary', 'product-report', 'outstanding-balances', 'fines-incentives', 'expenses'],
     crm: ['customers'],
     srm: ['suppliers'],
     finance: ['treasuries', 'transactions'],

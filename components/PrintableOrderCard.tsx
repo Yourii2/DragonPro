@@ -189,10 +189,10 @@ export const PrintableContent: React.FC<{
         </div>
         <div className="flex justify-between items-center" style={{ marginBottom: '3px' }}>
           <div className="text-right">
-            <span className="font-bold font-mono" style={{ fontSize: '10px' }}>{pickDisplayPhone(`${order.phone || ''}\n${order.phone1 || ''}\n${order.phone2 || ''}`, '')}</span>
+            <span className="font-bold font-mono" style={{ fontSize: '10px' }}>{pickDisplayPhone(`${order.phone1 || ''}\n${order.phone || ''}`, '')}</span>
           </div>
           <div className="text-left">
-            <span className="font-bold font-mono" style={{ fontSize: '10px' }}>{normalizeNumbers(order.phone2 || '')}</span>
+            <span className="font-bold font-mono" style={{ fontSize: '10px' }}>{normalizeNumbers(order.phone2 || (normalizeNumbers(`${order.phone1 || ''} ${order.phone || ''}`).match(/\d{11}/g) || [])[1] || '')}</span>
           </div>
         </div>
         <div className="text-right">
