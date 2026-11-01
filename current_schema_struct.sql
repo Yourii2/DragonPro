@@ -786,6 +786,7 @@ CREATE TABLE `order_items` (
   `product_id` int(11) NOT NULL,
   `quantity` int(11) NOT NULL,
   `price_per_unit` decimal(10,2) NOT NULL,
+  `cost_price` decimal(10,2) NOT NULL DEFAULT '0.00',
   PRIMARY KEY (`id`) USING BTREE,
   KEY `order_id` (`order_id`) USING BTREE,
   KEY `product_id` (`product_id`) USING BTREE,

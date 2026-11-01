@@ -51,6 +51,8 @@ interface CapitalProduct {
   total_qty: number;
   cost_price: number;
   total_cost: number;
+  warehouse_cost?: number;
+  custody_cost?: number;
   variants?: ProductVariantItem[];
   notes: string;
 }
@@ -91,10 +93,10 @@ const NewProfitLossReport: React.FC = () => {
 
   // Raw data from API
   const [capitalProducts, setCapitalProducts] = useState<CapitalProduct[]>([]);
-  const [apiOpenDailiesTotal, setApiOpenDailiesTotal] = useState(0);
+  const [apiWarehouseCost, setApiWarehouseCost] = useState(0);
+  const [apiCustodyCost, setApiCustodyCost] = useState(0);
   const [apiRepsDebtTotal, setApiRepsDebtTotal] = useState(0);
-  const [apiNetRepsDebt, setApiNetRepsDebt] = useState(0);
-  const [apiRepsAdvance, setApiRepsAdvance] = useState(0);
+  const [apiRepsInsurance, setApiRepsInsurance] = useState(0);
   const [apiSuppliersBalance, setApiSuppliersBalance] = useState(0);
   const [apiCashInSafes, setApiCashInSafes] = useState(0);
   const [apiPenalties, setApiPenalties] = useState(0);
@@ -107,10 +109,10 @@ const NewProfitLossReport: React.FC = () => {
 
   // Manual Overrides / Interactive adjustments
   const [isManualOverride, setIsManualOverride] = useState(false);
-  const [customOpenDailiesTotal, setCustomOpenDailiesTotal] = useState<number | null>(null);
+  const [customWarehouseCost, setCustomWarehouseCost] = useState<number | null>(null);
+  const [customCustodyCost, setCustomCustodyCost] = useState<number | null>(null);
   const [customRepsDebtTotal, setCustomRepsDebtTotal] = useState<number | null>(null);
-  const [customNetRepsDebt, setCustomNetRepsDebt] = useState<number | null>(null);
-  const [customRepsAdvance, setCustomRepsAdvance] = useState<number | null>(null);
+  const [customRepsInsurance, setCustomRepsInsurance] = useState<number | null>(null);
   const [customSuppliersBalance, setCustomSuppliersBalance] = useState<number | null>(null);
   const [customCashInSafes, setCustomCashInSafes] = useState<number | null>(null);
   const [customPenalties, setCustomPenalties] = useState<number | null>(null);
@@ -137,13 +139,10 @@ const NewProfitLossReport: React.FC = () => {
         const pl = json.data.profit_loss || {};
 
         setCapitalProducts(cap.products || []);
-        const openD = Number(cap.open_dailies_total || 0);
-        const debtD = Number(cap.reps_debt_total || 0);
-        const netD = cap.net_reps_debt !== undefined ? Number(cap.net_reps_debt) : (openD - debtD);
-        setApiOpenDailiesTotal(openD);
-        setApiRepsDebtTotal(debtD);
-        setApiNetRepsDebt(netD);
-        setApiRepsAdvance(Number(cap.reps_advance ?? netD));
+        setApiWarehouseCost(Number(cap.warehouse_cost || 0));
+        setApiCustodyCost(Number(cap.custody_cost || 0));
+        setApiRepsDebtTotal(Number(cap.reps_debt_total || 0));
+        setApiRepsInsurance(Number(cap.reps_insurance || 0));
         setApiSuppliersBalance(Number(cap.suppliers_balance || 0));
         setApiCashInSafes(Number(cap.cash_in_safes || 0));
 
@@ -172,10 +171,10 @@ const NewProfitLossReport: React.FC = () => {
 
   // Reset custom overrides
   const resetOverrides = () => {
-    setCustomOpenDailiesTotal(null);
+    setCustomWarehouseCost(null);
+    setCustomCustodyCost(null);
     setCustomRepsDebtTotal(null);
-    setCustomNetRepsDebt(null);
-    setCustomRepsAdvance(null);
+    setCustomRepsInsurance(null);
     setCustomSuppliersBalance(null);
     setCustomCashInSafes(null);
     setCustomPenalties(null);
@@ -226,38 +225,49 @@ const NewProfitLossReport: React.FC = () => {
     let totWarehouse = 0;
     let totQty = 0;
     let totCost = 0;
+    let calcWhCost = 0;
+    let calcCustodyCost = 0;
 
     const rows = capitalProducts.map(p => {
       const cost = customCostPrices[p.product_id] !== undefined
         ? customCostPrices[p.product_id]
         : Number(p.cost_price || 0);
-      const totalUnits = Number(p.custody_qty || 0) + Number(p.warehouse_qty || 0);
+      const custodyQty = Number(p.custody_qty || 0);
+      const warehouseQty = Number(p.warehouse_qty || 0);
+      const totalUnits = custodyQty + warehouseQty;
+      const whCost = warehouseQty * cost;
+      const custCost = custodyQty * cost;
       const totalItemCost = totalUnits * cost;
 
-      totCustody += Number(p.custody_qty || 0);
-      totWarehouse += Number(p.warehouse_qty || 0);
+      totCustody += custodyQty;
+      totWarehouse += warehouseQty;
       totQty += totalUnits;
+      calcWhCost += whCost;
+      calcCustodyCost += custCost;
       totCost += totalItemCost;
 
       return {
         ...p,
         effectiveCost: cost,
         totalUnits,
+        whCost,
+        custCost,
         totalItemCost
       };
     });
 
-    const openDailies = customOpenDailiesTotal !== null ? customOpenDailiesTotal : apiOpenDailiesTotal;
-    const repsDebt = customRepsDebtTotal !== null ? customRepsDebtTotal : apiRepsDebtTotal;
-    const netRepsDebt = customNetRepsDebt !== null 
-      ? customNetRepsDebt 
-      : (customRepsAdvance !== null ? customRepsAdvance : (openDailies - repsDebt));
-    const repsAdv = netRepsDebt;
-    const supBal = customSuppliersBalance !== null ? customSuppliersBalance : apiSuppliersBalance;
-    const safesBal = customCashInSafes !== null ? customCashInSafes : apiCashInSafes;
+    const warehouseCost = customWarehouseCost !== null ? customWarehouseCost : (apiWarehouseCost > 0 ? apiWarehouseCost : calcWhCost);
+    const custodyCost = customCustodyCost !== null ? customCustodyCost : (apiCustodyCost > 0 ? apiCustodyCost : calcCustodyCost);
+    const totalGoodsCost = warehouseCost + custodyCost;
 
-    const netInventory = totCost - repsAdv - supBal;
-    const netCapital = netInventory + safesBal;
+    const safesBal = customCashInSafes !== null ? customCashInSafes : apiCashInSafes;
+    const repsDebt = customRepsDebtTotal !== null ? customRepsDebtTotal : apiRepsDebtTotal;
+    const suppliersBal = customSuppliersBalance !== null ? customSuppliersBalance : apiSuppliersBalance;
+    const repsInsurance = customRepsInsurance !== null ? customRepsInsurance : apiRepsInsurance;
+
+    // Pure Capital Equation:
+    // Goods (Warehouse + Custody) + Cash in Safes + Reps Debt to Us - Suppliers Balance - Reps Insurance
+    const netCapital = totalGoodsCost + safesBal + repsDebt - suppliersBal - repsInsurance;
 
     return {
       rows,
@@ -265,16 +275,16 @@ const NewProfitLossReport: React.FC = () => {
       totWarehouse,
       totQty,
       totCost,
-      openDailies,
-      repsDebt,
-      netRepsDebt,
-      repsAdv,
-      supBal,
-      netInventory,
+      warehouseCost,
+      custodyCost,
+      totalGoodsCost,
       safesBal,
+      repsDebt,
+      suppliersBal,
+      repsInsurance,
       netCapital
     };
-  }, [capitalProducts, customCostPrices, customOpenDailiesTotal, customRepsDebtTotal, customNetRepsDebt, customRepsAdvance, customSuppliersBalance, customCashInSafes, apiOpenDailiesTotal, apiRepsDebtTotal, apiNetRepsDebt, apiRepsAdvance, apiSuppliersBalance, apiCashInSafes]);
+  }, [capitalProducts, customCostPrices, customWarehouseCost, customCustodyCost, customRepsDebtTotal, customRepsInsurance, customSuppliersBalance, customCashInSafes, apiWarehouseCost, apiCustodyCost, apiRepsDebtTotal, apiRepsInsurance, apiSuppliersBalance, apiCashInSafes]);
 
   // 2. Processed Expenses
   const processedExpenses = useMemo(() => {
@@ -531,7 +541,7 @@ const NewProfitLossReport: React.FC = () => {
       ws.getCell(`D${rTotCap}`).value = { formula: `SUM(D3:D${capEndRow})` };
       styleCell(ws.getCell(`D${rTotCap}`), null, 'FF000000', true, '#,##0');
 
-      ws.getCell(`E${rTotCap}`).value = 'إجمالي تكلفة المنتجات';
+      ws.getCell(`E${rTotCap}`).value = 'إجمالي تكلفة البضاعة';
       styleCell(ws.getCell(`E${rTotCap}`), null, 'FF000000', true);
 
       ws.getCell(`F${rTotCap}`).value = { formula: `SUM(F3:F${capEndRow})` };
@@ -539,73 +549,73 @@ const NewProfitLossReport: React.FC = () => {
 
       styleCell(ws.getCell(`G${rTotCap}`), null, 'FF000000', true);
 
-      // Open Dailies Row
-      const rOpen = rTotCap + 1;
-      ws.mergeCells(`A${rOpen}:D${rOpen}`);
-      ws.getCell(`A${rOpen}`).value = 'إجمالي اليوميات المفتوحة الآن';
-      styleCell(ws.getCell(`A${rOpen}`), C_HEADER_FILL, C_HEADER_TEXT, true);
-      ws.mergeCells(`F${rOpen}:G${rOpen}`);
-      ws.getCell(`F${rOpen}`).value = processedCapital.openDailies;
-      styleCell(ws.getCell(`F${rOpen}`), null, 'FF000000', true, '#,##0.00');
-      styleCell(ws.getCell(`E${rOpen}`), C_HEADER_FILL, C_HEADER_TEXT, true);
+      // Warehouse Stock Cost Row
+      const rWhCost = rTotCap + 1;
+      ws.mergeCells(`A${rWhCost}:D${rWhCost}`);
+      ws.getCell(`A${rWhCost}`).value = 'إجمالي تكلفة بضاعة المخزن';
+      styleCell(ws.getCell(`A${rWhCost}`), C_HEADER_FILL, C_HEADER_TEXT, true);
+      ws.mergeCells(`F${rWhCost}:G${rWhCost}`);
+      ws.getCell(`F${rWhCost}`).value = processedCapital.warehouseCost;
+      styleCell(ws.getCell(`F${rWhCost}`), null, 'FF000000', true, '#,##0.00');
+      styleCell(ws.getCell(`E${rWhCost}`), C_HEADER_FILL, C_HEADER_TEXT, true);
 
-      // Reps Debt Row
-      const rDebt = rOpen + 1;
-      ws.mergeCells(`A${rDebt}:D${rDebt}`);
-      ws.getCell(`A${rDebt}`).value = 'إجمالي مديونية المناديب الآن';
-      styleCell(ws.getCell(`A${rDebt}`), C_HEADER_FILL, C_HEADER_TEXT, true);
-      ws.mergeCells(`F${rDebt}:G${rDebt}`);
-      ws.getCell(`F${rDebt}`).value = processedCapital.repsDebt;
-      styleCell(ws.getCell(`F${rDebt}`), null, 'FF000000', true, '#,##0.00');
-      styleCell(ws.getCell(`E${rDebt}`), C_HEADER_FILL, C_HEADER_TEXT, true);
+      // Custody Stock Cost Row
+      const rCustCost = rWhCost + 1;
+      ws.mergeCells(`A${rCustCost}:D${rCustCost}`);
+      ws.getCell(`A${rCustCost}`).value = 'إجمالي تكلفة بضاعة العهدة طرف المناديب';
+      styleCell(ws.getCell(`A${rCustCost}`), C_HEADER_FILL, C_HEADER_TEXT, true);
+      ws.mergeCells(`F${rCustCost}:G${rCustCost}`);
+      ws.getCell(`F${rCustCost}`).value = processedCapital.custodyCost;
+      styleCell(ws.getCell(`F${rCustCost}`), null, 'FF000000', true, '#,##0.00');
+      styleCell(ws.getCell(`E${rCustCost}`), C_HEADER_FILL, C_HEADER_TEXT, true);
 
-      // Net Reps Debt / Advance Row
-      const rAdv = rDebt + 1;
-      ws.mergeCells(`A${rAdv}:D${rAdv}`);
-      ws.getCell(`A${rAdv}`).value = 'صافي مديونية المناديب';
-      styleCell(ws.getCell(`A${rAdv}`), C_HEADER_FILL, C_HEADER_TEXT, true);
-      ws.mergeCells(`F${rAdv}:G${rAdv}`);
-      ws.getCell(`F${rAdv}`).value = { formula: `F${rOpen}-F${rDebt}` };
-      styleCell(ws.getCell(`F${rAdv}`), null, 'FF000000', true, '#,##0.00');
-      styleCell(ws.getCell(`E${rAdv}`), C_HEADER_FILL, C_HEADER_TEXT, true);
-
-      // Suppliers Balance Row
-      const rSup = rAdv + 1;
-      ws.mergeCells(`A${rSup}:D${rSup}`);
-      ws.getCell(`A${rSup}`).value = 'الباقي للموردين';
-      styleCell(ws.getCell(`A${rSup}`), C_HEADER_FILL, C_HEADER_TEXT, true);
-      ws.mergeCells(`F${rSup}:G${rSup}`);
-      ws.getCell(`F${rSup}`).value = processedCapital.supBal;
-      styleCell(ws.getCell(`F${rSup}`), null, 'FF000000', true, '#,##0.00');
-      styleCell(ws.getCell(`E${rSup}`), C_HEADER_FILL, C_HEADER_TEXT, true);
-
-      // Net Inventory Row
-      const rNetInv = rSup + 1;
-      ws.mergeCells(`A${rNetInv}:D${rNetInv}`);
-      ws.getCell(`A${rNetInv}`).value = 'الصافي';
-      styleCell(ws.getCell(`A${rNetInv}`), C_HEADER_FILL, C_HEADER_TEXT, true);
-      ws.mergeCells(`F${rNetInv}:G${rNetInv}`);
-      ws.getCell(`F${rNetInv}`).value = { formula: `F${rTotCap}-F${rSup}-F${rAdv}` };
-      styleCell(ws.getCell(`F${rNetInv}`), null, 'FF000000', true, '#,##0.00');
-      styleCell(ws.getCell(`E${rNetInv}`), C_HEADER_FILL, C_HEADER_TEXT, true);
-
-      // Safes Balance Row
-      const rSafes = rNetInv + 1;
+      // Cash in Safes Row (+)
+      const rSafes = rCustCost + 1;
       ws.mergeCells(`A${rSafes}:D${rSafes}`);
-      ws.getCell(`A${rSafes}`).value = 'موجود فعلي في الخزائن';
+      ws.getCell(`A${rSafes}`).value = 'موجود فعلي في الخزائن (+)';
       styleCell(ws.getCell(`A${rSafes}`), C_HEADER_FILL, C_HEADER_TEXT, true);
       ws.mergeCells(`F${rSafes}:G${rSafes}`);
       ws.getCell(`F${rSafes}`).value = processedCapital.safesBal;
       styleCell(ws.getCell(`F${rSafes}`), null, 'FF000000', true, '#,##0.00');
       styleCell(ws.getCell(`E${rSafes}`), C_HEADER_FILL, C_HEADER_TEXT, true);
 
-      // Net Capital Row
-      const rNetCap = rSafes + 1;
+      // Reps Debt Row (+)
+      const rDebt = rSafes + 1;
+      ws.mergeCells(`A${rDebt}:D${rDebt}`);
+      ws.getCell(`A${rDebt}`).value = 'مستحق لنا طرف المناديب (مديونية المناديب) (+)';
+      styleCell(ws.getCell(`A${rDebt}`), C_HEADER_FILL, C_HEADER_TEXT, true);
+      ws.mergeCells(`F${rDebt}:G${rDebt}`);
+      ws.getCell(`F${rDebt}`).value = processedCapital.repsDebt;
+      styleCell(ws.getCell(`F${rDebt}`), null, 'FF000000', true, '#,##0.00');
+      styleCell(ws.getCell(`E${rDebt}`), C_HEADER_FILL, C_HEADER_TEXT, true);
+
+      // Suppliers Balance Row (-)
+      const rSup = rDebt + 1;
+      ws.mergeCells(`A${rSup}:D${rSup}`);
+      ws.getCell(`A${rSup}`).value = 'الباقي للموردين (-)';
+      styleCell(ws.getCell(`A${rSup}`), C_HEADER_FILL, C_HEADER_TEXT, true);
+      ws.mergeCells(`F${rSup}:G${rSup}`);
+      ws.getCell(`F${rSup}`).value = processedCapital.suppliersBal;
+      styleCell(ws.getCell(`F${rSup}`), null, 'FF000000', true, '#,##0.00');
+      styleCell(ws.getCell(`E${rSup}`), C_HEADER_FILL, C_HEADER_TEXT, true);
+
+      // Reps Insurance Row (-)
+      const rIns = rSup + 1;
+      ws.mergeCells(`A${rIns}:D${rIns}`);
+      ws.getCell(`A${rIns}`).value = 'تأمين وودائع المناديب طرفنا (أمانات للغير) (-)';
+      styleCell(ws.getCell(`A${rIns}`), C_HEADER_FILL, C_HEADER_TEXT, true);
+      ws.mergeCells(`F${rIns}:G${rIns}`);
+      ws.getCell(`F${rIns}`).value = processedCapital.repsInsurance;
+      styleCell(ws.getCell(`F${rIns}`), null, 'FF000000', true, '#,##0.00');
+      styleCell(ws.getCell(`E${rIns}`), C_HEADER_FILL, C_HEADER_TEXT, true);
+
+      // Net Capital Row (=)
+      const rNetCap = rIns + 1;
       ws.mergeCells(`A${rNetCap}:D${rNetCap}`);
-      ws.getCell(`A${rNetCap}`).value = 'صافي رأس مال الشركة';
+      ws.getCell(`A${rNetCap}`).value = 'صافي رأس مال الشركة (=)';
       styleCell(ws.getCell(`A${rNetCap}`), C_BLUE_ACCENT, 'FF000000', true);
       ws.mergeCells(`F${rNetCap}:G${rNetCap}`);
-      ws.getCell(`F${rNetCap}`).value = { formula: `F${rNetInv}+F${rSafes}` };
+      ws.getCell(`F${rNetCap}`).value = { formula: `F${rTotCap}+F${rSafes}+F${rDebt}-F${rSup}-F${rIns}` };
       styleCell(ws.getCell(`F${rNetCap}`), C_BLUE_ACCENT, 'FF000000', true, '#,##0.00');
       styleCell(ws.getCell(`E${rNetCap}`), C_BLUE_ACCENT, 'FF000000', true);
 
@@ -894,17 +904,17 @@ const NewProfitLossReport: React.FC = () => {
                 <span>لوحة التحكم بالمدخلات اليدوية:</span>
               </div>
               <div className="flex items-center gap-2">
-                <label className="text-slate-600 dark:text-slate-400">إجمالي اليوميات المفتوحة:</label>
+                <label className="text-slate-600 dark:text-slate-400">موجود فعلي في الخزائن (+):</label>
                 <input
                   type="number"
-                  placeholder={String(apiOpenDailiesTotal)}
-                  value={customOpenDailiesTotal !== null ? customOpenDailiesTotal : ''}
-                  onChange={e => setCustomOpenDailiesTotal(e.target.value === '' ? null : Number(e.target.value))}
+                  placeholder={String(apiCashInSafes)}
+                  value={customCashInSafes !== null ? customCashInSafes : ''}
+                  onChange={e => setCustomCashInSafes(e.target.value === '' ? null : Number(e.target.value))}
                   className="w-28 px-2 py-1 bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700 rounded-lg text-xs font-bold"
                 />
               </div>
               <div className="flex items-center gap-2">
-                <label className="text-slate-600 dark:text-slate-400">إجمالي مديونية المناديب:</label>
+                <label className="text-slate-600 dark:text-slate-400">مستحق لنا طرف المناديب (+):</label>
                 <input
                   type="number"
                   placeholder={String(apiRepsDebtTotal)}
@@ -914,32 +924,22 @@ const NewProfitLossReport: React.FC = () => {
                 />
               </div>
               <div className="flex items-center gap-2">
-                <label className="text-slate-600 dark:text-slate-400">صافي مديونية المناديب:</label>
+                <label className="text-slate-600 dark:text-slate-400">تأمين المناديب طرفنا (-):</label>
                 <input
                   type="number"
-                  placeholder={String(apiNetRepsDebt)}
-                  value={customNetRepsDebt !== null ? customNetRepsDebt : ''}
-                  onChange={e => setCustomNetRepsDebt(e.target.value === '' ? null : Number(e.target.value))}
+                  placeholder={String(apiRepsInsurance)}
+                  value={customRepsInsurance !== null ? customRepsInsurance : ''}
+                  onChange={e => setCustomRepsInsurance(e.target.value === '' ? null : Number(e.target.value))}
                   className="w-28 px-2 py-1 bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700 rounded-lg text-xs font-bold"
                 />
               </div>
               <div className="flex items-center gap-2">
-                <label className="text-slate-600 dark:text-slate-400">الباقي للموردين:</label>
+                <label className="text-slate-600 dark:text-slate-400">الباقي للموردين (-):</label>
                 <input
                   type="number"
                   placeholder={String(apiSuppliersBalance)}
                   value={customSuppliersBalance !== null ? customSuppliersBalance : ''}
                   onChange={e => setCustomSuppliersBalance(e.target.value === '' ? null : Number(e.target.value))}
-                  className="w-28 px-2 py-1 bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700 rounded-lg text-xs font-bold"
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="text-slate-600 dark:text-slate-400">موجود فعلي في الخزائن:</label>
-                <input
-                  type="number"
-                  placeholder={String(apiCashInSafes)}
-                  value={customCashInSafes !== null ? customCashInSafes : ''}
-                  onChange={e => setCustomCashInSafes(e.target.value === '' ? null : Number(e.target.value))}
                   className="w-28 px-2 py-1 bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700 rounded-lg text-xs font-bold"
                 />
               </div>
@@ -1130,75 +1130,73 @@ const NewProfitLossReport: React.FC = () => {
                   {/* Summary Row: الإجمالي */}
                   <tr className="bg-slate-100 dark:bg-slate-700/80 font-black border-t-2 border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white">
                     <td className="py-3 px-3 text-right border-l border-slate-300 dark:border-slate-600">الإجمالي</td>
-                    <td className="py-3 px-3 border-l border-slate-300 dark:border-slate-600">{fmt(processedCapital.totCustody)}</td>
-                    <td className="py-3 px-3 border-l border-slate-300 dark:border-slate-600">{fmt(processedCapital.totWarehouse)}</td>
-                    <td className="py-3 px-3 border-l border-slate-300 dark:border-slate-600">{fmt(processedCapital.totQty)}</td>
-                    <td className="py-3 px-3 border-l border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300">إجمالي تكلفة المنتجات</td>
-                    <td className="py-3 px-3 border-l border-slate-300 dark:border-slate-600 text-emerald-700 dark:text-emerald-400">{fmt(processedCapital.totCost)}</td>
+                    <td className="py-3 px-3 border-l border-slate-300 dark:border-slate-600 font-mono">{fmt(processedCapital.totCustody)}</td>
+                    <td className="py-3 px-3 border-l border-slate-300 dark:border-slate-600 font-mono">{fmt(processedCapital.totWarehouse)}</td>
+                    <td className="py-3 px-3 border-l border-slate-300 dark:border-slate-600 font-mono">{fmt(processedCapital.totQty)}</td>
+                    <td className="py-3 px-3 border-l border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300">إجمالي تكلفة البضاعة</td>
+                    <td className="py-3 px-3 border-l border-slate-300 dark:border-slate-600 text-emerald-700 dark:text-emerald-400 font-mono font-black">{fmt(processedCapital.totalGoodsCost)}</td>
                     <td className="py-3 px-3"></td>
                   </tr>
 
-                  {/* Row: إجمالي اليوميات المفتوحة الآن */}
+                  {/* Row: إجمالي تكلفة بضاعة المخزن */}
                   <tr className="bg-[#44546a]/10 dark:bg-slate-800 font-bold border-t border-slate-200 dark:border-slate-700">
-                    <td colSpan={4} className="py-2.5 px-4 text-right bg-[#44546a] text-white">إجمالي اليوميات المفتوحة الآن</td>
+                    <td colSpan={4} className="py-2.5 px-4 text-right bg-[#44546a] text-white">إجمالي تكلفة بضاعة المخزن</td>
                     <td className="bg-[#44546a]"></td>
-                    <td colSpan={2} className="py-2.5 px-3 text-center font-black text-blue-600 dark:text-blue-400 border-r border-slate-200 dark:border-slate-700">
-                      {fmt(processedCapital.openDailies)} {currencySymbol}
+                    <td colSpan={2} className="py-2.5 px-3 text-center font-black text-indigo-600 dark:text-indigo-400 border-r border-slate-200 dark:border-slate-700 font-mono">
+                      {fmt(processedCapital.warehouseCost)} {currencySymbol}
                     </td>
                   </tr>
 
-                  {/* Row: إجمالي مديونية المناديب الآن */}
+                  {/* Row: إجمالي تكلفة بضاعة العهدة طرف المناديب */}
                   <tr className="bg-[#44546a]/10 dark:bg-slate-800 font-bold border-t border-slate-200 dark:border-slate-700">
-                    <td colSpan={4} className="py-2.5 px-4 text-right bg-[#44546a] text-white">إجمالي مديونية المناديب الآن</td>
+                    <td colSpan={4} className="py-2.5 px-4 text-right bg-[#44546a] text-white">إجمالي تكلفة بضاعة العهدة طرف المناديب</td>
                     <td className="bg-[#44546a]"></td>
-                    <td colSpan={2} className="py-2.5 px-3 text-center font-black text-amber-600 dark:text-amber-400 border-r border-slate-200 dark:border-slate-700">
-                      {fmt(processedCapital.repsDebt)} {currencySymbol}
+                    <td colSpan={2} className="py-2.5 px-3 text-center font-black text-amber-600 dark:text-amber-400 border-r border-slate-200 dark:border-slate-700 font-mono">
+                      {fmt(processedCapital.custodyCost)} {currencySymbol}
                     </td>
                   </tr>
 
-                  {/* Row: صافي مديونية المناديب */}
+                  {/* Row: موجود فعلي في الخزائن (+) */}
                   <tr className="bg-[#44546a]/10 dark:bg-slate-800 font-bold border-t border-slate-200 dark:border-slate-700">
-                    <td colSpan={4} className="py-2.5 px-4 text-right bg-[#44546a] text-white">
-                      صافي مديونية المناديب (اليوميات المفتوحة - مديونية المناديب)
-                    </td>
+                    <td colSpan={4} className="py-2.5 px-4 text-right bg-[#44546a] text-white">موجود فعلي في الخزائن (+)</td>
                     <td className="bg-[#44546a]"></td>
-                    <td colSpan={2} className="py-2.5 px-3 text-center font-black text-slate-800 dark:text-slate-200 border-r border-slate-200 dark:border-slate-700">
-                      {fmt(processedCapital.repsAdv)} {currencySymbol}
-                    </td>
-                  </tr>
-
-                  {/* Row: الباقي للموردين */}
-                  <tr className="bg-[#44546a]/10 dark:bg-slate-800 font-bold border-t border-slate-200 dark:border-slate-700">
-                    <td colSpan={4} className="py-2.5 px-4 text-right bg-[#44546a] text-white">الباقي للموردين</td>
-                    <td className="bg-[#44546a]"></td>
-                    <td colSpan={2} className="py-2.5 px-3 text-center font-black text-rose-600 dark:text-rose-400 border-r border-slate-200 dark:border-slate-700">
-                      {fmt(processedCapital.supBal)} {currencySymbol}
-                    </td>
-                  </tr>
-
-                  {/* Row: الصافي */}
-                  <tr className="bg-[#44546a]/10 dark:bg-slate-800 font-bold border-t border-slate-200 dark:border-slate-700">
-                    <td colSpan={4} className="py-2.5 px-4 text-right bg-[#44546a] text-white">الصافي (تكلفة البضاعة بعد الالتزامات)</td>
-                    <td className="bg-[#44546a]"></td>
-                    <td colSpan={2} className="py-2.5 px-3 text-center font-black text-slate-900 dark:text-white border-r border-slate-200 dark:border-slate-700">
-                      {fmt(processedCapital.netInventory)} {currencySymbol}
-                    </td>
-                  </tr>
-
-                  {/* Row: موجود فعلي في الخزائن */}
-                  <tr className="bg-[#44546a]/10 dark:bg-slate-800 font-bold border-t border-slate-200 dark:border-slate-700">
-                    <td colSpan={4} className="py-2.5 px-4 text-right bg-[#44546a] text-white">موجود فعلي في الخزائن</td>
-                    <td className="bg-[#44546a]"></td>
-                    <td colSpan={2} className="py-2.5 px-3 text-center font-black text-emerald-600 dark:text-emerald-400 border-r border-slate-200 dark:border-slate-700">
+                    <td colSpan={2} className="py-2.5 px-3 text-center font-black text-emerald-600 dark:text-emerald-400 border-r border-slate-200 dark:border-slate-700 font-mono">
                       {fmt(processedCapital.safesBal)} {currencySymbol}
                     </td>
                   </tr>
 
-                  {/* Highlighted Row: صافي رأس مال الشركة */}
+                  {/* Row: مستحق لنا طرف المناديب (+) */}
+                  <tr className="bg-[#44546a]/10 dark:bg-slate-800 font-bold border-t border-slate-200 dark:border-slate-700">
+                    <td colSpan={4} className="py-2.5 px-4 text-right bg-[#44546a] text-white">مستحق لنا طرف المناديب (مديونية المناديب) (+)</td>
+                    <td className="bg-[#44546a]"></td>
+                    <td colSpan={2} className="py-2.5 px-3 text-center font-black text-blue-600 dark:text-blue-400 border-r border-slate-200 dark:border-slate-700 font-mono">
+                      {fmt(processedCapital.repsDebt)} {currencySymbol}
+                    </td>
+                  </tr>
+
+                  {/* Row: الباقي للموردين (-) */}
+                  <tr className="bg-[#44546a]/10 dark:bg-slate-800 font-bold border-t border-slate-200 dark:border-slate-700">
+                    <td colSpan={4} className="py-2.5 px-4 text-right bg-[#44546a] text-white">الباقي للموردين (-)</td>
+                    <td className="bg-[#44546a]"></td>
+                    <td colSpan={2} className="py-2.5 px-3 text-center font-black text-rose-600 dark:text-rose-400 border-r border-slate-200 dark:border-slate-700 font-mono">
+                      {fmt(processedCapital.suppliersBal)} {currencySymbol}
+                    </td>
+                  </tr>
+
+                  {/* Row: تأمين وودائع المناديب طرفنا (-) */}
+                  <tr className="bg-[#44546a]/10 dark:bg-slate-800 font-bold border-t border-slate-200 dark:border-slate-700">
+                    <td colSpan={4} className="py-2.5 px-4 text-right bg-[#44546a] text-white">تأمين وودائع المناديب طرفنا (أمانات للغير) (-)</td>
+                    <td className="bg-[#44546a]"></td>
+                    <td colSpan={2} className="py-2.5 px-3 text-center font-black text-orange-600 dark:text-orange-400 border-r border-slate-200 dark:border-slate-700 font-mono">
+                      {fmt(processedCapital.repsInsurance)} {currencySymbol}
+                    </td>
+                  </tr>
+
+                  {/* Highlighted Row: صافي رأس مال الشركة (=) */}
                   <tr className="bg-[#b4c6e7] dark:bg-blue-900/60 font-black border-t-2 border-indigo-400 text-slate-950 dark:text-white">
-                    <td colSpan={4} className="py-3 px-4 text-right text-sm">صافي رأس مال الشركة</td>
+                    <td colSpan={4} className="py-3 px-4 text-right text-sm">صافي رأس مال الشركة (=)</td>
                     <td className="bg-[#b4c6e7] dark:bg-blue-900/60"></td>
-                    <td colSpan={2} className="py-3 px-3 text-center text-base tracking-tight text-indigo-950 dark:text-indigo-200">
+                    <td colSpan={2} className="py-3 px-3 text-center text-base tracking-tight text-indigo-950 dark:text-indigo-200 font-mono">
                       {fmt(processedCapital.netCapital)} {currencySymbol}
                     </td>
                   </tr>

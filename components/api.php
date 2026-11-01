@@ -909,6 +909,66 @@ if (!function_exists('ensure_orders_status_has_new_confirmation_statuses')) {
     }
 }
 
+if (!function_exists('ensure_order_items_cost_price_column')) {
+    function ensure_order_items_cost_price_column($pdo) {
+        static $done = false;
+        if ($done) return;
+        $done = true;
+        if (!($pdo instanceof PDO)) return;
+        try {
+            if (table_exists($pdo, 'order_items') && !column_exists($pdo, 'order_items', 'cost_price')) {
+                execute_query($pdo, "ALTER TABLE `order_items` ADD COLUMN `cost_price` DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER `price_per_unit`");
+                if (table_exists($pdo, 'product_variants')) {
+                    execute_query($pdo, "
+                        UPDATE order_items oi
+                        LEFT JOIN product_variants pv ON pv.id = oi.product_id
+                        LEFT JOIN products p ON p.id = pv.product_id OR p.id = oi.product_id
+                        SET oi.cost_price = COALESCE(NULLIF(pv.cost_price, 0), NULLIF(pv.purchase_price, 0), NULLIF(p.purchase_price, 0), 0)
+                        WHERE oi.cost_price = 0 OR oi.cost_price IS NULL
+                    ");
+                } elseif (table_exists($pdo, 'products')) {
+                    execute_query($pdo, "
+                        UPDATE order_items oi
+                        LEFT JOIN products p ON p.id = oi.product_id
+                        SET oi.cost_price = COALESCE(NULLIF(p.purchase_price, 0), 0)
+                        WHERE oi.cost_price = 0 OR oi.cost_price IS NULL
+                    ");
+                }
+            }
+        } catch (Exception $e) {}
+    }
+}
+
+if (!function_exists('get_product_variant_cost_price')) {
+    function get_product_variant_cost_price($pdo, $variantOrProdId) {
+        $id = intval($variantOrProdId);
+        if ($id <= 0 || !($pdo instanceof PDO)) return 0.0;
+        try {
+            if (table_exists($pdo, 'product_variants')) {
+                $stmt = execute_query($pdo, "
+                    SELECT COALESCE(NULLIF(pv.cost_price, 0), NULLIF(pv.purchase_price, 0), NULLIF(p.purchase_price, 0), 0) as cost
+                    FROM product_variants pv
+                    LEFT JOIN products p ON p.id = pv.product_id
+                    WHERE pv.id = ? OR pv.product_id = ?
+                    LIMIT 1
+                ", [$id, $id]);
+                $c = floatval($stmt->fetchColumn() ?: 0);
+                if ($c > 0) return $c;
+            }
+            if (table_exists($pdo, 'products')) {
+                $stmt = execute_query($pdo, "
+                    SELECT COALESCE(NULLIF(purchase_price, 0), 0) as cost
+                    FROM products
+                    WHERE id = ?
+                    LIMIT 1
+                ", [$id]);
+                return floatval($stmt->fetchColumn() ?: 0);
+            }
+        } catch (Exception $e) {}
+        return 0.0;
+    }
+}
+
 if (!function_exists('user_is_admin')) {
     function user_is_admin($pdo, $user_id) {
         if (!$user_id) return false;
@@ -11014,6 +11074,7 @@ switch ($module) {
     case 'orders':
         $action = $_GET['action'] ?? 'getAll';
         ensure_orders_status_column_supports_all_statuses($pdo);
+        ensure_order_items_cost_price_column($pdo);
         try {
             if (!column_exists($pdo, 'orders', 'items_json')) {
                 execute_query($pdo, "ALTER TABLE orders ADD COLUMN items_json LONGTEXT NULL COMMENT 'أصناف الطلب مخزنة بصيغة JSON'");
@@ -12700,10 +12761,19 @@ switch ($module) {
 
                         $lineTotal = $prodQty * $price;
 
-                        if ($order_items_has_total) {
-                            execute_query($pdo, "INSERT INTO order_items (order_id, product_id, quantity, price_per_unit, total_price) VALUES (?, ?, ?, ?, ?)", [$orderId, $prodId, $prodQty, $price, $lineTotal]);
+                        $itemCost = get_product_variant_cost_price($pdo, $prodId);
+                        if (column_exists($pdo, 'order_items', 'cost_price')) {
+                            if ($order_items_has_total) {
+                                execute_query($pdo, "INSERT INTO order_items (order_id, product_id, quantity, price_per_unit, cost_price, total_price) VALUES (?, ?, ?, ?, ?, ?)", [$orderId, $prodId, $prodQty, $price, $itemCost, $lineTotal]);
+                            } else {
+                                execute_query($pdo, "INSERT INTO order_items (order_id, product_id, quantity, price_per_unit, cost_price) VALUES (?, ?, ?, ?, ?)", [$orderId, $prodId, $prodQty, $price, $itemCost]);
+                            }
                         } else {
-                            execute_query($pdo, "INSERT INTO order_items (order_id, product_id, quantity, price_per_unit) VALUES (?, ?, ?, ?)", [$orderId, $prodId, $prodQty, $price]);
+                            if ($order_items_has_total) {
+                                execute_query($pdo, "INSERT INTO order_items (order_id, product_id, quantity, price_per_unit, total_price) VALUES (?, ?, ?, ?, ?)", [$orderId, $prodId, $prodQty, $price, $lineTotal]);
+                            } else {
+                                execute_query($pdo, "INSERT INTO order_items (order_id, product_id, quantity, price_per_unit) VALUES (?, ?, ?, ?)", [$orderId, $prodId, $prodQty, $price]);
+                            }
                         }
 
                         // collect for optional sales processing (per-order)
@@ -13219,10 +13289,19 @@ switch ($module) {
                     }
 
                     $lineTotal = $qty * $price;
-                    if ($order_items_has_total) {
-                        execute_query($pdo, "INSERT INTO order_items (order_id, product_id, quantity, price_per_unit, total_price) VALUES (?, ?, ?, ?, ?)", [$orderId, $prodId, $qty, $price, $lineTotal]);
+                    $itemCost = get_product_variant_cost_price($pdo, $prodId);
+                    if (column_exists($pdo, 'order_items', 'cost_price')) {
+                        if ($order_items_has_total) {
+                            execute_query($pdo, "INSERT INTO order_items (order_id, product_id, quantity, price_per_unit, cost_price, total_price) VALUES (?, ?, ?, ?, ?, ?)", [$orderId, $prodId, $qty, $price, $itemCost, $lineTotal]);
+                        } else {
+                            execute_query($pdo, "INSERT INTO order_items (order_id, product_id, quantity, price_per_unit, cost_price) VALUES (?, ?, ?, ?, ?)", [$orderId, $prodId, $qty, $price, $itemCost]);
+                        }
                     } else {
-                        execute_query($pdo, "INSERT INTO order_items (order_id, product_id, quantity, price_per_unit) VALUES (?, ?, ?, ?)", [$orderId, $prodId, $qty, $price]);
+                        if ($order_items_has_total) {
+                            execute_query($pdo, "INSERT INTO order_items (order_id, product_id, quantity, price_per_unit, total_price) VALUES (?, ?, ?, ?, ?)", [$orderId, $prodId, $qty, $price, $lineTotal]);
+                        } else {
+                            execute_query($pdo, "INSERT INTO order_items (order_id, product_id, quantity, price_per_unit) VALUES (?, ?, ?, ?)", [$orderId, $prodId, $qty, $price]);
+                        }
                     }
                     $totalAmount += $lineTotal;
                 }
@@ -22199,6 +22278,7 @@ switch ($module) {
             try {
                 ensure_rep_daily_journal_table($pdo);
                 ensure_rep_journal_orders_table($pdo);
+                ensure_order_items_cost_price_column($pdo);
 
                 $start = !empty($_GET['start_date']) ? trim($_GET['start_date']) : (!empty($_GET['from']) ? trim($_GET['from']) : date('Y-m-01'));
                 $end   = !empty($_GET['end_date'])   ? trim($_GET['end_date'])   : (!empty($_GET['to'])   ? trim($_GET['to'])   : date('Y-m-d'));
@@ -22250,6 +22330,8 @@ switch ($module) {
                 $totCustody = 0.0;
                 $totWh = 0.0;
                 $totQty = 0.0;
+                $totWhCost = 0.0;
+                $totCustodyCost = 0.0;
                 $totProdCost = 0.0;
 
                 foreach ($products as $p) {
@@ -22317,9 +22399,13 @@ switch ($module) {
                     }
 
 
+                    $whItemCost = $w * $cost;
+                    $custodyItemCost = $c * $cost;
                     $totCustody += $c;
                     $totWh += $w;
                     $totQty += $tot;
+                    $totWhCost += $whItemCost;
+                    $totCustodyCost += $custodyItemCost;
                     $totProdCost += $itemCost;
 
                     $capitalRows[] = [
@@ -22330,23 +22416,38 @@ switch ($module) {
                         'total_qty' => $tot,
                         'cost_price' => round($cost, 2),
                         'variants' => $varItems,
+                        'warehouse_cost' => $whItemCost,
+                        'custody_cost' => $custodyItemCost,
                         'total_cost' => $itemCost,
                         'notes' => $p['notes'] ?? ''
                     ];
                 }
 
-                // Default liabilities and assets
-                $repsAdvance = 0.0;
+                // Capital balances (assets & liabilities)
+                $repsDebtTotal = 0.0;
                 try {
-                    $sqlOpen = "SELECT COALESCE(SUM(GREATEST(0, COALESCE(NULLIF(rdj.total_orders_value, 0), (rdj.assigned_value + rdj.old_orders_value), 0) - COALESCE(rdj.interim_payment_amount, 0))), 0) FROM rep_daily_journal rdj WHERE rdj.is_closed = 0";
-                    $openDailiesTotal = floatval($pdo->query($sqlOpen)->fetchColumn() ?: 0);
-                    if ($openDailiesTotal <= 0) {
-                        $openDailiesTotal = floatval($pdo->query("SELECT COALESCE(SUM(total_amount), 0) FROM orders WHERE status = 'with_rep'")->fetchColumn() ?: 0);
-                    }
-                    $sqlDebt = "SELECT COALESCE(SUM(CASE WHEN rep_bal.balance < 0 THEN ABS(rep_bal.balance) ELSE 0 END), 0) FROM users u JOIN (SELECT related_to_id, SUM(amount) as balance FROM transactions WHERE (related_to_type = 'rep' OR related_to_type = 'employee') GROUP BY related_to_id) rep_bal ON rep_bal.related_to_id = u.id WHERE u.role = 'representative'";
+                    $sqlDebt = "
+                        SELECT COALESCE(SUM(CASE WHEN rep_bal.balance < 0 THEN ABS(rep_bal.balance) ELSE 0 END), 0)
+                        FROM users u
+                        JOIN (
+                            SELECT related_to_id, SUM(amount) as balance
+                            FROM transactions
+                            WHERE (related_to_type = 'rep' OR related_to_type = 'employee')
+                            GROUP BY related_to_id
+                        ) rep_bal ON rep_bal.related_to_id = u.id
+                        WHERE u.role = 'representative'
+                    ";
                     $repsDebtTotal = floatval($pdo->query($sqlDebt)->fetchColumn() ?: 0);
-                    $netRepsDebt = $openDailiesTotal - $repsDebtTotal;
-                    $repsAdvance = $netRepsDebt;
+                } catch (Exception $e) {}
+
+                $repsInsurance = 0.0;
+                try {
+                    if (column_exists($pdo, 'users', 'insurance_amount') && column_exists($pdo, 'users', 'insurance_paid')) {
+                        $repsInsurance = floatval($pdo->query("SELECT COALESCE(SUM(insurance_amount), 0) FROM users WHERE role = 'representative' AND insurance_paid = 1")->fetchColumn() ?: 0);
+                    }
+                    if ($repsInsurance <= 0) {
+                        $repsInsurance = floatval($pdo->query("SELECT COALESCE(SUM(current_balance), 0) FROM treasuries WHERE name LIKE '%تأمين%' OR name LIKE '%تأمين المناديب%'")->fetchColumn() ?: 0);
+                    }
                 } catch (Exception $e) {}
 
                 $suppliersBalance = 0.0;
@@ -22359,8 +22460,9 @@ switch ($module) {
                     $cashInSafes = floatval($pdo->query("SELECT COALESCE(SUM(current_balance), 0) FROM treasuries")->fetchColumn() ?: 0);
                 } catch (Exception $e) {}
 
-                $netInventory = $totProdCost - $repsAdvance - $suppliersBalance;
-                $netCapital = $netInventory + $cashInSafes;
+                // Pure Capital Equation:
+                // Goods (Warehouse + Custody) + Cash in Safes + Reps Debt to Us - Suppliers Balance - Reps Insurance
+                $netCapital = $totProdCost + $cashInSafes + $repsDebtTotal - $suppliersBalance - $repsInsurance;
 
                 // 2. Expenses (strictly excluding raw materials & fabrics)
                 $expSql = "
@@ -22487,7 +22589,6 @@ switch ($module) {
                     SELECT 
                         COALESCE(ppar.id, pv.product_id, oi.product_id) AS product_id,
                         COALESCE(ppar.name, pv.name, CONCAT('منتج #', oi.product_id)) AS product_name,
-                        {$salesCostExpr} AS cost_price,
                         SUM(
                             CASE
                                 WHEN (COALESCE(rjo.status, o.status) = 'partial') AND COALESCE(rjo.returned_pieces, 0) > 0 AND COALESCE(o_tot.tot_qty, 0) > 0
@@ -22501,7 +22602,14 @@ switch ($module) {
                                 THEN GREATEST(0.0, oi.quantity * (1.0 - (LEAST(rjo.returned_pieces, o_tot.tot_qty) / o_tot.tot_qty)))
                                 ELSE oi.quantity
                             END * oi.price_per_unit
-                        ) AS sales_revenue
+                        ) AS sales_revenue,
+                        SUM(
+                            CASE
+                                WHEN (COALESCE(rjo.status, o.status) = 'partial') AND COALESCE(rjo.returned_pieces, 0) > 0 AND COALESCE(o_tot.tot_qty, 0) > 0
+                                THEN GREATEST(0.0, oi.quantity * (1.0 - (LEAST(rjo.returned_pieces, o_tot.tot_qty) / o_tot.tot_qty)))
+                                ELSE oi.quantity
+                            END * COALESCE(NULLIF(oi.cost_price, 0), {$salesCostExpr})
+                        ) AS sales_cost
                     FROM order_items oi
                     JOIN orders o ON o.id = oi.order_id
                     LEFT JOIN (
@@ -22518,7 +22626,7 @@ switch ($module) {
                         (rdj.is_closed = 1 AND rjo.status IN ('delivered', 'partial') AND DATE(COALESCE(rdj.closed_at, rdj.journal_date)) BETWEEN ? AND ?)
                         OR (o.status IN ('delivered', 'partial') AND (rdj.id IS NULL OR rdj.is_closed = 0) AND DATE(o.created_at) BETWEEN ? AND ?)
                     )
-                    GROUP BY product_id, product_name, cost_price
+                    GROUP BY product_id, product_name
                     ORDER BY sales_revenue DESC
                 ";
                 $stmtSales = $pdo->prepare($salesSql);
@@ -22533,8 +22641,9 @@ switch ($module) {
                 foreach ($salesRows as $sr) {
                     $q = floatval($sr['sold_qty'] ?? 0);
                     $rev = floatval($sr['sales_revenue'] ?? 0);
-                    $cost = floatval($sr['cost_price'] ?? 0);
-                    $profit = $rev - ($q * $cost);
+                    $itemSalesCost = floatval($sr['sales_cost'] ?? 0);
+                    $unitCost = $q > 0 ? ($itemSalesCost / $q) : 0.0;
+                    $profit = $rev - $itemSalesCost;
 
                     $totSoldQty += $q;
                     $totSalesRev += $rev;
@@ -22545,8 +22654,8 @@ switch ($module) {
                         'product_name' => $sr['product_name'],
                         'sold_qty' => $q,
                         'sales_revenue' => $rev,
-                        'cost_price' => round($cost, 2),
-                        'variants' => $varItems,
+                        'cost_price' => round($unitCost, 2),
+                        'variants' => [],
                         'product_profit' => $profit,
                         'notes' => ''
                     ];
@@ -22620,14 +22729,13 @@ switch ($module) {
                             'total_custody_qty' => $totCustody,
                             'total_warehouse_qty' => $totWh,
                             'total_stock_qty' => $totQty,
+                            'warehouse_cost' => $totWhCost,
+                            'custody_cost' => $totCustodyCost,
                             'total_products_cost' => $totProdCost,
-                            'open_dailies_total' => $openDailiesTotal ?? 0.0,
-                            'reps_debt_total' => $repsDebtTotal ?? 0.0,
-                            'net_reps_debt' => $netRepsDebt ?? 0.0,
-                            'reps_advance' => $repsAdvance,
-                            'suppliers_balance' => $suppliersBalance,
-                            'net_inventory' => $netInventory,
                             'cash_in_safes' => $cashInSafes,
+                            'reps_debt_total' => $repsDebtTotal,
+                            'reps_insurance' => $repsInsurance,
+                            'suppliers_balance' => $suppliersBalance,
                             'net_capital' => $netCapital
                         ],
                         'expenses' => [
